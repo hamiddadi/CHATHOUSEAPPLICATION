@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Settings - Chathouse</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&amp;family=Inter:wght@400;500;600&amp;family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "on-tertiary-fixed": "#00210b",
+                        "on-secondary-fixed": "#00105b",
+                        "on-error-container": "#ffdad6",
+                        "surface-container-low": "#141936",
+                        "surface-container-highest": "#2e3351",
+                        "primary-fixed": "#d9e2ff",
+                        "on-background": "#dee0ff",
+                        "primary-fixed-dim": "#b0c6ff",
+                        "surface": "#0c112e",
+                        "error-container": "#93000a",
+                        "on-primary-container": "#002661",
+                        "on-primary-fixed-variant": "#00429b",
+                        "on-secondary-container": "#a3b0ff",
+                        "on-tertiary-container": "#003114",
+                        "secondary-fixed-dim": "#bac3ff",
+                        "on-tertiary": "#003918",
+                        "inverse-primary": "#0058ca",
+                        "surface-container-high": "#232846",
+                        "outline": "#8c90a0",
+                        "tertiary-fixed-dim": "#00e475",
+                        "secondary-fixed": "#dee0ff",
+                        "tertiary": "#00e475",
+                        "tertiary-fixed": "#62ff96",
+                        "secondary-container": "#2f3f92",
+                        "on-secondary": "#15267b",
+                        "secondary": "#bac3ff",
+                        "primary-container": "#558dff",
+                        "on-tertiary-fixed-variant": "#005226",
+                        "primary": "#b0c6ff",
+                        "on-primary": "#002d6e",
+                        "background": "#0c112e",
+                        "outline-variant": "#424655",
+                        "surface-dim": "#0c112e",
+                        "surface-variant": "#2e3351",
+                        "surface-container-lowest": "#070b28",
+                        "surface-tint": "#b0c6ff",
+                        "on-surface": "#dee0ff",
+                        "inverse-on-surface": "#2a2e4c",
+                        "tertiary-container": "#00a754",
+                        "on-error": "#690005",
+                        "inverse-surface": "#dee0ff",
+                        "surface-bright": "#323756",
+                        "on-surface-variant": "#c2c6d7",
+                        "error": "#ffb4ab",
+                        "surface-container": "#191d3b",
+                        "on-primary-fixed": "#001945",
+                        "on-secondary-fixed-variant": "#2f3f92"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "fontFamily": {
+                        "headline": ["Manrope"],
+                        "body": ["Inter"],
+                        "label": ["Inter"]
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .ios-switch {
+            appearance: none;
+            -webkit-appearance: none;
+            width: 44px;
+            height: 24px;
+            background: #424655;
+            border-radius: 99px;
+            position: relative;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            outline: none;
+            flex-shrink: 0;
+        }
+        .ios-switch::after {
+            content: '';
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            width: 20px;
+            height: 20px;
+            background: white;
+            border-radius: 50%;
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        .ios-switch:checked {
+            background-color: #2979FF !important;
+        }
+        .ios-switch:checked::after {
+            transform: translateX(20px);
+        }
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+</head>
+<body class="bg-background font-body text-on-surface min-h-screen pb-32">
+<!-- TopAppBar -->
+<header class="bg-slate-950/40 backdrop-blur-xl text-[#b0c6ff] font-headline font-bold text-lg tracking-tight docked full-width top-0 sticky flex justify-between items-center w-full px-6 py-4 z-40">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-2xl" data-icon="graphic_eq">graphic_eq</span>
+<span class="text-2xl font-black text-[#b0c6ff] tracking-tighter">Chathouse</span>
+</div>
+<button class="hover:opacity-80 transition-opacity Active: scale-95 duration-150 ease-out">
+            Wave 👋
+        </button>
+</header>
+<main class="max-w-2xl mx-auto px-6 pt-8 space-y-10">
+<!-- Profile Card -->
+<section class="glass-panel p-6 rounded-xl flex items-center gap-6 border border-white/5">
+<div class="relative">
+<img alt="User Profile" class="w-20 h-20 rounded-full object-cover border-2 border-primary/20 p-1" data-alt="Portrait of a young man with a confident expression, soft studio lighting, deep blue background bokeh, professional photography style" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCVn5h0J3EkAfLrQl3oF-DuxePwl6bDBd6OsQHSJB2ScszJPH5YeUL_q3JtIboARDzfiyc_Sd8cSDLKTyovrXOdsqWcyOb9yQsUFzDqOId98zCSAfV-_9UV2H8SptTP0vlWYc181GtwBKsA6mUy9Axs1cxY2ymvfCyuX7QLkyzRzgCEPuejNKSCllsgEXMK9YjUyeO-iOHGcCfcZ4RW_Ij-oyH07KRbzAhcrHtK2yDBiMdoDnoTWchcztcKcgZ0HnfTcRs__Iqqx80A"/>
+</div>
+<div class="flex-grow">
+<h1 class="font-headline text-2xl font-bold tracking-tight text-on-surface">Julian Sterling</h1>
+<p class="text-on-surface-variant font-medium">@juliandigital</p>
+</div>
+<button class="px-5 py-2 rounded-full border border-primary text-primary font-semibold text-sm hover:bg-primary/10 transition-colors Active: scale-95 duration-150">
+                Edit Profile
+            </button>
+</section>
+<!-- Settings Groups -->
+<div class="space-y-12">
+<!-- Account Section -->
+<section>
+<h2 class="text-[#5C6BC0] text-xs font-bold tracking-widest uppercase mb-4 px-2">ACCOUNT</h2>
+<div class="glass-panel rounded-xl overflow-hidden border border-white/5">
+<div class="flex items-center justify-between p-4 hover:bg-white/5 transition-colors cursor-pointer group">
+<span class="font-medium">Email Address</span>
+<div class="flex items-center gap-2 text-on-surface-variant">
+<span>julian@digital.me</span>
+<span class="material-symbols-outlined text-sm group-hover:translate-x-1 transition-transform" data-icon="chevron_right">chevron_right</span>
+</div>
+</div>
+<div class="h-[1px] bg-white/5 mx-4"></div>
+<div class="flex items-center justify-between p-4 hover:bg-white/5 transition-colors cursor-pointer group">
+<span class="font-medium">Phone Number</span>
+<div class="flex items-center gap-2 text-on-surface-variant">
+<span>+1 (555) 012-3456</span>
+<span class="material-symbols-outlined text-sm group-hover:translate-x-1 transition-transform" data-icon="chevron_right">chevron_right</span>
+</div>
+</div><div class="h-[1px] bg-white/5 mx-4"></div>
+<div class="flex items-center justify-between p-4 hover:bg-white/5 transition-colors cursor-pointer group">
+<span class="font-medium">Biography</span>
+<div class="flex items-center gap-2 text-on-surface-variant">
+<span class="material-symbols-outlined text-sm group-hover:translate-x-1 transition-transform" data-icon="chevron_right">chevron_right</span>
+</div>
+</div>
+</div>
+</section>
+<!-- Privacy Section -->
+<section>
+<h2 class="text-[#5C6BC0] text-xs font-bold tracking-widest uppercase mb-4 px-2">PRIVACY</h2>
+<div class="glass-panel rounded-xl overflow-hidden border border-white/5">
+<div class="flex items-center justify-between p-4">
+<span class="font-medium">Private Profile</span>
+<input class="ios-switch" type="checkbox"/>
+</div>
+<div class="h-[1px] bg-white/5 mx-4"></div>
+<div class="flex items-center justify-between p-4 hover:bg-white/5 transition-colors cursor-pointer group">
+<span class="font-medium">Blocked Users</span>
+<div class="flex items-center gap-2 text-on-surface-variant">
+<span>12 users</span>
+<span class="material-symbols-outlined text-sm group-hover:translate-x-1 transition-transform" data-icon="chevron_right">chevron_right</span>
+</div>
+</div>
+</div>
+</section>
+<!-- Notifications Section -->
+<section>
+<h2 class="text-[#5C6BC0] text-xs font-bold tracking-widest uppercase mb-4 px-2">NOTIFICATIONS</h2>
+<div class="glass-panel rounded-xl overflow-hidden border border-white/5">
+<div class="flex items-center justify-between p-4">
+<span class="font-medium">Push Notifications</span>
+<input checked="" class="ios-switch" type="checkbox"/>
+</div>
+</div>
+</section>
+<!-- Invitations Section -->
+<section>
+<h2 class="text-[#5C6BC0] text-xs font-bold tracking-widest uppercase mb-4 px-2">INVITATIONS</h2>
+<div class="glass-panel rounded-xl overflow-hidden border border-white/5">
+<div class="flex items-center justify-between p-4 hover:bg-white/5 transition-colors cursor-pointer group">
+<div class="flex flex-col">
+<span class="font-medium">Invite Friends</span>
+<span class="text-xs text-on-surface-variant">5 invites remaining</span>
+</div>
+<span class="material-symbols-outlined text-primary" data-icon="ios_share">ios_share</span>
+</div>
+</div>
+</section>
+<!-- About Section -->
+<section>
+<h2 class="text-[#5C6BC0] text-xs font-bold tracking-widest uppercase mb-4 px-2">ABOUT</h2>
+<div class="glass-panel rounded-xl overflow-hidden border border-white/5">
+<div class="flex items-center justify-between p-4 hover:bg-white/5 transition-colors cursor-pointer">
+<span class="font-medium">Version</span>
+<span class="text-on-surface-variant">2.4.1 (Celestial)</span>
+</div>
+<div class="h-[1px] bg-white/5 mx-4"></div>
+<div class="flex items-center justify-between p-4 hover:bg-white/5 transition-colors cursor-pointer group">
+<span class="font-medium">Terms of Service</span>
+<span class="material-symbols-outlined text-sm text-on-surface-variant group-hover:translate-x-1 transition-transform" data-icon="open_in_new">open_in_new</span>
+</div>
+<div class="h-[1px] bg-white/5 mx-4"></div>
+<div class="flex items-center justify-between p-4 hover:bg-white/5 transition-colors cursor-pointer group text-error">
+<span class="font-semibold">Log Out</span>
+<span class="material-symbols-outlined" data-icon="logout">logout</span>
+</div>
+</div>
+</section>
+</div>
+</main>
+<!-- BottomNavBar -->
+<nav class="fixed bottom-8 left-0 right-0 z-50 flex justify-around items-center px-4 h-16 bg-[#070b28]/80 backdrop-blur-2xl shadow-[0_0_30px_rgba(41,121,255,0.08)] fixed bottom-6 left-1/2 -translate-x-1/2 w-[90%] max-w-md rounded-[2rem] border border-white/10">
+<button class="flex items-center justify-center text-slate-500 hover:text-[#b0c6ff]/80 transition-all duration-300">
+<span class="material-symbols-outlined text-2xl" data-icon="mic">mic</span>
+</button>
+<button class="flex items-center justify-center text-slate-500 hover:text-[#b0c6ff]/80 transition-all duration-300">
+<span class="material-symbols-outlined text-2xl" data-icon="map">map</span>
+</button>
+<button class="flex items-center justify-center text-slate-500 hover:text-[#b0c6ff]/80 transition-all duration-300">
+<span class="material-symbols-outlined text-2xl" data-icon="chat_bubble">chat_bubble</span>
+</button>
+<!-- Active Tab: Settings -->
+<button class="flex items-center justify-center text-[#b0c6ff] drop-shadow-[0_0_8px_rgba(176,198,255,0.8)] scale-110 transition-transform duration-300">
+<span class="material-symbols-outlined text-2xl" data-icon="settings" style="font-variation-settings: 'FILL' 1;">settings</span>
+</button>
+</nav>
+</body></html>

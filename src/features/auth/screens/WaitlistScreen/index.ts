@@ -1,0 +1,1 @@
+export { WaitlistScreen } from './WaitlistScreen';

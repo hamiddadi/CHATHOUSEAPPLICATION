@@ -1,0 +1,148 @@
+import { resolveHouseIcon } from '../constants/images';
+import type { House, HouseMember, HouseSummary } from '../types/domain';
+import { MOCK_USER_SUMMARIES } from './users.mock';
+
+const pickUser = (idx: number): (typeof MOCK_USER_SUMMARIES)[number] => {
+  const u = MOCK_USER_SUMMARIES[idx] ?? MOCK_USER_SUMMARIES[0];
+  if (!u) throw new Error('MOCK_USER_SUMMARIES is empty — cannot build mock houses.');
+  return u;
+};
+
+const member = (idx: number, role: HouseMember['role']): HouseMember => ({
+  ...pickUser(idx),
+  role,
+  joinedAt: '2024-03-10T00:00:00Z',
+});
+
+export const MOCK_HOUSES: readonly House[] = [
+  {
+    id: 'h-yc',
+    name: 'Y Combinator',
+    description: "The world's most prestigious startup accelerator.",
+    category: 'business',
+    categoryEmoji: '🚀',
+    iconUrl: resolveHouseIcon('h-yc'),
+    privacy: 'open',
+    membersCount: 12400,
+    liveRoomsCount: 8,
+    isJoinedByMe: true,
+    members: [
+      member(13, 'admin'),
+      member(14, 'moderator'),
+      member(15, 'moderator'),
+      member(5, 'member'),
+      member(4, 'member'),
+    ],
+    createdAt: '2023-11-01T00:00:00Z',
+  },
+  {
+    id: 'h-indie',
+    name: 'Indie Hackers',
+    description: 'Solo founders and small teams building public.',
+    category: 'tech',
+    categoryEmoji: '💻',
+    iconUrl: resolveHouseIcon('h-indie'),
+    privacy: 'open',
+    membersCount: 8430,
+    liveRoomsCount: 3,
+    isJoinedByMe: true,
+    members: [member(0, 'admin'), member(1, 'moderator'), member(2, 'member')],
+    createdAt: '2024-01-05T00:00:00Z',
+  },
+  {
+    id: 'h-design-mvts',
+    name: 'Design Movements',
+    description: 'Where designers argue about grids.',
+    category: 'design',
+    categoryEmoji: '🎨',
+    iconUrl: resolveHouseIcon('h-design-mvts'),
+    privacy: 'open',
+    membersCount: 3120,
+    liveRoomsCount: 2,
+    isJoinedByMe: true,
+    members: [member(3, 'admin'), member(4, 'moderator'), member(6, 'member')],
+    createdAt: '2024-02-20T00:00:00Z',
+  },
+  {
+    id: 'h-dao',
+    name: 'DAO Global',
+    description: 'Decentralized governance enthusiasts.',
+    category: 'crypto',
+    categoryEmoji: '⚖️',
+    iconUrl: resolveHouseIcon('h-dao'),
+    privacy: 'open',
+    membersCount: 15200,
+    liveRoomsCount: 5,
+    isJoinedByMe: false,
+    members: [member(7, 'admin'), member(8, 'moderator')],
+    createdAt: '2023-08-15T00:00:00Z',
+  },
+  {
+    id: 'h-ai',
+    name: 'AI Weekly',
+    description: 'Keep up with the bleeding edge of AI.',
+    category: 'ai',
+    categoryEmoji: '🤖',
+    iconUrl: resolveHouseIcon('h-ai'),
+    privacy: 'open',
+    membersCount: 27100,
+    liveRoomsCount: 11,
+    isJoinedByMe: false,
+    members: [member(0, 'admin'), member(10, 'moderator'), member(11, 'member')],
+    createdAt: '2024-05-01T00:00:00Z',
+  },
+  {
+    id: 'h-women-tech',
+    name: 'Women in Tech',
+    description: 'Community for women building in tech.',
+    category: 'tech',
+    categoryEmoji: '👩‍💻',
+    iconUrl: resolveHouseIcon('h-women-tech'),
+    privacy: 'private',
+    membersCount: 5400,
+    liveRoomsCount: 4,
+    isJoinedByMe: false,
+    members: [member(1, 'admin'), member(9, 'moderator'), member(12, 'member')],
+    createdAt: '2024-04-12T00:00:00Z',
+  },
+  {
+    id: 'h-ui-masters',
+    name: 'UI Masters Club',
+    description: 'The craft of interfaces.',
+    category: 'design',
+    categoryEmoji: '✨',
+    iconUrl: resolveHouseIcon('h-ui-masters'),
+    privacy: 'open',
+    membersCount: 2100,
+    liveRoomsCount: 1,
+    isJoinedByMe: false,
+    members: [member(3, 'admin'), member(5, 'member')],
+    createdAt: '2024-07-08T00:00:00Z',
+  },
+  {
+    id: 'h-product-club',
+    name: 'The Product Club',
+    description: 'PMs, designers, and engineers who ship.',
+    category: 'business',
+    categoryEmoji: '📦',
+    iconUrl: resolveHouseIcon('h-product-club'),
+    privacy: 'open',
+    membersCount: 9800,
+    liveRoomsCount: 6,
+    isJoinedByMe: true,
+    members: [member(2, 'admin'), member(0, 'moderator'), member(4, 'member')],
+    createdAt: '2024-06-18T00:00:00Z',
+  },
+];
+
+export const MOCK_HOUSE_SUMMARIES: readonly HouseSummary[] = MOCK_HOUSES.map(h => ({
+  id: h.id,
+  name: h.name,
+  category: h.category,
+  categoryEmoji: h.categoryEmoji,
+  iconUrl: h.iconUrl,
+  membersCount: h.membersCount,
+  privacy: h.privacy,
+}));
+
+export const findHouseById = (id: string): House | undefined => MOCK_HOUSES.find(h => h.id === id);

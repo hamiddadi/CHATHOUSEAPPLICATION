@@ -1,0 +1,1 @@
+export { ChatDetailScreen } from './ChatDetailScreen';

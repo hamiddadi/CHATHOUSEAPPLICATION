@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Chathouse - Room Feed</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&amp;family=Inter:wght@400;500;600&amp;family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                "on-tertiary-fixed": "#00210b",
+                "on-secondary-fixed": "#00105b",
+                "on-error-container": "#ffdad6",
+                "surface-container-low": "#141936",
+                "surface-container-highest": "#2e3351",
+                "primary-fixed": "#d9e2ff",
+                "on-background": "#dee0ff",
+                "primary-fixed-dim": "#b0c6ff",
+                "surface": "#0c112e",
+                "error-container": "#93000a",
+                "on-primary-container": "#002661",
+                "on-primary-fixed-variant": "#00429b",
+                "on-secondary-container": "#a3b0ff",
+                "on-tertiary-container": "#003114",
+                "secondary-fixed-dim": "#bac3ff",
+                "on-tertiary": "#003918",
+                "inverse-primary": "#0058ca",
+                "surface-container-high": "#232846",
+                "outline": "#8c90a0",
+                "tertiary-fixed-dim": "#00e475",
+                "secondary-fixed": "#dee0ff",
+                "tertiary": "#00e475",
+                "tertiary-fixed": "#62ff96",
+                "secondary-container": "#2f3f92",
+                "on-secondary": "#15267b",
+                "secondary": "#bac3ff",
+                "primary-container": "#558dff",
+                "on-tertiary-fixed-variant": "#005226",
+                "primary": "#b0c6ff",
+                "on-primary": "#002d6e",
+                "background": "#0c112e",
+                "outline-variant": "#424655",
+                "surface-dim": "#0c112e",
+                "surface-variant": "#2e3351",
+                "surface-container-lowest": "#070b28",
+                "surface-tint": "#b0c6ff",
+                "on-surface": "#dee0ff",
+                "inverse-on-surface": "#2a2e4c",
+                "tertiary-container": "#00a754",
+                "on-error": "#690005",
+                "inverse-surface": "#dee0ff",
+                "surface-bright": "#323756",
+                "on-surface-variant": "#c2c6d7",
+                "error": "#ffb4ab",
+                "surface-container": "#191d3b",
+                "on-primary-fixed": "#001945",
+                "on-secondary-fixed-variant": "#2f3f92"
+            },
+            "borderRadius": {
+                "DEFAULT": "0.25rem",
+                "lg": "0.5rem",
+                "xl": "0.75rem",
+                "full": "9999px"
+            },
+            "fontFamily": {
+                "headline": ["Manrope"],
+                "body": ["Inter"],
+                "label": ["Inter"]
+            }
+          },
+        },
+      }
+    </script>
+<style>
+        .glass-card {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+        }
+        .pulse-emerald {
+            box-shadow: 0 0 0 0 rgba(0, 228, 117, 0.7);
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(0, 228, 117, 0.7); }
+            70% { transform: scale(1); box-shadow: 0 0 0 10px rgba(0, 228, 117, 0); }
+            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(0, 228, 117, 0); }
+        }
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+</head>
+<body class="bg-background font-body text-on-surface min-h-screen pb-32">
+<!-- TopAppBar -->
+<header class="bg-slate-950/40 backdrop-blur-xl docked full-width top-0 sticky z-50 flex justify-between items-center w-full px-6 py-4">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-[#b0c6ff] text-2xl">graphic_eq</span>
+<h1 class="text-2xl font-black text-[#b0c6ff] tracking-tighter font-headline">Chathouse</h1>
+</div>
+<button class="bg-primary-container text-on-primary-container px-4 py-2 rounded-full font-manrope font-bold text-sm hover:opacity-80 transition-opacity active:scale-95 duration-150 ease-out">
+            Wave 👋
+        </button>
+</header>
+<main class="max-w-md mx-auto px-6 space-y-8 mt-4">
+<!-- Filter Pills -->
+<section class="overflow-x-auto hide-scrollbar -mx-6 px-6">
+<div class="flex gap-3 whitespace-nowrap">
+<button class="px-5 py-2 rounded-full bg-primary text-on-primary-container font-semibold text-sm">All</button>
+<button class="px-5 py-2 rounded-full glass-card border border-outline-variant/10 text-on-surface-variant font-semibold text-sm">Following</button>
+<button class="px-5 py-2 rounded-full glass-card border border-outline-variant/10 text-on-surface-variant font-semibold text-sm">Tech</button>
+<button class="px-5 py-2 rounded-full glass-card border border-outline-variant/10 text-on-surface-variant font-semibold text-sm">Music</button>
+<button class="px-5 py-2 rounded-full glass-card border border-outline-variant/10 text-on-surface-variant font-semibold text-sm">Business</button>
+<button class="px-5 py-2 rounded-full glass-card border border-outline-variant/10 text-on-surface-variant font-semibold text-sm">Health</button>
+</div>
+</section>
+<!-- Upcoming for you -->
+<!-- Active Room Cards -->
+<section class="space-y-6">
+<h2 class="font-headline font-bold text-xl tracking-tight text-on-surface">Live Now</h2>
+<!-- Room Card 1 -->
+<div class="rounded-xl glass-card border border-outline-variant/10 overflow-hidden">
+<div class="p-6 space-y-6">
+<div class="flex justify-between items-start">
+<div class="space-y-1">
+<div class="flex items-center gap-2">
+<span class="bg-surface-container-highest px-2 py-0.5 rounded text-[10px] font-bold text-primary uppercase tracking-tighter">💻 Tech</span>
+<span class="text-on-surface-variant text-xs font-medium">Inside <b>Y Combinator</b></span>
+</div>
+<h3 class="font-headline font-extrabold text-xl text-white leading-snug">Scaling to 10M users: Secrets from the edge</h3>
+</div>
+</div>
+<div class="flex items-end justify-between w-full">
+<div class="flex flex-col gap-3">
+<div class="flex -space-x-3">
+<div class="relative">
+<img class="w-12 h-12 rounded-xl border-2 border-tertiary pulse-emerald" data-alt="portrait of developer, technical background, soft glowing light from screen" src="https://lh3.googleusercontent.com/aida-public/AB6AXuC4HaARUGHMrknJToargdpzj8iWX30KFc69RgVUG0HeMkCvcOdiv5jTlfh7GoGCcOJnrAkIYOrM_7OC5IXf0i_I2TsvqMgdMCoDucal84I4DGp2R9Nr7slTByAdL4Zctf6mfu6KwbfUsw2e6m5e0f1rgolIeJe0kxX0MP-dND8_2r16qkvUNqBCYB5la-OG4TpyKVLUIqXUjBMzF9ISY-_NYfuhtVS56W-f_p4VpzAgsD5BBt4BQ-ASdVSORasFsbmrPfj1X0u1gKcz"/>
+<div class="absolute -bottom-1 -right-1 bg-tertiary w-3 h-3 rounded-full border-2 border-surface"></div>
+</div>
+<img class="w-12 h-12 rounded-xl border-2 border-surface" data-alt="headshot of smiling woman, colorful studio background, bright lighting" src="https://lh3.googleusercontent.com/aida-public/AB6AXuD8cSXWam4ZUluZE5anesMAMJX6POMhMuQqPjUB8UOJMDUaf58iF5ajI2CrZvBQS_UFDHOfOlAvGsDcEsN7JF9nJFDiQjWWgbggEYPZeKBWI5clmAmMNmEPamZ_ttGw31ASLp--fZ99uk2hO3tJUHUwsTL45SyBYuhTouMbrS0D1Z39RvjZUZsZmBtu1XMBSfvzh0AIK830WU4qTuUJR2rP-EC4RF03PzZJxF5lYwR4L6L4WLBQxa5b42TXVKKjzr1Y8AmjFT38Oxq9"/>
+<img class="w-12 h-12 rounded-xl border-2 border-surface" data-alt="professional male headshot, blurred office background, daylight" src="https://lh3.googleusercontent.com/aida-public/AB6AXuB4_XQqssl4NzfHnamrC4NhhJWJsvcOrykPTt9ezr5BA3t5cT-cc0zS6AtRPRw3BnHbE1OmCL2_2L8ivLqnSZ8l5xpF_wRgRlJbUTTqTDeexEGRawRcy8G0KQ-aFPwpSRStb1sdZGa1D3b4veYgTV-RAeSFyCchMpE04WQu4PzU_FgodTkvjrH3W5RcoZ_4m3zburKOkjGMEKeOT2yJiNdZB5ARS-zsOBvjYkAULsIdqee1hX6sMgbnNqauX6NehwgZk7gEJ4rBmV_Q"/>
+<div class="w-12 h-12 rounded-xl border-2 border-surface bg-surface-container-high flex items-center justify-center text-xs font-bold text-on-surface-variant">+12</div>
+</div>
+<span class="text-[#A0AEC0] text-xs font-semibold items-center gap-1 inline-flex items-center"><span class="material-symbols-outlined text-sm">mic</span> 12 speakers<span class="mx-1 text-outline/30">|</span><span class="text-on-surface-variant text-xs font-semibold flex items-center gap-1"><span class="material-symbols-outlined text-sm">groups</span> 142 listening</span></span>
+</div>
+<div class="flex flex-col items-end gap-2">
+<button class="bg-primary hover:bg-primary-container text-on-primary-container px-6 py-2 rounded-full font-manrope font-extrabold text-sm transition-all active:scale-95 shadow-lg shadow-primary/20">Join →</button>
+</div>
+</div>
+</div>
+</div>
+<!-- Room Card 2 -->
+<div class="rounded-xl glass-card border border-outline-variant/10 overflow-hidden">
+<div class="p-6 space-y-6">
+<div class="flex justify-between items-start">
+<div class="space-y-1">
+<div class="flex items-center gap-2">
+<span class="bg-surface-container-highest px-2 py-0.5 rounded text-[10px] font-bold text-secondary uppercase tracking-tighter">🎨 Design</span>
+<span class="text-on-surface-variant text-xs font-medium">Inside <b>UI Masters</b> Club</span>
+</div>
+<h3 class="font-headline font-extrabold text-xl text-white leading-snug">The Death of Minimalism? 2024 Trends</h3>
+</div>
+</div>
+<div class="flex items-end justify-between w-full">
+<div class="flex flex-col gap-3">
+<div class="flex -space-x-3">
+<img class="w-12 h-12 rounded-xl border-2 border-surface" data-alt="artistic portrait of a woman, creative studio setting, warm lighting" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCibbxY0DzLXhDOBz6DEroWMgXqyEggLxWiZ4I2PQUFVgcfEnpgR3hQ0kTB1i9h7c3e0towD2tR2_u5jTEdgmLrE-MPQYrwjk4ac7a54L5YHipNekELQ9Ko43fvKe49XBJtazOclc3FpuO-sev7DqyJdvhWQ7MFhUihV-TrWJAtApyTbE-Ux9vncVKIw6sUUIPje2CniBS-ko78PDI5M-EQtjNrjwv6FOyYV7agYVZdo4xJMzNAH7Ko8l-kQSYhuWNn4i1wcdxQKgHY"/>
+<div class="relative">
+<img class="w-12 h-12 rounded-xl border-2 border-tertiary pulse-emerald" data-alt="sharp headshot of a man, dark aesthetic background, focused gaze" src="https://lh3.googleusercontent.com/aida-public/AB6AXuB5uUwzeBnl8jNy7Rec9hatNub3vGrLyXIiFjT74_j34x4-Y8FFEZdYYg745kXQK9bIiasVIANqjCNLUEAtWixq_TpQaW7hoF0z9ftq5mznWO8Usgc9R1Jc__-fRDjuMIZ6cJDrWocbxz4VOwtA-BeFM5ESUspCwU3lxOqV2xAaDT0lrJa_AWtrYKohtCaV-ng8UiBN5Lvl1yYhmX4a3OS-AHuQud-BLCY-RAdo_wgg1YGP9MDPf_WiWDG1TwCAu46J7FRicUflq_gm"/>
+<div class="absolute -bottom-1 -right-1 bg-tertiary w-3 h-3 rounded-full border-2 border-surface"></div>
+</div>
+<img class="w-12 h-12 rounded-xl border-2 border-surface" data-alt="creative person profile, neon lighting accent, urban mood" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBUTnSv0jXoZPyL8qEjcogNYbrQzC1P1FrsoO64szY5A1mUktWtpvZ0wgFaQbu4Ld5dOSrmfYMUjE4waAxAoqHhnrjWZoCBNAGpYYmCWxfs4QXbsqqcmYckeQNiTRBztaG5jvkbs7-d57FOsYbcicqSjmqcoJ-Cn1zCgZEYP58M1SjltqyLSNRsZaZeKgW8vZrXb2op6pvgml7vq21aYY304xrsqQb76LfKp41aK3OwiLprEnn2CDHivKC39OrDaa0nKjvZSlEXmsMw"/>
+<div class="w-12 h-12 rounded-xl border-2 border-surface bg-surface-container-high flex items-center justify-center text-xs font-bold text-on-surface-variant">+8</div>
+</div>
+<span class="text-[#A0AEC0] text-xs font-semibold items-center gap-1 inline-flex items-center"><span class="material-symbols-outlined text-sm">mic</span> 8 speakers<span class="mx-1 text-outline/30">|</span><span class="text-on-surface-variant text-xs font-semibold flex items-center gap-1"><span class="material-symbols-outlined text-sm">groups</span> 89 listening</span></span>
+</div>
+<div class="flex flex-col items-end gap-2">
+<button class="bg-primary hover:bg-primary-container text-on-primary-container px-6 py-2 rounded-full font-manrope font-extrabold text-sm transition-all active:scale-95 shadow-lg shadow-primary/20">Join →</button>
+</div>
+</div>
+</div>
+</div>
+<!-- Room Card 3 -->
+<div class="rounded-xl glass-card border border-outline-variant/10 overflow-hidden">
+<div class="p-6 space-y-6">
+<div class="flex justify-between items-start">
+<div class="space-y-1">
+<div class="flex items-center gap-2">
+<span class="bg-surface-container-highest px-2 py-0.5 rounded text-[10px] font-bold text-[#ffd700] uppercase tracking-tighter">₿ Crypto</span>
+<span class="text-on-surface-variant text-xs font-medium">Inside <b>DAO Global</b></span>
+</div>
+<h3 class="font-headline font-extrabold text-xl text-white leading-snug">Governance 2.0: The state of decentralized voting</h3>
+</div>
+</div>
+<div class="flex items-end justify-between w-full">
+<div class="flex flex-col gap-3">
+<div class="flex -space-x-3">
+<img class="w-12 h-12 rounded-xl border-2 border-surface" data-alt="modern businessman portrait, high contrast lighting, professional look" src="https://lh3.googleusercontent.com/aida-public/AB6AXuALcnWjFxN1WH7438MTh63goM_EzIg8TWyS_8MBcffR4cOj7dn3ru-NoUNvLn-sA32VKG5o1Jie96fBFne3uGiq7nf_e6FaIcOTMwIrDRFfyHJ7AX9Ku6YzW9jsJJFdcj4GehYFZ70-bAIO6Orz3AQrcjrc5BowORpxV67bGuwHe7u4694kWXUC1w441iJL4T3ML2cA1OXjUAKhKD0Z2PI95fZbjm5UNH3RP8o0mgnjhJPUY2zbdhiXOErRsRHmWm09CgmiVomNIuxc"/>
+<img class="w-12 h-12 rounded-xl border-2 border-surface" data-alt="friendly woman profile, outdoors, soft natural light" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDlR-7I9lFlKF7CjLeDv9NX5C_GScpyWl3gwozGymZP-2xJ1_Qi8uVZwcO8TX4EFkVsIcthgxVekva7djGhnFMcId59sChwpv9Xoy7KvzV0HExIezgOAvHH8h2PbTLlOdq2wZa7VYyxLeeB_yR6h8p08i5ZdflJmg2mnkKkGCxXT80GM0QFS6b5YMPFLyQ-QoNYTnDtGxvhAzXDzxtSnqStnYK_p_Sbq7uAUZpNtQ5TffLUDEEbL4vyKCGzX3vTqJraiWKLWwp4KoXq"/>
+<div class="relative">
+<img class="w-12 h-12 rounded-xl border-2 border-tertiary pulse-emerald" data-alt="tech executive headshot, clean background, approachable look" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBz9znGB3quFIDoH-btZ_dbHMvtTlT_YplPQJxUydsE-hy86o4McaEpmEBbKrx3cLEvk8IF9xTU8xmRGUg6hDzx7UIWkgsro1Hdm_jDXZnKSSx9voX1OXyDHftz-HL5IHF5vjh0GaKYp4TIfn6Vqa3nk1sABckLL6mX17pcweSDhO-RNMHiKGkt6VNVe74ajurt_o1LlWq7UDewyJt82tsmTofhNBzKNvpgWgLY_sUYXC6C_BdFiVnQO0FVbvQ5FYcg1xlpYUWsQQwP"/>
+<div class="absolute -bottom-1 -right-1 bg-tertiary w-3 h-3 rounded-full border-2 border-surface"></div>
+</div>
+<div class="w-12 h-12 rounded-xl border-2 border-surface bg-surface-container-high flex items-center justify-center text-xs font-bold text-on-surface-variant">+42</div>
+</div>
+<span class="text-[#A0AEC0] text-xs font-semibold items-center gap-1 inline-flex items-center"><span class="material-symbols-outlined text-sm">mic</span> 15 speakers<span class="mx-1 text-outline/30">|</span><span class="text-on-surface-variant text-xs font-semibold flex items-center gap-1"><span class="material-symbols-outlined text-sm">groups</span> 312 listening</span></span>
+</div>
+<div class="flex flex-col items-end gap-2">
+<button class="bg-primary hover:bg-primary-container text-on-primary-container px-6 py-2 rounded-full font-manrope font-extrabold text-sm transition-all active:scale-95 shadow-lg shadow-primary/20">Join →</button>
+</div>
+</div>
+</div>
+</div>
+</section>
+</main>
+<!-- FAB: + Start a Room -->
+<button class="fixed bottom-28 right-6 z-[60] w-16 h-16 rounded-full bg-primary flex items-center justify-center shadow-[0_10px_40px_rgba(41,121,255,0.4)] transition-transform active:scale-90 duration-300">
+<span class="material-symbols-outlined text-on-primary text-3xl font-bold">add</span>
+<!-- Floating label for FAB -->
+<span class="absolute -top-10 right-0 bg-primary-container text-on-primary-container px-3 py-1 rounded-lg text-[10px] font-black whitespace-nowrap shadow-xl">START ROOM</span>
+</button>
+<!-- BottomNavBar -->
+<nav class="fixed bottom-8 left-0 right-0 z-50 flex justify-around items-center px-4 h-16">
+<div class="bg-[#070b28]/80 backdrop-blur-2xl fixed bottom-6 left-1/2 -translate-x-1/2 w-[90%] max-w-md rounded-[2rem] border border-white/10 shadow-[0_0_30px_rgba(41,121,255,0.08)] flex justify-around items-center h-16 px-6">
+<div class="flex items-center justify-center text-[#b0c6ff] drop-shadow-[0_0_8px_rgba(176,198,255,0.8)] scale-110 transition-transform duration-300">
+<span class="material-symbols-outlined font-manrope" style="font-variation-settings: 'FILL' 1;">mic</span>
+</div>
+<div class="flex items-center justify-center text-slate-500 hover:text-[#b0c6ff]/80 transition-colors">
+<span class="material-symbols-outlined font-manrope">map</span>
+</div>
+<div class="flex items-center justify-center text-slate-500 hover:text-[#b0c6ff]/80 transition-colors">
+<span class="material-symbols-outlined font-manrope">chat_bubble</span>
+</div>
+<div class="flex items-center justify-center text-slate-500 hover:text-[#b0c6ff]/80 transition-colors">
+<span class="material-symbols-outlined font-manrope">settings</span>
+</div>
+</div>
+</nav>
+</body></html>

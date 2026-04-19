@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Create House | Chathouse</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;700;800&amp;family=Inter:wght@400;500;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "tertiary-fixed": "#62ff96",
+                        "surface-bright": "#323756",
+                        "secondary-container": "#2f3f92",
+                        "primary": "#b0c6ff",
+                        "surface-dim": "#0c112e",
+                        "inverse-on-surface": "#2a2e4c",
+                        "surface-container-highest": "#2e3351",
+                        "tertiary": "#00e475",
+                        "on-tertiary-fixed": "#00210b",
+                        "on-primary-fixed-variant": "#00429b",
+                        "surface-container-lowest": "#070b28",
+                        "primary-container": "#558dff",
+                        "surface-container-low": "#141936",
+                        "tertiary-fixed-dim": "#00e475",
+                        "on-primary": "#002d6e",
+                        "on-surface-variant": "#c2c6d7",
+                        "on-secondary-fixed-variant": "#2f3f92",
+                        "on-surface": "#dee0ff",
+                        "on-error-container": "#ffdad6",
+                        "surface-container-high": "#232846",
+                        "surface-variant": "#2e3351",
+                        "background": "#0c112e",
+                        "on-tertiary-container": "#003114",
+                        "on-primary-container": "#002661",
+                        "on-tertiary": "#003918",
+                        "on-error": "#690005",
+                        "surface": "#0c112e",
+                        "outline-variant": "#424655",
+                        "tertiary-container": "#00a754",
+                        "primary-fixed": "#d9e2ff",
+                        "on-background": "#dee0ff",
+                        "surface-container": "#191d3b",
+                        "outline": "#8c90a0",
+                        "inverse-surface": "#dee0ff",
+                        "surface-tint": "#b0c6ff",
+                        "on-primary-fixed": "#001945",
+                        "on-secondary": "#15267b",
+                        "error-container": "#93000a",
+                        "on-tertiary-fixed-variant": "#005226",
+                        "secondary-fixed": "#dee0ff",
+                        "error": "#ffb4ab",
+                        "primary-fixed-dim": "#b0c6ff",
+                        "secondary-fixed-dim": "#bac3ff",
+                        "secondary": "#bac3ff",
+                        "on-secondary-fixed": "#00105b",
+                        "inverse-primary": "#0058ca",
+                        "on-secondary-container": "#a3b0ff"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "fontFamily": {
+                        "headline": ["Manrope"],
+                        "body": ["Inter"],
+                        "label": ["Inter"]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        body {
+            background: linear-gradient(180deg, #070b28 0%, #0c112e 100%);
+            min-height: 100vh;
+        }
+        .glass-surface {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+        }
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="font-body text-on-surface antialiased overflow-x-hidden">
+<!-- TopAppBar -->
+<header class="fixed top-0 w-full z-50 bg-[#070b28]/80 backdrop-blur-xl flex items-center justify-between px-6 h-16 w-full">
+<div class="flex items-center gap-4">
+<button class="hover:bg-white/5 transition-colors p-2 rounded-full Active: scale-95 transition-transform flex items-center justify-center">
+<span class="material-symbols-outlined text-[#b0c6ff]" data-icon="close">close</span>
+</button>
+</div>
+<h1 class="font-manrope font-bold text-lg tracking-tight text-[#b0c6ff]">Create House</h1>
+<div class="w-10"></div> <!-- Spacer for centering -->
+</header>
+<main class="pt-24 pb-32 px-6 max-w-2xl mx-auto">
+<!-- Celestial Atmosphere Background Decoration -->
+<div class="fixed top-[-10%] left-[-10%] w-[40%] h-[40%] bg-primary/10 rounded-full blur-[120px] -z-10"></div>
+<div class="fixed bottom-[10%] right-[-5%] w-[30%] h-[30%] bg-tertiary/5 rounded-full blur-[100px] -z-10"></div>
+<!-- Create House Content -->
+<div class="flex flex-col gap-8">
+<!-- Photo Upload Section -->
+<section class="flex flex-col items-center gap-4">
+<div class="relative group">
+<div class="w-32 h-32 rounded-full glass-surface border border-white/10 flex items-center justify-center overflow-hidden">
+<span class="material-symbols-outlined text-on-surface-variant text-5xl" data-icon="home_work">home_work</span>
+</div>
+<div class="absolute inset-0 rounded-full border-2 border-dashed border-primary/30 group-hover:border-primary/60 transition-colors pointer-events-none"></div>
+</div>
+<button class="text-primary font-semibold text-sm hover:text-primary-container transition-all flex items-center gap-2">
+<span class="material-symbols-outlined text-lg" data-icon="add_a_photo">add_a_photo</span>
+                    Change Photo
+                </button>
+</section>
+<!-- Form Container -->
+<div class="glass-surface rounded-xl p-8 border border-outline-variant/10 flex flex-col gap-8">
+<!-- House Name -->
+<div class="flex flex-col gap-3">
+<label class="text-sm font-label font-medium text-on-surface-variant px-1">House Name</label>
+<input class="w-full bg-surface-container-low border-none rounded-xl px-4 py-4 text-on-surface focus:ring-2 focus:ring-primary/50 transition-all placeholder:text-outline/50" placeholder="e.g. The Jazz Lounge" type="text"/>
+</div>
+<!-- Description -->
+<div class="flex flex-col gap-3">
+<label class="text-sm font-label font-medium text-on-surface-variant px-1">Description</label>
+<textarea class="w-full bg-surface-container-low border-none rounded-xl px-4 py-4 text-on-surface focus:ring-2 focus:ring-primary/50 transition-all placeholder:text-outline/50 resize-none" placeholder="What happens in this house?" rows="4"></textarea>
+</div>
+<!-- Topic Selection -->
+<div class="flex flex-col gap-4">
+<label class="text-sm font-label font-medium text-on-surface-variant px-1">Topic</label>
+<div class="flex flex-wrap gap-2">
+<button class="px-4 py-2 rounded-full glass-surface border border-outline-variant/20 text-sm text-on-surface hover:bg-primary/10 hover:border-primary/40 transition-all">Music</button>
+<button class="px-4 py-2 rounded-full bg-primary/20 border border-primary/50 text-sm text-primary font-semibold">Technology</button>
+<button class="px-4 py-2 rounded-full glass-surface border border-outline-variant/20 text-sm text-on-surface hover:bg-primary/10 hover:border-primary/40 transition-all">Art</button>
+<button class="px-4 py-2 rounded-full glass-surface border border-outline-variant/20 text-sm text-on-surface hover:bg-primary/10 hover:border-primary/40 transition-all">Philosophy</button>
+<button class="px-4 py-2 rounded-full glass-surface border border-outline-variant/20 text-sm text-on-surface hover:bg-primary/10 hover:border-primary/40 transition-all">Gaming</button>
+<button class="px-4 py-2 rounded-full glass-surface border border-outline-variant/20 text-sm text-on-surface hover:bg-primary/10 hover:border-primary/40 transition-all flex items-center gap-1">
+<span class="material-symbols-outlined text-base" data-icon="add">add</span>
+                            Other
+                        </button>
+</div>
+</div>
+<!-- Privacy Options -->
+<div class="flex flex-col gap-4">
+<label class="text-sm font-label font-medium text-on-surface-variant px-1">House Privacy</label>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+<label class="relative group cursor-pointer">
+<input checked="" class="peer hidden" name="privacy" type="radio"/>
+<div class="p-4 rounded-xl border border-outline-variant/20 glass-surface peer-checked:border-primary/60 peer-checked:bg-primary/5 transition-all flex items-start gap-4">
+<div class="mt-1 w-10 h-10 rounded-full bg-surface-container-high flex items-center justify-center text-primary">
+<span class="material-symbols-outlined" data-icon="public">public</span>
+</div>
+<div>
+<h4 class="font-bold text-on-surface">Public House</h4>
+<p class="text-xs text-on-surface-variant">Anyone can join and listen</p>
+</div>
+</div>
+</label>
+<label class="relative group cursor-pointer">
+<input class="peer hidden" name="privacy" type="radio"/>
+<div class="p-4 rounded-xl border border-outline-variant/20 glass-surface peer-checked:border-primary/60 peer-checked:bg-primary/5 transition-all flex items-start gap-4">
+<div class="mt-1 w-10 h-10 rounded-full bg-surface-container-high flex items-center justify-center text-secondary">
+<span class="material-symbols-outlined" data-icon="lock">lock</span>
+</div>
+<div>
+<h4 class="font-bold text-on-surface">Private House</h4>
+<p class="text-xs text-on-surface-variant">Membership requires approval</p>
+</div>
+</div>
+</label>
+</div>
+</div>
+</div>
+</div>
+</main>
+<!-- Fixed Bottom Action Area -->
+<div class="fixed bottom-0 left-0 w-full p-6 bg-gradient-to-t from-background via-background/95 to-transparent z-40">
+<div class="max-w-2xl mx-auto">
+<button class="w-full h-14 rounded-full bg-gradient-to-r from-primary to-primary-container text-on-primary font-bold text-lg shadow-[0_0_30px_rgba(41,121,255,0.2)] active:scale-95 transition-all flex items-center justify-center gap-2">
+                Create House
+                <span class="material-symbols-outlined" data-icon="arrow_forward">arrow_forward</span>
+</button>
+</div>
+</div>
+<!-- BottomNavBar (Hidden on desktop via style but rendered for shell completeness) -->
+<nav class="md:hidden fixed bottom-6 left-1/2 -translate-x-1/2 w-[90%] max-w-md rounded-[1.5rem] bg-[#1a1f3d]/40 backdrop-blur-2xl shadow-[0_0_30px_rgba(41,121,255,0.08)] z-50 flex justify-around items-center px-4 h-16">
+<button class="text-[#A0AEC0] hover:text-[#b0c6ff] transition-all Active: scale-110 transition-transform">
+<span class="material-symbols-outlined" data-icon="explore">explore</span>
+</button>
+<button class="text-[#A0AEC0] hover:text-[#b0c6ff] transition-all Active: scale-110 transition-transform">
+<span class="material-symbols-outlined" data-icon="mic_external_on">mic_external_on</span>
+</button>
+<button class="text-[#A0AEC0] hover:text-[#b0c6ff] transition-all Active: scale-110 transition-transform">
+<span class="material-symbols-outlined" data-icon="notifications">notifications</span>
+</button>
+<button class="text-[#A0AEC0] hover:text-[#b0c6ff] transition-all Active: scale-110 transition-transform">
+<span class="material-symbols-outlined" data-icon="person">person</span>
+</button>
+</nav>
+</body></html>

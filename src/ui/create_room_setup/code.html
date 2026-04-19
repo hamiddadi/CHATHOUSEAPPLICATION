@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&amp;family=Inter:wght@400;500;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "inverse-surface": "#dee0ff",
+                    "outline-variant": "#424655",
+                    "on-tertiary-fixed-variant": "#005226",
+                    "on-error-container": "#ffdad6",
+                    "surface": "#0c112e",
+                    "surface-dim": "#0c112e",
+                    "on-secondary-container": "#a3b0ff",
+                    "on-secondary-fixed-variant": "#2f3f92",
+                    "tertiary-fixed": "#62ff96",
+                    "on-tertiary-container": "#003114",
+                    "on-error": "#690005",
+                    "tertiary-fixed-dim": "#00e475",
+                    "surface-variant": "#2e3351",
+                    "primary": "#b0c6ff",
+                    "on-secondary": "#15267b",
+                    "background": "#0c112e",
+                    "on-tertiary": "#003918",
+                    "error-container": "#93000a",
+                    "outline": "#8c90a0",
+                    "on-surface-variant": "#c2c6d7",
+                    "surface-container-high": "#232846",
+                    "primary-fixed-dim": "#b0c6ff",
+                    "secondary-fixed-dim": "#bac3ff",
+                    "on-primary": "#002d6e",
+                    "error": "#ffb4ab",
+                    "surface-tint": "#b0c6ff",
+                    "surface-container-lowest": "#070b28",
+                    "on-secondary-fixed": "#00105b",
+                    "secondary-fixed": "#dee0ff",
+                    "on-primary-fixed-variant": "#00429b",
+                    "surface-container": "#191d3b",
+                    "on-tertiary-fixed": "#00210b",
+                    "on-primary-container": "#002661",
+                    "surface-container-low": "#141936",
+                    "on-background": "#dee0ff",
+                    "primary-container": "#558dff",
+                    "inverse-on-surface": "#2a2e4c",
+                    "surface-container-highest": "#2e3351",
+                    "secondary": "#bac3ff",
+                    "on-surface": "#dee0ff",
+                    "tertiary": "#00e475",
+                    "primary-fixed": "#d9e2ff",
+                    "on-primary-fixed": "#001945",
+                    "tertiary-container": "#00a754",
+                    "surface-bright": "#323756",
+                    "inverse-primary": "#0058ca",
+                    "secondary-container": "#2f3f92"
+            },
+            "borderRadius": {
+                    "DEFAULT": "0.25rem",
+                    "lg": "0.5rem",
+                    "xl": "0.75rem",
+                    "full": "9999px"
+            },
+            "fontFamily": {
+                    "headline": ["Manrope"],
+                    "body": ["Inter"],
+                    "label": ["Inter"]
+            }
+          },
+        },
+      }
+    </script>
+<style>
+        .glass-sheet {
+            background: rgba(12, 17, 46, 0.85);
+            backdrop-filter: blur(24px);
+            -webkit-backdrop-filter: blur(24px);
+        }
+        .pulse-emerald {
+            box-shadow: 0 0 0 0 rgba(0, 228, 117, 0.4);
+            animation: pulse-ring 2s infinite;
+        }
+        @keyframes pulse-ring {
+            0% { box-shadow: 0 0 0 0 rgba(0, 228, 117, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(0, 228, 117, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(0, 228, 117, 0); }
+        }
+        .custom-caret {
+            caret-color: #b0c6ff;
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+</head>
+<body class="bg-surface font-body text-on-surface overflow-hidden">
+<!-- Background: Room Feed (Blurred & Dimmed) -->
+<div class="fixed inset-0 z-0 brightness-[0.3] blur-md">
+<header class="fixed top-0 left-0 w-full z-50 flex justify-between items-center px-6 py-4">
+<span class="text-xl font-bold bg-gradient-to-r from-[#b0c6ff] to-[#2979FF] bg-clip-text text-transparent font-headline tracking-tight">Midnight Echo</span>
+<div class="w-10 h-10 rounded-full bg-surface-container-highest"></div>
+</header>
+<main class="pt-24 px-6 space-y-8">
+<!-- Mock Room Cards -->
+<div class="p-6 rounded-xl bg-surface-container-low border border-outline-variant/10">
+<div class="flex items-center gap-2 mb-4">
+<span class="material-symbols-outlined text-tertiary text-sm">record_voice_over</span>
+<span class="text-tertiary text-xs font-bold tracking-widest uppercase">Live Now</span>
+</div>
+<h2 class="text-2xl font-headline font-bold mb-4">The Future of AI Audio</h2>
+<div class="flex -space-x-3">
+<img class="w-10 h-10 rounded-lg border-2 border-surface shadow-lg" data-alt="portrait of a woman with vibrant lighting" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBGLL9svvaIopCAXSQwHeurmBQdmbIwOGRPfKs-opRRBqLvQnD6p4rYGs6mwsIhsVl9nrEo54QnMEWLBFIqc17mvzUsDQKF1ZfVxjfUkfYYtUCvCpQJD1jdrMHp1igu9acapbBbn18sECh2CNidgLHfRjW-CAvWyxPzaXnzwhMPEVLLTCJsklKV5jFDWuDbwCfJp-b2e-Wt5OMsP0Xtrj9-uVd-A1Q5zzfeXIWnY2lsLznzlhjzq6FEfDfBlhdmV0gw_fr8GyRv4Hvs"/>
+<img class="w-10 h-10 rounded-lg border-2 border-surface shadow-lg" data-alt="close up of a smiling man in casual attire" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDSZUiubJ7aaDESwc4YHMggfWHAbjFKzqTzYwnzTuT0ChWrp_wf8yiloZt7B3L9fj_BMPp3zRHqI5TL0ZnQar_XLTtYzJyM6O--AA3Kp5cGst2OVYjTzzqKgUlIvrSUiq8y5KJ1RAGrBOWOtqkm1bjmmkoUx3XXYL7YPABv85yNUJ6XhU0Ac02dvbLVkGLQuEdSyLrFNM8rrgccOntauM6qNPn9g-ELiawtL7vlzacWtd8vjH7gnJeZUwSFw8AQLSbp-nEBkwyi3rNm"/>
+<div class="w-10 h-10 rounded-lg bg-surface-container-highest border-2 border-surface flex items-center justify-center text-xs">+42</div>
+</div>
+</div>
+<div class="p-6 rounded-xl bg-surface-container-low border border-outline-variant/10">
+<h2 class="text-2xl font-headline font-bold mb-4">Midnight Jazz &amp; Poetry</h2>
+<div class="flex -space-x-3">
+<img class="w-10 h-10 rounded-lg border-2 border-surface shadow-lg" data-alt="man with beard in dramatic low light" src="https://lh3.googleusercontent.com/aida-public/AB6AXuB-iTtz9Krwltr0ECEMdsm2IJeYsMt2KPWOgV6xL9d6e656cPQ9w9XRPuU6tT0Q8QVORdRsLBtmV2yGTFTAPCaNlbRC77WozxB_7uZFRpYG7N_EwxohHCz_pugUyV9oda7kaX82KtPgmtiSj_8tNUr7FboS4fcxNTWFOZX6NnXjYv1f_OMfoHrbFXMNlnd3LkmMIXLTF7YtxkCbHb_0x1hHSxIQNatkJCNtP9VGle6ams32mcDzRABI1S6Bce81ldN3wTSQdw57wcRQ"/>
+<div class="w-10 h-10 rounded-lg bg-surface-container-highest border-2 border-surface flex items-center justify-center text-xs">+12</div>
+</div>
+</div>
+</main>
+</div>
+<!-- Bottom Sheet Overlay Container -->
+<div class="fixed inset-0 z-50 flex items-end justify-center pointer-events-none">
+<!-- Overlay Backdrop (Additional dimming layer) -->
+<div class="absolute inset-0 bg-black/40 pointer-events-auto"></div>
+<!-- The Bottom Sheet -->
+<section class="glass-sheet w-full max-w-2xl rounded-t-[2.5rem] pointer-events-auto relative flex flex-col max-h-[751px] overflow-hidden">
+<!-- Drag Handle -->
+<div class="w-full flex justify-center py-4">
+<div class="w-12 h-1.5 bg-on-surface-variant/20 rounded-full"></div>
+</div>
+<!-- Header -->
+<header class="px-8 pb-4 text-center">
+<h1 class="text-xl font-headline font-extrabold text-on-surface tracking-tight">Start a Room</h1>
+</header>
+<!-- Scrollable Content Area -->
+<div class="px-8 pb-32 space-y-10 overflow-y-auto">
+<!-- Room Title Input -->
+<div class="space-y-4">
+<textarea class="w-full bg-transparent border-none focus:ring-0 text-3xl md:text-4xl font-headline font-bold placeholder:text-on-surface-variant/30 custom-caret text-white resize-none" placeholder="What do you want to talk about?" rows="2"></textarea>
+</div>
+<!-- Privacy Options -->
+<div class="space-y-4">
+<label class="text-xs font-bold text-on-surface-variant tracking-[0.2em] uppercase">Privacy</label>
+<div class="grid grid-cols-3 gap-4">
+<!-- Open (Active) -->
+<button class="flex flex-col items-center justify-center py-5 rounded-2xl bg-primary-container/20 border border-primary/30 shadow-[0_0_20px_rgba(176,198,255,0.15)] group transition-all">
+<span class="material-symbols-outlined text-primary mb-2 text-3xl" style="font-variation-settings: 'FILL' 1;">public</span>
+<span class="text-sm font-semibold text-primary">Open</span>
+</button>
+<!-- Social -->
+<button class="flex flex-col items-center justify-center py-5 rounded-2xl bg-surface-container-high/50 border border-outline-variant/10 hover:bg-surface-container-highest transition-all group">
+<span class="material-symbols-outlined text-on-surface-variant group-hover:text-on-surface mb-2 text-3xl">group</span>
+<span class="text-sm font-semibold text-on-surface-variant group-hover:text-on-surface">Social</span>
+</button>
+<!-- Closed -->
+<button class="flex flex-col items-center justify-center py-5 rounded-2xl bg-surface-container-high/50 border border-outline-variant/10 hover:bg-surface-container-highest transition-all group">
+<span class="material-symbols-outlined text-on-surface-variant group-hover:text-on-surface mb-2 text-3xl">lock</span>
+<span class="text-sm font-semibold text-on-surface-variant group-hover:text-on-surface">Closed</span>
+</button>
+</div>
+</div>
+<!-- Choose a Club -->
+<div class="space-y-4">
+<label class="text-xs font-bold text-on-surface-variant tracking-[0.2em] uppercase">Choose a Club</label>
+<div class="flex items-center gap-4 overflow-x-auto pb-2 scrollbar-hide">
+<!-- Add Button -->
+<button class="flex-shrink-0 w-14 h-14 rounded-2xl bg-surface-container-high flex items-center justify-center border border-dashed border-outline-variant/40 hover:border-primary/50 transition-colors">
+<span class="material-symbols-outlined text-on-surface-variant">add</span>
+</button>
+<!-- Club Avatars -->
+<div class="relative flex-shrink-0 cursor-pointer">
+<img class="w-14 h-14 rounded-2xl object-cover ring-2 ring-primary ring-offset-4 ring-offset-surface" data-alt="close up of vintage technology and neon lights" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCQHVXeIELkz-EQ57W3YBCWkzped9gDDRy6p8dAA-kS7AqZQCQoJSc4hrw8b46K_Z_TPjq6Fg8dTnWYCtOAxna7epu7Vb5DHuypQz5EtHYlHBYak3r7NcW8FVyMeOxRWU2f0gQBRC8Q8NurEsL9nQ1ZbE5-v7blGhQ1cezPTeZHDD0EE651_fX4Wh93s03XZNw5vYwQwRQbrcyEtr6MCvdIooMuPmi3rUFOObNLzgIOx9VayWRUMt4KRW85wKIZvwDG05JodarkukUh"/>
+<div class="absolute -top-1 -right-1 bg-primary text-on-primary w-5 h-5 rounded-full flex items-center justify-center">
+<span class="material-symbols-outlined text-[12px] font-bold">check</span>
+</div>
+</div>
+<img class="flex-shrink-0 w-14 h-14 rounded-2xl object-cover border border-outline-variant/20 opacity-60 hover:opacity-100 transition-opacity" data-alt="abstract flowing colors in purple and blue tones" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAe6BzJVAkwdoG6APAtEyvJ_3uiIs7Hq87PaDy_8ut7UCl3Zw8vDxV6dbwiqsDwSO0-WPlAkV0F9dg46VmUGf_BTdk-iXo59uOPGqJUIz9uwElHB0ZisXpKlh2Blg_4Hni3edWD4687DQn1EcZ98WqeebcsZtMtl3zWtMpQJMBtYR3XJHWv_gfAqCUFkt5CgnwA1I9tciBtYYqQxQEyFzcH_-Dr86gJWRMxx7HZNBnS6t2RS1ERRyc4ZKbJDfRVIuFKkQNzTd_odfRC"/>
+<img class="flex-shrink-0 w-14 h-14 rounded-2xl object-cover border border-outline-variant/20 opacity-60 hover:opacity-100 transition-opacity" data-alt="deep blue gradient with subtle texture" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCe2TvmyQeY0q-y2foH213E9WPiKxYkLexyr5qtemZ13raMy3MtwSZmtt1S7hWYIDj4URRgwuDB9c8IDY1SbJp8OIAWtAkZcIV3hxS_T0TFFS84lBD_0sU13_4TXXbDHp-u_vkFrL17bZ9v2XJ9UeBdtrOczYj3fb-2SlAXdCaNjv76KYZekvxiT0foL6DcSGtydxL5-5Qj3tgWFYALht036l-hd-7dyLwxDt59_jQCmF9FCPfzkcSqtuiwx9KQlNItiuoFOjHnW4_k"/>
+<img class="flex-shrink-0 w-14 h-14 rounded-2xl object-cover border border-outline-variant/20 opacity-60 hover:opacity-100 transition-opacity" data-alt="soft pastel gradient background" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBSxlx4gqA0sigKk4sI1rEsMBO20mnk7gop8-Q0c9HyJ0bwPNKGncI6Qakdj3AHVHPs31OcEfLNHINxzI2ajwa1NUg1bxOzi2p89aOZgw_G0R42n-rtzUlczhZdguAW6OIUJG7ZZKJPnGJ5BUwqUJl1xa6BDC9A4hv30s7Rh-KV9VGaInyH2q1W9TtX1t9_B9RS7npw85CbOjOOMjmdXB8EQhzz8gWKQS0kSo8PAEJ9kAVHSS8kHToK_DLyC6nDe3iE3F_tDq2yc8g4"/>
+</div>
+</div>
+</div>
+<!-- Sticky Footer CTA -->
+<footer class="absolute bottom-0 left-0 right-0 p-8 glass-sheet bg-gradient-to-t from-surface to-transparent border-t border-outline-variant/10">
+<div class="flex items-center gap-4">
+<button class="px-6 py-4 rounded-full border border-outline-variant/40 text-on-surface font-semibold hover:bg-surface-variant/20 transition-all flex items-center gap-2">
+<span class="material-symbols-outlined text-sm">tag</span>
+                        Add Topics
+                    </button>
+<button class="flex-1 px-8 py-4 rounded-full bg-gradient-to-r from-primary to-primary-container text-on-primary-container font-extrabold text-lg shadow-[0_0_30px_rgba(41,121,255,0.2)] hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-3">
+                        Let's Go
+                        <span class="material-symbols-outlined">arrow_forward</span>
+</button>
+</div>
+</footer>
+</section>
+</div>
+<!-- Navigation Bar (Shared Component Style) -->
+<nav class="fixed bottom-8 left-0 right-0 z-50 flex justify-around items-center px-4 h-16">
+<div class="bg-[#070b28]/80 backdrop-blur-2xl fixed bottom-6 left-1/2 -translate-x-1/2 w-[90%] max-w-md rounded-[2rem] border border-white/10 shadow-[0_0_30px_rgba(41,121,255,0.08)] flex justify-around items-center h-16 px-6 pointer-events-auto">
+<a class="flex items-center justify-center text-slate-500 hover:text-[#b0c6ff]/80 transition-opacity" href="#">
+<span class="material-symbols-outlined" data-icon="mic">mic</span>
+</a>
+<a class="flex items-center justify-center text-slate-500 hover:text-[#b0c6ff]/80 transition-opacity" href="#">
+<span class="material-symbols-outlined" data-icon="map">map</span>
+</a>
+<a class="flex items-center justify-center text-[#b0c6ff] drop-shadow-[0_0_8px_rgba(176,198,255,0.8)] scale-110 transition-transform duration-300" href="#">
+<span class="material-symbols-outlined" data-icon="chat_bubble" style="font-variation-settings: 'FILL' 1;">chat_bubble</span>
+</a>
+<a class="flex items-center justify-center text-slate-500 hover:text-[#b0c6ff]/80 transition-opacity" href="#">
+<span class="material-symbols-outlined" data-icon="settings">settings</span>
+</a>
+</div>
+</nav>
+</body></html>

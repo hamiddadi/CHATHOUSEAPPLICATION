@@ -1,0 +1,8 @@
+#!/usr/bin/env sh
+# Block the push if types don't compile. Fast on incremental builds.
+echo "[pre-push] Running TypeScript type check..."
+npm run typecheck || {
+  echo "[pre-push] ✖ typecheck failed — push aborted."
+  exit 1
+}
+echo "[pre-push] ✔ typecheck passed."

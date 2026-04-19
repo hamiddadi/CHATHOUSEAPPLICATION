@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Chat Detail - Midnight Echo</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&amp;family=Inter:wght@400;500;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "on-tertiary-container": "#003114",
+                    "on-secondary-container": "#a3b0ff",
+                    "on-primary-fixed-variant": "#00429b",
+                    "surface-container-low": "#141936",
+                    "tertiary-fixed": "#62ff96",
+                    "surface-container-lowest": "#070b28",
+                    "surface-container-high": "#232846",
+                    "surface-container-highest": "#2e3351",
+                    "outline-variant": "#424655",
+                    "on-primary-container": "#002661",
+                    "surface-variant": "#2e3351",
+                    "on-surface": "#dee0ff",
+                    "background": "#0c112e",
+                    "secondary-container": "#2f3f92",
+                    "surface": "#0c112e",
+                    "on-tertiary": "#003918",
+                    "surface-container": "#191d3b",
+                    "inverse-primary": "#0058ca",
+                    "on-error-container": "#ffdad6",
+                    "on-primary-fixed": "#001945",
+                    "surface-tint": "#b0c6ff",
+                    "on-background": "#dee0ff",
+                    "secondary-fixed": "#dee0ff",
+                    "on-secondary-fixed-variant": "#2f3f92",
+                    "inverse-surface": "#dee0ff",
+                    "surface-dim": "#0c112e",
+                    "secondary-fixed-dim": "#bac3ff",
+                    "primary-fixed-dim": "#b0c6ff",
+                    "secondary": "#bac3ff",
+                    "error-container": "#93000a",
+                    "primary": "#b0c6ff",
+                    "on-tertiary-fixed-variant": "#005226",
+                    "outline": "#8c90a0",
+                    "on-secondary-fixed": "#00105b",
+                    "on-tertiary-fixed": "#00210b",
+                    "inverse-on-surface": "#2a2e4c",
+                    "tertiary": "#00e475",
+                    "on-error": "#690005",
+                    "surface-bright": "#323756",
+                    "tertiary-fixed-dim": "#00e475",
+                    "primary-container": "#558dff",
+                    "on-primary": "#002d6e",
+                    "on-surface-variant": "#c2c6d7",
+                    "primary-fixed": "#d9e2ff",
+                    "on-secondary": "#15267b",
+                    "tertiary-container": "#00a754",
+                    "error": "#ffb4ab"
+            },
+            "borderRadius": {
+                    "DEFAULT": "0.25rem",
+                    "lg": "0.5rem",
+                    "xl": "0.75rem",
+                    "full": "9999px"
+            },
+            "fontFamily": {
+                    "headline": ["Manrope"],
+                    "body": ["Inter"],
+                    "label": ["Inter"]
+            }
+          },
+        },
+      }
+    </script>
+<style>
+        body {
+            background: linear-gradient(180deg, #070b28 0%, #0c112e 100%);
+            min-height: 100vh;
+        }
+        .glass-card {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+        }
+        .primary-glass {
+            background: linear-gradient(135deg, rgba(176, 198, 255, 0.2) 0%, rgba(85, 141, 255, 0.3) 100%);
+            backdrop-filter: blur(20px);
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="font-body text-on-surface">
+<!-- Top AppBar (from JSON context) -->
+<header class="fixed top-0 w-full z-50 bg-[#0c112e]/80 backdrop-blur-xl flex items-center justify-between px-6 h-20 w-full">
+<div class="flex items-center gap-4">
+<button class="flex items-center justify-center w-10 h-10 rounded-full hover:bg-white/5 transition-colors scale-95 active:duration-100 text-[#b0c6ff]">
+<span class="material-symbols-outlined">arrow_back</span>
+</button>
+<div class="flex items-center gap-3">
+<div class="relative">
+<img alt="Elena" class="w-10 h-10 rounded-lg object-cover border border-outline-variant/20" data-alt="Close-up portrait of a young man with a focused expression and stylish short hair, moody dramatic lighting with blue tones" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCN0ts0B7AFYigqyokV3Iwv61nCpMLTtYvAu2RkX0rlcI8w78NiTticYggU84Pw7dgWlAp6CKsZv_ry0KVuXyU86HsrUeuja4tiyrHl9gYgot8D1O4wWvBQ7nPQkSdUc5Xs9KoIjeBfzmRSnKmgazZbIDQvjAHoClDCyowwU7QoqkLkNgTmxyoXi4eYJUEEoiZXop0eFZnlQirBWyBaV2BvS6DlAA-E2hehqq60unZaedeJ3XHJCeWW4n7rFNIlg71ZG_YEwrAEipJB"/>
+<div class="absolute bottom-[-2px] right-[-2px] w-3 h-3 bg-tertiary rounded-full border-2 border-background"></div>
+</div>
+<div class="flex flex-col">
+<span class="font-headline font-bold text-lg tracking-tight text-[#b0c6ff]">Julian Vance</span>
+<span class="text-xs text-on-surface-variant font-medium">@julian_vance</span>
+</div>
+</div>
+</div>
+<div class="flex items-center gap-2">
+<button class="p-2 hover:bg-white/5 rounded-full transition-colors">
+<span class="material-symbols-outlined text-[#b0c6ff]">call</span>
+</button>
+<button class="p-2 hover:bg-white/5 rounded-full transition-colors">
+<span class="material-symbols-outlined text-[#b0c6ff]">more_vert</span>
+</button>
+</div>
+</header>
+<!-- Conversation Area -->
+<main class="pt-24 pb-32 px-6 max-w-3xl mx-auto space-y-8">
+<!-- Date Separator -->
+<div class="flex justify-center">
+<span class="px-4 py-1 rounded-full glass-card text-[10px] uppercase tracking-widest text-on-surface-variant font-semibold">Today</span>
+</div>
+<!-- Received Message -->
+<div class="flex items-end gap-3 max-w-[85%]">
+<img alt="Julian" class="w-8 h-8 rounded-lg object-cover mb-1" data-alt="Realistic profile photo of a young man with cool lighting and urban aesthetic" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCVJm5Soa2ZpHRGPdrJLZVz0NgCYVCK9z4D2mxnIYrPa3SPta2e6jexL2uRixfg58lDzUPNV2qnc7suuoIilWK6Tn0ehUPkJgJtFhrz9HDDjtT9OxcqQD2CYOXEFqoUG38cWNMZv5-alE_RJbYc2qs9AYsDN-LYxdjvzsZAiwNDLujFH1aLX4TyuISaqpYf_a0av8MAECvLfkb9jXRaIQT4XYg2_ncY-TuoH6khZJq56cZP4UbfrIskMsa7Goffp9X0hM0Q2IpqE0QH"/>
+<div class="flex flex-col gap-1">
+<div class="glass-card px-4 py-3 rounded-2xl rounded-bl-none text-on-surface leading-relaxed">
+                    Hey! Are you joining the celestial salon session tonight? We're discussing the future of spatial audio.
+                </div>
+<span class="text-[10px] text-on-surface-variant ml-1">10:24 AM</span>
+</div>
+</div>
+<!-- Sent Message -->
+<div class="flex flex-col items-end gap-1 ml-auto max-w-[85%]">
+<div class="primary-glass px-4 py-3 rounded-2xl rounded-br-none text-white leading-relaxed">
+                Definitely! I just finished setting up my new mic. What's the link for the room?
+            </div>
+<div class="flex items-center gap-1 mr-1">
+<span class="text-[10px] text-on-surface-variant">10:26 AM</span>
+<span class="material-symbols-outlined text-[12px] text-primary">done_all</span>
+</div>
+</div>
+<!-- Received Shared Room Card -->
+<div class="flex items-end gap-3 max-w-[85%]">
+<img alt="Julian" class="w-8 h-8 rounded-lg object-cover mb-1" data-alt="Realistic profile photo of a young man with cool lighting and urban aesthetic" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCjEL8d6W9I3goG_oh536L11nJ26aHsmiJPr7Hp_USylFt824ddf9XgUnwoc9gBFGHqYj-4EDAJ-t5EsFdjzDIQI5yv_J4wH4z564GN1CRdvsU6UoEg2ljv4W-RGHV-ubn8GAJIcrnntHMVhxCAJFLWhpI3fxGUtNQvsFJ2XlDJqt940Ak-nXB76jcYo6UBT-kPyW-kRpQ1WiwwOSWKwhf2GbyENxVvnwKH63iKCNZlfXkGLcvQ-M91c_-RNzfMjGnclj-c4uMEZ4oh"/>
+<div class="flex flex-col gap-1 w-full">
+<div class="glass-card p-1 rounded-2xl rounded-bl-none overflow-hidden">
+<div class="p-3">
+<p class="text-on-surface mb-3">Here is the invite, we start in 10 minutes!</p>
+<div class="bg-surface-container-high/40 rounded-xl p-4 border border-outline-variant/10 flex items-center gap-4 hover:bg-surface-container-high/60 transition-all cursor-pointer">
+<div class="w-12 h-12 rounded-full bg-gradient-to-tr from-primary to-primary-container flex items-center justify-center shadow-lg shadow-primary/20">
+<span class="material-symbols-outlined text-white" style="font-variation-settings: 'FILL' 1;">mic</span>
+</div>
+<div class="flex-1">
+<h4 class="font-bold text-sm text-primary tracking-tight">The Celestial Salon</h4>
+<p class="text-xs text-on-surface-variant">Live Now • 142 Listening</p>
+</div>
+<span class="material-symbols-outlined text-tertiary animate-pulse">sensors</span>
+</div>
+</div>
+</div>
+<span class="text-[10px] text-on-surface-variant ml-1">10:28 AM</span>
+</div>
+</div>
+<!-- Sent Voice Message (Visualized) -->
+<div class="flex flex-col items-end gap-1 ml-auto max-w-[85%]">
+<div class="primary-glass px-4 py-3 rounded-2xl rounded-br-none flex items-center gap-3 min-w-[200px]">
+<button class="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center">
+<span class="material-symbols-outlined text-white text-sm" style="font-variation-settings: 'FILL' 1;">play_arrow</span>
+</button>
+<div class="flex items-center gap-[2px] flex-1 h-6">
+<div class="w-1 h-3 bg-white/40 rounded-full"></div>
+<div class="w-1 h-5 bg-white rounded-full"></div>
+<div class="w-1 h-2 bg-white/40 rounded-full"></div>
+<div class="w-1 h-6 bg-white rounded-full"></div>
+<div class="w-1 h-4 bg-white/60 rounded-full"></div>
+<div class="w-1 h-3 bg-white rounded-full"></div>
+<div class="w-1 h-5 bg-white/40 rounded-full"></div>
+<div class="w-1 h-2 bg-white rounded-full"></div>
+<div class="w-1 h-4 bg-white/60 rounded-full"></div>
+</div>
+<span class="text-[10px] font-bold text-white">0:12</span>
+</div>
+<div class="flex items-center gap-1 mr-1">
+<span class="text-[10px] text-on-surface-variant">10:30 AM</span>
+<span class="material-symbols-outlined text-[12px] text-primary">done_all</span>
+</div>
+</div>
+</main>
+<!-- Message Input Area -->
+<footer class="fixed bottom-0 left-0 w-full p-6 bg-gradient-to-t from-background via-background/95 to-transparent">
+<div class="max-w-3xl mx-auto flex items-center gap-3">
+<div class="flex-1 flex items-center gap-2 glass-card rounded-full px-4 py-2 border border-outline-variant/10 focus-within:border-primary/40 transition-all">
+<button class="text-on-surface-variant hover:text-primary transition-colors">
+<span class="material-symbols-outlined">sentiment_satisfied</span>
+</button>
+<input class="bg-transparent border-none focus:ring-0 text-sm text-on-surface placeholder:text-on-surface-variant/50 w-full font-medium" placeholder="Type a message..." type="text"/>
+<button class="text-on-surface-variant hover:text-primary transition-colors">
+<span class="material-symbols-outlined">attach_file</span>
+</button>
+</div>
+<div class="flex items-center gap-2">
+<button class="w-12 h-12 rounded-full glass-card border border-outline-variant/10 flex items-center justify-center text-on-surface-variant hover:text-primary transition-all active:scale-95">
+<span class="material-symbols-outlined">mic</span>
+</button>
+<button class="w-12 h-12 rounded-full bg-gradient-to-br from-primary to-primary-container flex items-center justify-center text-on-primary shadow-[0_0_20px_rgba(41,121,255,0.3)] active:scale-95 transition-all">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">send</span>
+</button>
+</div>
+</div>
+</footer>
+<!-- Suppressing BottomNavBar and FAB as this is a focused task screen -->
+</body></html>

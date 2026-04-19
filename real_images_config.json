@@ -1,0 +1,99 @@
+{
+  "_meta": {
+    "description": "Real photo URL mapping for Chathouse. All URLs are public, keyless, and return real JPEG images. Consume by importing this JSON in a constants file (see README at bottom of this doc).",
+    "generated": "2026-04-19",
+    "providers": {
+      "randomuser.me": "Real human portraits (150x150 thumbs + full-size). Stable, no key.",
+      "picsum.photos": "Random real photos with `/seed/{seed}/{w}/{h}` for deterministic picks.",
+      "images.unsplash.com": "Pinned Unsplash photo IDs (source.unsplash.com was deprecated 2024-06)."
+    },
+    "notes": [
+      "randomuser.me exposes id ranges 0-99 for both men and women.",
+      "picsum.photos seeded URLs always return the same image for the same seed — safe for caching and for stable CI screenshots.",
+      "Unsplash direct URLs use the `images.unsplash.com/photo-{id}` format; adjust `?w=` for sizing."
+    ]
+  },
+
+  "defaults": {
+    "avatar": "https://randomuser.me/api/portraits/thumb/men/32.jpg",
+    "avatar_large": "https://randomuser.me/api/portraits/men/32.jpg",
+    "cover": "https://picsum.photos/seed/chathouse/800/400",
+    "banner_landscape": "https://picsum.photos/seed/chathouse-banner/1080/480",
+    "house_icon": "https://picsum.photos/seed/chathouse-house/200/200",
+    "background_portrait": "https://picsum.photos/seed/chathouse-bg/1080/1920",
+    "room_thumbnail": "https://picsum.photos/seed/room-default/400/400"
+  },
+
+  "avatars_10_realistic": {
+    "male_01": "https://randomuser.me/api/portraits/men/12.jpg",
+    "male_02": "https://randomuser.me/api/portraits/men/32.jpg",
+    "male_03": "https://randomuser.me/api/portraits/men/45.jpg",
+    "male_04": "https://randomuser.me/api/portraits/men/67.jpg",
+    "male_05": "https://randomuser.me/api/portraits/men/88.jpg",
+    "female_01": "https://randomuser.me/api/portraits/women/5.jpg",
+    "female_02": "https://randomuser.me/api/portraits/women/19.jpg",
+    "female_03": "https://randomuser.me/api/portraits/women/33.jpg",
+    "female_04": "https://randomuser.me/api/portraits/women/58.jpg",
+    "female_05": "https://randomuser.me/api/portraits/women/77.jpg"
+  },
+
+  "user_avatars_by_id": {
+    "_comment": "Mirror of MOCK_USER_SUMMARIES ids in src/shared/mocks/users.mock.ts — swap the 16 pravatar URLs for these.",
+    "user-me": "https://randomuser.me/api/portraits/men/8.jpg",
+    "u1": "https://randomuser.me/api/portraits/men/12.jpg",
+    "u2": "https://randomuser.me/api/portraits/women/5.jpg",
+    "u3": "https://randomuser.me/api/portraits/men/15.jpg",
+    "u4": "https://randomuser.me/api/portraits/women/9.jpg",
+    "u5": "https://randomuser.me/api/portraits/men/33.jpg",
+    "u6": "https://randomuser.me/api/portraits/men/22.jpg",
+    "u7": "https://randomuser.me/api/portraits/women/47.jpg",
+    "u8": "https://randomuser.me/api/portraits/men/11.jpg",
+    "u9": "https://randomuser.me/api/portraits/men/3.jpg",
+    "u10": "https://randomuser.me/api/portraits/women/19.jpg",
+    "u11": "https://randomuser.me/api/portraits/men/27.jpg",
+    "u12": "https://randomuser.me/api/portraits/women/40.jpg",
+    "u13": "https://randomuser.me/api/portraits/women/44.jpg",
+    "u14": "https://randomuser.me/api/portraits/men/50.jpg",
+    "u15": "https://randomuser.me/api/portraits/women/52.jpg",
+    "u16": "https://randomuser.me/api/portraits/men/55.jpg"
+  },
+
+  "house_icons_by_id": {
+    "_comment": "Mirror of MOCK_HOUSES ids in src/shared/mocks/houses.mock.ts — keyword-driven.",
+    "h-yc": "https://picsum.photos/seed/ycombinator/200/200",
+    "h-indie": "https://picsum.photos/seed/indie-hackers/200/200",
+    "h-design-mvts": "https://picsum.photos/seed/design-movement/200/200",
+    "h-dao": "https://picsum.photos/seed/dao-global/200/200",
+    "h-ai": "https://picsum.photos/seed/ai-weekly/200/200",
+    "h-women-tech": "https://picsum.photos/seed/women-in-tech/200/200",
+    "h-ui-masters": "https://picsum.photos/seed/ui-masters/200/200",
+    "h-product-club": "https://picsum.photos/seed/product-club/200/200"
+  },
+
+  "room_covers_by_category": {
+    "tech": "https://images.unsplash.com/photo-1518770660439-4636190af475?w=800&q=75",
+    "design": "https://images.unsplash.com/photo-1558655146-d09347e92766?w=800&q=75",
+    "crypto": "https://images.unsplash.com/photo-1639762681485-074b7f938ba0?w=800&q=75",
+    "ai": "https://images.unsplash.com/photo-1677442136019-21780ecad995?w=800&q=75",
+    "music": "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=800&q=75",
+    "business": "https://images.unsplash.com/photo-1552664730-d307ca884978?w=800&q=75",
+    "health": "https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?w=800&q=75"
+  },
+
+  "backgrounds": {
+    "landing_gradient": "https://picsum.photos/seed/chathouse-landing/1080/1920",
+    "empty_state_rooms": "https://picsum.photos/seed/empty-rooms/600/400",
+    "empty_state_houses": "https://picsum.photos/seed/empty-houses/600/400",
+    "map_fallback": "https://picsum.photos/seed/map-fallback/800/800"
+  },
+
+  "fallback_ai_generated_portrait": "https://thispersondoesnotexist.com/image",
+
+  "_integration_guide": {
+    "step_1": "Copy real_images_config.json to project root (already placed there).",
+    "step_2": "Create a new file src/shared/constants/images.ts with: `import config from '../../../real_images_config.json'; export const images = config;`",
+    "step_3": "In mocks (users.mock.ts / houses.mock.ts / etc.), replace inline `i.pravatar.cc/150?img=X` strings with `images.user_avatars_by_id.uX`. Only URL strings change, no logic touched.",
+    "step_4": "For defaults/fallbacks in components (e.g. Avatar's BLURHASH_FALLBACK), they remain unchanged — config is only for data sources.",
+    "alternative_without_code_changes": "Point a local DNS alias `i.pravatar.cc` to a proxy that rewrites to randomuser.me. Impractical for mobile dev — prefer the 3-step integration above."
+  }
+}

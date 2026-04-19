@@ -1,0 +1,1 @@
+export { RoomFeedScreen } from './RoomFeedScreen';

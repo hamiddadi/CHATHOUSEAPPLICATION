@@ -1,0 +1,1 @@
+export { HouseDetailScreen } from './HouseDetailScreen';

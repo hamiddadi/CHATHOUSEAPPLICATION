@@ -1,0 +1,167 @@
+/**
+ * Domain types — shape of entities the backend will return.
+ * Mock data in `src/shared/mocks/` must conform to these types.
+ * Services/hooks use these as their return shapes.
+ */
+
+/* ============================================================
+ * User
+ * ========================================================== */
+export interface User {
+  id: string;
+  username: string;
+  displayName: string;
+  bio: string | null;
+  avatarUrl: string | null;
+  followersCount: number;
+  followingCount: number;
+  isFollowedByMe: boolean;
+  isOnline: boolean;
+  createdAt: string;
+}
+
+export type UserSummary = Pick<User, 'id' | 'username' | 'displayName' | 'avatarUrl'>;
+
+/* ============================================================
+ * Room (audio)
+ * ========================================================== */
+export type RoomRole = 'host' | 'speaker' | 'listener';
+export type RoomAudioState = 'speaking' | 'muted' | 'idle';
+export type RoomVisibility = 'public' | 'social' | 'closed';
+export type RoomCategory = 'tech' | 'design' | 'crypto' | 'ai' | 'music' | 'business' | 'health';
+
+export interface RoomParticipant extends UserSummary {
+  role: RoomRole;
+  audio: RoomAudioState;
+  handRaised: boolean;
+}
+
+export interface Room {
+  id: string;
+  title: string;
+  description: string | null;
+  category: RoomCategory;
+  categoryEmoji: string;
+  visibility: RoomVisibility;
+  houseId: string | null;
+  houseName: string | null;
+  hostId: string;
+  speakers: RoomParticipant[];
+  listeners: UserSummary[];
+  speakersCount: number;
+  listenersCount: number;
+  isLive: boolean;
+  isRecording: boolean;
+  startedAt: string;
+  scheduledFor: string | null;
+}
+
+export type RoomSummary = Pick<
+  Room,
+  'id' | 'title' | 'category' | 'categoryEmoji' | 'houseName' | 'speakersCount' | 'listenersCount'
+> & {
+  topSpeakers: UserSummary[];
+  topListeners: UserSummary[];
+};
+
+/* ============================================================
+ * House (community)
+ * ========================================================== */
+export type HousePrivacy = 'open' | 'private';
+
+export interface HouseMember extends UserSummary {
+  role: 'admin' | 'moderator' | 'member';
+  joinedAt: string;
+}
+
+export interface House {
+  id: string;
+  name: string;
+  description: string;
+  category: RoomCategory;
+  categoryEmoji: string;
+  iconUrl: string | null;
+  privacy: HousePrivacy;
+  membersCount: number;
+  liveRoomsCount: number;
+  isJoinedByMe: boolean;
+  members: HouseMember[];
+  createdAt: string;
+}
+
+export type HouseSummary = Pick<
+  House,
+  'id' | 'name' | 'category' | 'categoryEmoji' | 'iconUrl' | 'membersCount' | 'privacy'
+>;
+
+/* ============================================================
+ * Messages / Conversations
+ * ========================================================== */
+export interface Message {
+  id: string;
+  conversationId: string;
+  authorId: string;
+  text: string;
+  sentAt: string;
+  isMine: boolean;
+}
+
+export interface Conversation {
+  id: string;
+  participants: UserSummary[];
+  lastMessage: Message | null;
+  unreadCount: number;
+  updatedAt: string;
+}
+
+/* ============================================================
+ * Notifications
+ * ========================================================== */
+export type NotificationKind =
+  | 'follow'
+  | 'room_invite'
+  | 'house_invite'
+  | 'room_starting'
+  | 'mention'
+  | 'wave';
+
+export interface AppNotification {
+  id: string;
+  kind: NotificationKind;
+  actor: UserSummary;
+  message: string;
+  roomId: string | null;
+  houseId: string | null;
+  createdAt: string;
+  isRead: boolean;
+}
+
+/* ============================================================
+ * Geo / Presence (Maps feature)
+ * ========================================================== */
+export interface GeoPoint {
+  latitude: number;
+  longitude: number;
+  accuracy?: number;
+  updatedAt: string;
+}
+
+export type PresenceState = 'online' | 'recently_active' | 'offline';
+
+export interface FollowerOnMap extends UserSummary {
+  location: GeoPoint;
+  presence: PresenceState;
+  liveRoomId: string | null;
+  liveRoomTitle: string | null;
+  /** Minutes since the user was last active. Used for grayscale fade. */
+  lastSeenMinutesAgo: number;
+}
+
+/* ============================================================
+ * Paginated envelope (matches most REST backends)
+ * ========================================================== */
+export interface Page<T> {
+  items: T[];
+  nextCursor: string | null;
+  total: number;
+}

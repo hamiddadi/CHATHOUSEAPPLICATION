@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&amp;family=Inter:wght@400;500;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "on-tertiary-fixed": "#00210b",
+                    "on-secondary-fixed": "#00105b",
+                    "on-error-container": "#ffdad6",
+                    "surface-container-low": "#141936",
+                    "surface-container-highest": "#2e3351",
+                    "primary-fixed": "#d9e2ff",
+                    "on-background": "#dee0ff",
+                    "primary-fixed-dim": "#b0c6ff",
+                    "surface": "#0c112e",
+                    "error-container": "#93000a",
+                    "on-primary-container": "#002661",
+                    "on-primary-fixed-variant": "#00429b",
+                    "on-secondary-container": "#a3b0ff",
+                    "on-tertiary-container": "#003114",
+                    "secondary-fixed-dim": "#bac3ff",
+                    "on-tertiary": "#003918",
+                    "inverse-primary": "#0058ca",
+                    "surface-container-high": "#232846",
+                    "outline": "#8c90a0",
+                    "tertiary-fixed-dim": "#00e475",
+                    "secondary-fixed": "#dee0ff",
+                    "tertiary": "#00e475",
+                    "tertiary-fixed": "#62ff96",
+                    "secondary-container": "#2f3f92",
+                    "on-secondary": "#15267b",
+                    "secondary": "#bac3ff",
+                    "primary-container": "#558dff",
+                    "on-tertiary-fixed-variant": "#005226",
+                    "primary": "#b0c6ff",
+                    "on-primary": "#002d6e",
+                    "background": "#0c112e",
+                    "outline-variant": "#424655",
+                    "surface-dim": "#0c112e",
+                    "surface-variant": "#2e3351",
+                    "surface-container-lowest": "#070b28",
+                    "surface-tint": "#b0c6ff",
+                    "on-surface": "#dee0ff",
+                    "inverse-on-surface": "#2a2e4c",
+                    "tertiary-container": "#00a754",
+                    "on-error": "#690005",
+                    "inverse-surface": "#dee0ff",
+                    "surface-bright": "#323756",
+                    "on-surface-variant": "#c2c6d7",
+                    "error": "#ffb4ab",
+                    "surface-container": "#191d3b",
+                    "on-primary-fixed": "#001945",
+                    "on-secondary-fixed-variant": "#2f3f92"
+            },
+            "borderRadius": {
+                    "DEFAULT": "0.25rem",
+                    "lg": "0.5rem",
+                    "xl": "0.75rem",
+                    "full": "9999px"
+            },
+            "fontFamily": {
+                    "headline": ["Manrope"],
+                    "body": ["Inter"],
+                    "label": ["Inter"]
+            }
+          },
+        },
+      }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .speaker-pulse {
+            box-shadow: 0 0 0 0 rgba(0, 228, 117, 0.4);
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(0, 228, 117, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(0, 228, 117, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(0, 228, 117, 0); }
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+</head>
+<body class="bg-surface font-body text-on-surface min-h-screen selection:bg-primary-container selection:text-on-primary-container">
+<!-- TopAppBar -->
+<header class="bg-slate-950/40 backdrop-blur-xl text-[#b0c6ff] font-headline font-bold text-lg tracking-tight docked full-width top-0 sticky flex justify-between items-center w-full px-6 py-4 z-50">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-2xl font-black text-[#b0c6ff] tracking-tighter">graphic_eq</span>
+<span class="text-2xl font-black text-[#b0c6ff] tracking-tighter">Chathouse</span>
+</div>
+<button class="bg-primary/10 px-4 py-1.5 rounded-full text-sm font-bold border border-primary/20 hover:opacity-80 transition-opacity active:scale-95 duration-150 ease-out">
+            Wave 👋
+        </button>
+</header>
+<main class="max-w-2xl mx-auto px-6 pt-8 pb-48">
+<!-- Room Header -->
+<div class="mb-10 space-y-4">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-2">
+<span class="inline-flex items-center px-2 py-0.5 rounded bg-surface-container-highest text-[10px] font-bold text-on-surface-variant uppercase tracking-wider">The Product Club</span>
+<span class="inline-flex items-center px-2 py-0.5 rounded bg-primary/10 text-[10px] font-bold text-primary uppercase tracking-wider">AI &amp; Design</span>
+</div>
+<div class="flex items-center gap-1.5 bg-error-container/20 px-2 py-1 rounded-md">
+<span class="w-2 h-2 rounded-full bg-error animate-pulse"></span>
+<span class="text-[10px] font-extrabold text-error tracking-widest">REC</span>
+</div>
+</div>
+<h1 class="text-4xl font-headline font-extrabold text-white tracking-tight leading-tight">Future of Generative UI Interfaces</h1>
+</div>
+<!-- STAGE Section -->
+<section class="mb-12">
+<div class="flex items-center gap-2 mb-6">
+<span class="text-[10px] font-black text-tertiary tracking-widest uppercase">⭐ STAGE</span>
+<div class="h-px flex-1 bg-gradient-to-r from-tertiary/20 to-transparent"></div>
+</div>
+<div class="grid grid-cols-5 gap-2 justify-items-center px-1"><!-- Active Speaker -->
+<div class="flex flex-col items-center gap-2">
+<div class="relative">
+<img class="w-14 h-14 rounded-full object-cover ring-2 ring-tertiary speaker-pulse border-2 border-surface shadow-lg shadow-tertiary/20" data-alt="portrait of a confident creative professional man with short beard and stylish glasses in soft studio lighting" src="https://lh3.googleusercontent.com/aida-public/AB6AXuC_T4KNZr4BXBXian4DBxo5m4XX1Dc5R_mzlRGKQq7jWQpoWHMUhR3lNu02bo47mW4g8N8u8lz00YBY9J4dWJv47F-xZdmSNcgsjWp4ZPmkLkEBl-j8lmOWvHluThcj4wPxceXPWQhVO-nYIQXTiP22zQmOXX7zeCjdQpzvLHhTeg-Gd9sBquy5SquB2vLug1R11osakqUjBil6_6tGfrW22d1x-kOzWH-tF2PJTht_22zLITa4UADQlx_AiYK3GvrIwKBdLPiB04D2"/>
+<div class="absolute -bottom-1 -right-1 bg-tertiary p-0.5 rounded-full border border-surface">
+<span class="material-symbols-outlined text-[10px] text-on-tertiary font-bold" style="font-variation-settings: 'FILL' 1;">graphic_eq</span>
+</div>
+</div>
+<div class="text-center">
+<p class="text-white text-[10px] font-bold truncate w-14">Alex Rivers</p>
+<div class="flex items-center justify-center gap-0.5 opacity-60">
+<span class="material-symbols-outlined text-[8px]">shield</span>
+<span class="text-[7px] font-medium uppercase tracking-tighter">Host</span>
+</div>
+</div>
+</div>
+<!-- Speaker 2 -->
+<div class="flex flex-col items-center gap-2">
+<div class="relative">
+<img class="w-14 h-14 rounded-full object-cover border border-white/10" data-alt="professional woman with warm smile looking at camera with natural lighting and soft background" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCmGwZztWNb9pkFPXSUmEF5cyDcmUNWar7lYDWO3Jfr3GyVI3uEG4JQgyjJrafHDTqCc0pXK4y4Bwib7ufT4gNxZu3O4cz6o2vumX6ZVcmrDEq2XiOs2kqsjEuMsVEi9vU1FcxOvtAtjSW0HDbmNgS0FqQZjBTDo2_Z1s3g9iDljnbkpoSpxusiH1Degk4377yhlfOiBJchdlfEPjurDe_8pI2siQwm8HPjovEzoelOoib2SRqp_Uw43mppkzjvGvhNWm2h951uNJLd"/>
+</div>
+<div class="text-center">
+<p class="text-white text-[10px] font-bold truncate w-14">Sarah Chen</p>
+<div class="flex items-center justify-center gap-0.5 opacity-60">
+<span class="material-symbols-outlined text-[8px]">mic_off</span>
+<span class="text-[7px] font-medium uppercase tracking-tighter">Speaker</span>
+</div>
+</div>
+</div>
+<!-- Speaker 3 -->
+<div class="flex flex-col items-center gap-2">
+<div class="relative">
+<img class="w-14 h-14 rounded-full object-cover border border-white/10" data-alt="man with modern hairstyle and friendly expression against a clean dark grey background" src="https://lh3.googleusercontent.com/aida-public/AB6AXuC6_ZzScibh-cD7kn6Qak6Vdho9ZThRCT4Upo52KTQe8FxnfJZV85iAYw16KJGWMdf4lut69ADNaIP-GRa4C7agIMgpp7mgyOrOAirHDopRtgRfCPaJZYFQUt_LlBxYlUOJZ34FQRQSV2DV_FaydXdPew5_s9OFscmH_3me_mJRPV5RRhHBtnKjWLQbzKY2j7n4eaTBCgNnLa6gWVrmOmW4XlSfDGYzS_xt1UnT5K-hKYv6HoxvaGUYhzvCFi67FlM3vLgzcK1Ip2cT"/>
+</div>
+<div class="text-center">
+<p class="text-white text-[10px] font-bold truncate w-14">Marcus J.</p>
+<div class="flex items-center justify-center gap-0.5 opacity-60">
+<span class="material-symbols-outlined text-[8px]">mic_off</span>
+<span class="text-[7px] font-medium uppercase tracking-tighter">Speaker</span>
+</div>
+</div>
+</div>
+<!-- Speaker 4 -->
+<div class="flex flex-col items-center gap-2">
+<div class="relative">
+<img class="w-14 h-14 rounded-full object-cover border border-white/10" data-alt="professional woman with glasses and confident expression" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCNQcHAHkgntGRQo55ve799WWESuq_J4rTF1DWssRZso3UQTDWfdCalOW5pDkZHRsK7ro3YgtPtDL1OPVodE3wHdHKOA5UFX2MCLZlltwGYQ0UksWHZoe-eaqbzA4-tgZdF6TtUap4W-rlfDcSXVCqJAyOM42gg3nKDjXkXAaROhOrxZNlNj5aNDNIU9ExFWs3zM6xZNtQEIYWXmItLhAe7dTdRjKa9Q58KWpytQMJ3fpxd9PRIVUs_BVO4XWkiuciFZ-cf4NxrjObt"/>
+</div>
+<div class="text-center">
+<p class="text-white text-[10px] font-bold truncate w-14">Jordan Lee</p>
+<div class="flex items-center justify-center gap-0.5 opacity-60">
+<span class="material-symbols-outlined text-[8px]">mic_off</span>
+<span class="text-[7px] font-medium uppercase tracking-tighter">Speaker</span>
+</div>
+</div>
+</div>
+<!-- Speaker 5 -->
+<div class="flex flex-col items-center gap-2">
+<div class="relative">
+<img class="w-14 h-14 rounded-full object-cover border border-white/10" data-alt="modern professional man with beard and friendly look" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAT_ScZmOzaBBuGEFLPA9x9El1JydO4fLMWrgGDjTU_JyJcd70Ns-7Dbchq8YFQ3el2skROBl6HGPYGk1SLOTQ1WZ3r1R3saawTb85XPgSdDmRuD2yzX9fHhX3qTszB5qW7t5DxilPF5p5s8GXkmsgIUIhRkQzVoPSZasbQzdmFhNri_NAnPk3bO7DgIjAdJTO8tgPufn6vJ0I9Ol04DSGAy1Uu3TD0F8i9jWBNbwxrC1KS0Gr4rbdnc8uLUV73rAz84BhH1w9is7xB"/>
+</div>
+<div class="text-center">
+<p class="text-white text-[10px] font-bold truncate w-14">Casey Kim</p>
+<div class="flex items-center justify-center gap-0.5 opacity-60">
+<span class="material-symbols-outlined text-[8px]">mic_off</span>
+<span class="text-[7px] font-medium uppercase tracking-tighter">Speaker</span>
+</div>
+</div>
+</div></div>
+</section>
+<!-- HAND RAISED Section -->
+<section class="mb-12">
+<h3 class="text-[10px] font-black text-on-surface-variant tracking-widest uppercase mb-4 px-1">HAND RAISED</h3>
+<div class="grid grid-cols-5 gap-4 px-1">
+<div class="relative w-[52px] h-[52px]">
+<img class="w-full h-full rounded-full object-cover border border-white/10" data-alt="portrait of a young man" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCc4_sOAtJJAWwHteWCQUPxEVdYnJGhAURTK8hWHZDgjoWp8SrPSN5oXmWdS5c7H3QINarSmpQLG_bWvj0-TO63Z6mWqvl5gI9rLwCJnKlqoZWZqMsiD6hY8X15R7WyQY7jhewNEAyyWIB0-TPKrRq7cTSL2sBa8eZgPRfdWH2sWt8jWolEbGiCEOF3KCD-ye8wwswTRXa7aLKVLQunqLTM4ptT1aO_32Ezn_SFdcfayrsgNbDOfy_DgVWfdv6-wv7fULDTDxiVyvFf"/>
+<div class="absolute bottom-0 right-0 leading-none"><span class="text-[10px]">👋</span></div>
+</div>
+<div class="relative w-[52px] h-[52px]">
+<img class="w-full h-full rounded-full object-cover border border-white/10" data-alt="portrait of a young woman" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCfWEvLsQHMLoFq9QxBJnshLJs3pFJAjHOpKP08q4f1gE3UyUKABMiRRJRXkbBlGVwkOQVP1wXG-U7zsi49SbVDXmDIa08nn6o1iFZBwbM5k0V402rUukZ5OYi9okaiTQd99v8yR30aoVx0A65Rs3DRsloq8iGQ8rJK5f3_MmV8dGAPPeAQI7sBYGXk5pEVPJSbioeumh8V9HSNUFPsm2WPtnRptdl1CWJ-DI8oprKVIzuaW29KpJ2gDv90_mD74e94a3GVEKH6nB9u"/>
+<div class="absolute bottom-0 right-0 leading-none"><span class="text-[10px]">👋</span></div>
+</div>
+<div class="relative w-[52px] h-[52px]">
+<img class="w-full h-full rounded-full object-cover border border-white/10" data-alt="portrait of a creative" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBZWdA9XOZa9HTp0gbwGC_RoY4dtxKTPs2YIf4GxTh86Kj7kMoO4GcOU6wxTmjOk6IPYIe9MWFrGJWh1JrVwTJD9LqdopS13J-0lyMIwDa9GlkzUtnLTXTUpcfvXmqG4JaTUK3WYriunIIa3iIH_wxSBJ7oTcFAJnL-igmLWxr10-6H79R9a--xgqYEa9NPP3b-x9LIGPWP9A0zi47kG8GVy1qOIAesgoljypM7IvGRTHPc14Rzxo047JqQ2FRN20n8cEWN7X128kaA"/>
+<div class="absolute bottom-0 right-0 leading-none"><span class="text-[10px]">👋</span></div>
+</div>
+</div>
+</section>
+<!-- FOLLOWED BY SPEAKERS Section -->
+<section class="mb-12">
+<h3 class="text-[10px] font-black text-on-surface-variant tracking-widest uppercase mb-4 px-1">FOLLOWED BY SPEAKERS</h3>
+<div class="flex flex-wrap gap-4 px-1">
+<div class="w-[52px] h-[52px] rounded-full border border-white/5 overflow-hidden">
+<img class="w-full h-full object-cover" data-alt="headshot of young male with light beard" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDg9MBt6L-mB4dcTWCrYAkSWxISB5huDGUzTdsbJM9R9mYGS1Ec_ug8Uyh_XoINt6yCEcKPnDdVnbAAFsdpE8pMDLZBbZU19OTPafKT4s6YAGLJDtI-Wm3mWcg4Tc_goJ18oWIiXre_Py7TlhKmCq1XqR4vbNG6HIkK66Y-tJAg-Puc5zEMIxbhm6Us4EwvMmBfHBjYyIoc__PBpiS9Y4TceIO_a1zzyH1VLTP3q8eDnZupk2iomsVfts9MixeCmOksIiZTj2n3B3E-"/>
+</div>
+<div class="w-[52px] h-[52px] rounded-full border border-white/5 overflow-hidden">
+<img class="w-full h-full object-cover" data-alt="smiling young person in urban setting" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBvlIgeh-tx0vmaU0lJFDznEKVMEgk6CGVwjwA9XPBMVuK_BiYTpi-SbV3K0LS4tKMF16hjwly8KOcg7mWlqGID61MGEB0pZq2c61BQiQT0xzlh2_61Mng2pu0Z06uu8PcvjuP2CXktlR0P11Z7UiigGX-K5ljVBChmDxwxwlcOEe8wM373pg6TA0Dw9mctT4dhhFg9PzBzIy1cIXxPqye8g71mC_PGDMLt9geNXJ_UOCnNwkIBvBIO0E1N1PyKvBu9JDdDyLml_yOT"/>
+</div>
+<div class="w-[52px] h-[52px] rounded-full border border-white/5 overflow-hidden">
+<img class="w-full h-full object-cover" data-alt="woman portrait with subtle makeup" src="https://lh3.googleusercontent.com/aida-public/AB6AXuD-EJONUhwz7fbOLc4Q_hhS3xcTpNsBuZSn6EYKm_1mjdQTdqtp6-HJwHMdKOAGuLnTraQVk0hSU6Dz0Lu_jKAQ98yh8YjlEbcFd24Kv1kkP3q1A1bX4wGaqBAkz7Pc9p33q2sqaf0BA3wW7A8VzHgYRqdnqMFboC-GxqmgbMYK2GTgwMUEOWb86ukoocOiS9aFf0m2TQR6GXXxpsqzFbalN4pbekgVEIN0zuk4Qvg5iz-hwDTCAXcHQaXs7DpBJ1ZSus0PJlJVtL9y"/>
+</div>
+<div class="w-[52px] h-[52px] rounded-full border border-white/5 overflow-hidden">
+<img class="w-full h-full object-cover" data-alt="professional male portrait with soft lighting" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCApeWvwU6nE-_-acUSg16tDU5AyWA1o10oSmz-CgW03Dk8hDtIBSpyEmbMHd6PxY5oE4neGXl3COTK-IsecJKuI33d4D4MUTVJE66cQK4FTm-uwYTuBi21KZr6G6IkBBS9Dp7VXQXX2F1P8ZW2Y2-pcOd2T5zeRpiDxw5OieAVTP56FXBck5eUQqoknAtflXE-87-JhuSgVRCrWa-YGr9F4pq_hpAETKnCX8J8lAw9G6wPu2GmKd-qAiIsYDG-_WfYPi7hkQhxySav"/>
+</div>
+<div class="w-[52px] h-[52px] rounded-full border border-white/5 overflow-hidden">
+<img class="w-full h-full object-cover" data-alt="smiling woman in professional attire" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAdSGFen9Rr6JM1ctnxLtEcsjQmX185SC22kjJ-LAXrBqSgn6awPhIvq_RNaFr2SrcQSwX0FiMxJ3c-g4qvrGt-POY_B_mOcMz2DhC5ZHVO-BQnZHvxB0upX8yqySCA67EfQRerlwXDueWp-Ev_3B_OiaxwAmHZtiaUrFMcg_C658l_rw6BaboEzsxZ4mduG89MU1lTr1arZ9YlNcy45l1O7M-twt5qxCTrmIGzTbjCvDCtNnt8RSU7YZsFvtUsGm9CrD9pc4UOQg-T"/>
+</div>
+</div>
+</section>
+<!-- OTHERS IN ROOM Section -->
+<section class="mb-12">
+<h3 class="text-[10px] font-black text-on-surface-variant tracking-widest uppercase mb-4 px-1">OTHERS IN ROOM</h3>
+<div class="grid grid-cols-6 sm:grid-cols-8 gap-3 px-1 flex-wrap flex justify-center">
+<!-- Generic Avatars Loop -->
+<div class="w-10 h-10 rounded-full border border-white/5 bg-surface-container overflow-hidden opacity-60">
+<img data-alt="blurred profile of person" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAnpNeSxPHysiEDzHL-gKfj5UqbJpVf1JikFMujjYm2vQjtR6s4LdZlEKcrccGCe6dmcJJPQcvoyMVPTAcMo9HAUZv0BfkX7twKXs5UdFm8tRT6vd4dsVtvPSzC9tXfdm3WwSdIRo4MjKfItnGI6_UUrsxVHPGemUcigK1j_ffIWXl0-p71_bvfa3CtWp6T3zdj6e3dHILsbzRoQTNHbjw8diXCcIMKRuUTvvSDVjBZA5CD6nrm8WTbTxmndNPH5FCizgcGwc16eiIm"/>
+</div>
+<div class="w-10 h-10 rounded-full border border-white/5 bg-surface-container overflow-hidden opacity-60">
+<img data-alt="blurred profile of person" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAP6BI-H19AvxNREaZdicENgw40c9b-HTB8I9ydzvB9iWBYpdyWEvC2m7ZlOWDH9twjJJ_gpKCSvEizHzOBTfGoybXKlqqdPcOCFzqtVgatIpTWVVej0vYk2hhhKyfUqv-6IQBVKewwt7jXpfAFLkguM2gv2P68_HpiNuwnMIyqnlaNgj4eBbY-3TnO8wU9Fl4jJ97NVuvEsBdSP5LvZHXayhhRshFmI22C6DXXTqA7JDJ8XFD2_akIIQXKISzfh_s45s77wdJhMo36"/>
+</div>
+<div class="w-10 h-10 rounded-full border border-white/5 bg-surface-container overflow-hidden opacity-60">
+<img data-alt="blurred profile of person" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDQTGUeMMghODQ7ptG4TnAelK4j2wWbMc0zVm3VzQ0727yGrx6uwE4RLwShFns-ogJFC2noxA7WMqRH_m8xlcRuTlabvZlykclv-rPSLatt_N_Pd6zzkh6WzVOd94DoRN-qiuk-7U3E8DSIZrN3REr11I-gf9BlugX2pntbLDQ_ROiA2-BNos9moAmJUiHT3hgctJdkAv0YpyuupyIIxBHVcm8NiOCYu2v2mohLxZjgQXdvylEF4wcu_1uBGGVVFNyNTAbChN5g3BoC"/>
+</div>
+<div class="w-10 h-10 rounded-full border border-white/5 bg-surface-container overflow-hidden opacity-60">
+<img data-alt="blurred profile of person" src="https://lh3.googleusercontent.com/aida-public/AB6AXuC-5ntAAfnyO9nKp6b2sFud1Ji2hIF2N8gL8xudR9PW92oBxhza7VIaiVWTFDCzRX1stLD-DIQ1PXkUEWVSbhCM0d_llZlb1ovoSDWXn7GeSSPDRLgQu3xdFOc9HgcsfMXe0QuDzFvuUAFQBPdFDCiALPnrQV4Pfhpk-KKM06Hk_RPp-aFjc-FWCTLx918kWSogdh3wc-_aORBVLdET9pmr61rxUviPwvBZAWSSF5r5I9QOk5h0I2tBGvB_gwGfeegNR-_X0uLCz_Wg"/>
+</div>
+<div class="w-10 h-10 rounded-full border border-white/5 bg-surface-container overflow-hidden opacity-60">
+<img data-alt="blurred profile of person" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAQrYCvN8LAIT0eaVqzKX8AbHVZPKzE-oR17fU1FdEE5ZM1ExZST_xON2xFRyMjMhK26w3EgKsIlq8UUBSR3FWn-YmjQFRqkK0SxXWBVzcYfJu3WhVg2Swz6_F9HbbN_sXdBjKozPsih1_vo9D2xOKBVzX8jvCXQkxApUWhfgZdtIh-Zjumb8zjKODo_oOXDd46-n2PqCwks5jAUFQ30UC1pgaJy9kzAKJAdlFTMXj0q0ITtmQuDViuJciGRkP9sTde0jSMmrlTmbl3"/>
+</div>
+<div class="w-10 h-10 rounded-full border border-white/5 bg-surface-container overflow-hidden opacity-60">
+<img data-alt="blurred profile of person" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCTzDj2VMYEdyzqILlz7_LPP9aATiotxSA4yLH09fWY5eX3_XofHNa3LiOj28t3ZnEPbMa6giVjQDAzE0ymAqt36kGihp4C1mJPbxcFlg6dobMiD4jb46CmE4MlUE9Bc2z1i-z4jKIpw4hqm328OUanpMf90GcnLFybXnNgr7Xef5AQ-pFVDyRIxE8cMlwnSBJcnSCnnrNx2my9k4abhxxwaLhr1rDnSLgQWEznC5hPHk0ZtLbuQX31MXC7Zf7v56pKpbBnjaHNK5Zx"/>
+</div>
+<!-- Overflow -->
+<div class="w-10 h-10 rounded-full border border-white/10 bg-surface-container-high flex items-center justify-center">
+<span class="text-[9px] font-bold text-primary">+248</span>
+</div>
+<!-- Speaker 4 -->
+<!-- Speaker 5 -->
+</div>
+</section>
+<!-- Floating Action Bar (Contextual Pill) -->
+<div class="fixed bottom-32 left-1/2 -translate-x-1/2 z-[60] w-[90%] max-w-md">
+<div class="bg-[#0c112e]/90 backdrop-blur-3xl border border-white/10 rounded-full p-2 flex items-center justify-between shadow-2xl shadow-black/40">
+<button class="flex items-center gap-2 bg-error py-3 px-6 rounded-full text-on-error font-bold transition-transform active:scale-95">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">mic_off</span>
+<span class="text-sm">Mute</span>
+</button>
+<button class="flex items-center gap-2 bg-primary/20 py-3 px-4 rounded-full text-primary font-bold hover:bg-primary/30 transition-colors">
+<span class="material-symbols-outlined">front_hand</span>
+<span class="text-sm">Raise</span>
+</button>
+<button class="flex items-center gap-2 border border-white/20 py-3 px-6 rounded-full text-white font-bold hover:bg-white/5 transition-colors"><span class="material-symbols-outlined text-red-500">door_front</span>
+<span class="text-sm">Leave</span></button>
+</div>
+</div>
+<!-- Sticky Mini Player Strip -->
+<div class="fixed bottom-[112px] left-0 right-0 z-40 bg-surface-container-low/60 backdrop-blur-lg border-y border-white/5 px-6 py-2">
+<div class="max-w-2xl mx-auto flex items-center justify-between">
+<div class="flex items-center gap-3 overflow-hidden">
+<div class="flex -space-x-2">
+<img class="w-6 h-6 rounded-full border-2 border-surface" data-alt="mini avatar" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAzZixFgB3tvjaYVcJqSHBbb4hogjg-HFJzqyjdypvjwE_awBCuxkoHyWr6_R5BY6qov_e9pT-ZaIuWGy9bo1-wUaP9HSIJ93tAEIkwCOO3y5ukUG_Dl-0a55rfW-enE8IJQGHl8GUhD1DnwFPctx4ldfZFhbzPMosCMg-s2PFG6JW_PRM2BASDw9Aa9DeoBRtUAYlafmXIPtAkJnrh6qeQLvGTu44sA2O5P56085eD1rCfKG8xCnseQRlGPxwrD2I03p7gJoY6MxHA"/>
+<img class="w-6 h-6 rounded-full border-2 border-surface" data-alt="mini avatar" src="https://lh3.googleusercontent.com/aida-public/AB6AXuC63Wa80Mo6kM_QZhowd4E82LG_e-je6_QUj_lFn0U-L20A09atKB7Yc5-xCglGm880S7KuEHxDFJiQCLmtskq6GKk9jN4ONZjLVaeZzhoagh3j_T6K6XWHO7nC7h7iyTofhufS8TXH8UdfyAX_LXiK5Pmh7L9SRoqWluFjMgfAkvFFsDFgfB1SEircjc1Bq78Ug3QGJdq5NsAdMykYSk6OJIqAp-2ZMPfGigqCYt1PSurQWNRNMg2-_m5X6BPQalIHqNqEKajTa7Qt"/>
+</div>
+<span class="text-xs font-semibold text-white/80 truncate">Future of Generative UI...</span>
+</div>
+<div class="flex items-center gap-2">
+<span class="w-1 h-3 bg-tertiary rounded-full"></span>
+<span class="w-1 h-5 bg-tertiary rounded-full"></span>
+<span class="w-1 h-2 bg-tertiary rounded-full"></span>
+</div>
+</div>
+</div>
+</main>
+<!-- BottomNavBar -->
+<nav class="bg-[#070b28]/80 backdrop-blur-2xl fixed bottom-8 left-0 right-0 z-50 flex justify-around items-center px-4 h-16 w-[90%] max-w-md mx-auto rounded-[2rem] border border-white/10 shadow-[0_0_30px_rgba(41,121,255,0.08)]">
+<a class="flex items-center justify-center text-[#b0c6ff] drop-shadow-[0_0_8px_rgba(176,198,255,0.8)] scale-110 transition-transform duration-300" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">mic</span>
+</a>
+<a class="flex items-center justify-center text-slate-500 hover:text-[#b0c6ff]/80 transition-opacity" href="#">
+<span class="material-symbols-outlined">map</span>
+</a>
+<a class="flex items-center justify-center text-slate-500 hover:text-[#b0c6ff]/80 transition-opacity" href="#">
+<span class="material-symbols-outlined">chat_bubble</span>
+</a>
+<a class="flex items-center justify-center text-slate-500 hover:text-[#b0c6ff]/80 transition-opacity" href="#">
+<span class="material-symbols-outlined">settings</span>
+</a>
+</nav>
+</body></html>

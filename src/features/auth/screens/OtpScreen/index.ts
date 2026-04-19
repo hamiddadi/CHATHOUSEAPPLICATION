@@ -1,0 +1,1 @@
+export { OtpScreen } from './OtpScreen';

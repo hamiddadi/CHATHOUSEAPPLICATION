@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mv src/features/houses/screens/CreateHouseScreen/CreateClubScreen.tsx src/features/houses/screens/CreateHouseScreen/CreateHouseScreen.tsx)",
+      "Bash(mv src/features/houses/screens/HouseDetailScreen/ClubDetailScreen.tsx src/features/houses/screens/HouseDetailScreen/HouseDetailScreen.tsx)",
+      "Bash(mv src/features/houses/screens/HouseListScreen/ClubFeedScreen.tsx src/features/houses/screens/HouseListScreen/HouseListScreen.tsx)",
+      "Bash(rm -f src/app/navigation/stacks/HomeNavigator.tsx)",
+      "Bash(rm -f src/app/navigation/stacks/ClubNavigator.tsx)",
+      "Bash(rm -f src/app/navigation/stacks/ProfileNavigator.tsx)",
+      "Bash(rm -f src/app/navigation/stacks/RoomNavigator.tsx)",
+      "Bash(npx eslint *)",
+      "Bash(xargs wc *)",
+      "Bash(mkdir -p .husky)",
+      "Bash(cat)",
+      "Bash(chmod +x .husky/pre-commit)",
+      "Bash(npx prettier *)",
+      "Bash(npm audit *)",
+      "Bash(grep -v \"^npm\\\\|^$\")",
+      "Bash(npx stylelint *)",
+      "Bash(mkdir -p src/features/notifications/services)",
+      "Bash(echo \"// Notifications feature public API\")",
+      "Bash(grep -rn \"DARK_MAP_STYLE\\\\|mapStyle\\\\|PROVIDER_GOOGLE\\\\|PROVIDER_DEFAULT\\\\|googleMapsApiKey\" src app.json)",
+      "Bash(grep -rn \"UrlTile\" src)",
+      "Bash(node -e \"const m = require\\('./src/shared/mocks/rooms.mock.ts'\\);\")"
+    ]
+  }
+}

@@ -1,0 +1,62 @@
+{
+  "expo": {
+    "name": "Chathouse",
+    "slug": "chathouse",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "chathouse",
+    "userInterfaceStyle": "dark",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.chathouse.app",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "Chathouse uses your microphone so you can speak in audio rooms.",
+        "NSCameraUsageDescription": "Chathouse uses the camera so you can update your profile photo.",
+        "NSPhotoLibraryUsageDescription": "Chathouse needs access to your photos so you can update your profile photo.",
+        "NSLocationWhenInUseUsageDescription": "Chathouse shows friends and rooms on the map when you allow location access.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Chathouse keeps your location updated so friends can find you when you're active.",
+        "UIBackgroundModes": ["location", "fetch"]
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#0c112e"
+      },
+      "package": "com.chathouse.app",
+      "softwareKeyboardLayoutMode": "resize",
+      "permissions": [
+        "RECORD_AUDIO",
+        "CAMERA",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION"
+      ]
+    },
+    "web": {
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-font",
+      "expo-secure-store",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Chathouse needs photo access to update your profile photo."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Chathouse shows nearby rooms on the map when you allow location access."
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": false
+    },
+    "extra": {
+      "API_BASE_URL": "http://localhost:4000/api",
+      "ENV": "development"
+    }
+  }
+}

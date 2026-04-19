@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Invite to House</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;700;800&amp;family=Inter:wght@400;500;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "surface-container-low": "#141936",
+                    "inverse-surface": "#dee0ff",
+                    "surface-tint": "#b0c6ff",
+                    "primary-container": "#558dff",
+                    "on-tertiary-fixed-variant": "#005226",
+                    "on-surface": "#dee0ff",
+                    "on-primary-container": "#002661",
+                    "on-background": "#dee0ff",
+                    "secondary-fixed-dim": "#bac3ff",
+                    "on-primary-fixed": "#001945",
+                    "secondary-fixed": "#dee0ff",
+                    "secondary": "#bac3ff",
+                    "primary": "#b0c6ff",
+                    "inverse-primary": "#0058ca",
+                    "error": "#ffb4ab",
+                    "tertiary-fixed-dim": "#00e475",
+                    "surface": "#0c112e",
+                    "tertiary": "#00e475",
+                    "primary-fixed": "#d9e2ff",
+                    "inverse-on-surface": "#2a2e4c",
+                    "tertiary-fixed": "#62ff96",
+                    "surface-container-highest": "#2e3351",
+                    "surface-variant": "#2e3351",
+                    "tertiary-container": "#00a754",
+                    "on-secondary-container": "#a3b0ff",
+                    "surface-dim": "#0c112e",
+                    "primary-fixed-dim": "#b0c6ff",
+                    "error-container": "#93000a",
+                    "on-secondary-fixed-variant": "#2f3f92",
+                    "on-primary-fixed-variant": "#00429b",
+                    "secondary-container": "#2f3f92",
+                    "outline-variant": "#424655",
+                    "on-tertiary-container": "#003114",
+                    "on-secondary": "#15267b",
+                    "surface-container-high": "#232846",
+                    "background": "#0c112e",
+                    "surface-container": "#191d3b",
+                    "on-surface-variant": "#c2c6d7",
+                    "outline": "#8c90a0",
+                    "on-tertiary": "#003918",
+                    "on-tertiary-fixed": "#00210b",
+                    "on-secondary-fixed": "#00105b",
+                    "surface-container-lowest": "#070b28",
+                    "on-error-container": "#ffdad6",
+                    "surface-bright": "#323756",
+                    "on-primary": "#002d6e",
+                    "on-error": "#690005"
+            },
+            "borderRadius": {
+                    "DEFAULT": "0.25rem",
+                    "lg": "0.5rem",
+                    "xl": "0.75rem",
+                    "full": "9999px"
+            },
+            "fontFamily": {
+                    "headline": ["Manrope"],
+                    "body": ["Inter"],
+                    "label": ["Inter"]
+            }
+          },
+        },
+      }
+    </script>
+<style>
+      body {
+        background: linear-gradient(180deg, #070b28 0%, #0c112e 100%);
+        min-height: 100vh;
+        color: #dee0ff;
+        font-family: 'Inter', sans-serif;
+      }
+      .material-symbols-outlined {
+        font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+      }
+      .glass-card {
+        background: rgba(255, 255, 255, 0.05);
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
+      }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-background selection:bg-primary/30">
+<!-- TopAppBar -->
+<header class="fixed top-0 w-full z-50 bg-[#0c112e]/80 backdrop-blur-xl flex items-center justify-between px-6 py-4 w-full">
+<div class="flex items-center justify-center p-2 rounded-full hover:bg-white/10 transition-colors cursor-pointer active:scale-95 duration-200">
+<span class="material-symbols-outlined text-[#b0c6ff]" data-icon="close">close</span>
+</div>
+<h1 class="font-['Manrope'] font-bold text-xl tracking-tight text-[#b0c6ff]">Invite to House</h1>
+<div class="flex items-center justify-center p-2 rounded-full hover:bg-white/10 transition-colors cursor-pointer active:scale-95 duration-200">
+<span class="material-symbols-outlined text-[#b0c6ff]" data-icon="search">search</span>
+</div>
+</header>
+<main class="pt-24 pb-32 px-6 max-w-2xl mx-auto">
+<!-- Search Bar Section -->
+<div class="mb-8">
+<div class="relative group">
+<div class="absolute inset-y-0 left-4 flex items-center pointer-events-none">
+<span class="material-symbols-outlined text-on-surface-variant group-focus-within:text-primary transition-colors" data-icon="search">search</span>
+</div>
+<input class="w-full h-14 pl-12 pr-4 bg-surface-variant/20 border-none rounded-xl text-on-surface placeholder:text-on-surface-variant focus:ring-2 focus:ring-primary/50 backdrop-blur-xl transition-all" placeholder="Search friends..." type="text"/>
+</div>
+</div>
+<!-- Suggested Section Header -->
+<div class="mb-6">
+<h2 class="text-[10px] tracking-[0.2em] font-bold text-[#5C6BC0] uppercase px-1">Suggested</h2>
+</div>
+<!-- Friends List -->
+<div class="space-y-6">
+<!-- Friend Row 1 -->
+<div class="flex items-center justify-between group">
+<div class="flex items-center gap-4">
+<div class="relative">
+<img alt="User Avatar" class="w-12 h-12 rounded-xl object-cover ring-2 ring-white/5" data-alt="Close-up portrait of a stylish young man with a slight smile in soft moody cinematic lighting" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDxKt2WCFU1eK92DUePNyKJVUK4M9RGNSt1OhYogUeS3MB0S0YTf6RQ9OrKPp34SwhbU3NdsdU6Hbj1gCuS1nw5JzQ-EInTG3oiEQivxOKFFwbuSYBUE94FZ-TM8INSBszwqiUz4OPwX4RrfO209E7dS4aAnU1oOeGdDvEyCijYEEeIfrRZMudK_8mXUkSLmLWeYHlZMXosJvXbYDh1tymocxh2Re8Rh-odZYsaXGHIbGJkVhhixone9_8fzAmflbUx4cV0Y7D-RyKa"/>
+<div class="absolute -bottom-1 -right-1 w-4 h-4 bg-tertiary rounded-full border-2 border-background"></div>
+</div>
+<div>
+<p class="font-bold text-on-surface leading-tight">Julian Vance</p>
+<p class="text-sm text-on-surface-variant">@jvance_vibes</p>
+</div>
+</div>
+<button class="px-6 py-2 rounded-full border border-primary/30 text-primary font-semibold text-sm hover:bg-primary/10 active:scale-95 transition-all">
+                    Invite
+                </button>
+</div>
+<!-- Friend Row 2 -->
+<div class="flex items-center justify-between group">
+<div class="flex items-center gap-4">
+<img alt="User Avatar" class="w-12 h-12 rounded-xl object-cover ring-2 ring-white/5" data-alt="Professional headshot of a smiling woman with warm lighting and a soft atmospheric background" src="https://lh3.googleusercontent.com/aida-public/AB6AXuC7OgbgWoDacOrMV2y370lTY3kutWvwZj02c2bND2gOMvy8xgjUlK305q-Km1hJ5qn1pL23L4clzL__0dd-N0xn0wTjyW6hCmt8S_xmEzdfcf-45oMiBLL3EzEOFg5lvQdx5-erQJRDYPWmiVloVWcvT5XunpIIcJJsVTs_fpuQBBIzyfr0UxNqchEosAK4WJCyEoD4zcIJ2_HybfDpSmp1cJRQVLL-0BK2GZLVvoXtNLxDZ12ZhGgH84xNKgTfopWqFmax2whhaNB0"/>
+<div>
+<p class="font-bold text-on-surface leading-tight">Elena Rossi</p>
+<p class="text-sm text-on-surface-variant">@elena_peaks</p>
+</div>
+</div>
+<div class="px-6 py-2 rounded-full bg-surface-variant/30 text-on-surface-variant font-semibold text-sm cursor-default">
+                    Invited
+                </div>
+</div>
+<!-- Friend Row 3 -->
+<div class="flex items-center justify-between group">
+<div class="flex items-center gap-4">
+<img alt="User Avatar" class="w-12 h-12 rounded-xl object-cover ring-2 ring-white/5" data-alt="Thoughtful man looking away in natural soft morning light with shallow depth of field" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDeJhNypLdkYxlx4TlCPfrQnXJ-ptktSM20IDWStvstClMCAkbqf1lDlOpL7OIUI5WFsUq2TqLnJ6XhXakV2Dv2bDPLRh4Gx4YoTCikuuHTctUH94ngdzC92HLdXfwjH3MKe3520XjmDdGCtd316cdOMg7AgZQ2pjszH9vueR-gqqHlKLNZRZTe98IMRnCXXNvRnQz7JE9ZiZTy2ZZ8Dy6FaF97QHTV0BKgxpTgD9JF_py8Rcl7zmxBT5xJoHaCfhYsJBMiYMO5Bs8a"/>
+<div>
+<p class="font-bold text-on-surface leading-tight">Marcus Thorne</p>
+<p class="text-sm text-on-surface-variant">@mthorne_design</p>
+</div>
+</div>
+<button class="px-6 py-2 rounded-full border border-primary/30 text-primary font-semibold text-sm hover:bg-primary/10 active:scale-95 transition-all">
+                    Invite
+                </button>
+</div>
+<!-- Friend Row 4 -->
+<div class="flex items-center justify-between group">
+<div class="flex items-center gap-4">
+<div class="relative">
+<img alt="User Avatar" class="w-12 h-12 rounded-xl object-cover ring-2 ring-white/5" data-alt="High-fashion portrait of a young woman with neon highlights and soft purple ambient light" src="https://lh3.googleusercontent.com/aida-public/AB6AXuD3ONuQa64pEerk7glpeJbLFEJ2B5jfuR0836pBcv1kKAk4laY6C4JC1kkJOjxgAksz1gF_IIXIsnhnv4lWyU5poATGwNBMopvHnB0cyVE_BrugzGGdgTxLb9SxPwGKRPI1RRtAb_28o95kxKpVRAvBl5pAAogL-EdBT5WyNq1pDEZrhMLNTP4KV2-8T4c7ApZyWp7wI_yJWXkT9W0wC6KtKVrAsbNY_iAOJB24F_yAtfGqavh2-mHsDxMG-3UIavBeFVsIA6xMvlVF"/>
+<div class="absolute -bottom-1 -right-1 w-4 h-4 bg-tertiary rounded-full border-2 border-background"></div>
+</div>
+<div>
+<p class="font-bold text-on-surface leading-tight">Sienna Blake</p>
+<p class="text-sm text-on-surface-variant">@sienna_starlight</p>
+</div>
+</div>
+<button class="px-6 py-2 rounded-full border border-primary/30 text-primary font-semibold text-sm hover:bg-primary/10 active:scale-95 transition-all">
+                    Invite
+                </button>
+</div>
+<!-- Friend Row 5 -->
+<div class="flex items-center justify-between group">
+<div class="flex items-center gap-4">
+<img alt="User Avatar" class="w-12 h-12 rounded-xl object-cover ring-2 ring-white/5" data-alt="Portrait of a creative professional in a bright studio setting with soft natural window light" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBcqv0nHdlUalZdJ5PS5IhFuxjzfvi7lfaSeV_WFGefb971zjG_-wPsrL5NqnNbllCDJoO0Zn5FypbyzF7KeEYIgbmtIZbtBMPxRJ7heXgEAHrJSQORw1nrb1kE_m40hebhg0r0AgTAw58yCd-vHoiu8f6bTrEqJZO82MZEdgvdsZXQf9qWDXTw6yIJ0qw-EQLttj6DDZePIi23DfxnGAPpxkLYdC7JDUePEwoIEs-tmsvfNIUzh-hvQBt7niYvJlZuW4FGESUuQduX"/>
+<div>
+<p class="font-bold text-on-surface leading-tight">Leo Castille</p>
+<p class="text-sm text-on-surface-variant">@leocast</p>
+</div>
+</div>
+<button class="px-6 py-2 rounded-full border border-primary/30 text-primary font-semibold text-sm hover:bg-primary/10 active:scale-95 transition-all">
+                    Invite
+                </button>
+</div>
+<!-- Friend Row 6 -->
+<div class="flex items-center justify-between group">
+<div class="flex items-center gap-4">
+<img alt="User Avatar" class="w-12 h-12 rounded-xl object-cover ring-2 ring-white/5" data-alt="Candid street style portrait of a woman laughing in warm urban sunset light" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAhHf1MEcQ56UP7Us9MTEPfwd4OUKZ3TKj40bvduHt7B8WPRMepHNqSN7IR8BCE8MmX2lbJr56X8cM-CNjzcBw00FcV0dfpW0U6rzJcOM8mKMbTJOCTMkgZQVKYeJMmrupL-fqVEcVYFNtSB-BkvWVv7SMTCrRyzEGdEoah4rsML4PDEcTy5DkxTZ8CK192EIy5oMTutzS0JhlPwjivx3UxLhJaN5vhk4QjPaFpVZsDnX7QCXlS7ehqY83aimvbLwYuqSqZ0LEb-Htw"/>
+<div>
+<p class="font-bold text-on-surface leading-tight">Chloe Kim</p>
+<p class="text-sm text-on-surface-variant">@ckim_art</p>
+</div>
+</div>
+<button class="px-6 py-2 rounded-full border border-primary/30 text-primary font-semibold text-sm hover:bg-primary/10 active:scale-95 transition-all">
+                    Invite
+                </button>
+</div>
+</div>
+</main>
+<!-- Bottom Action Container -->
+<div class="fixed bottom-0 left-0 w-full p-6 pb-10 bg-gradient-to-t from-background via-background/90 to-transparent z-40">
+<div class="max-w-2xl mx-auto">
+<button class="w-full h-16 rounded-full bg-gradient-to-r from-primary to-primary-container text-on-primary-container font-extrabold text-lg tracking-wide shadow-[0_0_30px_rgba(41,121,255,0.15)] active:scale-[0.98] transition-all flex items-center justify-center gap-2">
+                Send Invites
+                <span class="material-symbols-outlined" data-icon="arrow_forward">arrow_forward</span>
+</button>
+</div>
+</div>
+<!-- BottomNavBar -->
+<nav class="fixed bottom-8 left-1/2 -translate-x-1/2 w-[90%] max-w-md rounded-[1.5rem] bg-[#1a1f3d]/60 backdrop-blur-2xl shadow-[0_0_30px_rgba(41,121,255,0.08)] flex justify-around items-center p-2 z-50">
+<a class="flex items-center justify-center bg-gradient-to-r from-[#b0c6ff] to-[#2979FF] text-white rounded-full p-4 shadow-[0_0_15px_rgba(176,198,255,0.4)] hover:scale-105 transition-transform" href="#">
+<span class="material-symbols-outlined" data-icon="person_add" style="font-variation-settings: 'FILL' 1;">person_add</span>
+</a>
+<a class="flex items-center justify-center text-[#A0AEC0] p-4 hover:scale-105 transition-transform" href="#">
+<span class="material-symbols-outlined" data-icon="share">share</span>
+</a>
+</nav>
+</body></html>

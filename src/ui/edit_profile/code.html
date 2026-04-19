@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Manrope:wght@600;700;800&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "on-tertiary-container": "#003114",
+                        "on-surface-variant": "#c2c6d7",
+                        "surface-container-high": "#232846",
+                        "on-background": "#dee0ff",
+                        "tertiary-fixed": "#62ff96",
+                        "secondary-container": "#2f3f92",
+                        "inverse-on-surface": "#2a2e4c",
+                        "on-error-container": "#ffdad6",
+                        "on-surface": "#dee0ff",
+                        "surface-container": "#191d3b",
+                        "on-secondary-fixed-variant": "#2f3f92",
+                        "surface-bright": "#323756",
+                        "primary-fixed": "#d9e2ff",
+                        "error": "#ffb4ab",
+                        "tertiary": "#00e475",
+                        "on-tertiary-fixed-variant": "#005226",
+                        "on-primary-fixed-variant": "#00429b",
+                        "secondary": "#bac3ff",
+                        "error-container": "#93000a",
+                        "on-tertiary": "#003918",
+                        "secondary-fixed": "#dee0ff",
+                        "outline-variant": "#424655",
+                        "background": "#0c112e",
+                        "primary-container": "#558dff",
+                        "on-primary-fixed": "#001945",
+                        "inverse-primary": "#0058ca",
+                        "on-primary-container": "#002661",
+                        "surface-container-low": "#141936",
+                        "on-tertiary-fixed": "#00210b",
+                        "tertiary-container": "#00a754",
+                        "on-secondary-fixed": "#00105b",
+                        "on-error": "#690005",
+                        "surface-variant": "#2e3351",
+                        "surface-container-lowest": "#070b28",
+                        "on-primary": "#002d6e",
+                        "primary-fixed-dim": "#b0c6ff",
+                        "secondary-fixed-dim": "#bac3ff",
+                        "outline": "#8c90a0",
+                        "inverse-surface": "#dee0ff",
+                        "surface-container-highest": "#2e3351",
+                        "surface-tint": "#b0c6ff",
+                        "on-secondary-container": "#a3b0ff",
+                        "surface-dim": "#0c112e",
+                        "primary": "#b0c6ff",
+                        "on-secondary": "#15267b",
+                        "tertiary-fixed-dim": "#00e475",
+                        "surface": "#0c112e"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "fontFamily": {
+                        "headline": ["Manrope"],
+                        "body": ["Inter"],
+                        "label": ["Inter"]
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        body {
+            background-color: #070b28;
+            background-image: radial-gradient(circle at 50% 0%, #141936 0%, #070b28 100%);
+            min-height: 100vh;
+            color: #dee0ff;
+            font-family: 'Inter', sans-serif;
+        }
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(24px);
+            -webkit-backdrop-filter: blur(24px);
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+</head>
+<body class="pb-24">
+<!-- TopAppBar -->
+<header class="fixed top-0 left-0 right-0 z-50 bg-[#070b28]/80 backdrop-blur-2xl shadow-[0_8px_32px_rgba(41,121,255,0.08)] bg-gradient-to-b from-white/5 to-transparent">
+<div class="flex justify-between items-center w-full px-6 py-4">
+<button class="text-slate-400 font-['Manrope'] tracking-tight font-bold text-lg hover:bg-white/10 hover:text-white transition-all active:scale-95 duration-200">
+                Cancel
+            </button>
+<h1 class="text-[#b0c6ff] font-['Manrope'] tracking-tight font-bold text-2xl">
+                Edit Profile
+            </h1>
+<button class="text-[#b0c6ff] font-['Manrope'] tracking-tight font-bold text-lg hover:bg-white/10 hover:text-white transition-all active:scale-95 duration-200">
+                Done
+            </button>
+</div>
+</header>
+<main class="pt-24 px-6 max-w-2xl mx-auto space-y-12">
+<!-- Profile Photo Section -->
+<section class="flex flex-col items-center justify-center pt-8">
+<div class="relative group">
+<div class="w-[120px] h-[120px] rounded-full overflow-hidden border-2 border-primary/20 ring-4 ring-primary/5 p-1 transition-transform duration-300 group-hover:scale-105">
+<img alt="Profile avatar" class="w-full h-full object-cover rounded-full" data-alt="Close-up portrait of a stylish person with soft atmospheric neon blue lighting and a celestial background" src="https://lh3.googleusercontent.com/aida-public/AB6AXuA9B8PfXIQXJ2w1vp75q-xuDnQjMcf-jKxeqdSx_wFg53TCEJg84236Cnq1h0M2vUAXrcXFPZUEAgP1QVdaQzsM0KZwEcG5kV0-8EQme8k3WFCNlriuIlrRxishdr7e0JfqggRmGJz4FiaqihBWL799_eCTbYRbNa3eVAlP57kCn0uXj9sky2TbO3JPLA4BWg9qp7xFdSB64wxwLWPJEd7U9xeysw-_Fcv14AIcrOAZVPEsdOmoy2liGGE16lPmws1rs5KlqQ4hVYBx"/>
+</div>
+<button class="absolute inset-0 flex items-center justify-center bg-black/40 rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-300 backdrop-blur-[2px]">
+<span class="material-symbols-outlined text-white text-3xl">photo_camera</span>
+</button>
+</div>
+<button class="mt-4 text-primary font-headline font-bold text-sm tracking-wide hover:text-secondary transition-colors uppercase">
+                Change Photo
+            </button>
+</section>
+<!-- Form Fields -->
+<section class="space-y-8 pb-12">
+<!-- Full Name -->
+<div class="space-y-2 group">
+<label class="block text-on-surface-variant font-label text-xs uppercase tracking-[0.2em] ml-1 group-focus-within:text-primary transition-colors">
+                    Full Name
+                </label>
+<div class="glass-panel rounded-xl border border-white/5 p-4 transition-all focus-within:ring-1 focus-within:ring-primary/40 focus-within:bg-white/10">
+<input class="w-full bg-transparent border-none p-0 text-on-surface font-body text-lg focus:ring-0 placeholder:text-slate-600" type="text" value="Julianne Etheridge"/>
+</div>
+</div>
+<!-- Username -->
+<div class="space-y-2 group">
+<label class="block text-on-surface-variant font-label text-xs uppercase tracking-[0.2em] ml-1 group-focus-within:text-primary transition-colors">
+                    Username
+                </label>
+<div class="glass-panel rounded-xl border border-white/5 p-4 flex items-center gap-2 transition-all focus-within:ring-1 focus-within:ring-primary/40 focus-within:bg-white/10">
+<span class="text-primary font-headline font-bold text-lg">@</span>
+<input class="w-full bg-transparent border-none p-0 text-on-surface font-body text-lg focus:ring-0 placeholder:text-slate-600" type="text" value="julianne_vox"/>
+</div>
+</div>
+<!-- Biography -->
+<div class="space-y-2 group">
+<label class="block text-on-surface-variant font-label text-xs uppercase tracking-[0.2em] ml-1 group-focus-within:text-primary transition-colors">
+                    Biography
+                </label>
+<div class="glass-panel rounded-xl border border-white/5 p-4 transition-all focus-within:ring-1 focus-within:ring-primary/40 focus-within:bg-white/10">
+<textarea class="w-full bg-transparent border-none p-0 text-on-surface font-body text-lg focus:ring-0 placeholder:text-slate-600 resize-none" rows="4">Curating soundscapes and digital silence. Voices are the heartbeat of the modern social cosmos. Join me in the Salon.</textarea>
+</div>
+</div>
+<!-- Website -->
+<!-- Destructive Action Section (Visual Polish) -->
+<div class="pt-6 border-t border-white/5">
+<button class="flex items-center gap-3 text-error/80 hover:text-error transition-colors px-1 py-2">
+<span class="material-symbols-outlined text-xl">delete_forever</span>
+<span class="font-headline font-bold text-sm tracking-wide uppercase">Deactivate Profile</span>
+</button>
+</div>
+</section>
+</main>
+<!-- BottomNavBar (Suppressed for Edit Profile focus) -->
+<!-- Navigation shell is excluded because this is a focused task-oriented page (Edit Profile) -->
+</body></html>
