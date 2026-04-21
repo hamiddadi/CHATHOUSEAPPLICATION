@@ -1,4 +1,4 @@
-import React, { memo, useCallback, useEffect, useState } from 'react';
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   FlatList,
   Keyboard,
@@ -7,16 +7,18 @@ import {
   Pressable,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
+import { Image } from 'expo-image';
+import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Avatar } from '../../../../shared/components/Avatar';
-import { Input } from '../../../../shared/components/Input';
 import { Loader } from '../../../../shared/components/Loader';
 import { colors, spacing } from '../../../../shared/constants/theme';
+import { DEFAULTS } from '../../../../shared/constants/images';
 import type { MessageStackParamList } from '../../../../core/navigation/types';
 import type { Message, UserSummary } from '../../../../shared/types/domain';
 import { CURRENT_USER } from '../../../../shared/mocks/users.mock';
@@ -25,35 +27,144 @@ import { useConversation, useConversationMessages, useSendMessage } from '../../
 type Nav = NativeStackNavigationProp<MessageStackParamList, 'ChatDetail'>;
 type Route = RouteProp<MessageStackParamList, 'ChatDetail'>;
 
-const Bubble: React.FC<{ message: Message }> = memo(({ message }) => (
-  <View className={message.isMine ? 'items-end px-xxl py-xxs' : 'items-start px-xxl py-xxs'}>
-    <View
-      className={
-        message.isMine
-          ? 'bg-primary rounded-xxl rounded-br-sm px-lg py-md max-w-[80%]'
-          : 'bg-surface-high rounded-xxl rounded-bl-sm px-lg py-md max-w-[80%]'
-      }
-    >
-      <Text
-        className={
-          message.isMine
-            ? 'text-sm font-body text-primary-on-container'
-            : 'text-sm font-body text-ink'
-        }
-      >
-        {message.text}
-      </Text>
+const HEADER_ICON_SIZE = 22;
+const AVATAR_HEADER_SIZE = 40;
+const AVATAR_BUBBLE_SIZE = 32;
+const STATUS_DOT_SIZE = 10;
+const BUBBLE_CORNER = 20;
+const INPUT_ICON_SIZE = 22;
+const SEND_BTN_SIZE = 44;
+
+const GLASS_BG = 'rgba(255,255,255,0.05)';
+const SENT_GRADIENT = ['rgba(176,198,255,0.2)', 'rgba(85,141,255,0.3)'] as const;
+const SEND_GRADIENT = ['#b0c6ff', '#558dff'] as const;
+
+const formatTime = (iso: string): string => {
+  const d = new Date(iso);
+  const h = d.getHours();
+  const m = d.getMinutes();
+  const suffix = h >= 12 ? 'PM' : 'AM';
+  const hh = ((h + 11) % 12) + 1;
+  return `${hh}:${m.toString().padStart(2, '0')} ${suffix}`;
+};
+
+const sameDay = (a: string, b: string): boolean => {
+  const da = new Date(a);
+  const db = new Date(b);
+  return (
+    da.getFullYear() === db.getFullYear() &&
+    da.getMonth() === db.getMonth() &&
+    da.getDate() === db.getDate()
+  );
+};
+
+const dateLabel = (iso: string): string => {
+  const today = new Date();
+  const d = new Date(iso);
+  if (sameDay(iso, today.toISOString())) return 'Today';
+  const yesterday = new Date(today.getTime() - 86400000);
+  if (sameDay(iso, yesterday.toISOString())) return 'Yesterday';
+  return d.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
+};
+
+interface BubbleProps {
+  message: Message;
+  otherAvatar: string | null;
+  showAvatar: boolean;
+}
+
+const Bubble: React.FC<BubbleProps> = memo(({ message, otherAvatar, showAvatar }) => {
+  if (message.isMine) {
+    return (
+      <View style={styles.sentRow}>
+        <LinearGradient
+          colors={SENT_GRADIENT}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.sentBubble}
+        >
+          <Text className="text-sm font-body text-white leading-relaxed">{message.text}</Text>
+        </LinearGradient>
+        <View style={styles.metaRowRight}>
+          <Text className="text-[10px] text-ink-muted">{formatTime(message.sentAt)}</Text>
+          <MaterialIcons name="done-all" size={12} color={colors.primary} />
+        </View>
+      </View>
+    );
+  }
+  return (
+    <View style={styles.receivedRow}>
+      {showAvatar ? (
+        <Image
+          source={{ uri: otherAvatar ?? DEFAULTS.avatar }}
+          style={styles.receivedAvatar}
+          contentFit="cover"
+          transition={200}
+          cachePolicy="memory-disk"
+        />
+      ) : (
+        <View style={styles.receivedAvatarPlaceholder} />
+      )}
+      <View style={styles.receivedContent}>
+        <View style={styles.receivedBubble}>
+          <Text className="text-sm font-body text-ink leading-relaxed">{message.text}</Text>
+        </View>
+        <Text className="text-[10px] text-ink-muted ml-xs mt-xxs">
+          {formatTime(message.sentAt)}
+        </Text>
+      </View>
     </View>
+  );
+});
+Bubble.displayName = 'Bubble';
+
+interface DateSeparatorProps {
+  label: string;
+}
+
+const DateSeparator: React.FC<DateSeparatorProps> = memo(({ label }) => (
+  <View style={styles.dateSeparator}>
+    <Text className="text-[10px] font-body-bold text-ink-muted uppercase tracking-widest">
+      {label}
+    </Text>
   </View>
 ));
-Bubble.displayName = 'Bubble';
+DateSeparator.displayName = 'DateSeparator';
+
+interface ChatListItem {
+  kind: 'message' | 'date';
+  id: string;
+  date?: string;
+  message?: Message;
+  showAvatar?: boolean;
+}
+
+const buildChatItems = (messages: readonly Message[]): ChatListItem[] => {
+  const items: ChatListItem[] = [];
+  let lastDate: string | null = null;
+  messages.forEach((m, i) => {
+    if (!lastDate || !sameDay(lastDate, m.sentAt)) {
+      items.push({ kind: 'date', id: `date-${m.id}`, date: m.sentAt });
+      lastDate = m.sentAt;
+    }
+    const next = messages[i + 1];
+    const showAvatar = !next || next.isMine !== m.isMine || !sameDay(next.sentAt, m.sentAt);
+    items.push({ kind: 'message', id: m.id, message: m, showAvatar });
+  });
+  return items;
+};
 
 export const ChatDetailScreen: React.FC = () => {
   const navigation = useNavigation<Nav>();
   const route = useRoute<Route>();
   const insets = useSafeAreaInsets();
+  const listRef = useRef<FlatList<ChatListItem>>(null);
   const [draft, setDraft] = useState('');
   const [keyboardVisible, setKeyboardVisible] = useState(false);
+
+  const scrollToEnd = useCallback(() => {
+    requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
+  }, []);
 
   useEffect(() => {
     const showEvt = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
@@ -65,6 +176,7 @@ export const ChatDetailScreen: React.FC = () => {
       hide.remove();
     };
   }, []);
+
   const { data: conversation } = useConversation(route.params.conversationId);
   const { data: messages, isLoading } = useConversationMessages(route.params.conversationId);
   const sendMessage = useSendMessage();
@@ -78,56 +190,123 @@ export const ChatDetailScreen: React.FC = () => {
         text: draft,
       });
       setDraft('');
+      scrollToEnd();
     } catch {
       // Handle via toast later.
     }
-  }, [draft, route.params.conversationId, sendMessage]);
+  }, [draft, route.params.conversationId, scrollToEnd, sendMessage]);
 
-  const renderItem = useCallback(({ item }: { item: Message }) => <Bubble message={item} />, []);
-  const keyExtractor = useCallback((item: Message) => item.id, []);
+  const handleCall = useCallback(() => {
+    // Wire to call feature later.
+  }, []);
+  const handleMore = useCallback(() => {
+    // Wire to chat options sheet later.
+  }, []);
+  const handleMicInput = useCallback(() => {
+    // Wire to voice-message capture later.
+  }, []);
+  const handleAttach = useCallback(() => {
+    // Wire to attachment picker later.
+  }, []);
+  const handleEmoji = useCallback(() => {
+    // Wire to emoji picker later.
+  }, []);
 
   const other: UserSummary | undefined = conversation?.participants.find(
     p => p.id !== CURRENT_USER.id,
   );
+  const otherAvatar = other?.avatarUrl ?? null;
+
+  const items = useMemo(() => buildChatItems(messages ?? []), [messages]);
+
+  const renderItem = useCallback(
+    ({ item }: { item: ChatListItem }) => {
+      if (item.kind === 'date' && item.date) {
+        return <DateSeparator label={dateLabel(item.date)} />;
+      }
+      if (item.message) {
+        return (
+          <Bubble
+            message={item.message}
+            otherAvatar={otherAvatar}
+            showAvatar={item.showAvatar ?? true}
+          />
+        );
+      }
+      return null;
+    },
+    [otherAvatar],
+  );
+
+  const keyExtractor = useCallback((item: ChatListItem) => item.id, []);
+
+  const isOnline = true;
+  const canSend = draft.trim().length > 0 && !sendMessage.isPending;
 
   return (
     <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       keyboardVerticalOffset={0}
       style={styles.kav}
     >
-      <View
-        className="flex-row items-center gap-md px-xxl py-lg border-b border-overlay-white-5"
-        style={{ paddingTop: insets.top + spacing.lg }}
-      >
-        <Pressable
-          onPress={handleBack}
-          accessibilityRole="button"
-          accessibilityLabel="Back"
-          hitSlop={8}
-        >
-          <MaterialIcons name="arrow-back" size={24} color={colors.text} />
-        </Pressable>
-        <Avatar
-          uri={other?.avatarUrl ?? undefined}
-          name={other?.displayName ?? 'Chat'}
-          size="md"
-          status="online"
-        />
-        <View className="flex-1">
-          <Text className="text-md font-body-bold text-ink">{other?.displayName ?? 'Chat'}</Text>
-          <Text className="text-xxs font-body text-accent">Online</Text>
+      <View style={[styles.header, { paddingTop: insets.top + spacing.sm }]}>
+        <View style={styles.headerLeft}>
+          <Pressable
+            onPress={handleBack}
+            accessibilityRole="button"
+            accessibilityLabel="Back"
+            hitSlop={8}
+            className="w-10 h-10 rounded-pill items-center justify-center active:bg-overlay-white-5"
+          >
+            <MaterialIcons name="arrow-back" size={HEADER_ICON_SIZE} color={colors.primary} />
+          </Pressable>
+          <View style={styles.headerAvatarWrapper}>
+            <Image
+              source={{ uri: otherAvatar ?? DEFAULTS.avatar }}
+              style={styles.headerAvatar}
+              contentFit="cover"
+              transition={200}
+              cachePolicy="memory-disk"
+            />
+            {isOnline && <View style={styles.headerStatusDot} />}
+          </View>
+          <View>
+            <Text className="text-md font-display text-primary tracking-tight">
+              {other?.displayName ?? 'Chat'}
+            </Text>
+            <Text className="text-xs font-body-medium text-ink-muted">
+              @{other?.username ?? 'user'}
+            </Text>
+          </View>
         </View>
-        <Pressable accessibilityRole="button" accessibilityLabel="Chat options" hitSlop={8}>
-          <MaterialIcons name="more-vert" size={24} color={colors.text} />
-        </Pressable>
+        <View style={styles.headerActions}>
+          <Pressable
+            onPress={handleCall}
+            accessibilityRole="button"
+            accessibilityLabel="Call"
+            hitSlop={8}
+            className="p-sm rounded-pill active:bg-overlay-white-5"
+          >
+            <MaterialIcons name="call" size={HEADER_ICON_SIZE} color={colors.primary} />
+          </Pressable>
+          <Pressable
+            onPress={handleMore}
+            accessibilityRole="button"
+            accessibilityLabel="Conversation options"
+            hitSlop={8}
+            className="p-sm rounded-pill active:bg-overlay-white-5"
+          >
+            <MaterialIcons name="more-vert" size={HEADER_ICON_SIZE} color={colors.primary} />
+          </Pressable>
+        </View>
       </View>
 
       {isLoading ? (
         <Loader fullscreen accessibilityLabel="Loading messages" />
       ) : (
         <FlatList
-          data={messages ?? []}
+          ref={listRef}
+          data={items}
           renderItem={renderItem}
           keyExtractor={keyExtractor}
           style={styles.flex1}
@@ -135,29 +314,74 @@ export const ChatDetailScreen: React.FC = () => {
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
           showsVerticalScrollIndicator={false}
+          onContentSizeChange={scrollToEnd}
         />
       )}
 
       <View
-        className="flex-row items-center gap-sm px-xxl py-md border-t border-overlay-white-5 bg-background"
-        style={{ paddingBottom: keyboardVisible ? spacing.md : insets.bottom + spacing.md }}
+        style={[
+          styles.footer,
+          { paddingBottom: keyboardVisible ? spacing.md : insets.bottom + spacing.md },
+        ]}
       >
-        <View className="flex-1">
-          <Input placeholder="Message…" value={draft} onChangeText={setDraft} variant="filled" />
+        <View style={styles.inputPill}>
+          <Pressable
+            onPress={handleEmoji}
+            accessibilityRole="button"
+            accessibilityLabel="Insert emoji"
+            hitSlop={8}
+          >
+            <MaterialIcons
+              name="sentiment-satisfied"
+              size={INPUT_ICON_SIZE}
+              color={colors.textMuted}
+            />
+          </Pressable>
+          <TextInput
+            style={styles.input}
+            placeholder="Type a message..."
+            placeholderTextColor={'rgba(194,198,215,0.5)'}
+            value={draft}
+            onChangeText={setDraft}
+            onFocus={scrollToEnd}
+            multiline
+          />
+          <Pressable
+            onPress={handleAttach}
+            accessibilityRole="button"
+            accessibilityLabel="Attach file"
+            hitSlop={8}
+          >
+            <MaterialIcons name="attach-file" size={INPUT_ICON_SIZE} color={colors.textMuted} />
+          </Pressable>
         </View>
-        <Pressable
-          onPress={handleSend}
-          disabled={!draft.trim() || sendMessage.isPending}
-          accessibilityRole="button"
-          accessibilityLabel="Send message"
-          className={
-            draft.trim() && !sendMessage.isPending
-              ? 'w-11 h-11 rounded-pill bg-primary items-center justify-center'
-              : 'w-11 h-11 rounded-pill bg-surface-high items-center justify-center opacity-50'
-          }
-        >
-          <MaterialIcons name="send" size={20} color={colors.onPrimary} />
-        </Pressable>
+        {canSend ? (
+          <Pressable
+            onPress={handleSend}
+            accessibilityRole="button"
+            accessibilityLabel="Send message"
+            disabled={!canSend}
+            className="rounded-pill overflow-hidden active:opacity-90"
+          >
+            <LinearGradient
+              colors={SEND_GRADIENT}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.sendBtn}
+            >
+              <MaterialIcons name="send" size={INPUT_ICON_SIZE} color={colors.onPrimary} />
+            </LinearGradient>
+          </Pressable>
+        ) : (
+          <Pressable
+            onPress={handleMicInput}
+            accessibilityRole="button"
+            accessibilityLabel="Record voice message"
+            style={styles.micBtn}
+          >
+            <MaterialIcons name="mic" size={INPUT_ICON_SIZE} color={colors.textMuted} />
+          </Pressable>
+        )}
       </View>
     </KeyboardAvoidingView>
   );
@@ -166,5 +390,148 @@ export const ChatDetailScreen: React.FC = () => {
 const styles = StyleSheet.create({
   kav: { flex: 1, backgroundColor: colors.background },
   flex1: { flex: 1 },
-  list: { paddingVertical: spacing.md, flexGrow: 1 },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.xxl,
+    paddingBottom: spacing.sm,
+    backgroundColor: 'rgba(12,17,46,0.8)',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(255,255,255,0.05)',
+  },
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    flexShrink: 1,
+  },
+  headerAvatarWrapper: {
+    position: 'relative',
+  },
+  headerAvatar: {
+    width: AVATAR_HEADER_SIZE,
+    height: AVATAR_HEADER_SIZE,
+    borderRadius: 10,
+    backgroundColor: colors.surfaceHighest,
+  },
+  headerStatusDot: {
+    position: 'absolute',
+    right: -2,
+    bottom: -2,
+    width: STATUS_DOT_SIZE,
+    height: STATUS_DOT_SIZE,
+    borderRadius: STATUS_DOT_SIZE / 2,
+    backgroundColor: colors.accent,
+    borderWidth: 2,
+    borderColor: colors.background,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  list: {
+    paddingHorizontal: spacing.xxl,
+    paddingTop: spacing.xxl,
+    paddingBottom: spacing.md,
+    gap: spacing.xl,
+  },
+  dateSeparator: {
+    alignSelf: 'center',
+    backgroundColor: GLASS_BG,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.xxs,
+    borderRadius: 9999,
+  },
+  receivedRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: spacing.sm,
+    maxWidth: '85%',
+  },
+  receivedAvatar: {
+    width: AVATAR_BUBBLE_SIZE,
+    height: AVATAR_BUBBLE_SIZE,
+    borderRadius: 8,
+    marginBottom: 4,
+    backgroundColor: colors.surfaceHighest,
+  },
+  receivedAvatarPlaceholder: {
+    width: AVATAR_BUBBLE_SIZE,
+  },
+  receivedContent: {
+    flexShrink: 1,
+  },
+  receivedBubble: {
+    backgroundColor: GLASS_BG,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    borderRadius: BUBBLE_CORNER,
+    borderBottomLeftRadius: 4,
+  },
+  sentRow: {
+    alignSelf: 'flex-end',
+    alignItems: 'flex-end',
+    maxWidth: '85%',
+  },
+  sentBubble: {
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    borderRadius: BUBBLE_CORNER,
+    borderBottomRightRadius: 4,
+  },
+  metaRowRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    marginTop: spacing.xxs,
+    marginRight: spacing.xs,
+  },
+  footer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.xxl,
+    paddingTop: spacing.sm,
+    backgroundColor: colors.background,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(255,255,255,0.05)',
+  },
+  inputPill: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: GLASS_BG,
+    borderRadius: 9999,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.xs,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.08)',
+    minHeight: 44,
+  },
+  input: {
+    flex: 1,
+    color: colors.text,
+    fontSize: 14,
+    paddingVertical: 0,
+    maxHeight: 100,
+  },
+  sendBtn: {
+    width: SEND_BTN_SIZE,
+    height: SEND_BTN_SIZE,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  micBtn: {
+    width: SEND_BTN_SIZE,
+    height: SEND_BTN_SIZE,
+    borderRadius: SEND_BTN_SIZE / 2,
+    backgroundColor: GLASS_BG,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 });

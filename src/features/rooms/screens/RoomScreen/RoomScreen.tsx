@@ -1,6 +1,7 @@
-import React, { memo, useCallback, useState } from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import React, { memo, useCallback, useMemo, useState } from 'react';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -11,38 +12,83 @@ import { EmptyState } from '../../../../shared/components/EmptyState';
 import { useAnimatedPress } from '../../../../shared/hooks/useAnimatedPress';
 import { colors, layout, spacing } from '../../../../shared/constants/theme';
 import type { RoomStackParamList } from '../../../../core/navigation/types';
-import type { RoomParticipant, UserSummary } from '../../../../shared/types/domain';
+import type {
+  RoomAudioState,
+  RoomParticipant,
+  RoomRole,
+  UserSummary,
+} from '../../../../shared/types/domain';
 import { useLeaveRoom, useRaiseHand, useRoom } from '../../hooks/useRooms';
 
 type Nav = NativeStackNavigationProp<RoomStackParamList, 'Room'>;
 type Route = RouteProp<RoomStackParamList, 'Room'>;
 
-const ACTION_BAR_ICON_SIZE = 20;
+const HEADER_ICON_SIZE = 22;
+const ACTION_BAR_ICON_SIZE = 18;
 const ROLE_ICON_SIZE = 10;
-const IS_MODERATOR = true;
+const SPEAKER_AVATAR = 56;
+const SECONDARY_AVATAR = 52;
+const OTHER_AVATAR = 40;
+const HAND_RAISED_MOCK_COUNT = 3;
 const FOLLOWED_COUNT = 5;
 
+const GREEN = '#00e475';
+
+const ROLE_COLORS = {
+  shield: '#22C55E',
+  mic: '#22C55E',
+  micOff: '#EF4444',
+} as const;
+
+type RoleIconName = 'shield' | 'mic' | 'mic-off';
+
+const getRoleIconProps = (
+  role: RoomRole,
+  audio: RoomAudioState,
+): { icon: RoleIconName; color: string } => {
+  if (role === 'host') return { icon: 'shield', color: ROLE_COLORS.shield };
+  if (audio === 'muted') return { icon: 'mic-off', color: ROLE_COLORS.micOff };
+  return { icon: 'mic', color: ROLE_COLORS.mic };
+};
+
 const SpeakerCell: React.FC<{ speaker: RoomParticipant }> = memo(({ speaker }) => {
-  const pulse = useAnimatedPress({ pulse: speaker.audio === 'speaking' });
-  const roleIcon: 'shield' | 'mic-off' | 'mic' =
-    speaker.role === 'host' ? 'shield' : speaker.audio === 'muted' ? 'mic-off' : 'mic';
+  const isSpeaking = speaker.audio === 'speaking';
+  const isHost = speaker.role === 'host';
+  const pulse = useAnimatedPress({ pulse: isSpeaking });
+  const { icon: roleIcon, color: roleColor } = getRoleIconProps(speaker.role, speaker.audio);
+  const roleLabel = isHost ? 'Host' : 'Speaker';
+
   return (
-    <View className="items-center gap-xs w-[64px]">
-      <Animated.View style={pulse.animatedStyle}>
+    <View style={styles.speakerCell}>
+      <Animated.View style={[pulse.animatedStyle, styles.speakerRingWrapper]}>
         <Avatar
           uri={speaker.avatarUrl ?? undefined}
           name={speaker.displayName}
-          size="lg"
-          status={speaker.audio === 'speaking' ? 'speaking' : 'none'}
+          sizeValue={SPEAKER_AVATAR}
+          ring={isSpeaking}
+          ringColor={GREEN}
+          ringWidth={2}
         />
+        {isSpeaking && (
+          <View style={styles.speakerMicBadge}>
+            <MaterialIcons name="graphic-eq" size={10} color="#00210b" />
+          </View>
+        )}
       </Animated.View>
-      <Text className="text-xxs font-body-bold text-white text-center" numberOfLines={1}>
+      <Text
+        className="text-[10px] font-body-bold text-white text-center"
+        numberOfLines={1}
+        style={styles.speakerName}
+      >
         {speaker.displayName}
       </Text>
-      <View className="flex-row items-center gap-xxs opacity-60">
-        <MaterialIcons name={roleIcon} size={ROLE_ICON_SIZE} color={colors.textMuted} />
-        <Text className="text-xxs font-body-medium text-ink-muted uppercase tracking-tighter">
-          {speaker.role === 'host' ? 'Host' : 'Speaker'}
+      <View className="flex-row items-center gap-xxs">
+        <MaterialIcons name={roleIcon} size={ROLE_ICON_SIZE} color={roleColor} />
+        <Text
+          style={{ fontSize: ROLE_ICON_SIZE, lineHeight: ROLE_ICON_SIZE + 2, color: roleColor }}
+          className="font-body-bold uppercase tracking-tighter"
+        >
+          {roleLabel}
         </Text>
       </View>
     </View>
@@ -50,45 +96,70 @@ const SpeakerCell: React.FC<{ speaker: RoomParticipant }> = memo(({ speaker }) =
 });
 SpeakerCell.displayName = 'SpeakerCell';
 
-interface ListenerCellProps {
-  listener: UserSummary;
-  size?: 'sm' | 'md';
-  faded?: boolean;
-  handRaised?: boolean;
-}
-
-const ListenerCell: React.FC<ListenerCellProps> = memo(
-  ({ listener, size = 'md', faded = false, handRaised = false }) => (
-    <View className={faded ? 'opacity-60' : undefined}>
-      <View className="relative">
-        <Avatar uri={listener.avatarUrl ?? undefined} name={listener.displayName} size={size} />
-        {handRaised && (
-          <View className="absolute -bottom-xxs -right-xxs">
-            <Text className="text-xxs">👋</Text>
-          </View>
-        )}
+const HandRaisedCell: React.FC<{ listener: UserSummary }> = memo(({ listener }) => (
+  <View style={styles.gridCell}>
+    <View style={styles.handRaisedCell}>
+      <Avatar
+        uri={listener.avatarUrl ?? undefined}
+        name={listener.displayName}
+        sizeValue={SECONDARY_AVATAR}
+      />
+      <View style={styles.handEmoji} pointerEvents="none">
+        <Text className="text-sm">👋</Text>
       </View>
     </View>
-  ),
-);
-ListenerCell.displayName = 'ListenerCell';
+  </View>
+));
+HandRaisedCell.displayName = 'HandRaisedCell';
 
-const SectionLabel: React.FC<{ label: string; emphasis?: boolean }> = memo(
-  ({ label, emphasis = false }) => (
-    <View className="flex-row items-center gap-sm mb-lg">
-      <Text
-        className={
-          emphasis
-            ? 'text-xxs font-body-bold text-accent tracking-widest uppercase'
-            : 'text-xxs font-body-bold text-ink-muted tracking-widest uppercase'
-        }
-      >
-        {label}
-      </Text>
-      <View className="h-px flex-1 bg-overlay-white-5" />
-    </View>
-  ),
-);
+const FollowedCell: React.FC<{ listener: UserSummary }> = memo(({ listener }) => (
+  <View style={styles.gridCell}>
+    <Avatar
+      uri={listener.avatarUrl ?? undefined}
+      name={listener.displayName}
+      sizeValue={SECONDARY_AVATAR}
+    />
+  </View>
+));
+FollowedCell.displayName = 'FollowedCell';
+
+const OtherCell: React.FC<{ listener: UserSummary }> = memo(({ listener }) => (
+  <View style={[styles.gridCell, styles.otherCell]}>
+    <Avatar
+      uri={listener.avatarUrl ?? undefined}
+      name={listener.displayName}
+      sizeValue={OTHER_AVATAR}
+    />
+  </View>
+));
+OtherCell.displayName = 'OtherCell';
+
+interface SectionLabelProps {
+  label: string;
+  emphasis?: boolean;
+}
+
+const SectionLabel: React.FC<SectionLabelProps> = memo(({ label, emphasis = false }) => (
+  <View className="flex-row items-center gap-sm mb-lg px-xs">
+    <Text
+      className={
+        emphasis
+          ? 'text-[10px] font-body-bold text-accent tracking-widest uppercase'
+          : 'text-[10px] font-body-bold text-ink-muted tracking-widest uppercase'
+      }
+    >
+      {label}
+    </Text>
+    {emphasis && (
+      <LinearGradient
+        colors={['rgba(0,228,117,0.2)', 'rgba(0,228,117,0)']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 0 }}
+        style={styles.sectionGradientLine}
+      />
+    )}
+  </View>
+));
 SectionLabel.displayName = 'SectionLabel';
 
 export const RoomScreen: React.FC = () => {
@@ -106,7 +177,9 @@ export const RoomScreen: React.FC = () => {
   const raiseBtn = useAnimatedPress({ scaleTo: 0.96 });
   const leaveBtn = useAnimatedPress({ scaleTo: 0.96 });
 
-  const handleBack = useCallback(() => navigation.goBack(), [navigation]);
+  const handleWave = useCallback(() => {
+    // Wire to presence wave when realtime ships.
+  }, []);
   const handleToggleMute = useCallback(() => setIsMuted(prev => !prev), []);
   const handleToggleHand = useCallback(() => {
     setIsHandRaised(prev => !prev);
@@ -123,36 +196,38 @@ export const RoomScreen: React.FC = () => {
     navigation.goBack();
   }, [leaveRoom, navigation, room]);
 
-  const actionBarBottom = layout.tabBarHeight + layout.tabBarBottomOffset + spacing.xxxl;
+  const handRaisedListeners = useMemo(
+    () => (room ? room.listeners.slice(0, HAND_RAISED_MOCK_COUNT) : []),
+    [room],
+  );
+  const followedListeners = useMemo(
+    () => (room ? room.listeners.slice(0, FOLLOWED_COUNT) : []),
+    [room],
+  );
+  const otherListeners = useMemo(() => (room ? room.listeners.slice(FOLLOWED_COUNT) : []), [room]);
+  const othersOverflow = room ? Math.max(0, room.listenersCount - room.listeners.length) : 0;
 
-  if (isLoading) {
-    return <Loader fullscreen accessibilityLabel="Loading room" />;
-  }
+  const actionBarBottomOffset = layout.tabBarHeight + layout.tabBarBottomOffset + spacing.xxl;
+
+  if (isLoading) return <Loader fullscreen accessibilityLabel="Loading room" />;
   if (isError || !room) {
     return <EmptyState title="Room unavailable" description="This room may have ended." />;
   }
 
-  const listenersCount = room.listeners.length;
-  const followedListeners = room.listeners.slice(0, FOLLOWED_COUNT);
-  const otherListeners = room.listeners.slice(FOLLOWED_COUNT);
-  const othersOverflow = Math.max(0, room.listenersCount - listenersCount);
-
   return (
-    <View className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
-      <View className="flex-row items-center justify-between px-xxl py-lg">
+    <View className="flex-1 bg-background">
+      <View style={[styles.topBar, { paddingTop: insets.top + spacing.sm }]}>
+        <View className="flex-row items-center gap-sm">
+          <MaterialIcons name="graphic-eq" size={HEADER_ICON_SIZE} color={colors.primary} />
+          <Text className="text-lg font-display text-primary tracking-tighter">Chathouse</Text>
+        </View>
         <Pressable
-          onPress={handleBack}
+          onPress={handleWave}
           accessibilityRole="button"
-          accessibilityLabel="Back to feed"
-          hitSlop={8}
+          accessibilityLabel="Send a wave"
+          className="bg-primary/10 border border-primary/20 px-lg py-xs rounded-pill"
         >
-          <MaterialIcons name="keyboard-arrow-down" size={28} color={colors.text} />
-        </Pressable>
-        <Text className="text-sm font-body-bold text-ink-muted" numberOfLines={1}>
-          {room.houseName ?? 'Chathouse'}
-        </Text>
-        <Pressable accessibilityRole="button" accessibilityLabel="Room options" hitSlop={8}>
-          <MaterialIcons name="more-vert" size={24} color={colors.text} />
+          <Text className="text-sm font-body-bold text-primary">Wave 👋</Text>
         </Pressable>
       </View>
 
@@ -160,21 +235,31 @@ export const RoomScreen: React.FC = () => {
         className="flex-1"
         contentContainerStyle={{
           paddingHorizontal: spacing.xxl,
-          paddingBottom: actionBarBottom + spacing.huge,
+          paddingTop: insets.top + spacing.mega,
+          paddingBottom: insets.bottom + actionBarBottomOffset + spacing.mega,
         }}
         showsVerticalScrollIndicator={false}
       >
         <View className="mb-huge gap-md">
-          <View className="flex-row items-center gap-sm">
-            <View className="bg-surface-highest px-sm py-xxs rounded-xs">
-              <Text className="text-xxs font-body-bold text-ink-muted uppercase tracking-wider">
-                {room.categoryEmoji} {room.category}
-              </Text>
+          <View className="flex-row items-center justify-between">
+            <View className="flex-row items-center gap-xs flex-wrap flex-1">
+              {room.houseName && (
+                <View className="bg-surface-highest px-sm py-xxs rounded-xs">
+                  <Text className="text-[10px] font-body-bold text-ink-muted uppercase tracking-wider">
+                    {room.houseName}
+                  </Text>
+                </View>
+              )}
+              <View className="bg-primary/10 px-sm py-xxs rounded-xs">
+                <Text className="text-[10px] font-body-bold text-primary uppercase tracking-wider">
+                  {room.categoryEmoji} {room.category}
+                </Text>
+              </View>
             </View>
             {room.isRecording && (
               <View className="flex-row items-center gap-xs bg-danger/20 px-sm py-xxs rounded-sm">
                 <View className="w-xs h-xs rounded-pill bg-danger" />
-                <Text className="text-xxs font-display text-danger tracking-widest">REC</Text>
+                <Text className="text-[10px] font-body-bold text-danger tracking-widest">REC</Text>
               </View>
             )}
           </View>
@@ -185,31 +270,30 @@ export const RoomScreen: React.FC = () => {
 
         <View className="mb-huge">
           <SectionLabel label="⭐ STAGE" emphasis />
-          <View className="flex-row flex-wrap gap-lg justify-center">
+          <View style={styles.stageGrid}>
             {room.speakers.map(s => (
               <SpeakerCell key={s.id} speaker={s} />
             ))}
-            {IS_MODERATOR && (
-              <View className="items-center gap-xs w-[64px]">
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="Invite a listener to the stage"
-                  className="w-[56px] h-[56px] rounded-pill bg-overlay-white-5 border border-dashed border-overlay-white-30 items-center justify-center"
-                >
-                  <MaterialIcons name="add" size={24} color={colors.text} />
-                </Pressable>
-                <Text className="text-xxs font-body-medium text-ink-muted">Add</Text>
-              </View>
-            )}
           </View>
         </View>
+
+        {handRaisedListeners.length > 0 && (
+          <View className="mb-huge">
+            <SectionLabel label="Hand raised" />
+            <View style={styles.handRaisedRow}>
+              {handRaisedListeners.map(l => (
+                <HandRaisedCell key={l.id} listener={l} />
+              ))}
+            </View>
+          </View>
+        )}
 
         {followedListeners.length > 0 && (
           <View className="mb-huge">
             <SectionLabel label="Followed by speakers" />
-            <View className="flex-row gap-md flex-wrap">
-              {followedListeners.map(f => (
-                <ListenerCell key={f.id} listener={f} size="md" />
+            <View style={styles.followedRow}>
+              {followedListeners.map(l => (
+                <FollowedCell key={l.id} listener={l} />
               ))}
             </View>
           </View>
@@ -218,13 +302,17 @@ export const RoomScreen: React.FC = () => {
         {(otherListeners.length > 0 || othersOverflow > 0) && (
           <View className="mb-huge">
             <SectionLabel label="Others in room" />
-            <View className="flex-row gap-sm flex-wrap justify-center">
+            <View style={styles.othersGrid}>
               {otherListeners.map(o => (
-                <ListenerCell key={o.id} listener={o} size="sm" faded />
+                <OtherCell key={o.id} listener={o} />
               ))}
               {othersOverflow > 0 && (
-                <View className="w-[40px] h-[40px] rounded-pill bg-surface-high items-center justify-center border border-overlay-white-10">
-                  <Text className="text-xxs font-body-bold text-primary">+{othersOverflow}</Text>
+                <View style={styles.gridCell}>
+                  <View style={styles.overflowChip}>
+                    <Text className="text-[9px] font-body-bold text-primary">
+                      +{othersOverflow}
+                    </Text>
+                  </View>
                 </View>
               )}
             </View>
@@ -234,10 +322,10 @@ export const RoomScreen: React.FC = () => {
 
       <View
         className="absolute left-0 right-0 items-center"
-        style={{ bottom: insets.bottom + actionBarBottom }}
+        style={{ bottom: insets.bottom + actionBarBottomOffset }}
         pointerEvents="box-none"
       >
-        <View className="flex-row items-center gap-sm bg-surface-lowest/90 border border-overlay-white-10 rounded-pill p-xs">
+        <View style={styles.actionPill}>
           <Animated.View style={muteBtn.animatedStyle}>
             <Pressable
               onPress={handleToggleMute}
@@ -246,24 +334,14 @@ export const RoomScreen: React.FC = () => {
               accessibilityRole="button"
               accessibilityLabel={isMuted ? 'Unmute microphone' : 'Mute microphone'}
               accessibilityState={{ selected: isMuted }}
-              className={
-                isMuted
-                  ? 'flex-row items-center gap-sm bg-danger rounded-pill py-md px-xl'
-                  : 'flex-row items-center gap-sm bg-primary-container rounded-pill py-md px-xl'
-              }
+              className="flex-row items-center gap-sm bg-danger rounded-pill py-sm px-xl"
             >
               <MaterialIcons
                 name={isMuted ? 'mic-off' : 'mic'}
                 size={ACTION_BAR_ICON_SIZE}
-                color={isMuted ? colors.white : colors.onPrimaryContainer}
+                color={colors.white}
               />
-              <Text
-                className={
-                  isMuted
-                    ? 'text-sm font-body-bold text-white'
-                    : 'text-sm font-body-bold text-primary-on-container'
-                }
-              >
+              <Text className="text-sm font-body-bold text-white">
                 {isMuted ? 'Unmute' : 'Mute'}
               </Text>
             </Pressable>
@@ -277,7 +355,7 @@ export const RoomScreen: React.FC = () => {
               accessibilityRole="button"
               accessibilityLabel={isHandRaised ? 'Lower hand' : 'Raise hand'}
               accessibilityState={{ selected: isHandRaised }}
-              className="flex-row items-center gap-sm bg-overlay-white-10 rounded-pill py-md px-lg"
+              className="flex-row items-center gap-sm bg-primary/20 rounded-pill py-sm px-lg"
             >
               <MaterialIcons name="pan-tool" size={ACTION_BAR_ICON_SIZE} color={colors.primary} />
               <Text className="text-sm font-body-bold text-primary">
@@ -293,9 +371,9 @@ export const RoomScreen: React.FC = () => {
               onPressOut={leaveBtn.onPressOut}
               accessibilityRole="button"
               accessibilityLabel="Leave room quietly"
-              className="flex-row items-center gap-sm border border-overlay-white-30 rounded-pill py-md px-xl"
+              className="flex-row items-center gap-sm border border-overlay-white-20 rounded-pill py-sm px-xl"
             >
-              <MaterialIcons name="logout" size={ACTION_BAR_ICON_SIZE} color={colors.white} />
+              <MaterialIcons name="logout" size={ACTION_BAR_ICON_SIZE} color={colors.danger} />
               <Text className="text-sm font-body-bold text-white">Leave</Text>
             </Pressable>
           </Animated.View>
@@ -304,3 +382,102 @@ export const RoomScreen: React.FC = () => {
     </View>
   );
 };
+
+const styles = StyleSheet.create({
+  topBar: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 10,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: spacing.xxl,
+    paddingBottom: spacing.sm,
+    backgroundColor: 'rgba(7,11,40,0.35)',
+  },
+  sectionGradientLine: {
+    flex: 1,
+    height: StyleSheet.hairlineWidth,
+  },
+  stageGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    rowGap: spacing.md,
+  },
+  speakerCell: {
+    width: '20%',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  speakerRingWrapper: {
+    position: 'relative',
+  },
+  speakerMicBadge: {
+    position: 'absolute',
+    bottom: -2,
+    right: -2,
+    backgroundColor: GREEN,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    borderWidth: 1.5,
+    borderColor: colors.background,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  speakerName: {
+    maxWidth: SPEAKER_AVATAR,
+  },
+  handRaisedRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    rowGap: spacing.lg,
+  },
+  handRaisedCell: {
+    position: 'relative',
+  },
+  handEmoji: {
+    position: 'absolute',
+    right: -2,
+    bottom: -2,
+  },
+  followedRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    rowGap: spacing.md,
+  },
+  othersGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    rowGap: spacing.md,
+  },
+  gridCell: {
+    width: '20%',
+    alignItems: 'center',
+  },
+  otherCell: {
+    opacity: 0.6,
+  },
+  overflowChip: {
+    width: OTHER_AVATAR,
+    height: OTHER_AVATAR,
+    borderRadius: OTHER_AVATAR / 2,
+    backgroundColor: colors.surfaceHigh,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  actionPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: 'rgba(12,17,46,0.9)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 9999,
+    padding: spacing.xs,
+  },
+});

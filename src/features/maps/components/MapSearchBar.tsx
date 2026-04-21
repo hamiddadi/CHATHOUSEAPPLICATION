@@ -1,8 +1,9 @@
 import React from 'react';
-import { View } from 'react-native';
+import { StyleSheet, TextInput, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { Input } from '../../../shared/components/Input';
-import { colors } from '../../../shared/constants/theme';
+
+const BRAND_NAVY = '#1E3A8A';
+const PLACEHOLDER_COLOR = 'rgba(30,58,138,0.55)';
 
 interface MapSearchBarProps {
   value: string;
@@ -10,18 +11,41 @@ interface MapSearchBarProps {
 }
 
 /**
- * Glass search bar anchored at the top of the map canvas.
- * Filtering is handled by the parent (MapsScreen) to keep marker centering logic colocated.
+ * Outlined "Find a friend" pill — navy border, transparent fill, navy ink.
+ * Parent (MapsScreen) owns the filtering to keep marker centering logic colocated.
  */
 export const MapSearchBar: React.FC<MapSearchBarProps> = ({ value, onChangeText }) => (
-  <View className="bg-overlay-white-5 border border-overlay-white-10 rounded-pill">
-    <Input
+  <View style={styles.container}>
+    <MaterialIcons name="search" size={20} color={BRAND_NAVY} />
+    <TextInput
+      style={styles.input}
       value={value}
       onChangeText={onChangeText}
       placeholder="Find a friend..."
-      variant="outlined"
-      size="md"
-      leftAdornment={<MaterialIcons name="search" size={18} color={colors.textMuted} />}
+      placeholderTextColor={PLACEHOLDER_COLOR}
+      accessibilityLabel="Find a friend"
+      returnKeyType="search"
     />
   </View>
 );
+
+const styles = StyleSheet.create({
+  container: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1.5,
+    borderColor: BRAND_NAVY,
+    backgroundColor: 'transparent',
+  },
+  input: {
+    flex: 1,
+    color: BRAND_NAVY,
+    fontSize: 14,
+    fontWeight: '600',
+    paddingVertical: 0,
+  },
+});

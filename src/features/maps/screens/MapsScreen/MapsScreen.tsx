@@ -82,9 +82,6 @@ export const MapsScreen: React.FC = () => {
   }, []);
 
   const handleCloseCard = useCallback(() => setSelected(null), []);
-  const handleWave = useCallback(() => {
-    // Wire to a "wave" presence ping later.
-  }, []);
 
   // Recenter on the user — reuses the live coords already tracked by useCurrentLocation.
   const handleRecenter = useCallback(async () => {
@@ -226,25 +223,16 @@ export const MapsScreen: React.FC = () => {
         </View>
       </View>
 
+      {/* Right-edge floating controls — recenter on top, See/Unsee right below. */}
       <View
         pointerEvents="box-none"
         style={[
-          styles.ghostAnchor,
-          { bottom: insets.bottom + MINI_CARD_BOTTOM_OFFSET + (selected ? 120 : 0) },
-        ]}
-      >
-        <GhostModeToggle />
-      </View>
-
-      {/* My Location button — mirrors GhostModeToggle on the right edge, shifts up with the mini-card. */}
-      <View
-        pointerEvents="box-none"
-        style={[
-          styles.myLocationAnchor,
+          styles.floatingButtons,
           { bottom: insets.bottom + MINI_CARD_BOTTOM_OFFSET + (selected ? 120 : 0) },
         ]}
       >
         <MyLocationButton onPress={handleRecenter} disabled={!coords} />
+        <GhostModeToggle />
       </View>
 
       {selected && (
@@ -264,7 +252,7 @@ export const MapsScreen: React.FC = () => {
       )}
 
       <View style={[styles.headerAnchor, { paddingTop: insets.top }]} pointerEvents="box-none">
-        <MapTopAppBar onWave={handleWave} />
+        <MapTopAppBar />
       </View>
     </View>
   );
@@ -286,13 +274,11 @@ const styles = StyleSheet.create({
     width: '90%',
     maxWidth: 420,
   },
-  ghostAnchor: {
-    position: 'absolute',
-    left: spacing.xxl,
-  },
-  myLocationAnchor: {
+  floatingButtons: {
     position: 'absolute',
     right: spacing.xxl,
+    alignItems: 'center',
+    gap: 10,
   },
   miniCardAnchor: {
     position: 'absolute',
