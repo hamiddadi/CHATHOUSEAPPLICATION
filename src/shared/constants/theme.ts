@@ -145,10 +145,13 @@ export const colors = {
   // Blue-ring overlay (avatar stacks)
   overlayBlue50: 'rgba(77, 163, 255, 0.50)',
 
-  // Hero gradient (landing)
-  gradientStart: '#1a3091',
-  gradientMid: '#4d6dd1',
-  gradientEnd: '#b0c6ff',
+  // Hero gradient (landing). Tuned to match the dark app interior —
+  // deep navy at top fading to a primary-container blue at bottom
+  // right, so the jump Landing → Home feels continuous rather than
+  // switching between two different worlds.
+  gradientStart: '#0c112e',
+  gradientMid: '#1a3091',
+  gradientEnd: '#558dff',
 
   // Semantic aliases used by legacy-style code
   textWhite: palette.white,

@@ -10,12 +10,14 @@ import Animated, {
   withDelay,
   withTiming,
 } from 'react-native-reanimated';
+import { useTranslation } from 'react-i18next';
 import { Avatar } from '../../../../shared/components/Avatar';
 import { useAnimatedPress } from '../../../../shared/hooks/useAnimatedPress';
 import { useOnMount } from '../../../../shared/hooks/useOnMount';
 import { AVATARS_10 } from '../../../../shared/constants/images';
 import { colors, spacing } from '../../../../shared/constants/theme';
 import type { LandingNavProp } from '../../../../core/navigation/types';
+import { useAuthStore } from '../../store/authStore';
 
 /* ============================================================
  * Constants (hoisted — avoids re-creation per render)
@@ -57,31 +59,16 @@ const CTA_SCALE_TO = 0.96;
 const GRADIENT_COLORS = [colors.gradientStart, colors.gradientMid, colors.gradientEnd] as const;
 
 interface FeatureItemData {
-  id: string;
+  id: 'rooms' | 'houses' | 'chat';
   icon: React.ComponentProps<typeof Ionicons>['name'];
-  title: string;
-  desc: string;
 }
 
+// Static config (icon + id) stays here; copy is pulled from i18n at
+// render time so both FR and EN show cleanly on the same screen.
 const FEATURES_DATA: readonly FeatureItemData[] = [
-  {
-    id: 'rooms',
-    icon: 'people',
-    title: 'Rejoignez des rooms live',
-    desc: 'Écoutez et parlez avec des gens du monde entier',
-  },
-  {
-    id: 'houses',
-    icon: 'home',
-    title: 'Créez des Houses',
-    desc: 'Construisez des communautés autour des sujets que vous aimez',
-  },
-  {
-    id: 'chat',
-    icon: 'chatbubbles',
-    title: 'Connectez et discutez',
-    desc: 'Envoyez des messages à vos amis et découvrez de nouvelles personnes',
-  },
+  { id: 'rooms', icon: 'people' },
+  { id: 'houses', icon: 'home' },
+  { id: 'chat', icon: 'chatbubbles' },
 ];
 
 interface CircleConfig {
@@ -123,7 +110,7 @@ const CIRCLE_CONFIGS: readonly CircleConfig[] = [
  * Sub-components (local to this screen, not exported)
  * ========================================================== */
 
-const LandingLogo: React.FC = memo(() => (
+const LandingLogo: React.FC<{ tagline: string }> = memo(({ tagline }) => (
   <View className="items-center" accessibilityRole="header">
     <View
       className="items-center justify-center bg-overlay-white-20"
@@ -133,9 +120,7 @@ const LandingLogo: React.FC = memo(() => (
       <Ionicons name="mic" size={LOGO_ICON_SIZE} color={colors.white} />
     </View>
     <Text className="text-hero font-display text-white tracking-tighter">Chathouse</Text>
-    <Text className="text-md font-body text-overlay-white-75 mt-xs">
-      Drop in audio conversations
-    </Text>
+    <Text className="text-md font-body text-overlay-white-75 mt-xs">{tagline}</Text>
   </View>
 ));
 LandingLogo.displayName = 'LandingLogo';
@@ -164,10 +149,15 @@ const FeatureItem: React.FC<FeatureItemProps> = memo(({ icon, title, desc }) => 
 ));
 FeatureItem.displayName = 'FeatureItem';
 
-const AvatarsPreview: React.FC = memo(() => (
+interface AvatarsPreviewProps {
+  label: string;
+  a11yLabel: string;
+}
+
+const AvatarsPreview: React.FC<AvatarsPreviewProps> = memo(({ label, a11yLabel }) => (
   <View
     accessibilityRole="text"
-    accessibilityLabel="Plus de 2000 utilisateurs en ligne"
+    accessibilityLabel={a11yLabel}
     className="flex-row items-center justify-center"
   >
     {AVATAR_URLS.map((url, i) => (
@@ -179,7 +169,7 @@ const AvatarsPreview: React.FC = memo(() => (
         <Avatar uri={url} size="md" shape="rounded" />
       </View>
     ))}
-    <Text className="text-xs font-body-semibold text-overlay-white-80 ml-sm">+2k online</Text>
+    <Text className="text-xs font-body-semibold text-overlay-white-80 ml-sm">{label}</Text>
   </View>
 ));
 AvatarsPreview.displayName = 'AvatarsPreview';
@@ -187,47 +177,72 @@ AvatarsPreview.displayName = 'AvatarsPreview';
 interface LandingCTAProps {
   onGetStarted: () => void;
   onLogin: () => void;
+  onDevSkip?: () => void;
+  devSkipPending?: boolean;
+  labels: {
+    getStarted: string;
+    getStartedA11y: string;
+    login: string;
+    loginA11y: string;
+    devSkip: string;
+    devSkipA11y: string;
+  };
 }
 
-const LandingCTA: React.FC<LandingCTAProps> = memo(({ onGetStarted, onLogin }) => {
-  const primary = useAnimatedPress({ scaleTo: CTA_SCALE_TO });
-  const secondary = useAnimatedPress({ scaleTo: CTA_SCALE_TO });
+const LandingCTA: React.FC<LandingCTAProps> = memo(
+  ({ onGetStarted, onLogin, onDevSkip, devSkipPending, labels }) => {
+    const primary = useAnimatedPress({ scaleTo: CTA_SCALE_TO });
+    const secondary = useAnimatedPress({ scaleTo: CTA_SCALE_TO });
 
-  return (
-    <View className="gap-sm">
-      <Animated.View style={primary.animatedStyle}>
-        <Pressable
-          onPress={onGetStarted}
-          onPressIn={primary.onPressIn}
-          onPressOut={primary.onPressOut}
-          accessibilityRole="button"
-          accessibilityLabel="Créer un compte"
-          accessibilityHint="Navigue vers l'écran d'inscription"
-          className="flex-row items-center justify-center bg-white rounded-xl gap-sm"
-          style={styles.ctaButton}
-        >
-          <Text className="text-lg font-display text-gradient-start">Get Started</Text>
-          <Ionicons name="arrow-forward" size={CTA_ARROW_SIZE} color={colors.gradientStart} />
-        </Pressable>
-      </Animated.View>
+    return (
+      <View className="gap-sm">
+        <Animated.View style={primary.animatedStyle}>
+          <Pressable
+            onPress={onGetStarted}
+            onPressIn={primary.onPressIn}
+            onPressOut={primary.onPressOut}
+            accessibilityRole="button"
+            accessibilityLabel={labels.getStartedA11y}
+            className="flex-row items-center justify-center bg-white rounded-xl gap-sm"
+            style={styles.ctaButton}
+          >
+            <Text className="text-lg font-display text-gradient-start">{labels.getStarted}</Text>
+            <Ionicons name="arrow-forward" size={CTA_ARROW_SIZE} color={colors.gradientStart} />
+          </Pressable>
+        </Animated.View>
 
-      <Animated.View style={secondary.animatedStyle}>
-        <Pressable
-          onPress={onLogin}
-          onPressIn={secondary.onPressIn}
-          onPressOut={secondary.onPressOut}
-          accessibilityRole="button"
-          accessibilityLabel="Se connecter"
-          accessibilityHint="Navigue vers l'écran de connexion"
-          className="items-center justify-center rounded-xl border-2 border-overlay-white-30"
-          style={styles.ctaButton}
-        >
-          <Text className="text-md font-body-semibold text-white">I already have an account</Text>
-        </Pressable>
-      </Animated.View>
-    </View>
-  );
-});
+        <Animated.View style={secondary.animatedStyle}>
+          <Pressable
+            onPress={onLogin}
+            onPressIn={secondary.onPressIn}
+            onPressOut={secondary.onPressOut}
+            accessibilityRole="button"
+            accessibilityLabel={labels.loginA11y}
+            className="items-center justify-center rounded-xl border-2 border-overlay-white-30"
+            style={styles.ctaButton}
+          >
+            <Text className="text-md font-body-semibold text-white">{labels.login}</Text>
+          </Pressable>
+        </Animated.View>
+
+        {onDevSkip && (
+          <Pressable
+            onPress={onDevSkip}
+            accessibilityRole="button"
+            accessibilityLabel={labels.devSkipA11y}
+            disabled={devSkipPending}
+            className="items-center justify-center"
+            style={styles.devSkipButton}
+          >
+            <Text className="text-xs font-body-medium text-overlay-white-60 underline">
+              {devSkipPending ? '…' : labels.devSkip}
+            </Text>
+          </Pressable>
+        )}
+      </View>
+    );
+  },
+);
 LandingCTA.displayName = 'LandingCTA';
 
 /* ============================================================
@@ -238,9 +253,28 @@ export const LandingScreen: React.FC = () => {
   const navigation = useNavigation<LandingNavProp>();
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
+  const { t } = useTranslation();
 
   const handleGetStarted = useCallback(() => navigation.navigate('Phone'), [navigation]);
   const handleLogin = useCallback(() => navigation.navigate('Phone'), [navigation]);
+
+  const devLogin = useAuthStore(s => s.devLogin);
+  const authStatus = useAuthStore(s => s.status);
+  const handleDevSkip = useCallback(() => {
+    void devLogin().catch(() => undefined);
+  }, [devLogin]);
+
+  const ctaLabels = useMemo(
+    () => ({
+      getStarted: t('auth.landing.cta.getStarted'),
+      getStartedA11y: t('auth.landing.cta.getStartedA11y'),
+      login: t('auth.landing.cta.login'),
+      loginA11y: t('auth.landing.cta.loginA11y'),
+      devSkip: t('auth.landing.cta.devSkip'),
+      devSkipA11y: t('auth.landing.cta.devSkipA11y'),
+    }),
+    [t],
+  );
 
   // Entry shared values
   const logoOpacity = useSharedValue(0);
@@ -317,21 +351,35 @@ export const LandingScreen: React.FC = () => {
       ))}
 
       <Animated.View style={logoStyle}>
-        <LandingLogo />
+        <LandingLogo tagline={t('auth.landing.tagline')} />
       </Animated.View>
 
       <Animated.View style={featuresStyle} className="gap-md">
         {FEATURES_DATA.map(f => (
-          <FeatureItem key={f.id} icon={f.icon} title={f.title} desc={f.desc} />
+          <FeatureItem
+            key={f.id}
+            icon={f.icon}
+            title={t(`auth.landing.features.${f.id}.title`)}
+            desc={t(`auth.landing.features.${f.id}.desc`)}
+          />
         ))}
       </Animated.View>
 
       <Animated.View style={avatarsStyle}>
-        <AvatarsPreview />
+        <AvatarsPreview
+          label={t('auth.landing.onlineSuffix')}
+          a11yLabel={t('auth.landing.onlineA11y')}
+        />
       </Animated.View>
 
       <Animated.View style={ctaStyle}>
-        <LandingCTA onGetStarted={handleGetStarted} onLogin={handleLogin} />
+        <LandingCTA
+          onGetStarted={handleGetStarted}
+          onLogin={handleLogin}
+          onDevSkip={__DEV__ ? handleDevSkip : undefined}
+          devSkipPending={authStatus === 'authenticating'}
+          labels={ctaLabels}
+        />
       </Animated.View>
     </LinearGradient>
   );
@@ -374,5 +422,9 @@ const styles = StyleSheet.create({
   },
   ctaButton: {
     height: CTA_BUTTON_HEIGHT,
+  },
+  devSkipButton: {
+    height: 36,
+    marginTop: spacing.xs,
   },
 });

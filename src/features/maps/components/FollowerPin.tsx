@@ -1,119 +1,165 @@
-import React, { memo } from 'react';
+import React, { memo, useEffect } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import { MaterialIcons } from '@expo/vector-icons';
-import Animated from 'react-native-reanimated';
-import { Avatar } from '../../../shared/components/Avatar';
-import { useAnimatedPress } from '../../../shared/hooks/useAnimatedPress';
-import { colors } from '../../../shared/constants/theme';
+import { Image } from 'expo-image';
+import Animated, {
+  Easing,
+  cancelAnimation,
+  useAnimatedStyle,
+  useSharedValue,
+  withRepeat,
+  withTiming,
+} from 'react-native-reanimated';
+import { DEFAULTS } from '../../../shared/constants/images';
 import type { FollowerOnMap } from '../../../shared/types/domain';
 
-const PIN_SIZE = 44;
-const PIN_RADIUS = 12;
-const BADGE_ICON_SIZE = 12;
-const RECENTLY_ACTIVE_CUTOFF_MIN = 5;
+const CONTAINER_WIDTH = 70;
+const CONTAINER_HEIGHT = 80;
+const AVATAR_SIZE = 44;
+const RING_SIZE = 54;
+const PULSE_DURATION_MS = 800;
+const PULSE_SCALE_PEAK = 1.4;
+const PULSE_OPACITY_TROUGH = 0.2;
+const PULSE_OPACITY_REST = 0.8;
+
+const GREEN = '#22C55E';
+const WHITE = '#FFFFFF';
+const USERNAME_BG = 'rgba(0,0,0,0.55)';
 
 interface FollowerPinProps {
   follower: FollowerOnMap;
 }
 
 /**
- * Avatar marker with 3 visual states matching the HTML spec:
- * - Live (in a live room):   accent ring + pulse
- * - In a room (not hosting): blue ring + mic badge
- * - Recently active:         muted ring + grayscale + "Xm ago" label
+ * Avatar marker pinned on the map.
+ * - In a live room → animated green pulse ring + green-bordered avatar + LIVE badge
+ * - Otherwise      → white-bordered avatar only
+ * Username badge sits under every marker for at-a-glance identification.
  */
 export const FollowerPin: React.FC<FollowerPinProps> = memo(({ follower }) => {
-  const isLive = follower.presence === 'online' && !!follower.liveRoomId;
-  const isOnline = follower.presence === 'online';
-  const isRecentlyActive =
-    follower.presence === 'recently_active' ||
-    follower.lastSeenMinutesAgo > RECENTLY_ACTIVE_CUTOFF_MIN;
+  const isInRoom = follower.liveRoomId !== null;
 
-  const pulse = useAnimatedPress({ pulse: isLive });
+  const scale = useSharedValue(1);
+  const opacity = useSharedValue(PULSE_OPACITY_REST);
 
-  const ringClass = isLive
-    ? 'bg-accent'
-    : isOnline && follower.liveRoomId
-      ? 'bg-primary'
-      : 'bg-outline-variant';
+  useEffect(() => {
+    if (!isInRoom) {
+      cancelAnimation(scale);
+      cancelAnimation(opacity);
+      scale.value = 1;
+      opacity.value = PULSE_OPACITY_REST;
+      return;
+    }
+    const easing = Easing.inOut(Easing.ease);
+    scale.value = withRepeat(
+      withTiming(PULSE_SCALE_PEAK, { duration: PULSE_DURATION_MS, easing }),
+      -1,
+      true,
+    );
+    opacity.value = withRepeat(
+      withTiming(PULSE_OPACITY_TROUGH, { duration: PULSE_DURATION_MS, easing }),
+      -1,
+      true,
+    );
+    return () => {
+      cancelAnimation(scale);
+      cancelAnimation(opacity);
+    };
+  }, [isInRoom, opacity, scale]);
+
+  const ringStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }],
+    opacity: opacity.value,
+  }));
 
   return (
-    <View className={`items-center ${isRecentlyActive ? 'opacity-60' : ''}`}>
-      <Animated.View style={pulse.animatedStyle}>
-        <View className={`p-0.5 ${ringClass}`} style={styles.ring}>
-          <View style={[styles.avatarWrap, isRecentlyActive && styles.desaturated]}>
-            <Avatar
-              uri={follower.avatarUrl ?? undefined}
-              name={follower.displayName}
-              sizeValue={PIN_SIZE - 4}
-              shape="rounded"
-            />
-            {isRecentlyActive && <View style={styles.grayscaleOverlay} pointerEvents="none" />}
-          </View>
-        </View>
+    <View style={styles.container}>
+      {isInRoom && <Animated.View pointerEvents="none" style={[styles.pulseRing, ringStyle]} />}
 
-        {isLive && (
-          <View className="absolute -top-2 -right-2 bg-accent px-xs py-[1px] rounded-pill">
-            <Text className="text-[9px] font-display text-accent-on-container uppercase tracking-widest">
-              Live
-            </Text>
-          </View>
-        )}
+      <View style={[styles.avatarWrapper, isInRoom && styles.avatarWrapperInRoom]}>
+        <Image
+          source={{ uri: follower.avatarUrl ?? DEFAULTS.avatar }}
+          style={styles.avatar}
+          contentFit="cover"
+          transition={200}
+          cachePolicy="memory-disk"
+        />
+      </View>
 
-        {!isLive && follower.liveRoomId && (
-          <View
-            className="absolute -bottom-2 -right-2 bg-primary rounded-pill items-center justify-center border-2 border-background"
-            style={styles.micBadge}
-          >
-            <MaterialIcons name="mic" size={BADGE_ICON_SIZE} color={colors.onPrimaryContainer} />
-          </View>
-        )}
-
-        {isOnline && !follower.liveRoomId && (
-          <View
-            className="absolute -bottom-1 -right-1 bg-accent rounded-pill border-2 border-background"
-            style={styles.onlineDot}
-          />
-        )}
-      </Animated.View>
-
-      {isRecentlyActive && follower.lastSeenMinutesAgo > 0 && (
-        <View className="mt-xxs bg-surface-low px-sm py-[1px] rounded-pill">
-          <Text className="text-[9px] font-body-bold text-ink-muted">
-            {follower.lastSeenMinutesAgo}m ago
-          </Text>
+      {isInRoom && (
+        <View style={styles.liveBadge}>
+          <Text style={styles.liveText}>LIVE</Text>
         </View>
       )}
+
+      <View style={styles.usernameBadge}>
+        <Text style={styles.usernameText} numberOfLines={1}>
+          {follower.username}
+        </Text>
+      </View>
     </View>
   );
 });
 FollowerPin.displayName = 'FollowerPin';
 
 const styles = StyleSheet.create({
-  ring: {
-    width: PIN_SIZE,
-    height: PIN_SIZE,
-    borderRadius: PIN_RADIUS,
+  container: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: CONTAINER_WIDTH,
+    height: CONTAINER_HEIGHT,
   },
-  avatarWrap: {
-    width: PIN_SIZE - 4,
-    height: PIN_SIZE - 4,
-    borderRadius: PIN_RADIUS - 2,
+  pulseRing: {
+    position: 'absolute',
+    top: (CONTAINER_HEIGHT - RING_SIZE) / 2 - 8,
+    width: RING_SIZE,
+    height: RING_SIZE,
+    borderRadius: RING_SIZE / 2,
+    backgroundColor: GREEN,
+  },
+  avatarWrapper: {
+    width: AVATAR_SIZE,
+    height: AVATAR_SIZE,
+    borderRadius: AVATAR_SIZE / 2,
+    borderWidth: 2,
+    borderColor: WHITE,
+    backgroundColor: '#E5E7EB',
     overflow: 'hidden',
   },
-  micBadge: {
-    width: 24,
-    height: 24,
+  avatarWrapperInRoom: {
+    borderWidth: 2.5,
+    borderColor: GREEN,
   },
-  onlineDot: {
-    width: 12,
-    height: 12,
+  avatar: {
+    width: '100%',
+    height: '100%',
   },
-  desaturated: {
-    opacity: 0.7,
+  liveBadge: {
+    position: 'absolute',
+    top: 6,
+    right: 4,
+    backgroundColor: GREEN,
+    borderRadius: 6,
+    paddingHorizontal: 4,
+    paddingVertical: 1,
   },
-  grayscaleOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(12, 17, 46, 0.35)',
+  liveText: {
+    color: WHITE,
+    fontSize: 8,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  usernameBadge: {
+    marginTop: 4,
+    backgroundColor: USERNAME_BG,
+    borderRadius: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    maxWidth: CONTAINER_WIDTH,
+  },
+  usernameText: {
+    color: WHITE,
+    fontSize: 9,
+    fontWeight: '600',
+    textAlign: 'center',
   },
 });

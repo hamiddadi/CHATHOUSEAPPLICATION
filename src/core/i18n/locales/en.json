@@ -1,0 +1,293 @@
+{
+  "common": {
+    "retry": "Retry",
+    "cancel": "Cancel",
+    "send": "Send",
+    "close": "Close",
+    "continue": "Continue",
+    "loading": "Loading…",
+    "back": "Back"
+  },
+  "errorBoundary": {
+    "title": "Something went wrong",
+    "fallbackMessage": "An unexpected error occurred.",
+    "retryA11yLabel": "Retry",
+    "retryA11yHint": "Reloads the screen that errored"
+  },
+  "offline": {
+    "banner": "Offline — messages will be sent once the connection is back."
+  },
+  "socket": {
+    "reconnecting": "Reconnecting…",
+    "disconnected": "Connection lost — reconnecting automatically."
+  },
+  "chat": {
+    "dateToday": "Today",
+    "dateYesterday": "Yesterday",
+    "inputPlaceholder": "Type a message…",
+    "callA11y": "Call",
+    "moreA11y": "More options",
+    "backA11y": "Back",
+    "sendA11y": "Send message",
+    "emojiA11y": "Insert emoji",
+    "attachA11y": "Attach file",
+    "micA11y": "Record voice message"
+  },
+  "messages": {
+    "title": "Messages",
+    "newChatA11y": "Start new conversation",
+    "empty": "No conversations yet",
+    "couldNotLoad": "Couldn't load messages",
+    "pullToRetry": "Pull to retry."
+  },
+  "settings": {
+    "title": "Settings",
+    "editProfile": "Edit profile",
+    "wave": "Wave",
+    "moreA11y": "More options",
+    "createHouse": "Create House",
+    "memberOf": "Member of",
+    "viewAll": "View all",
+    "account": "Account",
+    "signOut": "Sign out",
+    "cancel": "Cancel"
+  },
+  "room": {
+    "stage": "STAGE",
+    "handRaised": "Hand raised",
+    "followedBy": "Followed by speakers",
+    "others": "Others in room",
+    "rec": "REC",
+    "host": "HOST",
+    "speaker": "SPEAKER",
+    "mute": "Mute",
+    "unmute": "Unmute",
+    "raise": "Raise",
+    "lower": "Lower",
+    "leave": "Leave",
+    "waveA11y": "Send a wave",
+    "unavailable": "Room unavailable",
+    "mayHaveEnded": "This room may have ended.",
+    "audioBanner": "Audio coming soon — chat, hand-raise & reactions are live."
+  },
+  "feed": {
+    "liveNow": "Live Now",
+    "wave": "Wave 👋",
+    "join": "Join",
+    "speakers": "speakers",
+    "listeners": "listeners",
+    "startNewA11y": "Start a new room",
+    "startNewHint": "Opens the room creation modal",
+    "couldNotLoad": "Couldn't load rooms",
+    "checkConnection": "Check your connection and try again."
+  },
+  "errorMessages": {
+    "network": "We couldn't reach the server. Check your connection.",
+    "timeout": "The request took too long. Please try again.",
+    "auth": "Your session expired. Please sign in again.",
+    "forbidden": "You don't have access to this resource.",
+    "notFound": "Resource not found.",
+    "validation": "Some fields need attention.",
+    "server": "Something went wrong on our end.",
+    "unknown": "Unexpected error."
+  },
+  "auth": {
+    "landing": {
+      "tagline": "Drop in audio conversations",
+      "features": {
+        "rooms": {
+          "title": "Join live rooms",
+          "desc": "Listen and speak with people around the world"
+        },
+        "houses": {
+          "title": "Create Houses",
+          "desc": "Build communities around the topics you love"
+        },
+        "chat": {
+          "title": "Connect & chat",
+          "desc": "Message friends and discover new people"
+        }
+      },
+      "onlineSuffix": "+2k online",
+      "onlineA11y": "Over 2000 people online",
+      "cta": {
+        "getStarted": "Get started",
+        "getStartedA11y": "Create an account",
+        "login": "I already have an account",
+        "loginA11y": "Sign in",
+        "devSkip": "Skip auth (dev)",
+        "devSkipA11y": "Sign in as devuser — development only"
+      }
+    },
+    "phone": {
+      "title": "Enter your number",
+      "placeholder": "+1 415 555 1234",
+      "submit": "Send code",
+      "errors": {
+        "required": "Phone number is required.",
+        "invalid": "Invalid number. Expected format: +14155551234."
+      }
+    },
+    "otp": {
+      "title": "Enter the code you received",
+      "placeholder": "123456",
+      "submit": "Verify",
+      "resend": "Resend code",
+      "errors": {
+        "required": "Code is required.",
+        "invalid": "Invalid code. 6 digits expected."
+      }
+    },
+    "username": {
+      "title": "Pick a username",
+      "placeholder": "jane_doe",
+      "submit": "Continue",
+      "errors": {
+        "required": "Username is required.",
+        "tooShort": "At least 3 characters.",
+        "tooLong": "Max 24 characters.",
+        "format": "Letters, digits and _ only."
+      }
+    }
+  },
+  "explore": {
+    "title": "Explore",
+    "searchPlaceholder": "Search rooms, clubs, people",
+    "trendingRooms": "Trending rooms",
+    "popularClubs": "Popular clubs",
+    "peopleToFollow": "People to follow",
+    "emptyRooms": "No live rooms right now.",
+    "emptyClubs": "No clubs yet.",
+    "emptyUsers": "No suggestions yet.",
+    "searchResults": "Results",
+    "searchEmpty": "Nothing matches \"{{q}}\"."
+  },
+  "events": {
+    "title": "Events",
+    "tabs": {
+      "upcoming": "Upcoming",
+      "mine": "Mine"
+    },
+    "empty": "No upcoming events.",
+    "emptyMine": "You haven't RSVP'd to anything yet.",
+    "rsvp": "Going",
+    "notRsvp": "RSVP",
+    "hostBy": "by {{handle}}",
+    "scheduledIn": "Starts in {{label}}",
+    "startsNow": "Starting now"
+  },
+  "profile": {
+    "myHouses": "My Houses",
+    "recentRooms": "Recent rooms",
+    "emptyMyHouses": "You haven't joined any Houses yet.",
+    "emptyRecentRooms": "You haven't hosted any rooms yet.",
+    "seeAll": "See all",
+    "wave": "Wave",
+    "waveSent": "Wave sent 🌊",
+    "waveRateLimited": "Already waved recently — try again later.",
+    "more": "More",
+    "block": "Block user",
+    "unblock": "Unblock",
+    "report": "Report user",
+    "blockConfirmTitle": "Block {{handle}}?",
+    "blockConfirmBody": "They won't see your profile and you won't see theirs.",
+    "blockConfirm": "Block",
+    "reportTitle": "Report {{handle}}",
+    "reportReason": "Why are you reporting this profile?",
+    "reasons": {
+      "spam": "Spam",
+      "harassment": "Harassment",
+      "fake_profile": "Fake profile",
+      "other": "Other"
+    },
+    "reportDetailsPlaceholder": "Add details (optional)",
+    "reportSubmit": "Submit report",
+    "reportThanks": "Thanks — our team will review it.",
+    "cancel": "Cancel"
+  },
+  "createRoom": {
+    "title": "Start a Room",
+    "topicLabel": "Topic",
+    "topicPlaceholder": "What do you want to talk about?",
+    "descriptionLabel": "Description (optional)",
+    "descriptionPlaceholder": "Give people a sense of what to expect…",
+    "visibilityLabel": "Visibility",
+    "scheduleLabel": "Schedule for later",
+    "scheduleHint": "Pick a date and time to announce your room",
+    "topicsLabel": "Topics",
+    "topicsHint": "Pick up to 5 tags — they help the right people find your room.",
+    "coHostsLabel": "Co-hosts",
+    "coHostsHint": "Invite up to 5 people to co-host.",
+    "coHostsSearchPlaceholder": "Search by username",
+    "startRoom": "Start Room",
+    "closeA11y": "Close without starting"
+  },
+  "notifications": {
+    "title": "Notifications",
+    "empty": "You're all caught up.",
+    "markAllRead": "Mark all as read",
+    "unread": "{{count}} unread",
+    "delete": "Delete",
+    "tabs": {
+      "all": "All",
+      "rooms": "Rooms",
+      "social": "Social",
+      "clubs": "Clubs"
+    }
+  },
+  "onboarding": {
+    "welcome": {
+      "skip": "Skip",
+      "next": "Next",
+      "start": "Get started",
+      "slides": {
+        "welcome": {
+          "title": "Welcome to Chathouse",
+          "body": "A cozy place for live audio conversations with people you care about."
+        },
+        "rooms": {
+          "title": "Drop in on live rooms",
+          "body": "Join rooms around topics you love, or start one with a single tap."
+        },
+        "clubs": {
+          "title": "Find your Houses",
+          "body": "Clubs group people by interest — from crypto to music to design."
+        },
+        "topics": {
+          "title": "Pick what moves you",
+          "body": "Tell us what you're into; we'll surface rooms that match."
+        }
+      }
+    },
+    "setupProfile": {
+      "title": "Tell us about you",
+      "subtitle": "A short intro helps people recognise you in rooms.",
+      "displayNameLabel": "Display name",
+      "displayNamePlaceholder": "Casey Echo",
+      "bioLabel": "Bio",
+      "bioPlaceholder": "Builder by day, storyteller by night.",
+      "continue": "Continue",
+      "skip": "Skip",
+      "errors": {
+        "displayNameTooLong": "Max 60 characters.",
+        "bioTooLong": "Max 280 characters."
+      }
+    },
+    "interests": {
+      "title": "Pick a few interests",
+      "subtitle": "We'll use these to surface rooms you'll love.",
+      "minHint": "Pick at least one.",
+      "maxHint": "Up to 10.",
+      "finish": "Finish",
+      "categories": {
+        "tech": "Tech",
+        "design": "Design",
+        "crypto": "Crypto",
+        "ai": "AI",
+        "music": "Music",
+        "business": "Business",
+        "health": "Health"
+      }
+    }
+  }
+}

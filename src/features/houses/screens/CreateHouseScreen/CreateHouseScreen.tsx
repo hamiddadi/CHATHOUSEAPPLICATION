@@ -1,6 +1,7 @@
 import React, { memo, useCallback, useState } from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { Alert, Image, Pressable, ScrollView, Text, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -86,22 +87,44 @@ export const CreateHouseScreen: React.FC = () => {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [privacy, setPrivacy] = useState<Privacy>('open');
+  const [iconUri, setIconUri] = useState<string | null>(null);
 
   const createHouse = useCreateHouse();
 
   const handleClose = useCallback(() => navigation.goBack(), [navigation]);
+  const handlePickIcon = useCallback(async () => {
+    // Request gallery permission lazily — Expo prompts the user the first
+    // time the picker is opened. The descriptions in app.json drive the
+    // text shown in the system dialog.
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (perm.status !== 'granted') {
+      Alert.alert('Accès refusé', "Autorisez l'accès à vos photos pour ajouter une icône.");
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      quality: 0.8,
+      allowsEditing: true,
+      aspect: [1, 1],
+    });
+    if (result.canceled) return;
+    const uri = result.assets[0]?.uri;
+    if (uri) setIconUri(uri);
+  }, []);
+
   const handleCreate = useCallback(async () => {
     try {
       await createHouse.mutateAsync({
         name,
         description,
         privacy,
+        iconUrl: iconUri,
       });
       navigation.goBack();
-    } catch {
-      // Surface via toast later.
+    } catch (e) {
+      Alert.alert('Erreur', e instanceof Error ? e.message : 'Échec de la création');
     }
-  }, [createHouse, description, name, navigation, privacy]);
+  }, [createHouse, description, iconUri, name, navigation, privacy]);
 
   const canCreate = name.trim().length >= 2 && !createHouse.isPending;
 
@@ -131,14 +154,25 @@ export const CreateHouseScreen: React.FC = () => {
       >
         <View className="items-center py-lg">
           <Pressable
+            onPress={handlePickIcon}
             accessibilityRole="button"
-            accessibilityLabel="Upload house icon"
-            className="items-center justify-center bg-overlay-white-10 border-2 border-dashed border-overlay-white-30 rounded-xxl"
+            accessibilityLabel={iconUri ? 'Replace house icon' : 'Upload house icon'}
+            className="items-center justify-center bg-overlay-white-10 border-2 border-dashed border-overlay-white-30 rounded-xxl overflow-hidden"
             style={{ width: ICON_UPLOAD_SIZE, height: ICON_UPLOAD_SIZE }}
           >
-            <MaterialIcons name="add-a-photo" size={28} color={colors.text} />
+            {iconUri ? (
+              <Image
+                source={{ uri: iconUri }}
+                style={{ width: ICON_UPLOAD_SIZE, height: ICON_UPLOAD_SIZE }}
+                resizeMode="cover"
+              />
+            ) : (
+              <MaterialIcons name="add-a-photo" size={28} color={colors.text} />
+            )}
           </Pressable>
-          <Text className="text-xs font-body text-ink-muted mt-sm">House icon</Text>
+          <Text className="text-xs font-body text-ink-muted mt-sm">
+            {iconUri ? 'Tap to replace' : 'House icon (optional)'}
+          </Text>
         </View>
 
         <Input

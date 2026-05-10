@@ -1,5 +1,6 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Alert,
   FlatList,
   Keyboard,
   KeyboardAvoidingView,
@@ -16,7 +17,9 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useTranslation } from 'react-i18next';
 import { Loader } from '../../../../shared/components/Loader';
+import { useApiErrorToast } from '../../../../shared/hooks/useApiErrorToast';
 import { colors, spacing } from '../../../../shared/constants/theme';
 import { DEFAULTS } from '../../../../shared/constants/images';
 import type { MessageStackParamList } from '../../../../core/navigation/types';
@@ -58,13 +61,25 @@ const sameDay = (a: string, b: string): boolean => {
   );
 };
 
-const dateLabel = (iso: string): string => {
+// Date label is locale-aware: i18n translates "Today"/"Yesterday", and
+// Intl.DateTimeFormat gets the active app language so formatting matches
+// the rest of the UI (not the device locale, which can differ).
+const formatDateLabel = (
+  iso: string,
+  language: string,
+  todayLabel: string,
+  yesterdayLabel: string,
+): string => {
   const today = new Date();
   const d = new Date(iso);
-  if (sameDay(iso, today.toISOString())) return 'Today';
+  if (sameDay(iso, today.toISOString())) return todayLabel;
   const yesterday = new Date(today.getTime() - 86400000);
-  if (sameDay(iso, yesterday.toISOString())) return 'Yesterday';
-  return d.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
+  if (sameDay(iso, yesterday.toISOString())) return yesterdayLabel;
+  return new Intl.DateTimeFormat(language, {
+    weekday: 'long',
+    month: 'short',
+    day: 'numeric',
+  }).format(d);
 };
 
 interface BubbleProps {
@@ -161,6 +176,8 @@ export const ChatDetailScreen: React.FC = () => {
   const listRef = useRef<FlatList<ChatListItem>>(null);
   const [draft, setDraft] = useState('');
   const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const reportApiError = useApiErrorToast();
+  const { t, i18n } = useTranslation();
 
   const scrollToEnd = useCallback(() => {
     requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
@@ -191,25 +208,31 @@ export const ChatDetailScreen: React.FC = () => {
       });
       setDraft('');
       scrollToEnd();
-    } catch {
-      // Handle via toast later.
+    } catch (err) {
+      reportApiError(err);
     }
-  }, [draft, route.params.conversationId, scrollToEnd, sendMessage]);
+  }, [draft, reportApiError, route.params.conversationId, scrollToEnd, sendMessage]);
 
-  const handleCall = useCallback(() => {
-    // Wire to call feature later.
+  // Features below are not yet implemented end-to-end (no voice infra,
+  // no attachment upload pipeline). Rather than no-op handlers — which
+  // make the buttons feel broken — we surface a single "Coming soon"
+  // alert so the user gets immediate feedback. Replace each handler when
+  // the underlying feature ships.
+  const showComingSoon = useCallback((label: string) => {
+    Alert.alert(label, 'Cette fonctionnalité arrive bientôt.');
   }, []);
-  const handleMore = useCallback(() => {
-    // Wire to chat options sheet later.
-  }, []);
-  const handleMicInput = useCallback(() => {
-    // Wire to voice-message capture later.
-  }, []);
-  const handleAttach = useCallback(() => {
-    // Wire to attachment picker later.
-  }, []);
+
+  const handleCall = useCallback(() => showComingSoon('Appel vocal'), [showComingSoon]);
+  const handleMore = useCallback(
+    () => showComingSoon('Options de la conversation'),
+    [showComingSoon],
+  );
+  const handleMicInput = useCallback(() => showComingSoon('Message vocal'), [showComingSoon]);
+  const handleAttach = useCallback(() => showComingSoon('Pièce jointe'), [showComingSoon]);
   const handleEmoji = useCallback(() => {
-    // Wire to emoji picker later.
+    // Quick-insert: append a smiley to the draft. Real emoji picker is a
+    // separate native module; this stop-gap keeps the button useful.
+    setDraft(d => `${d}${d.length > 0 && !d.endsWith(' ') ? ' ' : ''}🙂`);
   }, []);
 
   const other: UserSummary | undefined = conversation?.participants.find(
@@ -219,10 +242,16 @@ export const ChatDetailScreen: React.FC = () => {
 
   const items = useMemo(() => buildChatItems(messages ?? []), [messages]);
 
+  const todayLabel = t('chat.dateToday');
+  const yesterdayLabel = t('chat.dateYesterday');
+  const language = i18n.language;
+
   const renderItem = useCallback(
     ({ item }: { item: ChatListItem }) => {
       if (item.kind === 'date' && item.date) {
-        return <DateSeparator label={dateLabel(item.date)} />;
+        return (
+          <DateSeparator label={formatDateLabel(item.date, language, todayLabel, yesterdayLabel)} />
+        );
       }
       if (item.message) {
         return (
@@ -235,7 +264,7 @@ export const ChatDetailScreen: React.FC = () => {
       }
       return null;
     },
-    [otherAvatar],
+    [language, otherAvatar, todayLabel, yesterdayLabel],
   );
 
   const keyExtractor = useCallback((item: ChatListItem) => item.id, []);
@@ -254,7 +283,7 @@ export const ChatDetailScreen: React.FC = () => {
           <Pressable
             onPress={handleBack}
             accessibilityRole="button"
-            accessibilityLabel="Back"
+            accessibilityLabel={t('chat.backA11y')}
             hitSlop={8}
             className="w-10 h-10 rounded-pill items-center justify-center active:bg-overlay-white-5"
           >
@@ -283,7 +312,7 @@ export const ChatDetailScreen: React.FC = () => {
           <Pressable
             onPress={handleCall}
             accessibilityRole="button"
-            accessibilityLabel="Call"
+            accessibilityLabel={t('chat.callA11y')}
             hitSlop={8}
             className="p-sm rounded-pill active:bg-overlay-white-5"
           >
@@ -292,7 +321,7 @@ export const ChatDetailScreen: React.FC = () => {
           <Pressable
             onPress={handleMore}
             accessibilityRole="button"
-            accessibilityLabel="Conversation options"
+            accessibilityLabel={t('chat.moreA11y')}
             hitSlop={8}
             className="p-sm rounded-pill active:bg-overlay-white-5"
           >
@@ -328,7 +357,7 @@ export const ChatDetailScreen: React.FC = () => {
           <Pressable
             onPress={handleEmoji}
             accessibilityRole="button"
-            accessibilityLabel="Insert emoji"
+            accessibilityLabel={t('chat.emojiA11y')}
             hitSlop={8}
           >
             <MaterialIcons
@@ -339,7 +368,7 @@ export const ChatDetailScreen: React.FC = () => {
           </Pressable>
           <TextInput
             style={styles.input}
-            placeholder="Type a message..."
+            placeholder={t('chat.inputPlaceholder')}
             placeholderTextColor={'rgba(194,198,215,0.5)'}
             value={draft}
             onChangeText={setDraft}
@@ -349,7 +378,7 @@ export const ChatDetailScreen: React.FC = () => {
           <Pressable
             onPress={handleAttach}
             accessibilityRole="button"
-            accessibilityLabel="Attach file"
+            accessibilityLabel={t('chat.attachA11y')}
             hitSlop={8}
           >
             <MaterialIcons name="attach-file" size={INPUT_ICON_SIZE} color={colors.textMuted} />
@@ -359,7 +388,7 @@ export const ChatDetailScreen: React.FC = () => {
           <Pressable
             onPress={handleSend}
             accessibilityRole="button"
-            accessibilityLabel="Send message"
+            accessibilityLabel={t('chat.sendA11y')}
             disabled={!canSend}
             className="rounded-pill overflow-hidden active:opacity-90"
           >
@@ -376,7 +405,7 @@ export const ChatDetailScreen: React.FC = () => {
           <Pressable
             onPress={handleMicInput}
             accessibilityRole="button"
-            accessibilityLabel="Record voice message"
+            accessibilityLabel={t('chat.micA11y')}
             style={styles.micBtn}
           >
             <MaterialIcons name="mic" size={INPUT_ICON_SIZE} color={colors.textMuted} />

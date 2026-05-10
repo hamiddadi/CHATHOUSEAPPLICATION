@@ -1,0 +1,1 @@
+export { SetupProfileScreen } from './SetupProfileScreen';

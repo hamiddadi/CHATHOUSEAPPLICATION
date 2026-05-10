@@ -1,5 +1,6 @@
 import * as SecureStore from 'expo-secure-store';
 import { create } from 'zustand';
+import { apiClient } from '../../../shared/services/api/apiClient';
 
 const KEY = 'chathouse.ghostMode.v1';
 
@@ -30,9 +31,17 @@ export const useGhostModeStore = create<GhostModeState>((set, get) => ({
   },
 
   setGhost: async next => {
+    // Persist optimistically — the SecureStore value is the source of truth
+    // when the user opens the app offline. Backend sync is best-effort.
     await SecureStore.setItemAsync(KEY, next ? '1' : '0');
     set({ isGhost: next });
-    // TODO: call apiClient.post('/me/presence/ghost', { isGhost: next }) when backend ships.
+    try {
+      await apiClient.patch('/users/me/visibility', { isVisible: !next });
+    } catch {
+      // Silent: local state already reflects the user's choice; the sync will
+      // be retried on the next toggle. The socket handler broadcasts
+      // `maps:user-offline` on Ghost activation regardless.
+    }
   },
 
   toggle: async () => {

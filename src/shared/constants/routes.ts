@@ -4,6 +4,7 @@
  */
 
 export const AuthRoutes = {
+  WelcomeSlides: 'WelcomeSlides',
   Landing: 'Landing',
   Phone: 'Phone',
   Otp: 'Otp',
@@ -33,6 +34,9 @@ export const RoomRoutes = {
   CreateHouse: 'CreateHouse',
   HouseInvitation: 'HouseInvitation',
   InviteMember: 'InviteMember',
+  Explore: 'Explore',
+  Events: 'Events',
+  Notifications: 'Notifications',
 } as const;
 
 export const MessageRoutes = {

@@ -1,5 +1,5 @@
 import React, { useCallback } from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, Share, Text, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -27,6 +27,27 @@ export const HouseDetailScreen: React.FC = () => {
     [navigation, route.params.houseId],
   );
 
+  const handleOptions = useCallback(() => {
+    const shareUrl = `https://app.chathouse.com/h/${route.params.houseId}`;
+    Alert.alert('Options de la house', undefined, [
+      {
+        text: 'Partager la house',
+        onPress: () => {
+          void Share.share({
+            title: 'Chathouse',
+            message: `Découvre cette house sur Chathouse — ${shareUrl}`,
+            url: shareUrl,
+          }).catch(() => undefined);
+        },
+      },
+      {
+        text: 'Inviter des membres',
+        onPress: handleInvite,
+      },
+      { text: 'Annuler', style: 'cancel' },
+    ]);
+  }, [handleInvite, route.params.houseId]);
+
   if (isLoading) return <Loader fullscreen accessibilityLabel="Loading house" />;
   if (isError || !house) {
     return <EmptyState title="House unavailable" description="This house may have been deleted." />;
@@ -43,7 +64,12 @@ export const HouseDetailScreen: React.FC = () => {
         >
           <MaterialIcons name="arrow-back" size={24} color={colors.text} />
         </Pressable>
-        <Pressable accessibilityRole="button" accessibilityLabel="House options" hitSlop={8}>
+        <Pressable
+          onPress={handleOptions}
+          accessibilityRole="button"
+          accessibilityLabel="House options"
+          hitSlop={8}
+        >
           <MaterialIcons name="more-vert" size={24} color={colors.text} />
         </Pressable>
       </View>

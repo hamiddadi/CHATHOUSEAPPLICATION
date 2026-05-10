@@ -94,6 +94,9 @@ module.exports = {
       files: ['**/*.test.ts', '**/*.test.tsx', '**/__tests__/**'],
       rules: {
         '@typescript-eslint/no-explicit-any': 'off',
+        '@typescript-eslint/consistent-type-imports': 'off',
+        '@typescript-eslint/no-non-null-assertion': 'off',
+        'import/no-named-as-default-member': 'off',
         'react-native/no-inline-styles': 'off',
       },
     },
@@ -102,6 +105,13 @@ module.exports = {
       files: ['**/*.config.js', '**/*.config.ts', '**/mocks/**'],
       rules: {
         '@typescript-eslint/no-explicit-any': 'off',
+        'no-console': 'off',
+      },
+    },
+    {
+      // CLI scripts — console output is the primary user interface.
+      files: ['**/scripts/**'],
+      rules: {
         'no-console': 'off',
       },
     },

@@ -25,7 +25,7 @@ export type UserSummary = Pick<User, 'id' | 'username' | 'displayName' | 'avatar
 /* ============================================================
  * Room (audio)
  * ========================================================== */
-export type RoomRole = 'host' | 'speaker' | 'listener';
+export type RoomRole = 'host' | 'moderator' | 'speaker' | 'listener';
 export type RoomAudioState = 'speaking' | 'muted' | 'idle';
 export type RoomVisibility = 'public' | 'social' | 'closed';
 export type RoomCategory = 'tech' | 'design' | 'crypto' | 'ai' | 'music' | 'business' | 'health';
@@ -52,6 +52,8 @@ export interface Room {
   listenersCount: number;
   isLive: boolean;
   isRecording: boolean;
+  chatEnabled: boolean;
+  chatVisibility: 'ALL' | 'MODS_ONLY';
   startedAt: string;
   scheduledFor: string | null;
 }
@@ -123,7 +125,10 @@ export type NotificationKind =
   | 'house_invite'
   | 'room_starting'
   | 'mention'
-  | 'wave';
+  | 'wave'
+  | 'hand_accepted'
+  | 'rsvp_reminder'
+  | 'new_message';
 
 export interface AppNotification {
   id: string;

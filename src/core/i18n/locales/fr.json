@@ -1,0 +1,293 @@
+{
+  "common": {
+    "retry": "Réessayer",
+    "cancel": "Annuler",
+    "send": "Envoyer",
+    "close": "Fermer",
+    "continue": "Continuer",
+    "loading": "Chargement…",
+    "back": "Retour"
+  },
+  "errorBoundary": {
+    "title": "Quelque chose s'est mal passé",
+    "fallbackMessage": "Une erreur inattendue est survenue.",
+    "retryA11yLabel": "Réessayer",
+    "retryA11yHint": "Tente de recharger l'écran en erreur"
+  },
+  "offline": {
+    "banner": "Hors ligne — les messages seront envoyés une fois la connexion rétablie."
+  },
+  "socket": {
+    "reconnecting": "Reconnexion…",
+    "disconnected": "Connexion perdue — reconnexion automatique."
+  },
+  "chat": {
+    "dateToday": "Aujourd'hui",
+    "dateYesterday": "Hier",
+    "inputPlaceholder": "Écrire un message…",
+    "callA11y": "Appeler",
+    "moreA11y": "Plus d'options",
+    "backA11y": "Retour",
+    "sendA11y": "Envoyer le message",
+    "emojiA11y": "Insérer un emoji",
+    "attachA11y": "Joindre un fichier",
+    "micA11y": "Enregistrer un message vocal"
+  },
+  "messages": {
+    "title": "Messages",
+    "newChatA11y": "Nouvelle conversation",
+    "empty": "Pas encore de conversations",
+    "couldNotLoad": "Impossible de charger les messages",
+    "pullToRetry": "Tire vers le bas pour réessayer."
+  },
+  "settings": {
+    "title": "Paramètres",
+    "editProfile": "Modifier le profil",
+    "wave": "Saluer",
+    "moreA11y": "Plus d'options",
+    "createHouse": "Créer une maison",
+    "memberOf": "Membre de",
+    "viewAll": "Tout voir",
+    "account": "Compte",
+    "signOut": "Se déconnecter",
+    "cancel": "Annuler"
+  },
+  "room": {
+    "stage": "SCÈNE",
+    "handRaised": "Main levée",
+    "followedBy": "Suivi·e·s par les speakers",
+    "others": "Autres dans la room",
+    "rec": "REC",
+    "host": "HOST",
+    "speaker": "SPEAKER",
+    "mute": "Mute",
+    "unmute": "Unmute",
+    "raise": "Lever",
+    "lower": "Baisser",
+    "leave": "Quitter",
+    "waveA11y": "Envoyer un salut",
+    "unavailable": "Room indisponible",
+    "mayHaveEnded": "Cette room a peut-être pris fin.",
+    "audioBanner": "Audio bientôt — chat, main levée & réactions sont live."
+  },
+  "feed": {
+    "liveNow": "En direct",
+    "wave": "Saluer 👋",
+    "join": "Rejoindre",
+    "speakers": "speakers",
+    "listeners": "listeners",
+    "startNewA11y": "Démarrer une nouvelle room",
+    "startNewHint": "Ouvre la fenêtre de création",
+    "couldNotLoad": "Impossible de charger les rooms",
+    "checkConnection": "Vérifie ta connexion et réessaie."
+  },
+  "errorMessages": {
+    "network": "Impossible de joindre le serveur. Vérifie ta connexion.",
+    "timeout": "La requête a pris trop de temps. Réessaie.",
+    "auth": "Ta session a expiré. Reconnecte-toi.",
+    "forbidden": "Tu n'as pas accès à cette ressource.",
+    "notFound": "Ressource introuvable.",
+    "validation": "Certains champs ont besoin d'attention.",
+    "server": "Un problème est survenu de notre côté.",
+    "unknown": "Erreur inattendue."
+  },
+  "auth": {
+    "landing": {
+      "tagline": "Conversations audio en direct",
+      "features": {
+        "rooms": {
+          "title": "Rejoins des rooms live",
+          "desc": "Écoute et parle avec des gens du monde entier"
+        },
+        "houses": {
+          "title": "Crée des Houses",
+          "desc": "Bâtis des communautés autour de tes sujets préférés"
+        },
+        "chat": {
+          "title": "Connecte et discute",
+          "desc": "Écris à tes amis et rencontre de nouvelles personnes"
+        }
+      },
+      "onlineSuffix": "+2k en ligne",
+      "onlineA11y": "Plus de 2000 personnes en ligne",
+      "cta": {
+        "getStarted": "Commencer",
+        "getStartedA11y": "Créer un compte",
+        "login": "J'ai déjà un compte",
+        "loginA11y": "Se connecter",
+        "devSkip": "Skip auth (dev)",
+        "devSkipA11y": "Connexion en tant que devuser — développement uniquement"
+      }
+    },
+    "phone": {
+      "title": "Entre ton numéro",
+      "placeholder": "+33 6 12 34 56 78",
+      "submit": "Recevoir un code",
+      "errors": {
+        "required": "Ton numéro est requis.",
+        "invalid": "Numéro invalide. Format attendu : +33612345678."
+      }
+    },
+    "otp": {
+      "title": "Entre le code reçu",
+      "placeholder": "123456",
+      "submit": "Vérifier",
+      "resend": "Renvoyer le code",
+      "errors": {
+        "required": "Le code est requis.",
+        "invalid": "Code invalide. 6 chiffres attendus."
+      }
+    },
+    "username": {
+      "title": "Choisis un pseudo",
+      "placeholder": "jean_doe",
+      "submit": "Valider",
+      "errors": {
+        "required": "Un pseudo est requis.",
+        "tooShort": "Au moins 3 caractères.",
+        "tooLong": "Maximum 24 caractères.",
+        "format": "Seulement lettres, chiffres et _."
+      }
+    }
+  },
+  "explore": {
+    "title": "Explorer",
+    "searchPlaceholder": "Rooms, clubs, personnes",
+    "trendingRooms": "Rooms en tendance",
+    "popularClubs": "Clubs populaires",
+    "peopleToFollow": "Personnes à suivre",
+    "emptyRooms": "Aucune room live pour l'instant.",
+    "emptyClubs": "Aucun club pour l'instant.",
+    "emptyUsers": "Aucune suggestion pour l'instant.",
+    "searchResults": "Résultats",
+    "searchEmpty": "Rien ne correspond à « {{q}} »."
+  },
+  "events": {
+    "title": "Événements",
+    "tabs": {
+      "upcoming": "À venir",
+      "mine": "Mes événements"
+    },
+    "empty": "Aucun événement à venir.",
+    "emptyMine": "Tu n'as RSVP à rien pour l'instant.",
+    "rsvp": "Je viens",
+    "notRsvp": "RSVP",
+    "hostBy": "par {{handle}}",
+    "scheduledIn": "Commence dans {{label}}",
+    "startsNow": "Commence maintenant"
+  },
+  "profile": {
+    "myHouses": "Mes Houses",
+    "recentRooms": "Rooms récentes",
+    "emptyMyHouses": "Aucun House pour l'instant.",
+    "emptyRecentRooms": "Aucune room hostée pour l'instant.",
+    "seeAll": "Tout voir",
+    "wave": "Wave",
+    "waveSent": "Wave envoyé 🌊",
+    "waveRateLimited": "Déjà envoyé récemment — réessaie plus tard.",
+    "more": "Plus",
+    "block": "Bloquer",
+    "unblock": "Débloquer",
+    "report": "Signaler",
+    "blockConfirmTitle": "Bloquer {{handle}} ?",
+    "blockConfirmBody": "Vous ne vous verrez plus ni l'un ni l'autre.",
+    "blockConfirm": "Bloquer",
+    "reportTitle": "Signaler {{handle}}",
+    "reportReason": "Pourquoi signales-tu ce profil ?",
+    "reasons": {
+      "spam": "Spam",
+      "harassment": "Harcèlement",
+      "fake_profile": "Faux profil",
+      "other": "Autre"
+    },
+    "reportDetailsPlaceholder": "Ajouter des détails (optionnel)",
+    "reportSubmit": "Envoyer le signalement",
+    "reportThanks": "Merci — notre équipe va vérifier.",
+    "cancel": "Annuler"
+  },
+  "createRoom": {
+    "title": "Nouvelle room",
+    "topicLabel": "Sujet",
+    "topicPlaceholder": "De quoi veux-tu parler ?",
+    "descriptionLabel": "Description (optionnel)",
+    "descriptionPlaceholder": "Donne le ton avant que les gens entrent…",
+    "visibilityLabel": "Visibilité",
+    "scheduleLabel": "Programmer plus tard",
+    "scheduleHint": "Choisis une date et une heure pour annoncer ta room",
+    "topicsLabel": "Tags",
+    "topicsHint": "Jusqu'à 5 tags — ça aide les bonnes personnes à trouver ta room.",
+    "coHostsLabel": "Co-hosts",
+    "coHostsHint": "Invite jusqu'à 5 personnes à co-animer.",
+    "coHostsSearchPlaceholder": "Rechercher par pseudo",
+    "startRoom": "Démarrer",
+    "closeA11y": "Fermer sans démarrer"
+  },
+  "notifications": {
+    "title": "Notifications",
+    "empty": "Rien à signaler.",
+    "markAllRead": "Tout marquer comme lu",
+    "unread": "{{count}} non lues",
+    "delete": "Supprimer",
+    "tabs": {
+      "all": "Tout",
+      "rooms": "Rooms",
+      "social": "Social",
+      "clubs": "Clubs"
+    }
+  },
+  "onboarding": {
+    "welcome": {
+      "skip": "Passer",
+      "next": "Suivant",
+      "start": "Commencer",
+      "slides": {
+        "welcome": {
+          "title": "Bienvenue sur Chathouse",
+          "body": "Un endroit chaleureux pour discuter en audio live avec les gens qui comptent."
+        },
+        "rooms": {
+          "title": "Rejoins des rooms live",
+          "body": "Entre dans des rooms sur tes sujets préférés ou lance la tienne en un tap."
+        },
+        "clubs": {
+          "title": "Trouve tes Houses",
+          "body": "Les clubs regroupent les gens par intérêt — crypto, musique, design…"
+        },
+        "topics": {
+          "title": "Choisis ce qui te parle",
+          "body": "Dis-nous ce que tu aimes ; on fera remonter les rooms qui te plaisent."
+        }
+      }
+    },
+    "setupProfile": {
+      "title": "Parle-nous de toi",
+      "subtitle": "Une courte intro aide les autres à te reconnaître.",
+      "displayNameLabel": "Nom affiché",
+      "displayNamePlaceholder": "Casey Echo",
+      "bioLabel": "Bio",
+      "bioPlaceholder": "Le jour je code, la nuit je raconte.",
+      "continue": "Continuer",
+      "skip": "Passer",
+      "errors": {
+        "displayNameTooLong": "Maximum 60 caractères.",
+        "bioTooLong": "Maximum 280 caractères."
+      }
+    },
+    "interests": {
+      "title": "Choisis quelques centres d'intérêt",
+      "subtitle": "On s'en sert pour te proposer des rooms qui te plaisent.",
+      "minHint": "Au moins un.",
+      "maxHint": "10 maximum.",
+      "finish": "Terminer",
+      "categories": {
+        "tech": "Tech",
+        "design": "Design",
+        "crypto": "Crypto",
+        "ai": "IA",
+        "music": "Musique",
+        "business": "Business",
+        "health": "Santé"
+      }
+    }
+  }
+}

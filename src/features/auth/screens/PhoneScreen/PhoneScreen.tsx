@@ -1,47 +1,83 @@
 import React, { useCallback, useState } from 'react';
-import { KeyboardAvoidingView, Platform, Pressable, Text, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, Pressable, Text, View, Keyboard } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Controller, useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { useTranslation } from 'react-i18next';
+import * as Localization from 'expo-localization';
+import { AsYouType, type CountryCode } from 'libphonenumber-js';
 import { Button } from '../../../../shared/components/Button';
 import { Input } from '../../../../shared/components/Input';
+import {
+  CountryPicker,
+  COUNTRIES,
+  type Country,
+} from '../../../../shared/components/CountryPicker';
+import { useFormApiErrors } from '../../../../shared/hooks/useFormApiErrors';
 import { useAuthStore } from '../../store/authStore';
+import { phoneFormSchema, type PhoneFormValues } from '../../schemas';
 import { colors, spacing } from '../../../../shared/constants/theme';
 import type { AuthStackParamList } from '../../../../core/navigation/types';
 
 type Nav = NativeStackNavigationProp<AuthStackParamList, 'Phone'>;
 
-const PHONE_REGEX = /^\+?[0-9\s\-()]{6,20}$/;
-
 export const PhoneScreen: React.FC = () => {
   const navigation = useNavigation<Nav>();
   const insets = useSafeAreaInsets();
-  const [phoneNumber, setPhoneNumber] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const requestOtp = useAuthStore(s => s.requestOtp);
+  const { t } = useTranslation();
+
+  const [countryPickerVisible, setCountryPickerVisible] = useState(false);
+
+  const initialCountryCode = (Localization.getLocales()[0]?.regionCode as CountryCode) || 'US';
+  const detectedCountry = (COUNTRIES.find(c => c.cca2 === initialCountryCode) ??
+    COUNTRIES.find(c => c.cca2 === 'US') ??
+    COUNTRIES[0]) as Country;
+
+  const [selectedCountry, setSelectedCountry] = useState<Country>(detectedCountry);
+
+  const {
+    control,
+    handleSubmit,
+    setError,
+    setValue,
+    formState: { errors, isSubmitting, isValid },
+  } = useForm<PhoneFormValues>({
+    resolver: zodResolver(phoneFormSchema),
+    mode: 'onChange',
+    defaultValues: { phoneNumber: detectedCountry.callingCode },
+  });
+
+  const handleApiError = useFormApiErrors(setError);
 
   const handleBack = useCallback(() => navigation.goBack(), [navigation]);
 
-  const handleSubmit = useCallback(async () => {
-    if (!PHONE_REGEX.test(phoneNumber.trim())) {
-      setError('Enter a valid phone number.');
-      return;
-    }
-    setError(null);
-    setIsSubmitting(true);
-    try {
-      await requestOtp(phoneNumber.trim());
-      navigation.navigate('Otp', { phoneNumber: phoneNumber.trim() });
-    } catch {
-      setError('Could not send the code. Try again.');
-    } finally {
-      setIsSubmitting(false);
-    }
-  }, [navigation, phoneNumber, requestOtp]);
+  const onSubmit = useCallback(
+    async ({ phoneNumber }: PhoneFormValues) => {
+      try {
+        await requestOtp(phoneNumber);
+        navigation.navigate('Otp', { phoneNumber });
+      } catch (err) {
+        handleApiError(err);
+      }
+    },
+    [handleApiError, navigation, requestOtp],
+  );
 
-  const isValid = PHONE_REGEX.test(phoneNumber.trim());
+  const handleSelectCountry = useCallback(
+    (c: Country) => {
+      setSelectedCountry(c);
+      setValue('phoneNumber', c.callingCode, { shouldValidate: true });
+    },
+    [setValue],
+  );
+
+  const phoneFieldError = errors.phoneNumber?.message
+    ? t(errors.phoneNumber.message as string)
+    : undefined;
 
   return (
     <KeyboardAvoidingView
@@ -53,7 +89,7 @@ export const PhoneScreen: React.FC = () => {
         <Pressable
           onPress={handleBack}
           accessibilityRole="button"
-          accessibilityLabel="Back"
+          accessibilityLabel={t('common.close', 'Close')}
           hitSlop={8}
         >
           <MaterialIcons name="arrow-back" size={24} color={colors.text} />
@@ -64,38 +100,86 @@ export const PhoneScreen: React.FC = () => {
         className="flex-1 px-xxl gap-xxl"
         style={{ paddingBottom: insets.bottom + spacing.huge }}
       >
-        <View className="gap-sm">
-          <Text className="text-display font-display text-ink tracking-tight">
-            Enter your phone number
-          </Text>
-          <Text className="text-sm font-body text-ink-muted">
-            We&apos;ll send you a verification code by SMS.
-          </Text>
-        </View>
+        <Text className="text-display font-display text-ink tracking-tight">
+          {t('auth.phone.title', "What's your phone number?")}
+        </Text>
 
-        <Input
-          label="Phone number"
-          placeholder="+33 6 12 34 56 78"
-          value={phoneNumber}
-          onChangeText={setPhoneNumber}
-          keyboardType="phone-pad"
-          autoFocus
-          error={error ?? undefined}
-          size="lg"
+        <Controller
+          control={control}
+          name="phoneNumber"
+          render={({ field: { onChange, onBlur, value } }) => {
+            const localRaw = value.startsWith(selectedCountry.callingCode)
+              ? value.slice(selectedCountry.callingCode.length)
+              : value;
+
+            const formatter = new AsYouType(selectedCountry.cca2);
+            const fullFormatted = formatter.input(selectedCountry.callingCode + localRaw);
+
+            // eslint-disable-next-line security/detect-non-literal-regexp
+            const prefixRegex = new RegExp(`^\\${selectedCountry.callingCode}\\s?`);
+            const displayValue = fullFormatted.replace(prefixRegex, '');
+
+            const handleTextChange = (text: string) => {
+              const raw = text.replace(/[^\d]/g, '');
+              onChange(selectedCountry.callingCode + raw);
+            };
+
+            return (
+              <Input
+                placeholder={t('auth.phone.placeholder', 'Phone number')}
+                value={displayValue}
+                onChangeText={handleTextChange}
+                onBlur={onBlur}
+                keyboardType="phone-pad"
+                autoFocus
+                error={phoneFieldError}
+                size="lg"
+                leftAdornment={
+                  <Pressable
+                    onPress={() => {
+                      Keyboard.dismiss();
+                      setCountryPickerVisible(true);
+                    }}
+                    className="flex-row items-center px-sm gap-xs"
+                  >
+                    <Text className="text-xl">{selectedCountry.flag}</Text>
+                    <Text className="text-body font-body-medium text-ink">
+                      {selectedCountry.callingCode}
+                    </Text>
+                    <MaterialIcons name="arrow-drop-down" size={24} color={colors.text} />
+                  </Pressable>
+                }
+              />
+            );
+          }}
         />
 
         <View className="flex-1" />
 
         <Button
-          label="Send code"
+          label={t('auth.phone.submit', 'Next')}
           variant="primary"
           size="lg"
           fullWidth
-          disabled={!isValid}
+          disabled={!isValid || isSubmitting}
           loading={isSubmitting}
-          onPress={handleSubmit}
+          onPress={handleSubmit(onSubmit)}
         />
+
+        <Text className="text-center text-xs text-ink-muted leading-5 mt-md">
+          {t('auth.phone.terms', 'By entering your number, you’re agreeing to our ')}
+          <Text className="text-primary font-body-medium">Terms of Service</Text>
+          {t('auth.phone.termsAnd', ' and ')}
+          <Text className="text-primary font-body-medium">Privacy Policy</Text>.
+          {t('auth.phone.termsEnd', ' Thanks!')}
+        </Text>
       </View>
+
+      <CountryPicker
+        visible={countryPickerVisible}
+        onClose={() => setCountryPickerVisible(false)}
+        onSelect={handleSelectCountry}
+      />
     </KeyboardAvoidingView>
   );
 };

@@ -1,5 +1,13 @@
 import type { AxiosError } from 'axios';
-import { isAxiosError } from 'axios';
+
+// Inlined rather than imported from `axios` — `axios/lib/adapters/fetch.js`
+// eagerly probes ReadableStream at load time, which crashes under jest-expo's
+// stream polyfill. Duck-typing `err.isAxiosError` is functionally identical
+// to axios's own helper.
+const isAxiosError = (err: unknown): err is AxiosError =>
+  typeof err === 'object' &&
+  err !== null &&
+  (err as { isAxiosError?: boolean }).isAxiosError === true;
 
 /**
  * Normalized error shape propagated up to UI layers.

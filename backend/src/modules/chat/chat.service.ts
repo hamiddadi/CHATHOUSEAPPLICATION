@@ -1,0 +1,196 @@
+import { prisma } from '../../config/database';
+import { AppError } from '../../middlewares/error.middleware';
+import { notificationsService } from '../notifications/notifications.service';
+import type { ListMessagesInput, SendMessageInput } from './chat.schema';
+
+const publicUser = {
+  id: true,
+  username: true,
+  displayName: true,
+  avatarUrl: true,
+} as const;
+
+const conversationPair = (a: string, b: string): [string, string] => (a < b ? [a, b] : [b, a]);
+
+/**
+ * Direct-message business rule: two users can only exchange DMs if they
+ * follow each other. Enforced at the point of send (both REST and the
+ * socket handler funnel through `chatService.send`), so there's no way
+ * to bypass by skipping the API.
+ */
+const assertMutualFollow = async (a: string, b: string): Promise<void> => {
+  const rows = await prisma.follow.findMany({
+    where: {
+      OR: [
+        { followerId: a, followingId: b },
+        { followerId: b, followingId: a },
+      ],
+    },
+    select: { followerId: true, followingId: true },
+  });
+  const aFollowsB = rows.some(r => r.followerId === a && r.followingId === b);
+  const bFollowsA = rows.some(r => r.followerId === b && r.followingId === a);
+  if (!(aFollowsB && bFollowsA)) throw new AppError('CHAT_004');
+};
+
+export const chatService = {
+  async listConversations(userId: string) {
+    const messages = await prisma.message.findMany({
+      where: {
+        OR: [{ senderId: userId }, { receiverId: userId }],
+        roomId: null,
+      },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        sender: { select: publicUser },
+      },
+      take: 500,
+    });
+
+    const byPeer = new Map<
+      string,
+      {
+        peerId: string;
+        lastMessage: (typeof messages)[number];
+        unreadCount: number;
+      }
+    >();
+
+    for (const m of messages) {
+      const peerId = m.senderId === userId ? (m.receiverId ?? '') : m.senderId;
+      if (!peerId) continue;
+      const entry = byPeer.get(peerId);
+      if (!entry) {
+        byPeer.set(peerId, {
+          peerId,
+          lastMessage: m,
+          unreadCount: m.receiverId === userId && !m.isRead ? 1 : 0,
+        });
+      } else if (m.receiverId === userId && !m.isRead) {
+        entry.unreadCount += 1;
+      }
+    }
+
+    const peerIds = Array.from(byPeer.keys());
+    const peers = await prisma.user.findMany({
+      where: { id: { in: peerIds } },
+      select: publicUser,
+    });
+    const peerById = new Map(peers.map(p => [p.id, p]));
+
+    return Array.from(byPeer.values())
+      .map(e => ({
+        peer: peerById.get(e.peerId),
+        lastMessage: e.lastMessage,
+        unreadCount: e.unreadCount,
+      }))
+      .filter(c => c.peer)
+      .sort((a, b) => b.lastMessage.createdAt.getTime() - a.lastMessage.createdAt.getTime());
+  },
+
+  async listWithPeer(userId: string, peerId: string, input: ListMessagesInput) {
+    if (userId === peerId) throw new AppError('CHAT_001');
+    const [lo, hi] = conversationPair(userId, peerId);
+    const messages = await prisma.message.findMany({
+      where: {
+        roomId: null,
+        OR: [
+          { senderId: lo, receiverId: hi },
+          { senderId: hi, receiverId: lo },
+        ],
+        ...(input.before ? { createdAt: { lt: new Date(input.before) } } : {}),
+      },
+      orderBy: { createdAt: 'desc' },
+      take: input.limit,
+      include: { sender: { select: publicUser } },
+    });
+    return messages.reverse();
+  },
+
+  async send(senderId: string, receiverId: string, input: SendMessageInput) {
+    if (senderId === receiverId) throw new AppError('CHAT_001');
+    const peer = await prisma.user.findUnique({
+      where: { id: receiverId },
+      select: { id: true, username: true, displayName: true },
+    });
+    if (!peer) throw new AppError('USER_001');
+
+    await assertMutualFollow(senderId, receiverId);
+
+    const sender = await prisma.user.findUnique({
+      where: { id: senderId },
+      select: { username: true, displayName: true },
+    });
+    const handle = sender?.displayName ?? sender?.username ?? 'Someone';
+
+    const msg = await prisma.message.create({
+      data: {
+        senderId,
+        receiverId,
+        content: input.content,
+      },
+      include: { sender: { select: publicUser } },
+    });
+
+    // Fire-and-forget notification + push. The recipient's in-app socket
+    // gets the message directly via chat:message; the Notification row
+    // is the offline fallback that lights up the bell badge next launch.
+    void notificationsService.create({
+      userId: receiverId,
+      type: 'NEW_MESSAGE',
+      title: handle,
+      body: input.content.slice(0, 160),
+      data: { messageId: msg.id, senderId, conversation: 'dm' },
+    });
+
+    return msg;
+  },
+
+  async markRead(userId: string, messageId: string) {
+    const msg = await prisma.message.findUnique({ where: { id: messageId } });
+    if (!msg) throw new AppError('CHAT_002');
+    if (msg.receiverId !== userId) throw new AppError('CHAT_003');
+    if (msg.isRead) return { ...msg, isRead: true };
+    return prisma.message.update({
+      where: { id: messageId },
+      data: { isRead: true },
+    });
+  },
+
+  /**
+   * Bulk-read every message FROM `peerId` TO `userId`. Drives the
+   * "opened the thread → mark all read" UX without N round-trips.
+   */
+  async markReadWithPeer(userId: string, peerId: string) {
+    if (userId === peerId) throw new AppError('CHAT_001');
+    const res = await prisma.message.updateMany({
+      where: {
+        senderId: peerId,
+        receiverId: userId,
+        isRead: false,
+        roomId: null,
+      },
+      data: { isRead: true },
+    });
+    return { updated: res.count };
+  },
+
+  /**
+   * Total unread DMs across every conversation. Cheap — it's a single
+   * indexed count query. The bell icon / badge hook calls this.
+   */
+  async unreadCount(userId: string) {
+    const count = await prisma.message.count({
+      where: { receiverId: userId, isRead: false, roomId: null },
+    });
+    return { count };
+  },
+
+  async remove(userId: string, messageId: string) {
+    const msg = await prisma.message.findUnique({ where: { id: messageId } });
+    if (!msg) throw new AppError('CHAT_002');
+    if (msg.senderId !== userId) throw new AppError('CHAT_003');
+    await prisma.message.delete({ where: { id: messageId } });
+    return { deleted: true };
+  },
+};

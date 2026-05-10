@@ -1,0 +1,596 @@
+// Chathouse — Prisma schema
+// Managed by `prisma migrate dev`. Indexes marked explicit on all FK / hot paths.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ──────────────────────────────────────────────
+enum Role {
+  HOST
+  MODERATOR
+  SPEAKER
+  LISTENER
+}
+
+enum RoomType {
+  OPEN
+  SOCIAL
+  CLOSED
+}
+
+enum NotificationType {
+  ROOM_INVITE
+  NEW_FOLLOWER
+  ROOM_STARTED
+  SPEAKER_REQUEST
+  MENTION
+  CLUB_INVITE
+  WAVE
+  HAND_ACCEPTED
+  RSVP_REMINDER
+  NEW_MESSAGE
+}
+
+enum ReportReason {
+  SPAM
+  HARASSMENT
+  FAKE_PROFILE
+  OTHER
+}
+
+enum ReportTargetKind {
+  USER
+  ROOM
+}
+
+// Platform-level role hierarchy — ORTHOGONAL to Room.Role and ClubMemberRole.
+// USER  : default, no admin powers
+// MODERATOR : can resolve reports + suspend users (read-only stats access)
+// ADMIN : MODERATOR + can change non-superadmin roles + force-end rooms
+// SUPER_ADMIN : ADMIN + can grant ADMIN/SUPER_ADMIN, view audit logs, hard-delete
+enum AppRole {
+  USER
+  MODERATOR
+  ADMIN
+  SUPER_ADMIN
+}
+
+// Discriminator for AuditLog so we can filter "everything that happened on
+// user X" or "everything an admin Y did" without pivoting through `metadata`.
+enum AuditAction {
+  USER_ROLE_CHANGED
+  USER_SUSPENDED
+  USER_UNSUSPENDED
+  USER_DELETED
+  ROOM_FORCE_ENDED
+  REPORT_RESOLVED
+  REPORT_DISMISSED
+  GODMODE_ACCESS
+  IMPERSONATION_STARTED
+  IMPERSONATION_ENDED
+}
+
+enum ClubPrivacy {
+  OPEN
+  SOCIAL
+  PRIVATE
+}
+
+
+enum ClubMemberRole {
+  ADMIN
+  MODERATOR
+  MEMBER
+}
+
+enum RoomChatVisibility {
+  ALL        // Everyone in the room sees the chat
+  MODS_ONLY  // Only host + moderators see (and can post to) the chat
+}
+
+// ─── User ───────────────────────────────────────────────
+// `username`, `email`, `passwordHash` are nullable so a user created via
+// phone+OTP can exist before completing SetupProfile (which will fill in
+// `username` and optionally `email`/`passwordHash`).
+model User {
+  id           String    @id @default(cuid())
+  username     String?   @unique
+  email        String?   @unique
+  passwordHash String?
+  phoneNumber  String?   @unique
+  displayName  String?
+  firstName    String?   @db.VarChar(50)
+  lastName     String?   @db.VarChar(50)
+  avatarUrl    String?
+  avatarThumb  String?   // 200x200 thumbnail
+  bio          String?
+  twitter      String?   @db.VarChar(50)
+  instagram    String?   @db.VarChar(50)
+  isOnline     Boolean   @default(false)
+  isVisible    Boolean   @default(true) // Ghost Mode off → visible on map
+  allowWaves   Boolean   @default(true)
+  isPrivateAccount Boolean @default(false)
+  latitude     Float?
+  longitude    Float?
+  lastSeenAt   DateTime?
+  // FK to the room the user is currently in (null = not in any room).
+  // Updated on join/leave so the profile can show "In a room" badge.
+  currentRoomId String?
+  currentRoom   Room?     @relation("UserCurrentRoom", fields: [currentRoomId], references: [id], onDelete: SetNull)
+  // Denormalized counts — updated via service on follow/unfollow.
+  followerCount  Int       @default(0)
+  followingCount Int       @default(0)
+  // ─── Onboarding ─────────────────────────
+  interests              String[]  @default([])
+  hasCompletedOnboarding Boolean   @default(false)
+  // ─── Account deletion ───────────────────
+  deletedAt    DateTime? // Soft delete: non-null = pending deletion
+  // ─── Platform admin role + suspension ───
+  // appRole defaults to USER. Only SUPER_ADMIN can grant ADMIN+. The
+  // suspendedUntil field is a temporary sanction (null = active, future
+  // timestamp = locked out, past timestamp = expired sanction). Hard-bans
+  // are modeled as suspendedUntil = year-9999.
+  appRole         AppRole   @default(USER)
+  suspendedUntil  DateTime?
+  suspensionReason String?  @db.VarChar(500)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  hostedRooms         Room[]               @relation("RoomHost")
+  participants        Participant[]
+  roomBansIssued      RoomBan[]            @relation("BanIssuer")
+  roomBansReceived    RoomBan[]            @relation("BanTarget")
+  sentMessages        Message[]            @relation("MessageSender")
+  followers           Follow[]             @relation("Following")
+  following           Follow[]             @relation("Follower")
+  notifications       Notification[]       @relation("NotifRecipient")
+  actedNotifications  Notification[]       @relation("NotifActor")
+  refreshTokens       RefreshToken[]
+  passwordResetTokens PasswordResetToken[]
+  ownedClubs          Club[]               @relation("ClubOwner")
+  clubMemberships     ClubMember[]
+  rsvps               RoomRsvp[]
+  pushTokens          PushToken[]
+  roomHandRaises      RoomHandRaise[]
+  roomChatMessages    RoomChatMessage[]
+  roomReactions       RoomReaction[]
+  blocksCreated       Block[]              @relation("BlockAuthor")
+  blocksReceived      Block[]              @relation("BlockTarget")
+  reportsFiled        Report[]             @relation("ReportAuthor")
+  reportsReceived     Report[]             @relation("ReportTarget")
+  notifPreferences    NotificationPreference?
+  auditLogsAuthored   AuditLog[]            @relation("AuditActor")
+  auditLogsTargeted   AuditLog[]            @relation("AuditTargetUser")
+
+  @@index([isOnline])
+  @@index([isVisible])
+  @@index([lastSeenAt])
+  @@index([currentRoomId])
+  @@index([appRole])
+  @@index([suspendedUntil])
+}
+
+// ─── Room ───────────────────────────────────────────────
+// A Room is *either* live (isLive=true, scheduledFor null) or scheduled
+// (isLive=false, scheduledFor in the future). The scheduler flips isLive
+// on when the BullMQ reminder job runs at scheduledFor-5min.
+model Room {
+  id           String    @id @default(cuid())
+  title        String
+  description  String?
+  hostId       String
+  clubId       String?
+  isLive       Boolean   @default(true)
+  isPrivate    Boolean   @default(false)
+  roomType     RoomType  @default(OPEN) // OPEN / SOCIAL / CLOSED
+  chatEnabled  Boolean   @default(true)
+  // ALL = open chat. MODS_ONLY = host + moderators only. Toggled live by
+  // host via PATCH /rooms/:id/chat. The flag is enforced server-side in
+  // sendRoomMessage; the UI hides the composer for non-mods accordingly.
+  chatVisibility RoomChatVisibility @default(ALL)
+  recordingEnabled Boolean @default(false)
+  topic        String?
+  topics       String[]  @default([])
+  maxSpeakers  Int       @default(10)
+  participantCount Int   @default(0) // Denormalized for feed perf
+  scheduledFor DateTime?
+  createdAt    DateTime  @default(now())
+  endedAt      DateTime?
+
+  host             User              @relation("RoomHost", fields: [hostId], references: [id], onDelete: Cascade)
+  club             Club?             @relation(fields: [clubId], references: [id], onDelete: SetNull)
+  participants     Participant[]
+  messages         Message[]
+  rsvps            RoomRsvp[]
+  handRaises       RoomHandRaise[]
+  chatMessages     RoomChatMessage[]
+  reactions        RoomReaction[]
+  bans             RoomBan[]
+  reports          Report[]          @relation("ReportRoomTarget")
+  currentListeners User[]            @relation("UserCurrentRoom")
+
+  @@index([isLive])
+  @@index([hostId])
+  @@index([clubId])
+  @@index([scheduledFor])
+  @@index([createdAt])
+  @@index([roomType])
+  @@index([participantCount])
+}
+
+// ─── RoomHandRaise (listener queued to speak) ──────────
+// FIFO queue by raisedAt; popped when a host promotes the listener to
+// SPEAKER or when the listener lowers their own hand.
+model RoomHandRaise {
+  id        String   @id @default(cuid())
+  roomId    String
+  userId    String
+  raisedAt  DateTime @default(now())
+
+  room Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([roomId, userId])
+  @@index([roomId, raisedAt])
+  @@index([userId])
+}
+
+// ─── RoomChatMessage (in-room text chat) ───────────────
+// Separate from the top-level Message table (which handles DMs) so the
+// room-chat retention + moderation policy can evolve independently. A
+// room chat message disappears when the room is deleted.
+model RoomChatMessage {
+  id        String   @id @default(cuid())
+  roomId    String
+  userId    String
+  content   String   @db.VarChar(500)
+  // Self-referential reply pointer. NULL = top-level. Cascade SetNull so
+  // deleting the parent (e.g. moderation) leaves replies as orphan
+  // top-level messages instead of vanishing the whole sub-thread.
+  replyToId String?
+  isDeleted Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  room    Room              @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user    User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  replyTo RoomChatMessage?  @relation("RoomChatReplies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies RoomChatMessage[] @relation("RoomChatReplies")
+
+  @@index([roomId, createdAt])
+  @@index([userId])
+  @@index([replyToId])
+}
+
+// ─── RoomReaction (ephemeral float-up emoji) ───────────
+// Persisted so moderators can spot spam patterns, but the UI only
+// renders the most recent ~30 seconds.
+model RoomReaction {
+  id        String   @id @default(cuid())
+  roomId    String
+  userId    String
+  emoji     String   @db.VarChar(16)
+  createdAt DateTime @default(now())
+
+  room Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([roomId, createdAt])
+}
+
+// ─── RoomRsvp (scheduled-room interest marker) ─────────
+// A lightweight "I intend to attend" signal. Separate from Participant
+// because we want to notify RSVP'd users before the room goes live; once
+// they actually join, a Participant row is created by the live join flow.
+model RoomRsvp {
+  id        String   @id @default(cuid())
+  roomId    String
+  userId    String
+  reminder  Boolean  @default(true) // Per-user reminder toggle
+  createdAt DateTime @default(now())
+
+  room Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([roomId, userId])
+  @@index([roomId])
+  @@index([userId])
+}
+
+// ─── Participant ────────────────────────────────────────
+model Participant {
+  id       String   @id @default(cuid())
+  userId   String
+  roomId   String
+  role     Role     @default(LISTENER)
+  isMuted  Boolean  @default(false)
+  joinedAt DateTime @default(now())
+  leftAt   DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  room Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, roomId])
+  @@index([roomId])
+  @@index([userId])
+}
+
+// ─── Message (room + direct) ────────────────────────────
+model Message {
+  id         String   @id @default(cuid())
+  content    String
+  senderId   String
+  roomId     String?
+  receiverId String?
+  isRead     Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  sender User  @relation("MessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+  room   Room? @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@index([senderId])
+  @@index([receiverId])
+  @@index([roomId])
+  @@index([createdAt])
+}
+
+// ─── Follow ─────────────────────────────────────────────
+model Follow {
+  id          String   @id @default(cuid())
+  followerId  String
+  followingId String
+  createdAt   DateTime @default(now())
+
+  follower  User @relation("Follower", fields: [followerId], references: [id], onDelete: Cascade)
+  following User @relation("Following", fields: [followingId], references: [id], onDelete: Cascade)
+
+  @@unique([followerId, followingId])
+  @@index([followerId])
+  @@index([followingId])
+}
+
+// ─── Notification ───────────────────────────────────────
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  actorId   String?          // Who triggered the notification
+  type      NotificationType
+  title     String
+  body      String
+  data      Json?
+  targetId  String?          // ID of the target entity (room, club, user)
+  targetType String?         @db.VarChar(32) // 'room', 'club', 'user'
+  isRead    Boolean          @default(false)
+  createdAt DateTime         @default(now())
+
+  user  User  @relation("NotifRecipient", fields: [userId], references: [id], onDelete: Cascade)
+  actor User? @relation("NotifActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([userId, isRead])
+  @@index([userId, type])
+  @@index([createdAt])
+  @@index([actorId])
+}
+
+// ─── Notification Preferences (per-type toggles) ───────
+model NotificationPreference {
+  id              String  @id @default(cuid())
+  userId          String  @unique
+  newFollower     Boolean @default(true)
+  wave            Boolean @default(true)
+  roomInvite      Boolean @default(true)
+  clubInvite      Boolean @default(true)
+  roomStarted     Boolean @default(true)
+  eventReminder   Boolean @default(true)
+  newMessage      Boolean @default(true)
+  handAccepted    Boolean @default(true)
+  mention         Boolean @default(true)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ─── Club (House) ──────────────────────────────────────
+model Club {
+  id            String       @id @default(cuid())
+  name          String       @unique @db.VarChar(50)
+  slug          String       @unique @db.VarChar(60)
+  description   String?      @db.VarChar(500)
+  iconUrl       String?      @db.VarChar(500)
+  privacy       ClubPrivacy  @default(OPEN)
+  category      String       @default("tech") @db.VarChar(32)
+  categoryEmoji String       @default("🏠") @db.VarChar(8)
+  ownerId       String
+  memberCount   Int          @default(1) // Denormalized
+  isVerified    Boolean      @default(false)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  owner   User         @relation("ClubOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  members ClubMember[]
+  rooms   Room[]
+
+  @@index([ownerId])
+  @@index([privacy])
+  @@index([createdAt])
+  @@index([slug])
+}
+
+model ClubMember {
+  id       String         @id @default(cuid())
+  clubId   String
+  userId   String
+  role     ClubMemberRole @default(MEMBER)
+  joinedAt DateTime       @default(now())
+
+  club Club @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([clubId, userId])
+  @@index([clubId])
+  @@index([userId])
+}
+
+// ─── Push token (Expo / FCM / APNs device tokens) ─────
+// One row per (user, token). A user can have several tokens (phone +
+// tablet); a token can outlive a user's session but is replaced when
+// the platform reissues it. `platform` is advisory — the dispatcher
+// treats Expo tokens (`ExponentPushToken[...]`) and raw FCM/APNs
+// tokens uniformly through the Expo push API when we wire it.
+model PushToken {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  platform  String   @db.VarChar(16)
+  createdAt DateTime @default(now())
+  lastUsed  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// ─── Phone OTP code ────────────────────────────────────
+// Stores bcrypt hashes (never the raw 6-digit code). Multiple rows per
+// phone survive over time; service logic selects the latest non-expired
+// unused row for verification and marks older ones `isUsed`.
+model OtpCode {
+  id          String   @id @default(cuid())
+  phoneNumber String
+  codeHash    String
+  attempts    Int      @default(0)
+  isUsed      Boolean  @default(false)
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+
+  @@index([phoneNumber])
+  @@index([expiresAt])
+}
+
+// ─── Password reset token ──────────────────────────────
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique
+  userId    String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+// ─── Refresh token (revocable) ─────────────────────────
+model RefreshToken {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  revokedAt DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+// ─── Block (one-way user block) ────────────────────────
+// The blocker never sees the blocked user in feeds/search. We don't
+// hard-filter the other direction so an abuser can't tell whether
+// they've been blocked — their feed just lacks the blocker.
+model Block {
+  id         String   @id @default(cuid())
+  blockerId  String
+  blockedId  String
+  createdAt  DateTime @default(now())
+
+  blocker User @relation("BlockAuthor", fields: [blockerId], references: [id], onDelete: Cascade)
+  blocked User @relation("BlockTarget", fields: [blockedId], references: [id], onDelete: Cascade)
+
+  @@unique([blockerId, blockedId])
+  @@index([blockerId])
+  @@index([blockedId])
+}
+
+// ─── Report (moderation queue) ─────────────────────────
+// Free-form report against another user OR a room. `targetKind` discriminates;
+// `reportedId` is set for USER reports, `reportedRoomId` for ROOM reports.
+// Exactly one of the two must be non-null (enforced in service layer).
+model Report {
+  id             String           @id @default(cuid())
+  reporterId     String
+  targetKind     ReportTargetKind @default(USER)
+  reportedId     String?
+  reportedRoomId String?
+  reason         ReportReason
+  details        String?          @db.VarChar(2000)
+  resolvedAt     DateTime?
+  createdAt      DateTime         @default(now())
+
+  reporter     User  @relation("ReportAuthor", fields: [reporterId], references: [id], onDelete: Cascade)
+  reported     User? @relation("ReportTarget", fields: [reportedId], references: [id], onDelete: Cascade)
+  reportedRoom Room? @relation("ReportRoomTarget", fields: [reportedRoomId], references: [id], onDelete: Cascade)
+
+  @@index([reportedId, createdAt])
+  @@index([reportedRoomId, createdAt])
+  @@index([reporterId])
+}
+
+// ─── AuditLog (Godmode action trail) ───────────────────
+// Append-only record of every privileged action performed via the admin
+// surface. Every admin endpoint MUST write a row before responding so the
+// trail can never lag behind the change. `metadata` carries the diff
+// (old/new values) when relevant; the IP/UA are best-effort and may be
+// null when the action came from a worker (e.g. cron job).
+model AuditLog {
+  id           String      @id @default(cuid())
+  actorId      String
+  action       AuditAction
+  targetUserId String?
+  targetRoomId String?
+  targetType   String?     @db.VarChar(32) // 'user' | 'room' | 'report' | etc.
+  targetId     String?     // generic string id when targetType isn't user/room
+  metadata     Json?
+  ip           String?     @db.VarChar(64)
+  userAgent    String?     @db.VarChar(500)
+  createdAt    DateTime    @default(now())
+
+  actor      User  @relation("AuditActor", fields: [actorId], references: [id], onDelete: Cascade)
+  targetUser User? @relation("AuditTargetUser", fields: [targetUserId], references: [id], onDelete: SetNull)
+
+  @@index([actorId, createdAt])
+  @@index([action, createdAt])
+  @@index([targetUserId, createdAt])
+  @@index([createdAt])
+}
+
+// ─── RoomBan (host/mod evicts a user from a room) ──────
+// Persisted ban: a kicked user can re-join once the ban expires (or never if
+// expiresAt is null). Checked at the start of `roomsService.join`. Distinct
+// from `Block` (Block is a one-way social filter; RoomBan is a room-scoped
+// access control imposed by moderators).
+model RoomBan {
+  id        String    @id @default(cuid())
+  roomId    String
+  userId    String
+  bannedBy  String
+  reason    String?   @db.VarChar(500)
+  expiresAt DateTime? // null = permanent
+  createdAt DateTime  @default(now())
+
+  room   Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user   User @relation("BanTarget", fields: [userId], references: [id], onDelete: Cascade)
+  issuer User @relation("BanIssuer", fields: [bannedBy], references: [id], onDelete: Cascade)
+
+  @@unique([roomId, userId])
+  @@index([roomId])
+  @@index([userId])
+  @@index([expiresAt])
+}

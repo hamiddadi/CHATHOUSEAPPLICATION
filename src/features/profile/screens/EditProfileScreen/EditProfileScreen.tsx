@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, Text, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
+import * as Haptics from 'expo-haptics';
 import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Avatar } from '../../../../shared/components/Avatar';
@@ -23,6 +25,7 @@ export const EditProfileScreen: React.FC = () => {
   const [displayName, setDisplayName] = useState('');
   const [username, setUsername] = useState('');
   const [bio, setBio] = useState('');
+  const [avatarUri, setAvatarUri] = useState<string | null>(null);
 
   useEffect(() => {
     if (me) {
@@ -32,15 +35,36 @@ export const EditProfileScreen: React.FC = () => {
     }
   }, [me]);
 
+  const handlePickImage = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    });
+
+    if (!result.canceled && result.assets[0]) {
+      setAvatarUri(result.assets[0].uri);
+      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
+  };
+
   const handleClose = useCallback(() => navigation.goBack(), [navigation]);
+
   const handleSave = useCallback(async () => {
     try {
-      await updateProfile.mutateAsync({ displayName, username, bio });
+      await updateProfile.mutateAsync({
+        displayName,
+        username,
+        bio,
+        avatarUrl: avatarUri || undefined,
+      });
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       navigation.goBack();
     } catch {
-      // Surface via toast later.
+      Alert.alert('Error', 'Failed to update profile. Please try again.');
     }
-  }, [bio, displayName, navigation, updateProfile, username]);
+  }, [avatarUri, bio, displayName, navigation, updateProfile, username]);
 
   const canSave =
     displayName.trim().length >= 2 && username.trim().length >= 2 && !updateProfile.isPending;
@@ -67,7 +91,7 @@ export const EditProfileScreen: React.FC = () => {
           accessibilityRole="button"
           accessibilityLabel="Save profile"
           hitSlop={8}
-          className={canSave ? undefined : 'opacity-40'}
+          className={canSave ? '' : 'opacity-40'}
         >
           <Text className="text-md font-body-bold text-primary">Save</Text>
         </Pressable>
@@ -81,11 +105,17 @@ export const EditProfileScreen: React.FC = () => {
           gap: spacing.xl,
         }}
         keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
       >
         <View className="items-center gap-sm py-md">
           <View className="relative">
-            <Avatar uri={me.avatarUrl ?? undefined} name={displayName} sizeValue={AVATAR_SIZE} />
+            <Avatar
+              uri={avatarUri || me.avatarUrl || undefined}
+              name={displayName}
+              sizeValue={AVATAR_SIZE}
+            />
             <Pressable
+              onPress={handlePickImage}
               accessibilityRole="button"
               accessibilityLabel="Change profile photo"
               className="absolute -bottom-xxs -right-xxs w-10 h-10 rounded-pill bg-primary items-center justify-center border-2 border-background"
@@ -109,6 +139,7 @@ export const EditProfileScreen: React.FC = () => {
           value={username}
           onChangeText={setUsername}
           autoCapitalize="none"
+          autoCorrect={false}
           leftAdornment={<Text className="text-md text-ink-muted">@</Text>}
         />
 
@@ -122,15 +153,17 @@ export const EditProfileScreen: React.FC = () => {
           helperText={`${bio.length} / ${BIO_MAX}`}
         />
 
-        <Button
-          label="Save changes"
-          variant="primary"
-          size="lg"
-          fullWidth
-          disabled={!canSave}
-          loading={updateProfile.isPending}
-          onPress={handleSave}
-        />
+        <View className="mt-xl">
+          <Button
+            label="Save changes"
+            variant="primary"
+            size="lg"
+            fullWidth
+            disabled={!canSave}
+            loading={updateProfile.isPending}
+            onPress={handleSave}
+          />
+        </View>
       </ScrollView>
     </View>
   );

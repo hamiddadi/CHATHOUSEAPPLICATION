@@ -7,6 +7,8 @@ export interface AuthUser {
   phoneNumber: string;
   avatarUrl?: string | null;
   bio?: string | null;
+  interests?: string[];
+  hasCompletedOnboarding?: boolean;
   createdAt: string;
 }
 

@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { authService } from '../services/authService';
 import { tokenStorage } from '../services/tokenStorage';
+import { pushService } from '../../notifications/services/pushService';
 import type { AuthSession, AuthStatus, AuthUser } from '../types/auth.types';
 
 interface AuthState {
@@ -11,9 +12,17 @@ interface AuthState {
   error: string | null;
 
   hydrate: () => Promise<void>;
+  refreshMe: () => Promise<void>;
   requestOtp: (phoneNumber: string) => Promise<void>;
   verifyOtp: (phoneNumber: string, code: string) => Promise<{ isNewUser: boolean }>;
+  devLogin: () => Promise<{ isNewUser: boolean }>;
   setUsername: (username: string) => Promise<void>;
+  completeOnboarding: (input: {
+    displayName?: string;
+    bio?: string;
+    avatarUrl?: string | null;
+    interests?: string[];
+  }) => Promise<void>;
   signOut: () => Promise<void>;
 }
 
@@ -27,13 +36,34 @@ export const useAuthStore = create<AuthState>((set, _get) => ({
   hydrate: async () => {
     try {
       const session = await tokenStorage.get();
-      set({
-        session,
-        status: session ? 'authenticated' : 'unauthenticated',
-        isHydrating: false,
-      });
+      if (!session) {
+        set({ session: null, status: 'unauthenticated', isHydrating: false });
+        return;
+      }
+      // Re-read the user from the API so we know their onboarding flag
+      // after a restart. If the call fails, fall back to the cached token
+      // and let the router treat the user as authenticated but unfetched;
+      // screens can retry via refreshMe.
+      try {
+        const user = await authService.getMe();
+        set({ session, user, status: 'authenticated', isHydrating: false });
+      } catch {
+        set({ session, status: 'authenticated', isHydrating: false });
+      }
+      // Best-effort push registration after cold start too. The backend
+      // dedupes on token so a re-register after every launch is fine.
+      void pushService.registerWithBackend();
     } catch {
       set({ status: 'unauthenticated', isHydrating: false });
+    }
+  },
+
+  refreshMe: async () => {
+    try {
+      const user = await authService.getMe();
+      set({ user });
+    } catch {
+      // Silent — callers can show a toast if needed.
     }
   },
 
@@ -54,6 +84,23 @@ export const useAuthStore = create<AuthState>((set, _get) => ({
       const { session, user, isNewUser } = await authService.verifyOtp(phoneNumber, code);
       await tokenStorage.set(session);
       set({ session, user, status: 'authenticated' });
+      // Fire-and-forget: request a push token + register with the backend.
+      // No-op in test/web environments without expo-notifications.
+      void pushService.registerWithBackend();
+      return { isNewUser };
+    } catch (e) {
+      set({ status: 'unauthenticated', error: (e as Error).message });
+      throw e;
+    }
+  },
+
+  devLogin: async () => {
+    set({ status: 'authenticating', error: null });
+    try {
+      const { session, user, isNewUser } = await authService.devLogin();
+      await tokenStorage.set(session);
+      set({ session, user, status: 'authenticated' });
+      void pushService.registerWithBackend();
       return { isNewUser };
     } catch (e) {
       set({ status: 'unauthenticated', error: (e as Error).message });
@@ -66,7 +113,29 @@ export const useAuthStore = create<AuthState>((set, _get) => ({
     set({ user });
   },
 
+  completeOnboarding: async input => {
+    const { user } = await authService.completeOnboarding(input);
+    set({ user });
+  },
+
   signOut: async () => {
+    // Drop the push token BEFORE invalidating the session so the
+    // /push/unregister call still carries a valid Authorization header.
+    await pushService.unregisterCurrentDevice();
+    // Tear down the Agora engine — the singleton holds a native session,
+    // a worker thread and an in-flight RTC channel join. Without an
+    // explicit release, those leak across logouts and the next login
+    // would inherit a stale audio bus. The require is dynamic to keep
+    // this file booting in test envs without `react-native-agora`.
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { releaseAgora } = require('../../rooms/services/agora/AgoraEngine') as {
+        releaseAgora: () => void;
+      };
+      releaseAgora();
+    } catch {
+      /* engine wasn't loaded (Expo Go / unit test) — nothing to release */
+    }
     await authService.signOut();
     await tokenStorage.clear();
     set({ user: null, session: null, status: 'unauthenticated' });

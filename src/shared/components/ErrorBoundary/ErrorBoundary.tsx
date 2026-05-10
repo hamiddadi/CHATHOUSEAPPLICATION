@@ -1,5 +1,6 @@
 import React, { Component, type ErrorInfo, type ReactNode } from 'react';
 import { Pressable, Text, View } from 'react-native';
+import { useTranslation } from 'react-i18next';
 
 interface ErrorBoundaryProps {
   children: ReactNode;
@@ -52,26 +53,27 @@ interface DefaultFallbackProps {
   onReset: () => void;
 }
 
-const DefaultFallback: React.FC<DefaultFallbackProps> = ({ error, onReset }) => (
-  <View
-    accessibilityRole="alert"
-    accessibilityLiveRegion="assertive"
-    className="flex-1 items-center justify-center bg-background px-xxl gap-md"
-  >
-    <Text className="text-xl font-headline text-ink text-center">
-      Quelque chose s'est mal passé
-    </Text>
-    <Text className="text-md font-body text-ink-muted text-center" numberOfLines={4}>
-      {error.message || 'Une erreur inattendue est survenue.'}
-    </Text>
-    <Pressable
-      onPress={onReset}
-      accessibilityRole="button"
-      accessibilityLabel="Réessayer"
-      accessibilityHint="Tente de recharger l'écran en erreur"
-      className="bg-primary rounded-pill px-xxl py-md min-h-[44px] items-center justify-center"
+const DefaultFallback: React.FC<DefaultFallbackProps> = ({ error, onReset }) => {
+  const { t } = useTranslation();
+  return (
+    <View
+      accessibilityRole="alert"
+      accessibilityLiveRegion="assertive"
+      className="flex-1 items-center justify-center bg-background px-xxl gap-md"
     >
-      <Text className="text-sm font-display text-primary-on">Réessayer</Text>
-    </Pressable>
-  </View>
-);
+      <Text className="text-xl font-headline text-ink text-center">{t('errorBoundary.title')}</Text>
+      <Text className="text-md font-body text-ink-muted text-center" numberOfLines={4}>
+        {error.message || t('errorBoundary.fallbackMessage')}
+      </Text>
+      <Pressable
+        onPress={onReset}
+        accessibilityRole="button"
+        accessibilityLabel={t('errorBoundary.retryA11yLabel')}
+        accessibilityHint={t('errorBoundary.retryA11yHint')}
+        className="bg-primary rounded-pill px-xxl py-md min-h-[44px] items-center justify-center"
+      >
+        <Text className="text-sm font-display text-primary-on">{t('common.retry')}</Text>
+      </Pressable>
+    </View>
+  );
+};

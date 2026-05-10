@@ -11,6 +11,8 @@ module.exports = {
     '^@config/(.*)$': '<rootDir>/src/config/$1',
     '^@assets/(.*)$': '<rootDir>/src/assets/$1',
   },
+  roots: ['<rootDir>/src'],
+  testPathIgnorePatterns: ['<rootDir>/backend/', '<rootDir>/node_modules/'],
   testMatch: ['**/*.test.ts', '**/*.test.tsx'],
   collectCoverageFrom: ['src/**/*.{ts,tsx}', '!src/**/*.d.ts', '!src/**/index.ts'],
 };

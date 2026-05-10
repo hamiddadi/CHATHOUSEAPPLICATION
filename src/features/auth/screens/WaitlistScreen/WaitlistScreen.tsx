@@ -1,5 +1,5 @@
 import React, { useCallback } from 'react';
-import { Text, View } from 'react-native';
+import { Share, Text, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -13,6 +13,18 @@ export const WaitlistScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
 
   const handleBack = useCallback(() => navigation.goBack(), [navigation]);
+
+  const handleInvite = useCallback(async () => {
+    try {
+      await Share.share({
+        message:
+          "J'attends mon accès à Chathouse — rejoins la waitlist pour m'aider à passer devant : https://app.chathouse.com",
+        url: 'https://app.chathouse.com',
+      });
+    } catch {
+      /* user cancelled — no-op */
+    }
+  }, []);
 
   return (
     <View
@@ -41,7 +53,7 @@ export const WaitlistScreen: React.FC = () => {
           variant="primary"
           size="lg"
           fullWidth
-          onPress={() => undefined}
+          onPress={handleInvite}
         />
         <Button label="Back" variant="ghost" size="md" fullWidth onPress={handleBack} />
       </View>

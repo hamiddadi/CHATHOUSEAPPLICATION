@@ -1,0 +1,166 @@
+import type { ReportReason } from '@prisma/client';
+import { prisma } from '../../config/database';
+import { redis } from '../../config/redis';
+import { AppError } from '../../middlewares/error.middleware';
+import { notificationsService } from '../notifications/notifications.service';
+import type { ReportInput, ReportRoomInput } from './social.schema';
+
+// Anti-spam: a reporter can only file one report per target per 24h.
+// Server-side dedup is cheap with Redis SET NX EX and avoids a DB row
+// per attempted spam without locking the user out of legitimate reports
+// on different targets.
+const REPORT_COOLDOWN_SECONDS = 24 * 60 * 60;
+const reportCooldownKey = (reporterId: string, kind: 'user' | 'room', targetId: string) =>
+  `report:${kind}:${reporterId}:${targetId}`;
+
+/**
+ * Social "soft actions" — interactions on a user that aren't follows or
+ * chat but shape discovery + safety: wave (low-cost ping), block (hard
+ * mute), report (moderation queue).
+ */
+
+const publicUser = {
+  id: true,
+  username: true,
+  displayName: true,
+  avatarUrl: true,
+} as const;
+
+// A wave is a 1-per-pair-per-hour ping. Enforced via a Redis bucket so
+// the check is O(1) and survives app restarts without an extra DB row.
+const WAVE_WINDOW_SECONDS = 60 * 60;
+const waveKey = (a: string, b: string) => `wave:${a}:${b}`;
+
+const reasonToEnum = (reason: ReportInput['reason']): ReportReason => {
+  switch (reason) {
+    case 'spam':
+      return 'SPAM';
+    case 'harassment':
+      return 'HARASSMENT';
+    case 'fake_profile':
+      return 'FAKE_PROFILE';
+    case 'other':
+      return 'OTHER';
+  }
+};
+
+export const socialService = {
+  // ──────────────────── Wave ────────────────────
+  async wave(senderId: string, targetId: string) {
+    if (senderId === targetId) throw new AppError('USER_003');
+    const target = await prisma.user.findUnique({
+      where: { id: targetId },
+      select: { id: true, username: true, displayName: true },
+    });
+    if (!target) throw new AppError('USER_001');
+
+    // Rate-limit: 1 wave per (sender, target) per hour.
+    const key = waveKey(senderId, targetId);
+    const set = await redis.set(key, '1', { EX: WAVE_WINDOW_SECONDS, NX: true });
+    if (set === null) throw new AppError('USER_005');
+
+    const sender = await prisma.user.findUnique({
+      where: { id: senderId },
+      select: { username: true, displayName: true },
+    });
+    const handle = sender?.displayName ?? sender?.username ?? 'Someone';
+
+    await notificationsService.create({
+      userId: targetId,
+      type: 'WAVE',
+      title: handle,
+      body: `${handle} sent you a wave 🌊`,
+      data: { waverId: senderId },
+    });
+    return { waved: true as const };
+  },
+
+  // ──────────────────── Block ────────────────────
+  async block(blockerId: string, targetId: string) {
+    if (blockerId === targetId) throw new AppError('USER_004');
+    const target = await prisma.user.findUnique({ where: { id: targetId } });
+    if (!target) throw new AppError('USER_001');
+
+    // Blocking is a hard break — wipe the follow graph in both directions
+    // so neither side keeps a stale relationship.
+    await prisma.$transaction([
+      prisma.block.upsert({
+        where: { blockerId_blockedId: { blockerId, blockedId: targetId } },
+        create: { blockerId, blockedId: targetId },
+        update: {},
+      }),
+      prisma.follow.deleteMany({
+        where: {
+          OR: [
+            { followerId: blockerId, followingId: targetId },
+            { followerId: targetId, followingId: blockerId },
+          ],
+        },
+      }),
+    ]);
+
+    return { blocked: true as const };
+  },
+
+  async unblock(blockerId: string, targetId: string) {
+    await prisma.block.deleteMany({
+      where: { blockerId, blockedId: targetId },
+    });
+    return { unblocked: true as const };
+  },
+
+  async listBlocked(userId: string) {
+    const rows = await prisma.block.findMany({
+      where: { blockerId: userId },
+      include: { blocked: { select: publicUser } },
+      orderBy: { createdAt: 'desc' },
+    });
+    return rows.map(r => r.blocked);
+  },
+
+  // ──────────────────── Report ────────────────────
+  async report(reporterId: string, targetId: string, input: ReportInput) {
+    if (reporterId === targetId) throw new AppError('USER_003');
+    const target = await prisma.user.findUnique({ where: { id: targetId } });
+    if (!target) throw new AppError('USER_001');
+
+    const set = await redis.set(reportCooldownKey(reporterId, 'user', targetId), '1', {
+      EX: REPORT_COOLDOWN_SECONDS,
+      NX: true,
+    });
+    if (set === null) throw new AppError('RATE_LIMIT_001');
+
+    const row = await prisma.report.create({
+      data: {
+        reporterId,
+        targetKind: 'USER',
+        reportedId: targetId,
+        reason: reasonToEnum(input.reason),
+        details: input.details ?? null,
+      },
+    });
+    return { reportId: row.id };
+  },
+
+  async reportRoom(reporterId: string, roomId: string, input: ReportRoomInput) {
+    const room = await prisma.room.findUnique({ where: { id: roomId }, select: { id: true } });
+    if (!room) throw new AppError('ROOM_001');
+
+    const set = await redis.set(reportCooldownKey(reporterId, 'room', roomId), '1', {
+      EX: REPORT_COOLDOWN_SECONDS,
+      NX: true,
+    });
+    if (set === null) throw new AppError('RATE_LIMIT_001');
+
+    const row = await prisma.report.create({
+      data: {
+        reporterId,
+        targetKind: 'ROOM',
+        reportedRoomId: roomId,
+        reason: reasonToEnum(input.reason),
+        details: input.details ?? null,
+      },
+    });
+    return { reportId: row.id };
+  },
+};

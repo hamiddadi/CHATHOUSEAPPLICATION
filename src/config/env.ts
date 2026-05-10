@@ -1,24 +1,49 @@
 import * as ExpoConstants from 'expo-constants';
+import { z } from 'zod';
 
 const Constants = ExpoConstants.default;
 
-type Env = {
-  API_BASE_URL: string;
-  WS_BASE_URL: string;
-  REALTIME_ENABLED: boolean;
-  ENV: 'development' | 'staging' | 'production';
-  SENTRY_DSN?: string;
-};
+/**
+ * Runtime env — sourced from `app.config.js → extra`. Zod validates on boot
+ * and throws at startup if anything is malformed, so we never race on undefined
+ * `env.API_BASE_URL` at runtime. EAS Build injects `process.env.*` into the
+ * config at bundle time; dev with Expo Go falls back to the defaults.
+ */
+const envSchema = z.object({
+  API_BASE_URL: z.string().url().default('http://localhost:4000/api'),
+  WS_BASE_URL: z.string().default('ws://localhost:4000'),
+  REALTIME_ENABLED: z
+    .union([z.boolean(), z.string()])
+    .default(false)
+    .transform(v => v === true || v === 'true'),
+  ENV: z.enum(['development', 'staging', 'production']).default('development'),
+  SENTRY_DSN: z.string().url().optional(),
 
-const extra = (Constants.expoConfig?.extra ?? {}) as Partial<Env>;
+  // ─── Agora (audio engine) ────────────────────────────────
+  // AGORA_APP_ID is the public app identifier — safe to ship in client
+  // builds. The PRIMARY_CERTIFICATE / SECONDARY_CERTIFICATE are SECRETS
+  // and MUST NEVER be embedded in the client bundle — the backend signs
+  // tokens using them. The temp token below is short-lived (max 24h)
+  // and is fine for development; production must call a token endpoint.
+  AGORA_APP_ID: z.string().min(1).optional(),
+  AGORA_DEFAULT_CHANNEL: z.string().min(1).default('CHATHOUSE'),
+  AGORA_TEMP_TOKEN: z.string().min(1).optional(),
+});
 
-export const env: Env = {
-  API_BASE_URL: extra.API_BASE_URL ?? 'http://localhost:4000/api',
-  WS_BASE_URL: extra.WS_BASE_URL ?? 'ws://localhost:4000',
-  REALTIME_ENABLED: extra.REALTIME_ENABLED ?? false,
-  ENV: (extra.ENV as Env['ENV']) ?? 'development',
-  SENTRY_DSN: extra.SENTRY_DSN,
-};
+const extra = Constants.expoConfig?.extra ?? {};
+const parsed = envSchema.safeParse(extra);
+
+if (!parsed.success) {
+  // Surface the first issue in the release bundle (console.error survives
+  // `no-console: warn` lint rule) and throw so the app doesn't boot with
+  // garbage values silently.
+  // eslint-disable-next-line no-console
+  console.error('[env] Invalid Expo config extra:', parsed.error.flatten());
+  throw new Error('Invalid Expo config — see logs.');
+}
+
+export const env = parsed.data;
+export type Env = typeof env;
 
 export const isDev = env.ENV === 'development';
 export const isProd = env.ENV === 'production';

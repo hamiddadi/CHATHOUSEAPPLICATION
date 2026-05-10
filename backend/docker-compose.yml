@@ -1,0 +1,104 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: chathouse-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: chathouse
+      POSTGRES_PASSWORD: chathouse
+      POSTGRES_DB: chathouse
+    ports:
+      - '5433:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U chathouse']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: chathouse-redis
+    restart: unless-stopped
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build: .
+    container_name: chathouse-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      PORT: 4000
+      HOST: 0.0.0.0
+      DATABASE_URL: postgresql://chathouse:chathouse@postgres:5432/chathouse?schema=public
+      REDIS_URL: redis://redis:6379
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?JWT_ACCESS_SECRET is required}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET is required}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8081}
+      # ─── mediasoup (phase 4) — narrow UDP port range to reduce host ports
+      # exposed. Widen to 40000-49999 when load-testing many simultaneous
+      # rooms; each transport uses one UDP port.
+      MEDIASOUP_ENABLED: ${MEDIASOUP_ENABLED:-true}
+      # IMPORTANT: MUST be the LAN/WAN IP reachable from devices, NOT 127.0.0.1
+      # when testing from a phone. Override per env (e.g. 192.168.1.42 in dev,
+      # the server's public IP in prod). 127.0.0.1 only works for same-host
+      # browsers — phones / different machines will fail ICE.
+      MEDIASOUP_ANNOUNCED_IP: ${MEDIASOUP_ANNOUNCED_IP:-127.0.0.1}
+      MEDIASOUP_LISTEN_IP: 0.0.0.0
+      # Each WebRTC transport consumes one UDP port. With 2 transports/user
+      # (send + recv), 500 ports gives a server-wide ceiling of ~250 users.
+      # Widen further for high-density servers.
+      MEDIASOUP_RTC_MIN_PORT: ${MEDIASOUP_RTC_MIN_PORT:-40000}
+      MEDIASOUP_RTC_MAX_PORT: ${MEDIASOUP_RTC_MAX_PORT:-40499}
+      # mediasoup spawns one native process per worker; each pins to a CPU
+      # core. 4 is a sane default for a typical 4–8 vCPU host. Tune up for
+      # high-density servers (>250 simultaneous transports).
+      MEDIASOUP_NUM_WORKERS: ${MEDIASOUP_NUM_WORKERS:-4}
+      # ICE servers sent to clients. When running the `turn` profile below,
+      # override to: '[{"urls":"stun:127.0.0.1:3478"},{"urls":"turn:127.0.0.1:3478","username":"chathouse","credential":"chathouse"}]'
+      ICE_SERVERS_JSON: ${ICE_SERVERS_JSON:-[{"urls":"stun:stun.l.google.com:19302"}]}
+    ports:
+      - '4000:4000'
+      - '40000-40499:40000-40499/udp'
+
+  # ─── coturn STUN/TURN server (phase 5) ───────────────
+  # Disabled in the default profile — local testing often works over host
+  # candidates alone. Bring it up with:
+  #   docker compose --profile turn up -d
+  # network_mode: host gives the container access to the full UDP port
+  # range it needs for peer relays without declaring hundreds of `- ports:`.
+  coturn:
+    image: coturn/coturn:4.6
+    container_name: chathouse-coturn
+    profiles: ['turn']
+    restart: unless-stopped
+    network_mode: host
+    command:
+      - '-n'
+      - '--lt-cred-mech'
+      - '--user=chathouse:chathouse'
+      - '--realm=chathouse.local'
+      - '--listening-port=3478'
+      - '--min-port=49160'
+      - '--max-port=49200'
+      - '--external-ip=${COTURN_EXTERNAL_IP:-127.0.0.1}'
+      - '--no-multicast-peers'
+      - '--no-cli'
+
+volumes:
+  postgres-data:
+  redis-data:

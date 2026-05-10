@@ -9,6 +9,7 @@ import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
  * AUTH STACK
  * ========================================================== */
 export type AuthStackParamList = {
+  WelcomeSlides: undefined;
   Landing: undefined;
   Phone: undefined;
   Otp: { phoneNumber: string };
@@ -48,6 +49,14 @@ export type RoomStackParamList = {
   CreateHouse: undefined;
   HouseInvitation: { houseId: string; inviteToken?: string };
   InviteMember: { houseId: string };
+
+  // Module-follow-up screens (Module 3/4/6 surfaces).
+  Explore: undefined;
+  Events: undefined;
+  Notifications: undefined;
+
+  // In-room: invite multiple followers/contacts to join the current room.
+  InviteToRoom: { roomId: string };
 };
 
 export type MessageStackParamList = {
@@ -64,6 +73,21 @@ export type SettingsStackParamList = {
   Profile: { userId?: string } | undefined;
   EditProfile: undefined;
   Followers: { userId: string; initialTab?: 'followers' | 'following' };
+
+  // Godmode — gated by appRole >= MODERATOR. The entry point in Settings
+  // only renders when whoami() reports a privileged role.
+  AdminHome: undefined;
+  AdminUsers: undefined;
+  AdminUserDetail: { userId: string };
+  AdminReports: undefined;
+  AdminRooms: undefined;
+  AdminAuditLog: undefined;
+
+  // GDPR / privacy — accessible to every authed user.
+  PrivacyPolicy: undefined;
+  Terms: undefined;
+  DataExport: undefined;
+  DeleteAccount: undefined;
 };
 
 /* ============================================================

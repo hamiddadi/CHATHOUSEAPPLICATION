@@ -6,3 +6,19 @@ npm run typecheck || {
   exit 1
 }
 echo "[pre-push] ✔ typecheck passed."
+
+# Secrets scan — runs gitleaks when the binary is available. Silently
+# skips if not installed so the hook doesn't punish contributors who
+# haven't set it up yet; CI still enforces it.
+if command -v gitleaks >/dev/null 2>&1; then
+  echo "[pre-push] Running gitleaks..."
+  gitleaks detect --source . --config .gitleaks.toml --redact --no-banner || {
+    echo "[pre-push] ✖ gitleaks found potential secrets — push aborted."
+    echo "[pre-push]   Review the report above. If it's a false positive,"
+    echo "[pre-push]   add the pattern to .gitleaks.toml [allowlist]."
+    exit 1
+  }
+  echo "[pre-push] ✔ gitleaks clean."
+else
+  echo "[pre-push] gitleaks not installed — skipping (CI will still enforce)."
+fi

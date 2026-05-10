@@ -1,0 +1,1 @@
+export { RoomChatSidebar } from './RoomChatSidebar';

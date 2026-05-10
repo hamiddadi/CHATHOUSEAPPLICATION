@@ -13,11 +13,22 @@ import { colors, layout, spacing } from '../../../../shared/constants/theme';
 import type { RoomStackParamList } from '../../../../core/navigation/types';
 import type { RoomSummary, UserSummary } from '../../../../shared/types/domain';
 import { useRooms } from '../../hooks/useRooms';
+import { useHallwaySocket } from '../../hooks/useHallwaySocket';
+import { useUnreadNotificationCount } from '../../../notifications/hooks/useNotifications';
 
 type Nav = NativeStackNavigationProp<RoomStackParamList, 'RoomFeed'>;
 
 const FILTERS = ['All', 'Following', 'Tech', 'Music', 'Business', 'Health'] as const;
 type Filter = (typeof FILTERS)[number];
+
+// Map UI labels to the backend's topic / following params. `All` is the
+// no-filter case (sends nothing), `Following` flips the following flag,
+// the rest become a `topic` query string.
+const filterToParams = (f: Filter): { topic?: string; following?: boolean } => {
+  if (f === 'All') return {};
+  if (f === 'Following') return { following: true };
+  return { topic: f.toLowerCase() };
+};
 
 const SPEAKER_AVATAR_SIZE = 36;
 const LISTENER_AVATAR_SIZE = 28;
@@ -174,22 +185,60 @@ const RoomCard: React.FC<RoomCardProps> = memo(({ room, onJoin }) => {
 });
 RoomCard.displayName = 'RoomCard';
 
-const Header: React.FC<{ onWave: () => void }> = memo(({ onWave }) => (
-  <View className="flex-row items-center justify-between px-xxl py-lg">
-    <View className="flex-row items-center gap-sm">
-      <MaterialIcons name="graphic-eq" size={HEADER_ICON_SIZE} color={colors.primary} />
-      <Text className="text-xxl font-display text-primary tracking-tighter">Chathouse</Text>
+interface HeaderProps {
+  onSearch: () => void;
+  onEvents: () => void;
+  onNotifications: () => void;
+  unreadCount: number;
+}
+
+const HeaderIcon: React.FC<{
+  name: React.ComponentProps<typeof MaterialIcons>['name'];
+  label: string;
+  onPress: () => void;
+  badge?: number;
+}> = ({ name, label, onPress, badge }) => (
+  <Pressable
+    onPress={onPress}
+    accessibilityRole="button"
+    accessibilityLabel={label}
+    hitSlop={8}
+    className="w-10 h-10 items-center justify-center rounded-pill bg-overlay-white-5"
+  >
+    <MaterialIcons name={name} size={20} color={colors.text} />
+    {typeof badge === 'number' && badge > 0 && (
+      <View
+        className="absolute -top-1 -right-1 min-w-4 h-4 px-1 rounded-pill bg-primary items-center justify-center"
+        accessibilityLabel={`${badge} unread`}
+      >
+        <Text className="text-xxs font-body-bold text-primary-on-container">
+          {badge > 99 ? '99+' : badge}
+        </Text>
+      </View>
+    )}
+  </Pressable>
+);
+
+const Header: React.FC<HeaderProps> = memo(
+  ({ onSearch, onEvents, onNotifications, unreadCount }) => (
+    <View className="flex-row items-center justify-between px-xxl py-lg">
+      <View className="flex-row items-center gap-sm">
+        <MaterialIcons name="graphic-eq" size={HEADER_ICON_SIZE} color={colors.primary} />
+        <Text className="text-xxl font-display text-primary tracking-tighter">Chathouse</Text>
+      </View>
+      <View className="flex-row items-center gap-sm">
+        <HeaderIcon name="search" label="Explore" onPress={onSearch} />
+        <HeaderIcon name="event" label="Events" onPress={onEvents} />
+        <HeaderIcon
+          name="notifications"
+          label="Notifications"
+          onPress={onNotifications}
+          badge={unreadCount}
+        />
+      </View>
     </View>
-    <Pressable
-      onPress={onWave}
-      accessibilityRole="button"
-      accessibilityLabel="Wave to friends"
-      className="bg-primary-container rounded-pill px-lg py-sm"
-    >
-      <Text className="text-sm font-headline text-primary-on-container">Wave 👋</Text>
-    </Pressable>
-  </View>
-));
+  ),
+);
 Header.displayName = 'Header';
 
 export const RoomFeedScreen: React.FC = () => {
@@ -197,16 +246,21 @@ export const RoomFeedScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const [activeFilter, setActiveFilter] = useState<Filter>('All');
   const fab = useAnimatedPress({ scaleTo: 0.9 });
-  const { data: rooms, isLoading, isError, refetch } = useRooms();
+  const { data: rooms, isLoading, isError, refetch } = useRooms(filterToParams(activeFilter));
+
+  // Subscribe to live hallway broadcasts — new/ended rooms invalidate
+  // the scored feed so ranking stays fresh without manual refreshes.
+  useHallwaySocket();
+  const { data: unreadCount = 0 } = useUnreadNotificationCount();
 
   const handleJoin = useCallback(
     (roomId: string) => navigation.navigate('Room', { roomId }),
     [navigation],
   );
   const handleStartRoom = useCallback(() => navigation.navigate('CreateRoom'), [navigation]);
-  const handleWave = useCallback(() => {
-    // Wire to a "wave" presence ping later.
-  }, []);
+  const handleSearch = useCallback(() => navigation.navigate('Explore'), [navigation]);
+  const handleEvents = useCallback(() => navigation.navigate('Events'), [navigation]);
+  const handleNotifications = useCallback(() => navigation.navigate('Notifications'), [navigation]);
 
   const renderItem = useCallback(
     ({ item }: { item: RoomSummary }) => <RoomCard room={item} onJoin={handleJoin} />,
@@ -217,7 +271,12 @@ export const RoomFeedScreen: React.FC = () => {
 
   return (
     <View className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
-      <Header onWave={handleWave} />
+      <Header
+        onSearch={handleSearch}
+        onEvents={handleEvents}
+        onNotifications={handleNotifications}
+        unreadCount={unreadCount}
+      />
 
       {isLoading ? (
         <Loader fullscreen accessibilityLabel="Loading live rooms" />
@@ -258,6 +317,11 @@ export const RoomFeedScreen: React.FC = () => {
       )}
 
       <Animated.View
+        // `pointerEvents="box-none"` makes the animated wrapper transparent
+        // to taps that don't land on its children — without it, the empty
+        // pixels around the FAB intercept scroll/swipe gestures meant for
+        // the FlatList underneath.
+        pointerEvents="box-none"
         style={[fab.animatedStyle, styles.fab, { bottom: insets.bottom + FAB_BOTTOM_OFFSET }]}
       >
         <Pressable

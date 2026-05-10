@@ -7,7 +7,15 @@ export const messageKeys = {
   conversations: () => [...messageKeys.all, 'conversations'] as const,
   conversation: (id: string) => [...messageKeys.all, 'conversation', id] as const,
   messages: (id: string) => [...messageKeys.all, 'messages', id] as const,
+  unread: () => [...messageKeys.all, 'unread'] as const,
 };
+
+export const useUnreadMessageCount = () =>
+  useQuery<number>({
+    queryKey: messageKeys.unread(),
+    queryFn: () => messageService.unreadCount(),
+    staleTime: 30_000,
+  });
 
 export const useConversations = () =>
   useQuery<Conversation[]>({

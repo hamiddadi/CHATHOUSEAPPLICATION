@@ -1,0 +1,27 @@
+# Gitleaks config. Loads the upstream default rules, then allows a narrow
+# set of known-safe strings so the CI step doesn't false-flag fixtures.
+#
+# Run locally:  gitleaks detect --source . --config .gitleaks.toml --verbose
+# CI:           via gitleaks/gitleaks-action@v2 in .github/workflows/ci.yml
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Repo-wide false-positive exemptions"
+paths = [
+  # Test fixtures: deterministic dummy secrets, not real credentials.
+  '''backend/tests/.*''',
+  '''src/features/.*/.*\.test\.tsx?''',
+  # Docker compose includes the dev DB password ("chathouse") which the
+  # CI seeds to a throwaway Postgres service — not a real credential.
+  '''backend/docker-compose\.ya?ml''',
+  # Example env files meant to be committed as a reference.
+  '''.*\.env\.example''',
+]
+# Strings that gitleaks matches but we know are placeholders or dev
+# defaults only used locally / in ephemeral CI containers.
+regexes = [
+  '''chathouse:chathouse''',                    # dev Postgres creds
+  '''ci_(access|refresh)_secret_[0-9a-f]+''',   # CI-only JWT secrets
+  '''ExponentPushToken\[[^\]]+\]''',            # Expo push token fixtures
+]

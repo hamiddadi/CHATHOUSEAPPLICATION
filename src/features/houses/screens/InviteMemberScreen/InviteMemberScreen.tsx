@@ -1,6 +1,7 @@
 import React, { memo, useCallback, useState } from 'react';
-import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, FlatList, Pressable, Share, StyleSheet, Text, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
+import * as Clipboard from 'expo-clipboard';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -59,6 +60,25 @@ export const InviteMemberScreen: React.FC = () => {
   const inviteToHouse = useInviteToHouse();
 
   const handleClose = useCallback(() => navigation.goBack(), [navigation]);
+
+  const inviteUrl = `https://app.chathouse.com/invite/${route.params.houseId}`;
+  const handleCopyLink = useCallback(async () => {
+    try {
+      await Clipboard.setStringAsync(inviteUrl);
+      Alert.alert('Copié', "Le lien d'invitation est dans votre presse-papier.", [
+        {
+          text: 'Partager',
+          onPress: () => {
+            void Share.share({ message: inviteUrl, url: inviteUrl }).catch(() => undefined);
+          },
+        },
+        { text: 'OK', style: 'cancel' },
+      ]);
+    } catch {
+      Alert.alert('Erreur', 'Impossible de copier le lien.');
+    }
+  }, [inviteUrl]);
+
   const handleInvite = useCallback(
     (id: string) => {
       setInvited(prev => {
@@ -102,7 +122,12 @@ export const InviteMemberScreen: React.FC = () => {
           <Text className="flex-1 text-xs font-body text-ink-muted" numberOfLines={1}>
             chathouse.app/invite/{route.params.houseId}
           </Text>
-          <Pressable accessibilityRole="button" accessibilityLabel="Copy invite link" hitSlop={6}>
+          <Pressable
+            onPress={handleCopyLink}
+            accessibilityRole="button"
+            accessibilityLabel="Copy invite link"
+            hitSlop={6}
+          >
             <MaterialIcons name="content-copy" size={18} color={colors.primary} />
           </Pressable>
         </View>

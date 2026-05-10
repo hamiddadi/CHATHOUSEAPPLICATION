@@ -1,0 +1,230 @@
+import type { Request, Response } from 'express';
+import { sendOk } from '../../utils/response';
+import { AppError } from '../../middlewares/error.middleware';
+import { prisma } from '../../config/database';
+import { closeRoom as closeSfuRoom } from '../../webrtc/mediasoup.manager';
+import { agoraService, type AgoraParticipantRole } from './agora.service';
+import {
+  createRoomSchema,
+  inviteToRoomSchema,
+  kickSchema,
+  listRoomsSchema,
+  muteAllSchema,
+  muteSchema,
+  pingUserSchema,
+  sendReactionSchema,
+  sendRoomMessageSchema,
+  toggleRoomChatSchema,
+  updateRoleSchema,
+  updateRoomTitleSchema,
+} from './rooms.schema';
+import { roomsService } from './rooms.service';
+
+const requireUserId = (req: Request): string => {
+  if (!req.userId) throw new AppError('AUTH_003');
+  return req.userId;
+};
+
+const paramId = (req: Request, key: string): string => {
+  const raw = req.params[key];
+  const id = Array.isArray(raw) ? raw[0] : raw;
+  if (!id) throw new AppError('ROOM_001');
+  return id;
+};
+
+export const roomsController = {
+  async list(req: Request, res: Response) {
+    const input = listRoomsSchema.parse(req.query);
+    const rows = await roomsService.list(input);
+    sendOk(res, rows);
+  },
+
+  async create(req: Request, res: Response) {
+    const input = createRoomSchema.parse(req.body);
+    const room = await roomsService.create(requireUserId(req), input);
+    sendOk(res, room, 201);
+  },
+
+  async get(req: Request, res: Response) {
+    const room = await roomsService.get(paramId(req, 'id'));
+    sendOk(res, room);
+  },
+
+  async join(req: Request, res: Response) {
+    const room = await roomsService.join(paramId(req, 'id'), requireUserId(req));
+    sendOk(res, room);
+  },
+
+  async leave(req: Request, res: Response) {
+    const result = await roomsService.leave(paramId(req, 'id'), requireUserId(req));
+    sendOk(res, result);
+  },
+
+  async end(req: Request, res: Response) {
+    const roomId = paramId(req, 'id');
+    const result = await roomsService.end(roomId, requireUserId(req));
+    // Release SFU state too so a subsequent /rooms/:id/join on a reused id
+    // doesn't inherit the old router.
+    await closeSfuRoom(roomId);
+    sendOk(res, result);
+  },
+
+  async setRole(req: Request, res: Response) {
+    const input = updateRoleSchema.parse(req.body);
+    const result = await roomsService.setRole(paramId(req, 'id'), requireUserId(req), input);
+    sendOk(res, result);
+  },
+
+  async setMute(req: Request, res: Response) {
+    const input = muteSchema.parse(req.body);
+    const result = await roomsService.setMute(paramId(req, 'id'), requireUserId(req), input);
+    sendOk(res, result);
+  },
+
+  async rsvp(req: Request, res: Response) {
+    const result = await roomsService.rsvp(paramId(req, 'id'), requireUserId(req));
+    sendOk(res, result);
+  },
+
+  async cancelRsvp(req: Request, res: Response) {
+    const result = await roomsService.cancelRsvp(paramId(req, 'id'), requireUserId(req));
+    sendOk(res, result);
+  },
+
+  async listRsvps(req: Request, res: Response) {
+    const rows = await roomsService.listRsvps(paramId(req, 'id'));
+    sendOk(res, rows);
+  },
+
+  async myUpcoming(req: Request, res: Response) {
+    const rows = await roomsService.myUpcomingEvents(requireUserId(req));
+    sendOk(res, rows);
+  },
+
+  async myHistory(req: Request, res: Response) {
+    const raw = req.query['limit'];
+    const parsed = typeof raw === 'string' ? Number.parseInt(raw, 10) : NaN;
+    const limit = Number.isFinite(parsed) ? Math.max(1, Math.min(50, parsed)) : 20;
+    const rows = await roomsService.myRoomHistory(requireUserId(req), limit);
+    sendOk(res, rows);
+  },
+
+  async feed(req: Request, res: Response) {
+    const raw = req.query['limit'];
+    const parsed = typeof raw === 'string' ? Number.parseInt(raw, 10) : NaN;
+    const limit = Number.isFinite(parsed) ? Math.max(1, Math.min(50, parsed)) : 20;
+    // Optional topic / following filter — passed through to the service so
+    // the scoring pool is narrowed before ranking. `topic=tech` matches
+    // both Room.topic (single) and Room.topics[] (array).
+    const topicQ = req.query['topic'];
+    const topic =
+      typeof topicQ === 'string' && topicQ.length > 0 ? topicQ.toLowerCase() : undefined;
+    const followingQ = req.query['following'];
+    const following = followingQ === 'true' || followingQ === '1';
+    const rows = await roomsService.feed(requireUserId(req), limit, undefined, {
+      topic,
+      following,
+    });
+    sendOk(res, rows);
+  },
+
+  async raiseHand(req: Request, res: Response) {
+    const result = await roomsService.raiseHand(paramId(req, 'id'), requireUserId(req));
+    sendOk(res, result);
+  },
+
+  async lowerHand(req: Request, res: Response) {
+    const result = await roomsService.lowerHand(paramId(req, 'id'), requireUserId(req));
+    sendOk(res, result);
+  },
+
+  async listHandRaises(req: Request, res: Response) {
+    const rows = await roomsService.listHandRaises(paramId(req, 'id'), requireUserId(req));
+    sendOk(res, rows);
+  },
+
+  async sendMessage(req: Request, res: Response) {
+    const input = sendRoomMessageSchema.parse(req.body);
+    const msg = await roomsService.sendRoomMessage(paramId(req, 'id'), requireUserId(req), input);
+    sendOk(res, msg, 201);
+  },
+
+  async listMessages(req: Request, res: Response) {
+    const rows = await roomsService.listRoomMessages(paramId(req, 'id'), requireUserId(req));
+    sendOk(res, rows);
+  },
+
+  async reaction(req: Request, res: Response) {
+    const input = sendReactionSchema.parse(req.body);
+    const r = await roomsService.sendReaction(paramId(req, 'id'), requireUserId(req), input);
+    sendOk(res, r, 201);
+  },
+
+  async kick(req: Request, res: Response) {
+    const input = kickSchema.parse(req.body);
+    const result = await roomsService.kick(paramId(req, 'id'), requireUserId(req), input.userId, {
+      banMinutes: input.banMinutes,
+      reason: input.reason,
+    });
+    sendOk(res, result);
+  },
+
+  async updateTitle(req: Request, res: Response) {
+    const input = updateRoomTitleSchema.parse(req.body);
+    const result = await roomsService.updateTitle(paramId(req, 'id'), requireUserId(req), input);
+    sendOk(res, result);
+  },
+
+  async toggleChat(req: Request, res: Response) {
+    const input = toggleRoomChatSchema.parse(req.body);
+    const result = await roomsService.toggleChat(paramId(req, 'id'), requireUserId(req), input);
+    sendOk(res, result);
+  },
+
+  async muteAll(req: Request, res: Response) {
+    const input = muteAllSchema.parse(req.body ?? {});
+    const result = await roomsService.muteAll(paramId(req, 'id'), requireUserId(req), input);
+    sendOk(res, result);
+  },
+
+  async invite(req: Request, res: Response) {
+    const input = inviteToRoomSchema.parse(req.body);
+    const result = await roomsService.invite(paramId(req, 'id'), requireUserId(req), input);
+    sendOk(res, result);
+  },
+
+  async ping(req: Request, res: Response) {
+    const input = pingUserSchema.parse(req.body);
+    const result = await roomsService.pingUser(
+      input.roomId,
+      requireUserId(req),
+      paramId(req, 'userId'),
+    );
+    sendOk(res, result);
+  },
+
+  /**
+   * Issue an Agora token for the caller's current role in the room. The
+   * token is bound to (channel = roomId, uid = FNV-1a(userId), role).
+   * Caller MUST be an active participant — listeners get a SUBSCRIBER
+   * token, host/mod/speaker get a PUBLISHER token. The client refetches
+   * this on `onTokenPrivilegeWillExpire` to renew without rejoining.
+   */
+  async agoraToken(req: Request, res: Response) {
+    const userId = requireUserId(req);
+    const roomId = paramId(req, 'id');
+
+    const participant = await prisma.participant.findUnique({
+      where: { userId_roomId: { userId, roomId } },
+      select: { role: true, leftAt: true },
+    });
+    if (!participant || participant.leftAt) throw new AppError('ROOM_005');
+
+    const result = agoraService.issueRoomToken({
+      roomId,
+      userId,
+      role: participant.role as AgoraParticipantRole,
+    });
+    sendOk(res, result);
+  },
+};

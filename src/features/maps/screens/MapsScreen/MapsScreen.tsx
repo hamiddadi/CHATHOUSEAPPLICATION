@@ -64,7 +64,9 @@ export const MapsScreen: React.FC = () => {
   }, [coords]);
 
   const filteredFollowers = useMemo(
-    () => followers.filter(f => matches(f, search)),
+    // Ghost Mode users are dropped upstream by the backend; here we also drop
+    // offline followers so the map only shows reachable, live-or-recent users.
+    () => followers.filter(f => f.presence !== 'offline' && matches(f, search)),
     [followers, search],
   );
 
@@ -203,7 +205,7 @@ export const MapsScreen: React.FC = () => {
               longitude: f.location.longitude,
             }}
             onPress={() => handlePinPress(f)}
-            tracksViewChanges={false}
+            tracksViewChanges={f.liveRoomId !== null}
             anchor={{ x: 0.5, y: 0.5 }}
           >
             <FollowerPin follower={f} />

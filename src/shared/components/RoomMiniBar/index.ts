@@ -1,0 +1,1 @@
+export { RoomMiniBar } from './RoomMiniBar';

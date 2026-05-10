@@ -3,6 +3,7 @@
     "name": "Chathouse",
     "slug": "chathouse",
     "version": "0.1.0",
+    "runtimeVersion": { "policy": "appVersion" },
     "orientation": "portrait",
     "scheme": "chathouse",
     "userInterfaceStyle": "dark",
@@ -15,7 +16,7 @@
         "NSPhotoLibraryUsageDescription": "Chathouse needs access to your photos so you can update your profile photo.",
         "NSLocationWhenInUseUsageDescription": "Chathouse shows friends and rooms on the map when you allow location access.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "Chathouse keeps your location updated so friends can find you when you're active.",
-        "UIBackgroundModes": ["location", "fetch"]
+        "UIBackgroundModes": ["location", "fetch", "audio", "voip"]
       }
     },
     "android": {
@@ -29,7 +30,11 @@
         "CAMERA",
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
-        "ACCESS_BACKGROUND_LOCATION"
+        "ACCESS_BACKGROUND_LOCATION",
+        "MODIFY_AUDIO_SETTINGS",
+        "ACCESS_NETWORK_STATE",
+        "BLUETOOTH",
+        "BLUETOOTH_CONNECT"
       ]
     },
     "web": {
@@ -38,6 +43,9 @@
     "plugins": [
       "expo-font",
       "expo-secure-store",
+      "expo-localization",
+      "expo-system-ui",
+      "@sentry/react-native",
       [
         "expo-image-picker",
         {
@@ -49,14 +57,24 @@
         {
           "locationAlwaysAndWhenInUsePermission": "Chathouse shows nearby rooms on the map when you allow location access."
         }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "minSdkVersion": 24,
+            "compileSdkVersion": 36,
+            "targetSdkVersion": 36,
+            "buildToolsVersion": "36.0.0"
+          },
+          "ios": {
+            "deploymentTarget": "15.1"
+          }
+        }
       ]
     ],
     "experiments": {
       "typedRoutes": false
-    },
-    "extra": {
-      "API_BASE_URL": "http://localhost:4000/api",
-      "ENV": "development"
     }
   }
 }

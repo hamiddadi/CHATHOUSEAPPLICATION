@@ -1,5 +1,24 @@
 import { CURRENT_USER, MOCK_USERS, findUserById } from '../../../shared/mocks/users.mock';
+import { apiClient } from '../../../shared/services/api/apiClient';
 import type { User } from '../../../shared/types/domain';
+
+interface Envelope<T> {
+  success: true;
+  data: T;
+}
+
+// Shape returned by GET /api/users/search — narrower than the full User
+// domain type. We fill the remaining fields with safe defaults so the
+// hook's `User[]` return type stays intact.
+interface RawSearchUser {
+  id: string;
+  username: string | null;
+  displayName: string | null;
+  avatarUrl: string | null;
+  bio: string | null;
+  isOnline: boolean;
+  createdAt: string;
+}
 
 const wait = (ms: number): Promise<void> => new Promise(res => setTimeout(res, ms));
 
@@ -59,11 +78,31 @@ export const profileService = {
   },
 
   async search(query: string): Promise<User[]> {
-    await wait(200);
-    const q = query.trim().toLowerCase();
+    const q = query.trim();
+    // Backend rejects empty q; mimic the old "no query → list" behaviour
+    // from the frontend by short-circuiting to the mock list — this path
+    // only fires when the search box is empty.
     if (q.length === 0) return [...MOCK_USERS];
-    return MOCK_USERS.filter(
-      u => u.displayName.toLowerCase().includes(q) || u.username.toLowerCase().includes(q),
+
+    const res = await apiClient.get<Envelope<RawSearchUser[]>>('/users/search', {
+      params: { q },
+    });
+    return res.data.data.map(
+      (u): User => ({
+        id: u.id,
+        username: u.username ?? '',
+        displayName: u.displayName ?? u.username ?? '',
+        avatarUrl: u.avatarUrl,
+        bio: u.bio,
+        isOnline: u.isOnline,
+        // These counts aren't part of the search payload (they'd require
+        // an N+1 lookup). Callers that need them should fetch the user
+        // detail via `get(userId)`.
+        followersCount: 0,
+        followingCount: 0,
+        isFollowedByMe: false,
+        createdAt: u.createdAt,
+      }),
     );
   },
 };
