@@ -21,8 +21,6 @@ import { signAccessToken } from '../src/utils/jwt';
 
 let httpServer: http.Server;
 let port: number;
-let _adminId: string;
-let _testUser1Id: string;
 let adminToken: string;
 let testUser1Token: string;
 let sampleRoomId: string;
@@ -53,8 +51,6 @@ beforeAll(async () => {
   const user1 = await prisma.user.findUnique({ where: { email: 'test1@chathouse.dev' } });
   if (!admin || !user1) throw new Error('Run seed first');
 
-  _adminId = admin.id;
-  _testUser1Id = user1.id;
   adminToken = signAccessToken(admin.id);
   testUser1Token = signAccessToken(user1.id);
 

@@ -7,6 +7,7 @@ import { useNavigation } from '@react-navigation/native';
 import { Avatar } from '../Avatar';
 import { colors, layout, radii, shadows, spacing } from '../../constants/theme';
 import { useCurrentRoom } from '../../../features/rooms/hooks/useRooms';
+import type { RoomParticipant } from '../../types/domain';
 
 /**
  * Persistent mini-bar that floats above the bottom tab bar whenever the
@@ -55,25 +56,18 @@ export const RoomMiniBar: React.FC = memo(() => {
         <View style={styles.content}>
           {/* Speaker avatars */}
           <View style={styles.avatarStack}>
-            {room.speakers
-              .slice(0, 3)
-              .map(
-                (
-                  s: { id: string; avatarUrl?: string; displayName: string; audio?: string },
-                  i: number,
-                ) => (
-                  <View key={s.id} style={[styles.stackItem, i > 0 && styles.stackItemOverlap]}>
-                    <Avatar
-                      uri={s.avatarUrl ?? undefined}
-                      name={s.displayName}
-                      sizeValue={28}
-                      ring={s.audio === 'speaking'}
-                      ringColor="#00e475"
-                      ringWidth={1.5}
-                    />
-                  </View>
-                ),
-              )}
+            {room.speakers.slice(0, 3).map((s: RoomParticipant, i: number) => (
+              <View key={s.id} style={[styles.stackItem, i > 0 && styles.stackItemOverlap]}>
+                <Avatar
+                  uri={s.avatarUrl ?? undefined}
+                  name={s.displayName}
+                  sizeValue={28}
+                  ring={s.audio === 'speaking'}
+                  ringColor="#00e475"
+                  ringWidth={1.5}
+                />
+              </View>
+            ))}
           </View>
 
           {/* Room info */}

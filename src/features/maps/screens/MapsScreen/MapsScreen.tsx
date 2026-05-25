@@ -175,7 +175,7 @@ export const MapsScreen: React.FC = () => {
         initialRegion={initialRegion}
         showsUserLocation={false}
         showsMyLocationButton={false}
-        showsPointsOfInterest={false}
+        showsPointsOfInterests={false}
         showsCompass={false}
         toolbarEnabled={false}
       >
