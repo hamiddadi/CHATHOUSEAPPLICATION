@@ -2,6 +2,7 @@ import React, { memo, useCallback } from 'react';
 import { Alert, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { colors, spacing } from '../../../../shared/constants/theme';
+import { errorMessage } from '../../../../shared/utils/errorMessage';
 import { useMuteAllInRoom, useToggleRoomChat } from '../../hooks/useRooms';
 
 interface RoomControlsSheetProps {
@@ -38,7 +39,7 @@ export const RoomControlsSheet: React.FC<RoomControlsSheetProps> = memo(
                 { roomId, includeHost: false },
                 {
                   onSuccess: r => Alert.alert('Fait', `${r.mutedCount} speaker(s) muté(s).`),
-                  onError: e => Alert.alert('Erreur', e instanceof Error ? e.message : 'Échec'),
+                  onError: e => Alert.alert('Erreur', errorMessage(e, 'Échec')),
                 },
               ),
           },
@@ -50,7 +51,7 @@ export const RoomControlsSheet: React.FC<RoomControlsSheetProps> = memo(
       toggleChat.mutate(
         { roomId, chatEnabled: !chatEnabled },
         {
-          onError: e => Alert.alert('Erreur', e instanceof Error ? e.message : 'Échec'),
+          onError: e => Alert.alert('Erreur', errorMessage(e, 'Échec')),
         },
       );
     }, [chatEnabled, roomId, toggleChat]);
@@ -59,7 +60,7 @@ export const RoomControlsSheet: React.FC<RoomControlsSheetProps> = memo(
       toggleChat.mutate(
         { roomId, chatVisibility: chatVisibility === 'MODS_ONLY' ? 'all' : 'mods' },
         {
-          onError: e => Alert.alert('Erreur', e instanceof Error ? e.message : 'Échec'),
+          onError: e => Alert.alert('Erreur', errorMessage(e, 'Échec')),
         },
       );
     }, [chatVisibility, roomId, toggleChat]);

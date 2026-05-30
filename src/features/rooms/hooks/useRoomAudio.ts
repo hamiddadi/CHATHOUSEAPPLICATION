@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { env } from '../../../config/env';
 import { getSocket } from '../../../shared/services/realtime/socketClient';
+import { errorMessage } from '../../../shared/utils/errorMessage';
 import { startRoomAudio, type RoomAudioHandle } from '../services/roomAudioService';
 
 interface UseRoomAudioOptions {
@@ -91,7 +92,7 @@ export const useRoomAudio = ({
         setStatus('live');
       } catch (err) {
         if (cancelled) return;
-        const msg = err instanceof Error ? err.message : 'unknown';
+        const msg = errorMessage(err, 'unknown');
         // The "native module missing" sentinel — surfaces as
         // `unsupported` so the UI can show a "audio à venir — installer
         // react-native-agora" banner instead of a hard error toast.

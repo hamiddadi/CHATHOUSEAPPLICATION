@@ -10,4 +10,4 @@ export type { Theme };
  * directly — that path is unchanged.
  */
 export const themeFor = (scheme: 'light' | 'dark'): Theme =>
-  (scheme === 'dark' ? darkTheme : lightTheme) as Theme;
+  scheme === 'dark' ? darkTheme : lightTheme;

@@ -14,6 +14,7 @@ import {
   lineHeights,
   letterSpacing,
 } from '../constants/theme';
+import type { Theme } from './theme.types';
 
 export const darkTheme = {
   mode: 'dark' as const,
@@ -26,6 +27,6 @@ export const darkTheme = {
   fontWeights,
   lineHeights,
   letterSpacing,
-} as const;
+} as const satisfies Theme;
 
-export type Theme = typeof darkTheme;
+export type { Theme };

@@ -5,6 +5,7 @@ import { Button } from '../../../shared/components/Button';
 import { colors, spacing } from '../../../shared/constants/theme';
 import { useAuthStore } from '../../auth/store/authStore';
 import { privacyService } from '../services/privacyService';
+import { errorMessage } from '../../../shared/utils/errorMessage';
 
 const CONFIRM_PHRASE = 'SUPPRIMER';
 
@@ -33,7 +34,7 @@ export const DeleteAccountScreen: React.FC = () => {
               // keep transacting with the now-soft-deleted account.
               await signOut();
             } catch (e) {
-              Alert.alert('Erreur', e instanceof Error ? e.message : 'Échec');
+              Alert.alert('Erreur', errorMessage(e, 'Échec'));
             } finally {
               setBusy(false);
             }

@@ -10,6 +10,7 @@ import { Button } from '../../../../shared/components/Button';
 import { Input } from '../../../../shared/components/Input';
 import { colors, radii, spacing } from '../../../../shared/constants/theme';
 import type { RoomStackParamList } from '../../../../core/navigation/types';
+import { errorMessage } from '../../../../shared/utils/errorMessage';
 import { useCreateRoom } from '../../hooks/useRooms';
 import { searchService } from '../../../search/services/searchService';
 import { INTEREST_CATEGORIES } from '../../../onboarding/schemas';
@@ -246,10 +247,7 @@ export const CreateRoomScreen: React.FC = () => {
       });
       navigation.goBack();
     } catch (err) {
-      Alert.alert(
-        t('createRoom.errorTitle'),
-        err instanceof Error ? err.message : t('createRoom.errorBody'),
-      );
+      Alert.alert(t('createRoom.errorTitle'), errorMessage(err, t('createRoom.errorBody')));
     }
   }, [
     createRoom,

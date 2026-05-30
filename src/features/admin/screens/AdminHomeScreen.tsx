@@ -10,6 +10,7 @@ import { AdminHeader } from '../components/AdminHeader';
 import { useAdminStats, useAdminWhoami } from '../hooks/useAdmin';
 import { adminService } from '../services/adminService';
 import { isAtLeast } from '../types/admin.types';
+import { errorMessage } from '../../../shared/utils/errorMessage';
 import type { SettingsStackScreenProps } from '../../../core/navigation/types';
 
 type Nav = SettingsStackScreenProps<'AdminHome'>['navigation'];
@@ -104,7 +105,7 @@ export const AdminHomeScreen: React.FC<SettingsStackScreenProps<'AdminHome'>> = 
         title: `Chathouse · export ${kind}`,
       });
     } catch (e) {
-      Alert.alert('Erreur', e instanceof Error ? e.message : 'Échec export');
+      Alert.alert('Erreur', errorMessage(e, 'Échec export'));
     } finally {
       setExporting(null);
     }

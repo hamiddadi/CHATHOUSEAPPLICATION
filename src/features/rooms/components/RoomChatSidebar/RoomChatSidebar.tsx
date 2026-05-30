@@ -16,6 +16,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Avatar } from '../../../../shared/components/Avatar';
 import { colors, spacing } from '../../../../shared/constants/theme';
 import { getSocket } from '../../../../shared/services/realtime/socketClient';
+import { errorMessage } from '../../../../shared/utils/errorMessage';
 import { roomKeys, useRoomMessages, useSendRoomMessage } from '../../hooks/useRooms';
 
 // Defer the scroll-to-end so the FlatList finishes layout before scrolling.
@@ -151,7 +152,7 @@ export const RoomChatSidebar: React.FC<RoomChatSidebarProps> = memo(
             setDraft('');
             setReplyTo(null);
           },
-          onError: e => Alert.alert('Erreur', e instanceof Error ? e.message : "Échec de l'envoi"),
+          onError: e => Alert.alert('Erreur', errorMessage(e, "Échec de l'envoi")),
         },
       );
     }, [draft, roomId, replyTo, sendMessage]);
