@@ -1,4 +1,4 @@
-import React, { memo, useCallback, useEffect, useState } from 'react';
+import React, { memo, useCallback, useState } from 'react';
 import { Alert, FlatList, Pressable, Share, StyleSheet, Text, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
@@ -12,6 +12,7 @@ import { Loader } from '../../../../shared/components/Loader';
 import { colors, spacing } from '../../../../shared/constants/theme';
 import type { RoomStackParamList } from '../../../../core/navigation/types';
 import type { User } from '../../../../shared/types/domain';
+import { useDebouncedValue } from '../../../../shared/hooks/useDebouncedValue';
 import { useSearchUsers } from '../../../profile/hooks/useProfile';
 import { useInviteToHouse } from '../../hooks/useHouses';
 
@@ -63,13 +64,8 @@ export const InviteMemberScreen: React.FC = () => {
   const route = useRoute<Route>();
   const insets = useSafeAreaInsets();
   const [query, setQuery] = useState('');
-  const [debouncedQuery, setDebouncedQuery] = useState('');
   const [invited, setInvited] = useState<Record<string, boolean>>({});
-
-  useEffect(() => {
-    const id = setTimeout(() => setDebouncedQuery(query.trim()), SEARCH_DEBOUNCE_MS);
-    return () => clearTimeout(id);
-  }, [query]);
+  const debouncedQuery = useDebouncedValue(query.trim(), SEARCH_DEBOUNCE_MS);
 
   const { data: users, isLoading } = useSearchUsers(debouncedQuery);
   const inviteToHouse = useInviteToHouse();

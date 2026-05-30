@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Linking, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { profileLinksApi, type ProfileLink } from '../api/profileLinksApi';
+import { apiErrorMessage } from '../utils/extUi';
 
 interface Props {
   userId: string;
@@ -52,9 +53,7 @@ export const ExtProfileLinks: React.FC<Props> = ({ userId, editable = false }) =
       setLabel('');
       setUrl('');
     } catch (err) {
-      const msg = (err as { response?: { data?: { error?: { message?: string } } } })?.response
-        ?.data?.error?.message;
-      setError(msg ?? 'Failed to add link');
+      setError(apiErrorMessage(err, 'Failed to add link'));
     } finally {
       setBusy(false);
     }

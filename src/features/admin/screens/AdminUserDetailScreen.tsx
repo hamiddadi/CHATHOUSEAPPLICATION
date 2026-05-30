@@ -7,6 +7,7 @@ import { Button } from '../../../shared/components/Button';
 import { EmptyState } from '../../../shared/components/EmptyState';
 import { Loader } from '../../../shared/components/Loader';
 import { colors, spacing } from '../../../shared/constants/theme';
+import { errorMessage } from '../../../shared/utils/errorMessage';
 import { AdminHeader } from '../components/AdminHeader';
 import {
   useAdminUser,
@@ -16,6 +17,7 @@ import {
   useSuspendUser,
   useUnsuspendUser,
 } from '../hooks/useAdmin';
+import { promptForReason } from '../promptForReason';
 import { useImpersonationStore } from '../store/impersonationStore';
 import { isAtLeast, ROLE_RANK, type AppRole } from '../types/admin.types';
 import { formatDate, formatDateTime } from '../../../shared/utils/intl';
@@ -69,7 +71,7 @@ export const AdminUserDetailScreen: React.FC<SettingsStackScreenProps<'AdminUser
               setRole.mutate(
                 { userId: user.id, role },
                 {
-                  onError: e => Alert.alert('Erreur', e instanceof Error ? e.message : 'Échec'),
+                  onError: e => Alert.alert('Erreur', errorMessage(e, 'Échec')),
                 },
               ),
           },
@@ -86,41 +88,19 @@ export const AdminUserDetailScreen: React.FC<SettingsStackScreenProps<'AdminUser
         suspend.mutate(
           { userId: user.id, reason: motif, durationMinutes: minutes },
           {
-            onError: e => Alert.alert('Erreur', e instanceof Error ? e.message : 'Échec'),
+            onError: e => Alert.alert('Erreur', errorMessage(e, 'Échec')),
           },
         );
       };
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const prompt = (Alert as any).prompt as
-        | undefined
-        | ((
-            title: string,
-            message?: string,
-            buttons?: {
-              text?: string;
-              style?: 'default' | 'cancel' | 'destructive';
-              onPress?: (text: string | undefined) => void;
-            }[],
-            type?: 'default' | 'plain-text' | 'secure-text' | 'login-password',
-          ) => void);
-      if (prompt) {
-        prompt(
-          'Suspendre',
-          'Motif (visible dans le journal d’audit)',
-          [
-            { text: 'Annuler', style: 'cancel' },
-            {
-              text: 'Suspendre',
-              style: 'destructive',
-              onPress: (text: string | undefined) =>
-                fire((text ?? '').trim() || 'Sanction modération'),
-            },
-          ],
-          'plain-text',
-        );
-      } else {
-        fire('Sanction modération');
-      }
+      promptForReason(
+        {
+          title: 'Suspendre',
+          message: 'Motif (visible dans le journal d’audit)',
+          confirmLabel: 'Suspendre',
+          defaultReason: 'Sanction modération',
+        },
+        fire,
+      );
     },
     [suspend, user],
   );
@@ -133,7 +113,7 @@ export const AdminUserDetailScreen: React.FC<SettingsStackScreenProps<'AdminUser
         text: 'Confirmer',
         onPress: () =>
           unsuspend.mutate(user.id, {
-            onError: e => Alert.alert('Erreur', e instanceof Error ? e.message : 'Échec'),
+            onError: e => Alert.alert('Erreur', errorMessage(e, 'Échec')),
           }),
       },
     ]);
@@ -154,7 +134,7 @@ export const AdminUserDetailScreen: React.FC<SettingsStackScreenProps<'AdminUser
               await startImpersonation(user.id);
               navigation.popToTop();
             } catch (e) {
-              Alert.alert('Erreur', e instanceof Error ? e.message : 'Échec');
+              Alert.alert('Erreur', errorMessage(e, 'Échec'));
             }
           },
         },
@@ -175,7 +155,7 @@ export const AdminUserDetailScreen: React.FC<SettingsStackScreenProps<'AdminUser
           onPress: () =>
             del.mutate(user.id, {
               onSuccess: () => navigation.goBack(),
-              onError: e => Alert.alert('Erreur', e instanceof Error ? e.message : 'Échec'),
+              onError: e => Alert.alert('Erreur', errorMessage(e, 'Échec')),
             }),
         },
       ],

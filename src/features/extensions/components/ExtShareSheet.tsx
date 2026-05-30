@@ -1,15 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import {
-  ActivityIndicator,
-  Linking,
-  Modal,
-  Pressable,
-  Share,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Linking, Pressable, Share, StyleSheet, Text } from 'react-native';
 import { shareApi, type ShareLinks } from '../api/shareApi';
+import { ExtBottomSheet } from './ExtBottomSheet';
 
 interface Props {
   roomId: string | null;
@@ -68,56 +60,40 @@ export const ExtShareSheet: React.FC<Props> = ({ roomId, visible, onClose }) => 
   };
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose}>
-        <Pressable style={styles.sheet} onPress={e => e.stopPropagation()}>
-          <View style={styles.handle} />
-          <Text style={styles.title}>Share this room</Text>
-          {loading ? (
-            <ActivityIndicator style={styles.loader} />
-          ) : !links ? (
-            <Text style={styles.error}>Failed to build share links.</Text>
-          ) : (
-            <>
-              {OPTIONS.map(opt => (
-                <Pressable
-                  key={opt.key}
-                  style={styles.row}
-                  onPress={() => void handleOpen(opt.key)}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Share via ${opt.label}`}
-                >
-                  <Text style={styles.emoji}>{opt.emoji}</Text>
-                  <Text style={styles.label}>{opt.label}</Text>
-                </Pressable>
-              ))}
-              <Pressable style={styles.cancel} onPress={onClose}>
-                <Text style={styles.cancelText}>Cancel</Text>
-              </Pressable>
-            </>
-          )}
-        </Pressable>
-      </Pressable>
-    </Modal>
+    <ExtBottomSheet visible={visible} onClose={onClose} sheetStyle={styles.sheet}>
+      <Text style={styles.title}>Share this room</Text>
+      {loading ? (
+        <ActivityIndicator style={styles.loader} />
+      ) : !links ? (
+        <Text style={styles.error}>Failed to build share links.</Text>
+      ) : (
+        <>
+          {OPTIONS.map(opt => (
+            <Pressable
+              key={opt.key}
+              style={styles.row}
+              onPress={() => void handleOpen(opt.key)}
+              accessibilityRole="button"
+              accessibilityLabel={`Share via ${opt.label}`}
+            >
+              <Text style={styles.emoji}>{opt.emoji}</Text>
+              <Text style={styles.label}>{opt.label}</Text>
+            </Pressable>
+          ))}
+          <Pressable style={styles.cancel} onPress={onClose}>
+            <Text style={styles.cancelText}>Cancel</Text>
+          </Pressable>
+        </>
+      )}
+    </ExtBottomSheet>
   );
 };
 
 const styles = StyleSheet.create({
-  backdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.4)' },
   sheet: {
-    backgroundColor: '#FFFFFF',
-    borderTopLeftRadius: 18,
-    borderTopRightRadius: 18,
     paddingHorizontal: 20,
     paddingTop: 8,
     paddingBottom: 32,
-  },
-  handle: {
-    alignSelf: 'center',
-    width: 36,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: '#CBD5E1',
   },
   loader: { marginVertical: 20 },
   title: { fontSize: 16, fontWeight: '600', marginTop: 12, marginBottom: 12, textAlign: 'center' },

@@ -6,6 +6,7 @@ import type {
   AdminStats,
   AdminUser,
   AdminUserDetail,
+  AdminUserRef,
   AppRole,
   AuditAction,
   Paginated,
@@ -122,23 +123,13 @@ export const adminService = {
   async startImpersonation(userId: string): Promise<{
     token: string;
     expiresInSec: number;
-    user: {
-      id: string;
-      username: string | null;
-      displayName: string | null;
-      avatarUrl: string | null;
-    };
+    user: AdminUserRef;
   }> {
     const res = await apiClient.post<
       Envelope<{
         token: string;
         expiresInSec: number;
-        user: {
-          id: string;
-          username: string | null;
-          displayName: string | null;
-          avatarUrl: string | null;
-        };
+        user: AdminUserRef;
       }>
     >(`/admin/users/${userId}/impersonate`);
     return res.data.data;
