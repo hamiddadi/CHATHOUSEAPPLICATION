@@ -9,6 +9,7 @@ import { Button } from '../../../../shared/components/Button';
 import { Input } from '../../../../shared/components/Input';
 import { colors, spacing } from '../../../../shared/constants/theme';
 import type { RoomStackParamList } from '../../../../core/navigation/types';
+import { errorMessage } from '../../../../shared/utils/errorMessage';
 import { useCreateHouse } from '../../hooks/useHouses';
 
 type Nav = NativeStackNavigationProp<RoomStackParamList, 'CreateHouse'>;
@@ -122,7 +123,7 @@ export const CreateHouseScreen: React.FC = () => {
       });
       navigation.goBack();
     } catch (e) {
-      Alert.alert('Erreur', e instanceof Error ? e.message : 'Échec de la création');
+      Alert.alert('Erreur', errorMessage(e, 'Échec de la création'));
     }
   }, [createHouse, description, iconUri, name, navigation, privacy]);
 

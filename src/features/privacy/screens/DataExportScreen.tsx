@@ -4,6 +4,7 @@ import * as Clipboard from 'expo-clipboard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button } from '../../../shared/components/Button';
 import { colors, spacing } from '../../../shared/constants/theme';
+import { errorMessage } from '../../../shared/utils/errorMessage';
 import { privacyService } from '../services/privacyService';
 
 export const DataExportScreen: React.FC = () => {
@@ -32,7 +33,7 @@ export const DataExportScreen: React.FC = () => {
       // Share sheet carries the full archive (not truncated) — no clipboard.
       await Share.share({ message: json, title: 'Mon export Chathouse (RGPD)' });
     } catch (e) {
-      Alert.alert('Erreur', e instanceof Error ? e.message : 'Échec de l’export');
+      Alert.alert('Erreur', errorMessage(e, 'Échec de l’export'));
     } finally {
       setBusy(false);
     }
@@ -46,7 +47,7 @@ export const DataExportScreen: React.FC = () => {
       await Clipboard.setStringAsync(archiveRef.current);
       setCopied(true);
     } catch (e) {
-      Alert.alert('Erreur', e instanceof Error ? e.message : 'Échec de la copie');
+      Alert.alert('Erreur', errorMessage(e, 'Échec de la copie'));
     }
   }, []);
 

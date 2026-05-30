@@ -6,6 +6,7 @@ import { Avatar } from '../../../../shared/components/Avatar';
 import { colors, spacing } from '../../../../shared/constants/theme';
 import { apiClient } from '../../../../shared/services/api/apiClient';
 import { usePingUserToRoom } from '../../hooks/useRooms';
+import { errorMessage } from '../../../../shared/utils/errorMessage';
 import type { UserSummary } from '../../../../shared/types/domain';
 
 // Direct REST shims — the existing `profileService.follow/wave` are
@@ -47,7 +48,7 @@ export const ProfileActionSheet: React.FC<ProfileActionSheetProps> = memo(
           Alert.alert('OK', `Vous suivez maintenant @${target.username ?? target.displayName}.`);
           onClose();
         },
-        onError: e => Alert.alert('Erreur', e instanceof Error ? e.message : 'Échec'),
+        onError: e => Alert.alert('Erreur', errorMessage(e, 'Échec')),
       });
     }, [follow, onClose, target]);
 
@@ -63,7 +64,7 @@ export const ProfileActionSheet: React.FC<ProfileActionSheetProps> = memo(
             );
             onClose();
           },
-          onError: e => Alert.alert('Erreur', e instanceof Error ? e.message : 'Échec'),
+          onError: e => Alert.alert('Erreur', errorMessage(e, 'Échec')),
         },
       );
     }, [onClose, ping, roomId, target]);
@@ -72,7 +73,7 @@ export const ProfileActionSheet: React.FC<ProfileActionSheetProps> = memo(
       if (!target) return;
       wave.mutate(target.id, {
         onSuccess: () => onClose(),
-        onError: e => Alert.alert('Erreur', e instanceof Error ? e.message : 'Échec'),
+        onError: e => Alert.alert('Erreur', errorMessage(e, 'Échec')),
       });
     }, [onClose, target, wave]);
 

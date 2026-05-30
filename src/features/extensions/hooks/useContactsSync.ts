@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 import { Platform } from 'react-native';
 import { contactsApi, type ContactMatch } from '../api/contactsApi';
+import { errorMessage } from '../../../shared/utils/errorMessage';
 
 // ─── Loose types for the optional native modules ───
 interface ContactsPhone {
@@ -80,7 +81,7 @@ export const useExtContactsSync = () => {
       setStatus('done');
     } catch (e) {
       setStatus('error');
-      setError(e instanceof Error ? e.message : 'unknown');
+      setError(errorMessage(e, 'unknown'));
     }
   }, []);
 

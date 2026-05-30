@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { Button } from '../../../../shared/components/Button';
 import { colors, spacing } from '../../../../shared/constants/theme';
+import { errorMessage } from '../../../../shared/utils/errorMessage';
 import { useUpdateRoomTitle } from '../../hooks/useRooms';
 
 interface TitleEditModalProps {
@@ -47,7 +48,7 @@ export const TitleEditModal: React.FC<TitleEditModalProps> = memo(
         { roomId, title: trimmed },
         {
           onSuccess: () => onClose(),
-          onError: e => Alert.alert('Erreur', e instanceof Error ? e.message : 'Échec'),
+          onError: e => Alert.alert('Erreur', errorMessage(e, 'Échec')),
         },
       );
     };

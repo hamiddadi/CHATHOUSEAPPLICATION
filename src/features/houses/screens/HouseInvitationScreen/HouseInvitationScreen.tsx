@@ -9,6 +9,7 @@ import { Button } from '../../../../shared/components/Button';
 import { resolveHouseIcon, resolveUserAvatar } from '../../../../shared/constants/images';
 import { colors, spacing } from '../../../../shared/constants/theme';
 import type { RoomStackParamList } from '../../../../core/navigation/types';
+import { errorMessage } from '../../../../shared/utils/errorMessage';
 import { useAcceptInvitation, useHouse } from '../../hooks/useHouses';
 
 type Nav = NativeStackNavigationProp<RoomStackParamList, 'HouseInvitation'>;
@@ -37,7 +38,7 @@ export const HouseInvitationScreen: React.FC = () => {
       await accept.mutateAsync({ houseId, inviteToken });
       navigation.replace('HouseDetail', { houseId });
     } catch (e) {
-      Alert.alert('Erreur', e instanceof Error ? e.message : "Impossible d'accepter l'invitation.");
+      Alert.alert('Erreur', errorMessage(e, "Impossible d'accepter l'invitation."));
     }
   }, [accept, houseId, inviteToken, navigation]);
   const handleDecline = useCallback(() => navigation.goBack(), [navigation]);

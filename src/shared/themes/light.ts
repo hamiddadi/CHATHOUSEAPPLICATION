@@ -18,6 +18,7 @@ import {
   lineHeights,
   letterSpacing,
 } from '../constants/theme';
+import type { Theme } from './theme.types';
 
 const lightPalette = {
   ...darkPalette,
@@ -122,4 +123,4 @@ export const lightTheme = {
   fontWeights,
   lineHeights,
   letterSpacing,
-} as const;
+} as const satisfies Theme;
