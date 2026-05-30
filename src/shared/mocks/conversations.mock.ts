@@ -1,5 +1,6 @@
 import type { Conversation, Message } from '../types/domain';
-import { CURRENT_USER, MOCK_USER_SUMMARIES } from './users.mock';
+import { pickUser as basePickUser } from './_helpers';
+import { CURRENT_USER } from './users.mock';
 
 const msg = (
   id: string,
@@ -66,11 +67,8 @@ const lastOf = (convoId: string): Message | null => {
   return list?.at(-1) ?? null;
 };
 
-const pickUser = (idx: number): (typeof MOCK_USER_SUMMARIES)[number] => {
-  const u = MOCK_USER_SUMMARIES[idx] ?? MOCK_USER_SUMMARIES[0];
-  if (!u) throw new Error('MOCK_USER_SUMMARIES is empty — cannot build mock conversations.');
-  return u;
-};
+const pickUser = (idx: number): ReturnType<typeof basePickUser> =>
+  basePickUser(idx, 'MOCK_USER_SUMMARIES is empty — cannot build mock conversations.');
 
 export const MOCK_CONVERSATIONS: readonly Conversation[] = [
   {

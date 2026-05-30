@@ -5,23 +5,16 @@ import { requireAuth } from '../../middlewares/auth.middleware';
 import { sendOk } from '../../utils/response';
 import { AppError } from '../../middlewares/error.middleware';
 import { authedUserId as uid } from '../../utils/authedUserId';
-import { notificationsService } from './notifications.service';
+import { notificationsService, parseFilter } from './notifications.service';
 
 export const notificationsRouter: Router = Router();
 
 notificationsRouter.use(requireAuth);
 
-const FILTER_VALUES = ['all', 'rooms', 'social', 'clubs'] as const;
-type FilterValue = (typeof FILTER_VALUES)[number];
-
-const isFilter = (v: unknown): v is FilterValue =>
-  typeof v === 'string' && (FILTER_VALUES as readonly string[]).includes(v);
-
 notificationsRouter.get(
   '/',
   asyncHandler(async (req, res) => {
-    const raw = req.query['filter'];
-    const filter = isFilter(raw) ? raw : 'all';
+    const filter = parseFilter(req.query['filter']);
     const limitRaw = req.query['limit'];
     const parsedLimit = typeof limitRaw === 'string' ? Number(limitRaw) : NaN;
     const limit = Number.isFinite(parsedLimit) ? Math.min(50, Math.max(1, parsedLimit)) : 50;

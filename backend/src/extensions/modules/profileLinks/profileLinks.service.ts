@@ -1,5 +1,6 @@
 import { redis } from '../../../config/redis';
 import { AppError } from '../../../middlewares/error.middleware';
+import { readJson, writeJson } from '../../utils/redisJson';
 
 /**
  * Custom links on a user profile (Module 2.2 / PROFIL-008).
@@ -77,21 +78,15 @@ const validateUrl = (s: string): void => {
 const newId = (): string => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 
 const read = async (userId: string): Promise<ProfileLink[]> => {
-  const raw = await redis.get(key(userId));
-  if (!raw) return [];
-  try {
-    const arr = JSON.parse(raw);
-    return Array.isArray(arr) ? (arr as ProfileLink[]) : [];
-  } catch {
-    return [];
-  }
+  const arr = await readJson<ProfileLink[]>(key(userId));
+  return Array.isArray(arr) ? arr : [];
 };
 
 const write = async (userId: string, links: ProfileLink[]): Promise<void> => {
   if (links.length === 0) {
     await redis.del(key(userId));
   } else {
-    await redis.setEx(key(userId), TTL_S, JSON.stringify(links));
+    await writeJson(key(userId), links, TTL_S);
   }
 };
 

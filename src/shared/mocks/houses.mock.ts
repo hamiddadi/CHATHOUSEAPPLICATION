@@ -1,12 +1,9 @@
 import { resolveHouseIcon } from '../constants/images';
 import type { House, HouseMember, HouseSummary } from '../types/domain';
-import { MOCK_USER_SUMMARIES } from './users.mock';
+import { pickUser as basePickUser } from './_helpers';
 
-const pickUser = (idx: number): (typeof MOCK_USER_SUMMARIES)[number] => {
-  const u = MOCK_USER_SUMMARIES[idx] ?? MOCK_USER_SUMMARIES[0];
-  if (!u) throw new Error('MOCK_USER_SUMMARIES is empty — cannot build mock houses.');
-  return u;
-};
+const pickUser = (idx: number): ReturnType<typeof basePickUser> =>
+  basePickUser(idx, 'MOCK_USER_SUMMARIES is empty — cannot build mock houses.');
 
 const member = (idx: number, role: HouseMember['role']): HouseMember => ({
   ...pickUser(idx),
