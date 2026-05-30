@@ -1,25 +1,16 @@
-import React, { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Animated from 'react-native-reanimated';
 import { useTranslation } from 'react-i18next';
-import { Avatar } from '../../../../shared/components/Avatar';
 import { Loader } from '../../../../shared/components/Loader';
 import { EmptyState } from '../../../../shared/components/EmptyState';
-import { useAnimatedPress } from '../../../../shared/hooks/useAnimatedPress';
 import { colors, layout, spacing } from '../../../../shared/constants/theme';
 import type { RoomStackParamList } from '../../../../core/navigation/types';
-import type {
-  RoomAudioState,
-  RoomParticipant,
-  RoomRole,
-  UserSummary,
-} from '../../../../shared/types/domain';
+import type { RoomParticipant, UserSummary } from '../../../../shared/types/domain';
 import {
   useEndRoom,
   useHandRaises,
@@ -45,6 +36,11 @@ import { TitleEditModal } from '../../components/TitleEditModal';
 import { RoomTimer } from '../../components/RoomTimer';
 import { useAuthStore } from '../../../auth/store/authStore';
 import { getSocket } from '../../../../shared/services/realtime/socketClient';
+import StageGrid from './partials/StageGrid';
+import HandRaiseQueue from './partials/HandRaiseQueue';
+import FollowedByListeners from './partials/FollowedByListeners';
+import OthersGrid from './partials/OthersGrid';
+import RoomActionBar from './partials/RoomActionBar';
 
 // Public landing URL for share-sheet messages. Universal Links (iOS) /
 // App Links (Android) on this domain redirect to chathouse:// when the
@@ -55,152 +51,11 @@ type Nav = NativeStackNavigationProp<RoomStackParamList, 'Room'>;
 type Route = RouteProp<RoomStackParamList, 'Room'>;
 
 const HEADER_ICON_SIZE = 22;
-const ACTION_BAR_ICON_SIZE = 18;
-const ROLE_ICON_SIZE = 10;
-const SPEAKER_AVATAR = 56;
-const SECONDARY_AVATAR = 52;
-const OTHER_AVATAR = 40;
 const FOLLOWED_COUNT = 5;
 
 // Pure layout constant (depends only on imported theme tokens) — hoisted so
 // it isn't recomputed every render and can be shared by the inline styles.
 const ACTION_BAR_BOTTOM_OFFSET = layout.tabBarHeight + layout.tabBarBottomOffset + spacing.xxl;
-
-const GREEN = '#00e475';
-
-const ROLE_COLORS = {
-  shield: '#22C55E',
-  mic: '#22C55E',
-  micOff: '#EF4444',
-} as const;
-
-type RoleIconName = 'shield' | 'mic' | 'mic-off';
-
-const getRoleIconProps = (
-  role: RoomRole,
-  audio: RoomAudioState,
-): { icon: RoleIconName; color: string } => {
-  if (role === 'host') return { icon: 'shield', color: ROLE_COLORS.shield };
-  if (audio === 'muted') return { icon: 'mic-off', color: ROLE_COLORS.micOff };
-  return { icon: 'mic', color: ROLE_COLORS.mic };
-};
-
-const SpeakerCell: React.FC<{ speaker: RoomParticipant; isSpeakingLive?: boolean }> = memo(
-  ({ speaker, isSpeakingLive = false }) => {
-    // Live "is speaking" comes from mediasoup score broadcasts when audio is
-    // active; `speaker.audio === 'speaking'` is a static fallback for the
-    // unsupported case (no audio engine).
-    const isSpeaking = isSpeakingLive || speaker.audio === 'speaking';
-    const isHost = speaker.role === 'host';
-    const pulse = useAnimatedPress({ pulse: isSpeaking });
-    const { icon: roleIcon, color: roleColor } = getRoleIconProps(speaker.role, speaker.audio);
-    const { t } = useTranslation();
-    const roleLabel = isHost ? t('room.host') : t('room.speaker');
-
-    return (
-      <View style={styles.speakerCell}>
-        <Animated.View style={[pulse.animatedStyle, styles.speakerRingWrapper]}>
-          <Avatar
-            uri={speaker.avatarUrl ?? undefined}
-            name={speaker.displayName}
-            sizeValue={SPEAKER_AVATAR}
-            ring={isSpeaking}
-            ringColor={GREEN}
-            ringWidth={2}
-          />
-          {isSpeaking && (
-            <View style={styles.speakerMicBadge}>
-              <MaterialIcons name="graphic-eq" size={10} color="#00210b" />
-            </View>
-          )}
-        </Animated.View>
-        <Text
-          className="text-[10px] font-body-bold text-white text-center"
-          numberOfLines={1}
-          style={styles.speakerName}
-        >
-          {speaker.displayName}
-        </Text>
-        <View className="flex-row items-center gap-xxs">
-          <MaterialIcons name={roleIcon} size={ROLE_ICON_SIZE} color={roleColor} />
-          <Text
-            style={{ fontSize: ROLE_ICON_SIZE, lineHeight: ROLE_ICON_SIZE + 2, color: roleColor }}
-            className="font-body-bold uppercase tracking-tighter"
-          >
-            {roleLabel}
-          </Text>
-        </View>
-      </View>
-    );
-  },
-);
-SpeakerCell.displayName = 'SpeakerCell';
-
-const HandRaisedCell: React.FC<{ listener: UserSummary }> = memo(({ listener }) => (
-  <View style={styles.gridCell}>
-    <View style={styles.handRaisedCell}>
-      <Avatar
-        uri={listener.avatarUrl ?? undefined}
-        name={listener.displayName}
-        sizeValue={SECONDARY_AVATAR}
-      />
-      <View style={styles.handEmoji} pointerEvents="none">
-        <Text className="text-sm">👋</Text>
-      </View>
-    </View>
-  </View>
-));
-HandRaisedCell.displayName = 'HandRaisedCell';
-
-const FollowedCell: React.FC<{ listener: UserSummary }> = memo(({ listener }) => (
-  <View style={styles.gridCell}>
-    <Avatar
-      uri={listener.avatarUrl ?? undefined}
-      name={listener.displayName}
-      sizeValue={SECONDARY_AVATAR}
-    />
-  </View>
-));
-FollowedCell.displayName = 'FollowedCell';
-
-const OtherCell: React.FC<{ listener: UserSummary }> = memo(({ listener }) => (
-  <View style={[styles.gridCell, styles.otherCell]}>
-    <Avatar
-      uri={listener.avatarUrl ?? undefined}
-      name={listener.displayName}
-      sizeValue={OTHER_AVATAR}
-    />
-  </View>
-));
-OtherCell.displayName = 'OtherCell';
-
-interface SectionLabelProps {
-  label: string;
-  emphasis?: boolean;
-}
-
-const SectionLabel: React.FC<SectionLabelProps> = memo(({ label, emphasis = false }) => (
-  <View className="flex-row items-center gap-sm mb-lg px-xs">
-    <Text
-      className={
-        emphasis
-          ? 'text-[10px] font-body-bold text-accent tracking-widest uppercase'
-          : 'text-[10px] font-body-bold text-ink-muted tracking-widest uppercase'
-      }
-    >
-      {label}
-    </Text>
-    {emphasis && (
-      <LinearGradient
-        colors={['rgba(0,228,117,0.2)', 'rgba(0,228,117,0)']}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 0 }}
-        style={styles.sectionGradientLine}
-      />
-    )}
-  </View>
-));
-SectionLabel.displayName = 'SectionLabel';
 
 export const RoomScreen: React.FC = () => {
   const navigation = useNavigation<Nav>();
@@ -324,9 +179,6 @@ export const RoomScreen: React.FC = () => {
     };
   }, [navigation, room, viewerId]);
 
-  const muteBtn = useAnimatedPress({ scaleTo: 0.96 });
-  const raiseBtn = useAnimatedPress({ scaleTo: 0.96 });
-  const leaveBtn = useAnimatedPress({ scaleTo: 0.96 });
   const { t } = useTranslation();
 
   const handleToggleMute = useCallback(async () => {
@@ -423,6 +275,21 @@ export const RoomScreen: React.FC = () => {
     [viewerId],
   );
 
+  // Promote a hand-raised listener: synthesise the RoomParticipant shape the
+  // moderation/profile press handler expects (the queue only carries the
+  // lightweight UserSummary).
+  const handlePromoteHandRaise = useCallback(
+    (listener: UserSummary) => {
+      handleParticipantPress({
+        ...listener,
+        role: 'listener',
+        audio: 'idle',
+        handRaised: true,
+      });
+    },
+    [handleParticipantPress],
+  );
+
   const handleShare = useCallback(async () => {
     if (!room) return;
     try {
@@ -448,12 +315,22 @@ export const RoomScreen: React.FC = () => {
       })),
     [handRaises],
   );
-  const followedListeners = useMemo(
-    () => (room ? room.listeners.slice(0, FOLLOWED_COUNT) : []),
-    [room],
-  );
-  const otherListeners = useMemo(() => (room ? room.listeners.slice(FOLLOWED_COUNT) : []), [room]);
   const othersOverflow = room ? Math.max(0, room.listenersCount - room.listeners.length) : 0;
+
+  // Live "is speaking" per speaker, keyed by speaker id. The mediasoup score
+  // map keys the local user under SPEAKING_SELF_KEY; everyone else is keyed by
+  // their user id. Computed here so the score graph stays in the orchestrator
+  // and StageGrid stays purely presentational.
+  const speakingLiveByUser = useMemo(() => {
+    const map = new Map<string, boolean>();
+    if (!room) return map;
+    for (const s of room.speakers) {
+      const key = s.id === viewerId ? SPEAKING_SELF_KEY : s.id;
+      const score = audio.scores.get(key) ?? 0;
+      map.set(s.id, score >= SPEAKING_SCORE_THRESHOLD && s.audio !== 'muted');
+    }
+    return map;
+  }, [room, viewerId, audio.scores]);
 
   if (isLoading) return <Loader fullscreen accessibilityLabel={t('common.loading')} />;
   if (isError || !room) {
@@ -611,101 +488,31 @@ export const RoomScreen: React.FC = () => {
           </View>
         </View>
 
-        <View className="mb-huge">
-          <SectionLabel label={`⭐ ${t('room.stage')}`} emphasis />
-          <View style={styles.stageGrid}>
-            {room.speakers.map(s => {
-              const key = s.id === viewerId ? SPEAKING_SELF_KEY : s.id;
-              const score = audio.scores.get(key) ?? 0;
-              const isSpeakingLive = score >= SPEAKING_SCORE_THRESHOLD && s.audio !== 'muted';
-              return (
-                <Pressable
-                  key={s.id}
-                  onPress={() => handleParticipantPress(s)}
-                  accessibilityRole={viewerCanModerate ? 'button' : undefined}
-                  accessibilityLabel={
-                    viewerCanModerate ? `Actions pour ${s.displayName}` : s.displayName
-                  }
-                  style={styles.speakerPress}
-                >
-                  <SpeakerCell speaker={s} isSpeakingLive={isSpeakingLive} />
-                </Pressable>
-              );
-            })}
-          </View>
-        </View>
+        <StageGrid
+          speakers={room.speakers}
+          speakingLiveByUser={speakingLiveByUser}
+          viewerCanModerate={viewerCanModerate}
+          onParticipantPress={handleParticipantPress}
+        />
 
-        {handRaisedUsers.length > 0 && (
-          <View className="mb-huge">
-            <SectionLabel label={`${t('room.handRaised')} · ${handRaisedUsers.length}`} />
-            <View style={styles.handRaisedRow}>
-              {handRaisedUsers.map(l => (
-                <Pressable
-                  key={l.id}
-                  onPress={() =>
-                    handleParticipantPress({
-                      ...l,
-                      role: 'listener',
-                      audio: 'idle',
-                      handRaised: true,
-                    })
-                  }
-                  accessibilityRole={viewerCanModerate ? 'button' : undefined}
-                  accessibilityLabel={
-                    viewerCanModerate ? `Inviter ${l.displayName} à parler` : l.displayName
-                  }
-                >
-                  <HandRaisedCell listener={l} />
-                </Pressable>
-              ))}
-            </View>
-          </View>
-        )}
+        <HandRaiseQueue
+          handRaises={handRaisedUsers}
+          viewerCanModerate={viewerCanModerate}
+          onPromote={handlePromoteHandRaise}
+        />
 
-        {followedListeners.length > 0 && (
-          <View className="mb-huge">
-            <SectionLabel label={t('room.followedBy')} />
-            <View style={styles.followedRow}>
-              {followedListeners.map(l => (
-                <Pressable
-                  key={l.id}
-                  onPress={() => handleListenerPress(l)}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Profil de ${l.displayName ?? l.username}`}
-                >
-                  <FollowedCell listener={l} />
-                </Pressable>
-              ))}
-            </View>
-          </View>
-        )}
+        <FollowedByListeners
+          participants={room.listeners}
+          maxVisible={FOLLOWED_COUNT}
+          onTap={handleListenerPress}
+        />
 
-        {(otherListeners.length > 0 || othersOverflow > 0) && (
-          <View className="mb-huge">
-            <SectionLabel label={t('room.others')} />
-            <View style={styles.othersGrid}>
-              {otherListeners.map(o => (
-                <Pressable
-                  key={o.id}
-                  onPress={() => handleListenerPress(o)}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Profil de ${o.displayName ?? o.username}`}
-                >
-                  <OtherCell listener={o} />
-                </Pressable>
-              ))}
-              {othersOverflow > 0 && (
-                <View style={styles.gridCell}>
-                  <View style={styles.overflowChip}>
-                    <Text className="text-[9px] font-body-bold text-primary">
-                      +{othersOverflow}
-                    </Text>
-                  </View>
-                </View>
-              )}
-            </View>
-          </View>
-        )}
+        <OthersGrid
+          participants={room.listeners}
+          skip={FOLLOWED_COUNT}
+          overflow={othersOverflow}
+          onTap={handleListenerPress}
+        />
       </ScrollView>
 
       {/* Floating reactions bar — sits just above the action pill so the
@@ -724,61 +531,14 @@ export const RoomScreen: React.FC = () => {
         style={{ bottom: insets.bottom + ACTION_BAR_BOTTOM_OFFSET }}
         pointerEvents="box-none"
       >
-        <View style={styles.actionPill}>
-          {viewerCanSpeak ? (
-            <Animated.View style={muteBtn.animatedStyle}>
-              <Pressable
-                onPress={handleToggleMute}
-                onPressIn={muteBtn.onPressIn}
-                onPressOut={muteBtn.onPressOut}
-                accessibilityRole="button"
-                accessibilityLabel={isMuted ? 'Unmute microphone' : 'Mute microphone'}
-                accessibilityState={{ selected: isMuted }}
-                className="flex-row items-center gap-sm bg-danger rounded-pill py-sm px-xl"
-              >
-                <MaterialIcons
-                  name={isMuted ? 'mic-off' : 'mic'}
-                  size={ACTION_BAR_ICON_SIZE}
-                  color={colors.white}
-                />
-                <Text className="text-sm font-body-bold text-white">
-                  {isMuted ? t('room.unmute') : t('room.mute')}
-                </Text>
-              </Pressable>
-            </Animated.View>
-          ) : null}
-
-          <Animated.View style={raiseBtn.animatedStyle}>
-            <Pressable
-              onPress={handleToggleHand}
-              onPressIn={raiseBtn.onPressIn}
-              onPressOut={raiseBtn.onPressOut}
-              accessibilityRole="button"
-              accessibilityLabel={isHandRaised ? 'Lower hand' : 'Raise hand'}
-              accessibilityState={{ selected: isHandRaised }}
-              className="flex-row items-center gap-sm bg-primary/20 rounded-pill py-sm px-lg"
-            >
-              <MaterialIcons name="pan-tool" size={ACTION_BAR_ICON_SIZE} color={colors.primary} />
-              <Text className="text-sm font-body-bold text-primary">
-                {isHandRaised ? t('room.lower') : t('room.raise')}
-              </Text>
-            </Pressable>
-          </Animated.View>
-
-          <Animated.View style={leaveBtn.animatedStyle}>
-            <Pressable
-              onPress={handleLeave}
-              onPressIn={leaveBtn.onPressIn}
-              onPressOut={leaveBtn.onPressOut}
-              accessibilityRole="button"
-              accessibilityLabel={t('room.leave')}
-              className="flex-row items-center gap-sm border border-overlay-white-20 rounded-pill py-sm px-xl"
-            >
-              <MaterialIcons name="logout" size={ACTION_BAR_ICON_SIZE} color={colors.danger} />
-              <Text className="text-sm font-body-bold text-white">{t('room.leave')}</Text>
-            </Pressable>
-          </Animated.View>
-        </View>
+        <RoomActionBar
+          viewerCanSpeak={viewerCanSpeak}
+          isMuted={isMuted}
+          isHandRaised={isHandRaised}
+          onToggleMute={handleToggleMute}
+          onToggleHand={handleToggleHand}
+          onLeave={handleLeave}
+        />
       </View>
 
       <HostActionsSheet
@@ -826,92 +586,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.xxl,
     paddingBottom: spacing.sm,
     backgroundColor: 'rgba(7,11,40,0.35)',
-  },
-  sectionGradientLine: {
-    flex: 1,
-    height: StyleSheet.hairlineWidth,
-  },
-  stageGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    rowGap: spacing.md,
-  },
-  speakerCell: {
-    width: '100%',
-    alignItems: 'center',
-    gap: spacing.xs,
-  },
-  speakerPress: {
-    width: '20%',
-  },
-  speakerRingWrapper: {
-    position: 'relative',
-  },
-  speakerMicBadge: {
-    position: 'absolute',
-    bottom: -2,
-    right: -2,
-    backgroundColor: GREEN,
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    borderWidth: 1.5,
-    borderColor: colors.background,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  speakerName: {
-    maxWidth: SPEAKER_AVATAR,
-  },
-  handRaisedRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    rowGap: spacing.lg,
-  },
-  handRaisedCell: {
-    position: 'relative',
-  },
-  handEmoji: {
-    position: 'absolute',
-    right: -2,
-    bottom: -2,
-  },
-  followedRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    rowGap: spacing.md,
-  },
-  othersGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    rowGap: spacing.md,
-  },
-  gridCell: {
-    width: '20%',
-    alignItems: 'center',
-  },
-  otherCell: {
-    opacity: 0.6,
-  },
-  overflowChip: {
-    width: OTHER_AVATAR,
-    height: OTHER_AVATAR,
-    borderRadius: OTHER_AVATAR / 2,
-    backgroundColor: colors.surfaceHigh,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  actionPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    backgroundColor: 'rgba(12,17,46,0.9)',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.1)',
-    borderRadius: 9999,
-    padding: spacing.xs,
   },
   reactionsWrapper: {
     position: 'absolute',
