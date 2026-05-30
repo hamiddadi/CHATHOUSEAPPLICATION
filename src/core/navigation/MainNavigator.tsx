@@ -7,6 +7,7 @@ import { BlurView } from 'expo-blur';
 import { colors, layout, radii, shadows, spacing } from '../../shared/constants/theme';
 import { useUnreadMessageCount } from '../../features/messages/hooks/useMessages';
 import { useChatSocket } from '../../features/messages/hooks/useChatSocket';
+import { useNotificationSocket } from '../../features/notifications/hooks/useNotificationSocket';
 import { RoomMiniBar } from '../../shared/components/RoomMiniBar';
 import type { MainTabParamList } from './types';
 import { RoomsNavigator } from './stacks/RoomsNavigator';
@@ -86,6 +87,9 @@ export const MainNavigator: React.FC = () => {
   // Messages tab badge refreshes even when the user is on another tab
   // or inside a room. Idempotent — the underlying socket is a singleton.
   useChatSocket();
+  // Same idea for notification:new / notification:count → keeps the
+  // Notifications badge + list live without polling.
+  useNotificationSocket();
   return (
     <View style={styles.container}>
       <Tab.Navigator
