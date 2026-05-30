@@ -32,6 +32,10 @@ const HISTORY_CAP = 100;
 const keyCount = (userId: string) => `ext:nominator:count:${userId}`;
 const keyHistory = (userId: string) => `ext:nominator:history:${userId}`;
 
+// Strip formatting characters so an invite and a later signup normalise the
+// same raw number identically (otherwise de-dup/match would silently miss).
+const normalizePhone = (phone: string): string => phone.replace(/[\s().-]/g, '');
+
 // HMAC the phone so a raw number never lands in a Redis key (PII at rest)
 // and is never directly enumerable. Keyed on the server JWT secret.
 const phoneHmac = (phone: string): string =>
@@ -55,6 +59,15 @@ export interface InvitationRecord {
   acceptedUserId: string | null;
   createdAt: string;
 }
+
+// Safely decode a stored history row; corrupt JSON yields null (skipped).
+const parseRecord = (s: string): InvitationRecord | null => {
+  try {
+    return JSON.parse(s) as InvitationRecord;
+  } catch {
+    return null;
+  }
+};
 
 export const nominatorService = {
   /** Initialise the counter once (atomic SET NX) so concurrent first reads
@@ -85,15 +98,7 @@ export const nominatorService = {
 
   async history(userId: string, limit = 50): Promise<InvitationRecord[]> {
     const raw = await redis.lRange(keyHistory(userId), 0, limit - 1);
-    return raw
-      .map(s => {
-        try {
-          return JSON.parse(s) as InvitationRecord;
-        } catch {
-          return null;
-        }
-      })
-      .filter((r): r is InvitationRecord => r !== null);
+    return raw.map(parseRecord).filter((r): r is InvitationRecord => r !== null);
   },
 
   async invite(
@@ -101,7 +106,7 @@ export const nominatorService = {
     invitedPhone: string,
     invitedName: string,
   ): Promise<{ remaining: number; record: InvitationRecord }> {
-    const cleanedPhone = invitedPhone.replace(/[\s().-]/g, '');
+    const cleanedPhone = normalizePhone(invitedPhone);
     if (!/^\+\d{6,15}$/.test(cleanedPhone)) {
       throw extError('PAY_INVALID', 'Invalid E.164 phone number');
     }
@@ -150,7 +155,7 @@ export const nominatorService = {
     newUserId: string,
     phoneNumber: string,
   ): Promise<{ inviterId: string } | null> {
-    const cleaned = phoneNumber.replace(/[\s().-]/g, '');
+    const cleaned = normalizePhone(phoneNumber);
     const inviterId = await redis.get(keyInvited(cleaned));
     if (!inviterId) return null;
 
@@ -161,15 +166,12 @@ export const nominatorService = {
     for (let i = 0; i < rows.length; i += 1) {
       const row = rows[i];
       if (row === undefined) continue;
-      try {
-        const rec = JSON.parse(row) as InvitationRecord;
-        if (rec.invitedPhoneHmac === cleanedHmac && !rec.acceptedUserId) {
-          rec.acceptedUserId = newUserId;
-          await redis.lSet(keyHistory(inviterId), i, JSON.stringify(rec));
-          break;
-        }
-      } catch {
-        /* ignore corrupt row */
+      const rec = parseRecord(row);
+      if (rec === null) continue; // ignore corrupt row
+      if (rec.invitedPhoneHmac === cleanedHmac && !rec.acceptedUserId) {
+        rec.acceptedUserId = newUserId;
+        await redis.lSet(keyHistory(inviterId), i, JSON.stringify(rec));
+        break;
       }
     }
 

@@ -3,6 +3,7 @@ import { logger } from '../../config/logger';
 import * as sfu from '../../webrtc/mediasoup.manager';
 import { canPublishInRoom, isActiveRoomParticipant } from '../../webrtc/roomAuthz';
 import { env } from '../../config/env';
+import { getUserId } from '../socket.middleware';
 
 interface RoomScoped {
   roomId: string;
@@ -35,7 +36,7 @@ type Ack<T = unknown> = (res: { ok: true; data: T } | { ok: false; error: string
  * gracefully without blocking.
  */
 export const registerRtcHandlers = (socket: Socket): void => {
-  const me = (): string => socket.data.userId as string;
+  const me = (): string => getUserId(socket);
 
   const requireMember = async (roomId: string): Promise<void> => {
     const ok = await isActiveRoomParticipant(roomId, me());

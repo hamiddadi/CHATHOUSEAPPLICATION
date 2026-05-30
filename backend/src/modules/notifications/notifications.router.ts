@@ -4,16 +4,12 @@ import { asyncHandler } from '../../utils/asyncHandler';
 import { requireAuth } from '../../middlewares/auth.middleware';
 import { sendOk } from '../../utils/response';
 import { AppError } from '../../middlewares/error.middleware';
+import { authedUserId as uid } from '../../utils/authedUserId';
 import { notificationsService } from './notifications.service';
 
 export const notificationsRouter: Router = Router();
 
 notificationsRouter.use(requireAuth);
-
-const uid = (req: Request): string => {
-  if (!req.userId) throw new AppError('AUTH_003');
-  return req.userId;
-};
 
 const FILTER_VALUES = ['all', 'rooms', 'social', 'clubs'] as const;
 type FilterValue = (typeof FILTER_VALUES)[number];

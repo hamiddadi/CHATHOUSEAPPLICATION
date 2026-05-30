@@ -1,13 +1,9 @@
 import type { Request, Response } from 'express';
 import { sendOk } from '../../utils/response';
 import { AppError } from '../../middlewares/error.middleware';
+import { authedUserId as requireUserId } from '../../utils/authedUserId';
 import { listMessagesSchema, sendMessageSchema } from './chat.schema';
 import { chatService } from './chat.service';
-
-const requireUserId = (req: Request): string => {
-  if (!req.userId) throw new AppError('AUTH_003');
-  return req.userId;
-};
 
 const paramId = (req: Request, key: string, errorCode: 'CHAT_002' | 'USER_001') => {
   const raw = req.params[key];

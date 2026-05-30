@@ -14,6 +14,9 @@ interface ContactsModule {
   getContactsAsync: (opts: { fields: unknown[] }) => Promise<{ data: ContactsContact[] }>;
   Fields: { PhoneNumbers: unknown };
 }
+
+/** Upper bound on phone numbers sent in a single contacts-match request. */
+const MAX_CONTACTS_PER_SYNC = 2000;
 /**
  * Hook that orchestrates the contacts sync:
  *  1. Ask runtime permission for contacts
@@ -72,7 +75,7 @@ export const useExtContactsSync = () => {
       }
 
       const unique = Array.from(new Set(e164));
-      const result = await contactsApi.match(unique.slice(0, 2000));
+      const result = await contactsApi.match(unique.slice(0, MAX_CONTACTS_PER_SYNC));
       setMatches(result);
       setStatus('done');
     } catch (e) {

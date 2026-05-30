@@ -250,12 +250,6 @@ export const resumeConsumer = async (consumerId: string): Promise<void> => {
 };
 
 /**
- * List every active producer in a room, optionally excluding a given user
- * (so a late-joiner skips their own producer if any). Used by the client
- * immediately after `rtc:get-rtp-capabilities` to discover peers already
- * publishing audio.
- */
-/**
  * Close every producer owned by `userId` in `roomId`. Cascading close on the
  * Producer fires the transportclose/close handlers registered in `produce()`,
  * which in turn emit `onProducerClosed` so the socket layer broadcasts
@@ -292,6 +286,12 @@ export const closeAllProducersForUser = (userId: string): number => {
   return closed;
 };
 
+/**
+ * List every active producer in a room, optionally excluding a given user
+ * (so a late-joiner skips their own producer if any). Used by the client
+ * immediately after `rtc:get-rtp-capabilities` to discover peers already
+ * publishing audio.
+ */
 export const listProducersForRoom = (roomId: string, excludeUserId?: string): ProducerInfo[] => {
   const roomMap = producersByRoom.get(roomId);
   if (!roomMap) return [];

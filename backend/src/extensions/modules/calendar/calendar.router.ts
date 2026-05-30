@@ -11,12 +11,10 @@ calendarRouter.use(requireAuth);
 calendarRouter.get(
   '/:roomId.ics',
   asyncHandler(async (req, res) => {
-    const ics = await calendarService.icsForRoom(authedUserId(req), String(req.params.roomId));
+    const roomId = String(req.params.roomId);
+    const ics = await calendarService.icsForRoom(authedUserId(req), roomId);
     res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
-    res.setHeader(
-      'Content-Disposition',
-      `attachment; filename="chathouse-${String(req.params.roomId)}.ics"`,
-    );
+    res.setHeader('Content-Disposition', `attachment; filename="chathouse-${roomId}.ics"`);
     res.send(ics);
   }),
 );

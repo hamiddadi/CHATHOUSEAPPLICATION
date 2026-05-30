@@ -7,6 +7,7 @@ import type {
   RoomVisibility,
   UserSummary,
 } from '../../../shared/types/domain';
+import type { Envelope } from '../../../shared/types/api';
 
 /**
  * Backend is now authoritative for rooms. The service translates the
@@ -26,11 +27,6 @@ export interface CreateRoomInput {
   isPrivate?: boolean;
   chatEnabled?: boolean;
   maxSpeakers?: number;
-}
-
-interface Envelope<T> {
-  success: true;
-  data: T;
 }
 
 interface RawUser {
@@ -67,6 +63,12 @@ interface RawRoom {
   knownSpeakers?: RawUser[];
   hasKnownSpeakers?: boolean;
 }
+
+// Feed page size requested from GET /rooms/feed (backend caps at 50).
+const FEED_PAGE_SIZE = 30;
+// Avatar preview counts surfaced in a room summary card.
+const TOP_SPEAKERS_PREVIEW = 3;
+const TOP_LISTENERS_PREVIEW = 5;
 
 const CATEGORY_EMOJI: Record<RoomCategory, string> = {
   tech: '💻',
@@ -137,24 +139,18 @@ const toRoom = (raw: RawRoom): Room => {
 const toSummary = (raw: RawRoom): RoomSummary => {
   const category = pickCategory(raw);
   const participants = raw.participants ?? [];
-  const topSpeakers = participants
-    .filter(p => p.role !== 'LISTENER')
-    .slice(0, 3)
-    .map(p => toSummaryUser(p.user));
-  const topListeners = participants
-    .filter(p => p.role === 'LISTENER')
-    .slice(0, 5)
-    .map(p => toSummaryUser(p.user));
+  const speakers = participants.filter(p => p.role !== 'LISTENER');
+  const listeners = participants.filter(p => p.role === 'LISTENER');
   return {
     id: raw.id,
     title: raw.title,
     category,
     categoryEmoji: CATEGORY_EMOJI[category],
     houseName: null,
-    speakersCount: participants.filter(p => p.role !== 'LISTENER').length,
-    listenersCount: participants.filter(p => p.role === 'LISTENER').length,
-    topSpeakers,
-    topListeners,
+    speakersCount: speakers.length,
+    listenersCount: listeners.length,
+    topSpeakers: speakers.slice(0, TOP_SPEAKERS_PREVIEW).map(p => toSummaryUser(p.user)),
+    topListeners: listeners.slice(0, TOP_LISTENERS_PREVIEW).map(p => toSummaryUser(p.user)),
   };
 };
 
@@ -185,7 +181,7 @@ export const roomService = {
   async list(filter: RoomsListFilter = {}): Promise<RoomSummary[]> {
     const res = await apiClient.get<Envelope<RawRoom[]>>('/rooms/feed', {
       params: {
-        limit: 30,
+        limit: FEED_PAGE_SIZE,
         ...(filter.topic ? { topic: filter.topic } : {}),
         ...(filter.following ? { following: 'true' } : {}),
       },

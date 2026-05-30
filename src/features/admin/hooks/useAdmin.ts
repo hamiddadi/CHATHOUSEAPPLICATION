@@ -44,7 +44,7 @@ export const useAdminUsers = (params: ListUsersParams = {}) =>
 export const useAdminUser = (userId: string | null) =>
   useQuery({
     queryKey: adminKeys.user(userId ?? ''),
-    queryFn: () => adminService.getUser(userId as string),
+    queryFn: () => adminService.getUser(userId ?? ''),
     enabled: Boolean(userId),
   });
 

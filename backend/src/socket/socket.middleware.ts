@@ -7,6 +7,13 @@ export interface AuthedSocketData {
   userId: string;
 }
 
+/**
+ * Typed accessor for the authenticated user id populated by `socketAuth`.
+ * Centralises the `socket.data.userId` cast so handlers don't each redefine
+ * a local `me()`/`userId()` helper.
+ */
+export const getUserId = (socket: Socket): string => (socket.data as AuthedSocketData).userId;
+
 const extractToken = (socket: Socket): string | null => {
   const fromAuth = socket.handshake.auth?.['token'];
   if (typeof fromAuth === 'string' && fromAuth.length > 0) return fromAuth;

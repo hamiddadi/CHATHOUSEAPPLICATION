@@ -1,15 +1,11 @@
-import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { hash, compare } from 'bcrypt';
 import { prisma } from '../../config/database';
 import { env } from '../../config/env';
 import { AppError } from '../../middlewares/error.middleware';
-import {
-  signAccessToken,
-  signRefreshToken,
-  verifyRefreshToken,
-  decodeTokenTtl,
-} from '../../utils/jwt';
+import { verifyRefreshToken, decodeTokenTtl } from '../../utils/jwt';
 import { revokeAccessToken } from '../../middlewares/auth.middleware';
+import { issueTokenPair } from '../../utils/issueTokenPair';
 import { sendMail } from '../../config/mailer';
 import { logger } from '../../config/logger';
 import type {
@@ -20,7 +16,6 @@ import type {
 } from './auth.schema';
 
 const SALT_ROUNDS = 12;
-const REFRESH_TTL_DAYS = 7;
 const RESET_TOKEN_TTL_MINUTES = 30;
 const RESET_TOKEN_BYTES = 32;
 
@@ -41,19 +36,6 @@ const userToPublic = (u: {
   avatarUrl: u.avatarUrl,
   bio: u.bio,
 });
-
-const issueTokenPair = async (userId: string) => {
-  const jti = randomUUID();
-  const accessToken = signAccessToken(userId);
-  const refreshToken = signRefreshToken(userId, jti);
-  const expiresAt = new Date(Date.now() + REFRESH_TTL_DAYS * 24 * 60 * 60 * 1000);
-
-  await prisma.refreshToken.create({
-    data: { token: jti, userId, expiresAt },
-  });
-
-  return { accessToken, refreshToken };
-};
 
 export const authService = {
   async register(input: RegisterInput) {

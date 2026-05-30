@@ -1,6 +1,5 @@
 import { useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import type { Socket } from 'socket.io-client';
 import { getSocket } from '../../../shared/services/realtime/socketClient';
 import { roomKeys } from './useRooms';
 
@@ -21,13 +20,11 @@ export const useRoomSocket = (roomId: string | null): void => {
   useEffect(() => {
     if (!roomId) return;
     let cancelled = false;
-    let boundSocket: Socket | null = null;
     let cleanup: (() => void) | undefined;
 
     void (async () => {
       const socket = await getSocket();
       if (!socket || cancelled) return;
-      boundSocket = socket;
 
       socket.emit('room:join', { roomId });
 
@@ -67,8 +64,6 @@ export const useRoomSocket = (roomId: string | null): void => {
     return () => {
       cancelled = true;
       cleanup?.();
-      boundSocket = null;
-      void boundSocket;
     };
   }, [roomId, qc]);
 };

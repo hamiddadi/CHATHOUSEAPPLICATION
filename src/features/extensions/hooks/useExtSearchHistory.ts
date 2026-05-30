@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { searchHistoryApi } from '../api/searchHistoryApi';
 
+/** Maximum number of search entries kept in the optimistic local list. */
+const MAX_HISTORY = 20;
+/** Debounce before a committed query is persisted to the server. */
+const RECORD_DEBOUNCE_MS = 600;
+
 /**
  * Search history (Module 11 / SEARCH-020).
  *
@@ -32,8 +37,8 @@ export const useExtSearchHistory = () => {
   }, []);
 
   /**
-   * Commit a query to history. Debounces 600ms so a fast typist doesn't
-   * spam the server with intermediate strings.
+   * Commit a query to history. Debounces RECORD_DEBOUNCE_MS so a fast typist
+   * doesn't spam the server with intermediate strings.
    */
   const commit = useCallback((rawQuery: string): void => {
     const q = rawQuery.trim();
@@ -41,13 +46,13 @@ export const useExtSearchHistory = () => {
 
     setItems(prev => {
       const filtered = prev.filter(p => p.toLowerCase() !== q.toLowerCase());
-      return [q, ...filtered].slice(0, 20);
+      return [q, ...filtered].slice(0, MAX_HISTORY);
     });
 
     if (debounceTimer.current) clearTimeout(debounceTimer.current);
     debounceTimer.current = setTimeout(() => {
       void searchHistoryApi.record(q).catch(() => undefined);
-    }, 600);
+    }, RECORD_DEBOUNCE_MS);
   }, []);
 
   const remove = useCallback(async (query: string): Promise<void> => {

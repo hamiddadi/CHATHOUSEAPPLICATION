@@ -2,7 +2,6 @@ import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, {
   Easing,
-  runOnJS,
   useAnimatedStyle,
   useSharedValue,
   withSequence,
@@ -152,13 +151,10 @@ const FloatingEmojiView: React.FC<{ emoji: string; startX: number }> = memo(({ e
       withTiming(0, { duration: 480 }),
     );
     scale.value = withTiming(1.1, { duration: 200, easing: Easing.out(Easing.cubic) });
-    translateY.value = withTiming(
-      -180,
-      { duration: FLY_DURATION_MS, easing: Easing.out(Easing.quad) },
-      () => {
-        runOnJS(noop)();
-      },
-    );
+    translateY.value = withTiming(-180, {
+      duration: FLY_DURATION_MS,
+      easing: Easing.out(Easing.quad),
+    });
   }, [opacity, scale, translateY]);
 
   const animatedStyle = useAnimatedStyle(() => ({
@@ -173,8 +169,6 @@ const FloatingEmojiView: React.FC<{ emoji: string; startX: number }> = memo(({ e
   );
 });
 FloatingEmojiView.displayName = 'FloatingEmojiView';
-
-const noop = (): void => undefined;
 
 const styles = StyleSheet.create({
   wrap: {

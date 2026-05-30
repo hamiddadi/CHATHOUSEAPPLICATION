@@ -1,9 +1,8 @@
-import { Queue, Worker, type ConnectionOptions, type Job } from 'bullmq';
-import IORedis from 'ioredis';
-import { env } from '../config/env';
+import { Queue, Worker, type Job } from 'bullmq';
 import { logger } from '../config/logger';
 import { prisma } from '../config/database';
 import { notificationsService } from '../modules/notifications/notifications.service';
+import { bullConnection } from './connection';
 
 /**
  * BullMQ queue for scheduled-room reminders. A job is enqueued with a
@@ -21,12 +20,6 @@ const LEAD_TIME_MS = 5 * 60 * 1000; // 5 minutes
 export interface ReminderJobData {
   roomId: string;
 }
-
-// BullMQ requires maxRetriesPerRequest=null for blocking commands used by
-// Worker/QueueEvents. We keep this connection distinct from the app's
-// node-redis client (different driver, different semantics).
-const bullConnection = (): ConnectionOptions =>
-  new IORedis(env.REDIS_URL, { maxRetriesPerRequest: null });
 
 let queue: Queue<ReminderJobData> | null = null;
 let worker: Worker<ReminderJobData> | null = null;

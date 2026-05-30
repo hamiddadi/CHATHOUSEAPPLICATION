@@ -24,6 +24,12 @@ const FILTERS: { value: Filter; label: string }[] = [
 // doesn't grow `items` (and the FlatList window) without bound.
 const MAX_ITEMS = 200;
 
+// Prefix marking a synthetic live (socket-driven) entry that the server hasn't
+// persisted yet. Shared by the prepend handlers and the merge/dedupe logic so
+// the contract lives in one place.
+const LIVE_PREFIX = 'live-';
+const isLiveId = (id: string): boolean => id.startsWith(LIVE_PREFIX);
+
 /** Prepend a live socket entry, capping the list length. */
 const prependCapped = (prev: ActivityItem[], next: ActivityItem): ActivityItem[] =>
   [next, ...prev].slice(0, MAX_ITEMS);
@@ -89,7 +95,7 @@ export const ExtActivityFeedScreen: React.FC<{ onTapItem?: (item: ActivityItem) 
       setItems(prev => {
         const serverKeys = new Set(next.map(i => `${i.targetType}:${i.targetId}`));
         const survivingLive = prev.filter(
-          i => i.id.startsWith('live-') && !serverKeys.has(`${i.targetType}:${i.targetId}`),
+          i => isLiveId(i.id) && !serverKeys.has(`${i.targetType}:${i.targetId}`),
         );
         return [...survivingLive, ...next].slice(0, MAX_ITEMS);
       });
@@ -108,7 +114,7 @@ export const ExtActivityFeedScreen: React.FC<{ onTapItem?: (item: ActivityItem) 
     room_started_by_following: payload => {
       setItems(prev =>
         prependCapped(prev, {
-          id: `live-${payload.roomId}-${Date.now()}`,
+          id: `${LIVE_PREFIX}${payload.roomId}-${Date.now()}`,
           type: 'ROOM_STARTED',
           title: payload.hostName ?? 'Someone you follow',
           body: `started "${payload.title}"`,
@@ -129,7 +135,7 @@ export const ExtActivityFeedScreen: React.FC<{ onTapItem?: (item: ActivityItem) 
     join_request: payload => {
       setItems(prev =>
         prependCapped(prev, {
-          id: `live-jr-${payload.clubId}-${Date.now()}`,
+          id: `${LIVE_PREFIX}jr-${payload.clubId}-${Date.now()}`,
           type: 'CLUB_INVITE',
           title: 'Join request',
           body: payload.message ?? 'New request to join',
@@ -145,7 +151,7 @@ export const ExtActivityFeedScreen: React.FC<{ onTapItem?: (item: ActivityItem) 
     ping_user: payload => {
       setItems(prev =>
         prependCapped(prev, {
-          id: `live-ping-${payload.fromUserId}-${Date.now()}`,
+          id: `${LIVE_PREFIX}ping-${payload.fromUserId}-${Date.now()}`,
           type: 'WAVE',
           title: 'Wave received',
           body: 'Someone is waving at you',
@@ -160,15 +166,15 @@ export const ExtActivityFeedScreen: React.FC<{ onTapItem?: (item: ActivityItem) 
     },
   });
 
-  const onRefresh = async (): Promise<void> => {
+  const onRefresh = useCallback(async (): Promise<void> => {
     setRefreshing(true);
     await fetchItems();
     setRefreshing(false);
-  };
+  }, [fetchItems]);
 
   const handleTap = useCallback(
     (item: ActivityItem): void => {
-      if (!item.id.startsWith('live-')) {
+      if (!isLiveId(item.id)) {
         void activityApi.markRead(item.id).catch(() => undefined);
       }
       setItems(prev => prev.map(i => (i.id === item.id ? { ...i, isRead: true } : i)));

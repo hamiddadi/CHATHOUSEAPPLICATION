@@ -9,6 +9,8 @@ import { useAuthStore } from '../../../auth/store/authStore';
 import { useOnboardingStore } from '../../store/onboardingStore';
 import { INTEREST_CATEGORIES, type InterestCategory } from '../../schemas';
 
+const MAX_INTERESTS = 10;
+
 /**
  * Step 2 of onboarding. User toggles interest chips (min 1, max 10) and
  * taps "Finish" to flush the accumulated profile + interests to the
@@ -36,7 +38,7 @@ export const InterestSelectionScreen: React.FC = () => {
       const next = new Set(prev);
       if (next.has(cat)) {
         next.delete(cat);
-      } else if (next.size < 10) {
+      } else if (next.size < MAX_INTERESTS) {
         next.add(cat);
       }
       return next;
@@ -84,7 +86,7 @@ export const InterestSelectionScreen: React.FC = () => {
           <Text className="text-sm text-ink-muted">
             {interests.length === 0
               ? t('onboarding.interests.minHint')
-              : `${interests.length} / 10`}
+              : `${interests.length} / ${MAX_INTERESTS}`}
           </Text>
         </View>
 

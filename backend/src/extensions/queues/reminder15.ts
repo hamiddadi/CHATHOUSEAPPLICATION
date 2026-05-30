@@ -1,9 +1,8 @@
-import { Queue, Worker, type ConnectionOptions, type Job } from 'bullmq';
-import IORedis from 'ioredis';
-import { env } from '../../config/env';
+import { Queue, Worker, type Job } from 'bullmq';
 import { logger } from '../../config/logger';
 import { prisma } from '../../config/database';
 import { notificationsService } from '../../modules/notifications/notifications.service';
+import { bullConnection } from '../../queues/connection';
 
 /**
  * 15-minute event reminder worker — sister to the existing 5-min worker
@@ -25,9 +24,6 @@ const SCAN_INTERVAL_MS = 60 * 1000;
 export interface Reminder15JobData {
   roomId: string;
 }
-
-const bullConnection = (): ConnectionOptions =>
-  new IORedis(env.REDIS_URL, { maxRetriesPerRequest: null });
 
 let queue: Queue<Reminder15JobData> | null = null;
 let worker: Worker<Reminder15JobData> | null = null;

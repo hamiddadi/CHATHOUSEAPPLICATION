@@ -45,12 +45,13 @@ export const suggestionsService = {
     blockedIds.delete(userId);
 
     const excludeIds = new Set<string>([userId, ...followingIds, ...Array.from(blockedIds)]);
+    const excludeIdsArr = Array.from(excludeIds);
 
     // Candidate pool: interest overlap first, then friends-of-friends, then trending.
     const interestMatch = me.interests.length
       ? await prisma.user.findMany({
           where: {
-            id: { notIn: Array.from(excludeIds) },
+            id: { notIn: excludeIdsArr },
             deletedAt: null,
             interests: { hasSome: me.interests },
           },
@@ -63,7 +64,7 @@ export const suggestionsService = {
     const friendsOfFriends = followingIds.length
       ? await prisma.user.findMany({
           where: {
-            id: { notIn: Array.from(excludeIds) },
+            id: { notIn: excludeIdsArr },
             deletedAt: null,
             followers: { some: { followerId: { in: followingIds } } },
           },
@@ -75,7 +76,7 @@ export const suggestionsService = {
 
     const trending = await prisma.user.findMany({
       where: {
-        id: { notIn: Array.from(excludeIds) },
+        id: { notIn: excludeIdsArr },
         deletedAt: null,
       },
       select: PUBLIC_USER,
@@ -90,10 +91,10 @@ export const suggestionsService = {
       return true;
     });
 
+    const fofIds = new Set(friendsOfFriends.map(u => u.id));
     const scored = merged.map(u => {
       const overlap = me.interests.filter(i => u.interests.includes(i)).length;
-      const score =
-        overlap * 10 + (followingIds.length ? (friendsOfFriends.includes(u) ? 5 : 0) : 0);
+      const score = overlap * 10 + (followingIds.length ? (fofIds.has(u.id) ? 5 : 0) : 0);
       return { user: u, score, sharedInterests: overlap };
     });
 
@@ -110,7 +111,7 @@ export const suggestionsService = {
       reason:
         s.sharedInterests > 0
           ? 'shared_interests'
-          : friendsOfFriends.includes(s.user)
+          : fofIds.has(s.user.id)
             ? 'friends_of_friends'
             : 'trending',
     }));

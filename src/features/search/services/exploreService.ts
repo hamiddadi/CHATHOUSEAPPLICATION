@@ -1,4 +1,5 @@
 import { apiClient } from '../../../shared/services/api/apiClient';
+import type { Envelope } from '../../../shared/types/api';
 import type { HouseSummary, UserSummary } from '../../../shared/types/domain';
 import type { SearchRoomHit } from './searchService';
 
@@ -21,11 +22,6 @@ export interface ExploreFeed {
   rooms: SearchRoomHit[];
   clubs: ExploreClubHit[];
   users: ExploreUserHit[];
-}
-
-interface Envelope<T> {
-  success: true;
-  data: T;
 }
 
 export const exploreService = {

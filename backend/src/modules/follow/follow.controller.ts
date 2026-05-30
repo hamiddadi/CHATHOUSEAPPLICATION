@@ -2,12 +2,8 @@ import { z } from 'zod';
 import type { Request, Response } from 'express';
 import { sendOk } from '../../utils/response';
 import { AppError } from '../../middlewares/error.middleware';
+import { authedUserId as requireUserId } from '../../utils/authedUserId';
 import { followService } from './follow.service';
-
-const requireUserId = (req: Request): string => {
-  if (!req.userId) throw new AppError('AUTH_003');
-  return req.userId;
-};
 
 // Shared list pagination guard. Replaces the hand-rolled Number()/string
 // parsing that let `limit=abc` reach Prisma as NaN and an invalid `cursor`

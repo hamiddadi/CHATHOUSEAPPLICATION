@@ -1,4 +1,5 @@
 import { apiClient } from '../../../shared/services/api/apiClient';
+import type { Envelope } from '../../../shared/types/api';
 import type { House, HousePrivacy, HouseSummary } from '../../../shared/types/domain';
 
 export interface CreateHouseInput {
@@ -6,11 +7,6 @@ export interface CreateHouseInput {
   description: string;
   privacy: HousePrivacy;
   iconUrl?: string | null;
-}
-
-interface Envelope<T> {
-  success: true;
-  data: T;
 }
 
 // Backend /api/clubs envelope already matches House / HouseSummary shape:

@@ -12,9 +12,11 @@ const boolFromString = (def: boolean) =>
   z
     .string()
     .optional()
-    .transform(v =>
-      v === undefined ? def : v.trim().toLowerCase() === 'true' || v.trim() === '1',
-    );
+    .transform(v => {
+      if (v === undefined) return def;
+      const s = v.trim().toLowerCase();
+      return s === 'true' || s === '1';
+    });
 
 /**
  * Runtime environment — validated at process boot. Missing or malformed vars

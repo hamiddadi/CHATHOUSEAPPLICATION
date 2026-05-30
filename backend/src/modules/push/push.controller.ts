@@ -1,13 +1,8 @@
 import type { Request, Response } from 'express';
 import { sendOk } from '../../utils/response';
-import { AppError } from '../../middlewares/error.middleware';
+import { authedUserId as uid } from '../../utils/authedUserId';
 import { registerPushSchema, unregisterPushSchema } from './push.schema';
 import { pushService } from './push.service';
-
-const uid = (req: Request): string => {
-  if (!req.userId) throw new AppError('AUTH_003');
-  return req.userId;
-};
 
 export const pushController = {
   async register(req: Request, res: Response) {

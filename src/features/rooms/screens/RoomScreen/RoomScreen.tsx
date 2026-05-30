@@ -62,6 +62,10 @@ const SECONDARY_AVATAR = 52;
 const OTHER_AVATAR = 40;
 const FOLLOWED_COUNT = 5;
 
+// Pure layout constant (depends only on imported theme tokens) — hoisted so
+// it isn't recomputed every render and can be shared by the inline styles.
+const ACTION_BAR_BOTTOM_OFFSET = layout.tabBarHeight + layout.tabBarBottomOffset + spacing.xxl;
+
 const GREEN = '#00e475';
 
 const ROLE_COLORS = {
@@ -451,8 +455,6 @@ export const RoomScreen: React.FC = () => {
   const otherListeners = useMemo(() => (room ? room.listeners.slice(FOLLOWED_COUNT) : []), [room]);
   const othersOverflow = room ? Math.max(0, room.listenersCount - room.listeners.length) : 0;
 
-  const actionBarBottomOffset = layout.tabBarHeight + layout.tabBarBottomOffset + spacing.xxl;
-
   if (isLoading) return <Loader fullscreen accessibilityLabel={t('common.loading')} />;
   if (isError || !room) {
     return <EmptyState title={t('room.unavailable')} description={t('room.mayHaveEnded')} />;
@@ -525,7 +527,7 @@ export const RoomScreen: React.FC = () => {
         contentContainerStyle={{
           paddingHorizontal: spacing.xxl,
           paddingTop: insets.top + spacing.mega,
-          paddingBottom: insets.bottom + actionBarBottomOffset + spacing.mega,
+          paddingBottom: insets.bottom + ACTION_BAR_BOTTOM_OFFSET + spacing.mega,
         }}
         showsVerticalScrollIndicator={false}
       >
@@ -711,7 +713,7 @@ export const RoomScreen: React.FC = () => {
           'box-none' on the wrapper lets taps on the action pill pass
           through the float layer. */}
       <View
-        style={[styles.reactionsWrapper, { bottom: insets.bottom + actionBarBottomOffset + 60 }]}
+        style={[styles.reactionsWrapper, { bottom: insets.bottom + ACTION_BAR_BOTTOM_OFFSET + 60 }]}
         pointerEvents="box-none"
       >
         <ReactionsBar roomId={room.id} />
@@ -719,7 +721,7 @@ export const RoomScreen: React.FC = () => {
 
       <View
         className="absolute left-0 right-0 items-center"
-        style={{ bottom: insets.bottom + actionBarBottomOffset }}
+        style={{ bottom: insets.bottom + ACTION_BAR_BOTTOM_OFFSET }}
         pointerEvents="box-none"
       >
         <View style={styles.actionPill}>

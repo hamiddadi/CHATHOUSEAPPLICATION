@@ -36,6 +36,9 @@ export const otpFormSchema = z.object({
 
 const USERNAME_REGEX = /^[a-z0-9_]+$/i;
 
+export const USERNAME_MIN_LEN = 3;
+export const USERNAME_MAX_LEN = 24;
+
 export const usernameFormSchema = z.object({
   username: z
     .string()
@@ -44,8 +47,8 @@ export const usernameFormSchema = z.object({
       z
         .string()
         .min(1, 'auth.username.errors.required')
-        .min(3, 'auth.username.errors.tooShort')
-        .max(24, 'auth.username.errors.tooLong')
+        .min(USERNAME_MIN_LEN, 'auth.username.errors.tooShort')
+        .max(USERNAME_MAX_LEN, 'auth.username.errors.tooLong')
         .regex(USERNAME_REGEX, 'auth.username.errors.format'),
     ),
 });

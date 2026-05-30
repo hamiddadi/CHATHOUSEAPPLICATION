@@ -16,6 +16,10 @@ export interface InterceptorHandlers {
   onUnauthenticated?: () => void | Promise<void>;
 }
 
+// Backend contract: access tokens live ~15 min. Used only for a rough
+// `expiresAt` UI hint in tokenStorage, not for validation.
+const ACCESS_TOKEN_TTL_MS = 15 * 60 * 1000;
+
 // Guard against the internal retry spinning if `/auth/refresh` itself 401s.
 interface RetriableConfig extends InternalAxiosRequestConfig {
   _retry?: boolean;
@@ -46,9 +50,9 @@ const performRefresh = async (client: AxiosInstance): Promise<AuthSession | null
       const next: AuthSession = {
         accessToken: res.data.data.accessToken,
         refreshToken: res.data.data.refreshToken,
-        // Backend contract is a 15-min access token; tokenStorage expects a
-        // rough expiresAt — not used for validation, only for UI hints.
-        expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+        // tokenStorage expects a rough expiresAt — not used for validation,
+        // only for UI hints. See ACCESS_TOKEN_TTL_MS above.
+        expiresAt: new Date(Date.now() + ACCESS_TOKEN_TTL_MS).toISOString(),
       };
       await tokenStorage.set(next);
       return next;

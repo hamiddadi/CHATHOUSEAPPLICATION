@@ -32,6 +32,9 @@ import { startReminderWorker, shutdownReminders } from './queues/eventReminders'
 import { startLocationPurgeWorker, shutdownLocationPurge } from './queues/locationPurge';
 import { ensureSearchIndexes } from './config/searchIndexes';
 
+// Grace period before a hung server.close() is hard-killed during shutdown.
+const SHUTDOWN_GRACE_MS = 10_000;
+
 export const createApp = (): express.Express => {
   const app = express();
 
@@ -157,11 +160,11 @@ const startServer = async (): Promise<void> => {
         process.exit(1);
       }
     });
-    // Hard-kill after 10s if close() hangs
+    // Hard-kill after the grace period if close() hangs
     setTimeout(() => {
-      logger.error('forced shutdown after 10s');
+      logger.error(`forced shutdown after ${SHUTDOWN_GRACE_MS / 1000}s`);
       process.exit(1);
-    }, 10_000).unref();
+    }, SHUTDOWN_GRACE_MS).unref();
   };
 
   process.on('SIGTERM', () => {

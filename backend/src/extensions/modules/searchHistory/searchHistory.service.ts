@@ -13,6 +13,16 @@ const key = (userId: string) => `ext:searchhist:${userId}`;
 
 const normalize = (q: string): string => q.trim().slice(0, 100);
 
+// Atomically replace the stored list with `next` (clearing the key when empty,
+// otherwise rewriting and refreshing the TTL).
+const rewrite = async (userId: string, next: string[]): Promise<void> => {
+  await redis.del(key(userId));
+  if (next.length > 0) {
+    await redis.rPush(key(userId), next);
+    await redis.expire(key(userId), TTL_S);
+  }
+};
+
 export const searchHistoryService = {
   async list(userId: string, limit = MAX_ENTRIES): Promise<string[]> {
     return redis.lRange(key(userId), 0, limit - 1);
@@ -25,12 +35,7 @@ export const searchHistoryService = {
     const current = await redis.lRange(key(userId), 0, MAX_ENTRIES);
     const remaining = current.filter(c => c.toLowerCase() !== q.toLowerCase());
     const next = [q, ...remaining].slice(0, MAX_ENTRIES);
-    // Atomic rewrite
-    await redis.del(key(userId));
-    if (next.length > 0) {
-      await redis.rPush(key(userId), next);
-      await redis.expire(key(userId), TTL_S);
-    }
+    await rewrite(userId, next);
   },
 
   async clear(userId: string): Promise<void> {
@@ -42,10 +47,6 @@ export const searchHistoryService = {
     if (q.length === 0) return;
     const current = await redis.lRange(key(userId), 0, MAX_ENTRIES);
     const next = current.filter(c => c.toLowerCase() !== q.toLowerCase());
-    await redis.del(key(userId));
-    if (next.length > 0) {
-      await redis.rPush(key(userId), next);
-      await redis.expire(key(userId), TTL_S);
-    }
+    await rewrite(userId, next);
   },
 };

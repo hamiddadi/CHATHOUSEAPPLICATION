@@ -27,6 +27,15 @@ export interface NetQualityReport {
 const TTL_S = 30;
 const key = (userId: string, roomId: string) => `ext:netq:${roomId}:${userId}`;
 
+// Classification thresholds (close approximation of Clubhouse's 3-bar indicator).
+const RTT_CRITICAL_MS = 1000;
+const RTT_POOR_MS = 350;
+const RTT_FAIR_MS = 150;
+const JITTER_POOR_MS = 80;
+const JITTER_FAIR_MS = 30;
+const LOSS_POOR_PCT = 5;
+const LOSS_FAIR_PCT = 1;
+
 export const netqualityService = {
   classify(
     rttMs: number,
@@ -41,14 +50,16 @@ export const netqualityService = {
     //  - 2 bars: RTT < 350ms, jitter < 80ms, loss < 5%
     //  - 1 bar : worse
     let bars: NetQualityBars = 3;
-    if (rttMs >= 1000) bars = 1;
-    else if (rttMs >= 350 || jitterMs >= 80 || packetLossPct >= 5) bars = 1;
-    else if (rttMs >= 150 || jitterMs >= 30 || packetLossPct >= 1) bars = 2;
+    if (rttMs >= RTT_CRITICAL_MS) bars = 1;
+    else if (rttMs >= RTT_POOR_MS || jitterMs >= JITTER_POOR_MS || packetLossPct >= LOSS_POOR_PCT)
+      bars = 1;
+    else if (rttMs >= RTT_FAIR_MS || jitterMs >= JITTER_FAIR_MS || packetLossPct >= LOSS_FAIR_PCT)
+      bars = 2;
 
     let warning: NetQualityReport['warning'] = null;
-    if (rttMs >= 1000) warning = 'high_latency';
-    else if (packetLossPct >= 5) warning = 'poor';
-    else if (jitterMs >= 80) warning = 'unstable';
+    if (rttMs >= RTT_CRITICAL_MS) warning = 'high_latency';
+    else if (packetLossPct >= LOSS_POOR_PCT) warning = 'poor';
+    else if (jitterMs >= JITTER_POOR_MS) warning = 'unstable';
     return { bars, warning };
   },
 

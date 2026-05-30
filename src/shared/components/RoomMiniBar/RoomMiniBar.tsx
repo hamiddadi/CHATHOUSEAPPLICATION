@@ -63,7 +63,7 @@ export const RoomMiniBar: React.FC = memo(() => {
                   name={s.displayName}
                   sizeValue={28}
                   ring={s.audio === 'speaking'}
-                  ringColor="#00e475"
+                  ringColor={colors.accent}
                   ringWidth={1.5}
                 />
               </View>
@@ -76,7 +76,7 @@ export const RoomMiniBar: React.FC = memo(() => {
               {room.title}
             </Text>
             <View style={styles.metaRow}>
-              <MaterialIcons name="graphic-eq" size={10} color="#00e475" />
+              <MaterialIcons name="graphic-eq" size={10} color={colors.accent} />
               <Text style={styles.meta}>
                 {room.speakers.length} speaking · {room.listenersCount} listening
               </Text>

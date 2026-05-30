@@ -18,17 +18,29 @@ export interface PrivacySettings {
   isVisibleOnMap: boolean;
 }
 
+// Maps a Prisma row (`isVisible`) to the public `PrivacySettings` shape
+// (`isVisibleOnMap`). Centralises the column→field rename used by get/update.
+const toSettings = (u: {
+  isPrivateAccount: boolean;
+  allowWaves: boolean;
+  isVisible: boolean;
+}): PrivacySettings => ({
+  isPrivateAccount: u.isPrivateAccount,
+  allowWaves: u.allowWaves,
+  isVisibleOnMap: u.isVisible,
+});
+
 export const privacyService = {
   async get(userId: string): Promise<PrivacySettings> {
     const u = await prisma.user.findUnique({
       where: { id: userId },
       select: { isPrivateAccount: true, allowWaves: true, isVisible: true },
     });
-    return {
+    return toSettings({
       isPrivateAccount: u?.isPrivateAccount ?? false,
       allowWaves: u?.allowWaves ?? true,
-      isVisibleOnMap: u?.isVisible ?? false,
-    };
+      isVisible: u?.isVisible ?? false,
+    });
   },
 
   async update(
@@ -57,10 +69,6 @@ export const privacyService = {
       data,
       select: { isPrivateAccount: true, allowWaves: true, isVisible: true },
     });
-    return {
-      isPrivateAccount: updated.isPrivateAccount,
-      allowWaves: updated.allowWaves,
-      isVisibleOnMap: updated.isVisible,
-    };
+    return toSettings(updated);
   },
 };

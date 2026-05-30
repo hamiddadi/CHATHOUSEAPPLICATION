@@ -1,8 +1,8 @@
 import type { Server, Socket } from 'socket.io';
 import { chatService } from '../../modules/chat/chat.service';
 import { logger } from '../../config/logger';
-
-const userChannel = (userId: string): string => `user:${userId}`;
+import { userChannel } from '../channels';
+import { getUserId } from '../socket.middleware';
 
 interface SendPayload {
   receiverId: string;
@@ -22,7 +22,7 @@ interface ReadPayload {
  * adapter.
  */
 export const registerChatHandlers = (io: Server, socket: Socket): void => {
-  const me = (): string => socket.data.userId as string;
+  const me = (): string => getUserId(socket);
   void socket.join(userChannel(me()));
 
   socket.on('chat:send', async (payload: SendPayload, ack?: (ok: boolean) => void) => {

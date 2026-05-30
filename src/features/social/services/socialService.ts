@@ -1,15 +1,11 @@
 import { apiClient } from '../../../shared/services/api/apiClient';
+import type { Envelope } from '../../../shared/types/api';
 import type { UserSummary } from '../../../shared/types/domain';
 
 /**
  * Wrapper around the backend `/api/users/:id/wave|block|report` +
  * `/api/users/me/blocked` endpoints (Module 10).
  */
-
-interface Envelope<T> {
-  success: true;
-  data: T;
-}
 
 export type ReportReason = 'spam' | 'harassment' | 'fake_profile' | 'other';
 

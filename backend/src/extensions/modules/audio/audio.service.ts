@@ -27,16 +27,20 @@ const DEFAULTS: AudioPreferences = {
 
 const key = (userId: string) => `ext:audio:prefs:${userId}`;
 
+const coerceTier = (t: unknown): AudioQualityTier =>
+  t === 'high' || t === 'music' ? t : 'standard';
+
+const coerceDropIn = (m: unknown): DropInMode => (m === 'silent' ? 'silent' : 'normal');
+
 const parse = (raw: string | null): AudioPreferences => {
   if (!raw) return DEFAULTS;
   try {
     const obj = JSON.parse(raw) as Partial<AudioPreferences>;
     return {
-      qualityTier:
-        obj.qualityTier === 'high' || obj.qualityTier === 'music' ? obj.qualityTier : 'standard',
+      qualityTier: coerceTier(obj.qualityTier),
       spatialAudio: typeof obj.spatialAudio === 'boolean' ? obj.spatialAudio : false,
       noiseSuppression: typeof obj.noiseSuppression === 'boolean' ? obj.noiseSuppression : true,
-      dropInMode: obj.dropInMode === 'silent' ? 'silent' : 'normal',
+      dropInMode: coerceDropIn(obj.dropInMode),
     };
   } catch {
     return DEFAULTS;

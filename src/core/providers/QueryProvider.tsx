@@ -7,11 +7,11 @@ import type { AppError } from '../../shared/services/api/errorHandler';
  * - Network + timeout + 5xx → worth another shot
  * - 4xx (auth/forbidden/notFound/validation) → never retry
  */
-const shouldRetryError = (err: unknown): boolean => {
-  const e = err as AppError | undefined;
-  if (!e || typeof e !== 'object' || !('kind' in e)) return false;
-  return e.kind === 'network' || e.kind === 'timeout' || e.kind === 'server';
-};
+const isAppError = (e: unknown): e is AppError =>
+  typeof e === 'object' && e !== null && 'kind' in e;
+
+const shouldRetryError = (err: unknown): boolean =>
+  isAppError(err) && (err.kind === 'network' || err.kind === 'timeout' || err.kind === 'server');
 
 export const QueryProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const client = useMemo(

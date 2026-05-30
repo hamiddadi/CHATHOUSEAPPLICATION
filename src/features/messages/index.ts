@@ -5,6 +5,7 @@ export {
   useConversationMessages,
   useSendMessage,
   useMarkConversationRead,
+  useUnreadMessageCount,
   messageKeys,
 } from './hooks/useMessages';
 export { OnlineUsersList } from './components/OnlineUsersList';
