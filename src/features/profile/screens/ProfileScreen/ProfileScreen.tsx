@@ -1,6 +1,5 @@
-import React, { memo, useCallback, useState } from 'react';
-import { Alert, Pressable, ScrollView, Share, Text, View } from 'react-native';
-import { MaterialIcons } from '@expo/vector-icons';
+import React, { useCallback, useState } from 'react';
+import { Alert, ScrollView, Share, View } from 'react-native';
 import {
   useNavigation,
   useRoute,
@@ -11,11 +10,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ExpoClipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
 import { useTranslation } from 'react-i18next';
-import { Avatar } from '../../../../shared/components/Avatar';
-import { Button } from '../../../../shared/components/Button';
 import { Loader } from '../../../../shared/components/Loader';
 import { EmptyState } from '../../../../shared/components/EmptyState';
-import { colors, spacing } from '../../../../shared/constants/theme';
+import { spacing } from '../../../../shared/constants/theme';
 import type { RoomStackParamList, SettingsStackParamList } from '../../../../core/navigation/types';
 import { useAuthStore } from '../../../auth/store/authStore';
 import { useFollow, useMe, useProfile, useUnfollow } from '../../hooks/useProfile';
@@ -23,7 +20,11 @@ import { useBlock, useReport, useWave } from '../../../social/hooks/useSocial';
 import type { ReportReason } from '../../../social/services/socialService';
 import { useHouses } from '../../../houses/hooks/useHouses';
 import { useMyRoomHistory } from '../../../rooms/hooks/useRooms';
-import type { HouseSummary, RoomSummary } from '../../../../shared/types/domain';
+import ProfileHeaderBar from './partials/ProfileHeaderBar';
+import ProfileIdentity from './partials/ProfileIdentity';
+import ProfileStats from './partials/ProfileStats';
+import ProfileActionButtons from './partials/ProfileActionButtons';
+import SelfSections from './partials/SelfSections';
 
 type Route = RouteProp<SettingsStackParamList, 'Profile'>;
 
@@ -35,88 +36,6 @@ const REPORT_REASONS: readonly ReportReason[] = [
   'fake_profile',
   'other',
 ] as const;
-
-const Stat: React.FC<{ label: string; value: string; onPress?: () => void }> = memo(
-  ({ label, value, onPress }) => (
-    <Pressable
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityLabel={`${value} ${label}`}
-      className="items-center px-md"
-    >
-      <Text className="text-xl font-display text-ink">{value}</Text>
-      <Text className="text-xxs font-body text-ink-muted uppercase tracking-wider">{label}</Text>
-    </Pressable>
-  ),
-);
-Stat.displayName = 'Stat';
-
-const formatCount = (n: number): string => {
-  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
-  return n.toString();
-};
-
-interface HouseRowProps {
-  house: HouseSummary;
-  onPress: (id: string) => void;
-}
-
-const HouseRow: React.FC<HouseRowProps> = memo(({ house, onPress }) => {
-  const handle = useCallback(() => onPress(house.id), [house.id, onPress]);
-  return (
-    <Pressable
-      onPress={handle}
-      accessibilityRole="button"
-      accessibilityLabel={house.name}
-      className="flex-row items-center gap-md py-sm"
-    >
-      <View className="w-10 h-10 rounded-md bg-surface-container items-center justify-center">
-        <Text className="text-lg">{house.categoryEmoji}</Text>
-      </View>
-      <View className="flex-1 gap-xxs">
-        <Text className="text-md font-body-medium text-ink" numberOfLines={1}>
-          {house.name}
-        </Text>
-        <Text className="text-xs text-ink-muted" numberOfLines={1}>
-          {house.membersCount} members · {house.privacy}
-        </Text>
-      </View>
-      <MaterialIcons name="chevron-right" size={18} color={colors.textMuted} />
-    </Pressable>
-  );
-});
-HouseRow.displayName = 'HouseRow';
-
-interface HistoryRowProps {
-  room: RoomSummary;
-  onPress: (id: string) => void;
-}
-
-const HistoryRow: React.FC<HistoryRowProps> = memo(({ room, onPress }) => {
-  const handle = useCallback(() => onPress(room.id), [onPress, room.id]);
-  return (
-    <Pressable
-      onPress={handle}
-      accessibilityRole="button"
-      accessibilityLabel={room.title}
-      className="flex-row items-center gap-md py-sm"
-    >
-      <View className="w-10 h-10 rounded-md bg-surface-container items-center justify-center">
-        <Text className="text-lg">{room.categoryEmoji}</Text>
-      </View>
-      <View className="flex-1 gap-xxs">
-        <Text className="text-md font-body-medium text-ink" numberOfLines={1}>
-          {room.title}
-        </Text>
-        <Text className="text-xs text-ink-muted" numberOfLines={1}>
-          {room.speakersCount} speakers · {room.listenersCount} listeners
-        </Text>
-      </View>
-      <MaterialIcons name="chevron-right" size={18} color={colors.textMuted} />
-    </Pressable>
-  );
-});
-HistoryRow.displayName = 'HistoryRow';
 
 export const ProfileScreen: React.FC = () => {
   const navigation = useNavigation<NavigationProp<SettingsStackParamList>>();
@@ -285,46 +204,13 @@ export const ProfileScreen: React.FC = () => {
 
   return (
     <View className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
-      <View className="flex-row items-center justify-between px-xxl py-lg">
-        <Pressable
-          onPress={handleBack}
-          accessibilityRole="button"
-          accessibilityLabel="Back"
-          hitSlop={8}
-        >
-          <MaterialIcons name="arrow-back" size={24} color={colors.text} />
-        </Pressable>
-        <View className="flex-row items-center gap-md">
-          {isSelf && (
-            <Pressable
-              onPress={goEdit}
-              accessibilityRole="button"
-              accessibilityLabel={t('profile.editProfile')}
-              hitSlop={8}
-            >
-              <MaterialIcons name="edit" size={22} color={colors.text} />
-            </Pressable>
-          )}
-          <Pressable
-            onPress={handleShare}
-            accessibilityRole="button"
-            accessibilityLabel="Share profile"
-            hitSlop={8}
-          >
-            <MaterialIcons name="share" size={22} color={colors.text} />
-          </Pressable>
-          {!isSelf && (
-            <Pressable
-              onPress={handleMore}
-              accessibilityRole="button"
-              accessibilityLabel={t('profile.more')}
-              hitSlop={8}
-            >
-              <MaterialIcons name="more-horiz" size={24} color={colors.text} />
-            </Pressable>
-          )}
-        </View>
-      </View>
+      <ProfileHeaderBar
+        isSelf={isSelf}
+        onBack={handleBack}
+        onEdit={goEdit}
+        onShare={handleShare}
+        onMore={handleMore}
+      />
 
       <ScrollView
         className="flex-1"
@@ -336,117 +222,42 @@ export const ProfileScreen: React.FC = () => {
         showsVerticalScrollIndicator={false}
       >
         <View className="items-center gap-md">
-          <Avatar
-            uri={user.avatarUrl ?? undefined}
-            name={user.displayName}
-            sizeValue={120}
-            status={user.isOnline ? 'online' : 'none'}
+          <ProfileIdentity
+            avatarUrl={user.avatarUrl}
+            displayName={user.displayName}
+            username={user.username}
+            isOnline={user.isOnline}
+            bio={bio}
+            displayBio={displayBio}
+            isBioLong={isBioLong}
+            bioExpanded={bioExpanded}
+            onCopyUsername={handleCopyUsername}
+            onToggleBio={() => setBioExpanded(!bioExpanded)}
           />
-          <View className="items-center gap-xxs">
-            <Text className="text-xxxl font-display text-ink tracking-tight">
-              {user.displayName}
-            </Text>
-            <Pressable
-              onPress={handleCopyUsername}
-              accessibilityRole="button"
-              className="active:opacity-60"
-            >
-              <Text className="text-sm font-body text-ink-muted">@{user.username}</Text>
-            </Pressable>
-          </View>
 
-          {bio.length > 0 && (
-            <View className="items-center gap-xs">
-              <Text className="text-sm font-body text-ink text-center leading-normal">
-                {displayBio}
-              </Text>
-              {isBioLong && (
-                <Pressable onPress={() => setBioExpanded(!bioExpanded)}>
-                  <Text className="text-xs font-body-bold text-primary">
-                    {bioExpanded ? t('profile.seeLess') : t('profile.seeMore')}
-                  </Text>
-                </Pressable>
-              )}
-            </View>
-          )}
-
-          <View className="flex-row items-center mt-sm">
-            <Stat label="Following" value={formatCount(user.followingCount)} />
-            <View className="w-px h-[24px] bg-overlay-white-10" />
-            <Stat label="Followers" value={formatCount(user.followersCount)} />
-          </View>
+          <ProfileStats followingCount={user.followingCount} followersCount={user.followersCount} />
 
           {!isSelf && (
-            <View className="flex-row items-center gap-sm mt-md w-full">
-              <View className="flex-1">
-                <Button
-                  label={user.isFollowedByMe ? 'Following' : 'Follow'}
-                  variant={user.isFollowedByMe ? 'ghost' : 'primary'}
-                  size="md"
-                  fullWidth
-                  loading={follow.isPending || unfollow.isPending}
-                  onPress={handleToggleFollow}
-                />
-              </View>
-              <Pressable
-                onPress={handleWave}
-                accessibilityRole="button"
-                accessibilityLabel={t('profile.wave')}
-                disabled={wave.isPending}
-                className="w-11 h-11 rounded-pill bg-overlay-white-10 items-center justify-center"
-              >
-                <Text className="text-lg">🌊</Text>
-              </Pressable>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Send message"
-                className="w-11 h-11 rounded-pill bg-overlay-white-10 items-center justify-center"
-              >
-                <MaterialIcons name="chat-bubble-outline" size={18} color={colors.text} />
-              </Pressable>
-            </View>
+            <ProfileActionButtons
+              isFollowedByMe={user.isFollowedByMe}
+              followLoading={follow.isPending || unfollow.isPending}
+              waveLoading={wave.isPending}
+              onToggleFollow={handleToggleFollow}
+              onWave={handleWave}
+            />
           )}
         </View>
 
         {isSelf && (
-          <View className="gap-xl mt-xl">
-            <View className="gap-sm">
-              <View className="flex-row items-center justify-between">
-                <Text className="text-sm font-body-bold text-ink-muted uppercase tracking-wider">
-                  {t('profile.myHouses')}
-                </Text>
-                {(myHouses.data?.length ?? 0) > 0 && (
-                  <Pressable onPress={goHouseList} accessibilityRole="button" hitSlop={8}>
-                    <Text className="text-xs font-body-bold text-primary">
-                      {t('profile.seeAll')}
-                    </Text>
-                  </Pressable>
-                )}
-              </View>
-              {myHouses.isLoading ? (
-                <Text className="text-xs text-ink-dim">…</Text>
-              ) : !myHouses.data || myHouses.data.length === 0 ? (
-                <Text className="text-sm text-ink-dim">{t('profile.emptyMyHouses')}</Text>
-              ) : (
-                myHouses.data
-                  .slice(0, 5)
-                  .map(h => <HouseRow key={h.id} house={h} onPress={goHouseDetail} />)
-              )}
-            </View>
-
-            <View className="gap-sm">
-              <Text className="text-sm font-body-bold text-ink-muted uppercase tracking-wider">
-                {t('profile.recentRooms')}
-              </Text>
-              {roomHistory.isLoading ? (
-                <Text className="text-xs text-ink-dim">…</Text>
-              ) : !roomHistory.data || roomHistory.data.length === 0 ? (
-                <Text className="text-sm text-ink-dim">{t('profile.emptyRecentRooms')}</Text>
-              ) : (
-                roomHistory.data.map(r => <HistoryRow key={r.id} room={r} onPress={goRoom} />)
-              )}
-            </View>
-          </View>
+          <SelfSections
+            houses={myHouses.data}
+            housesLoading={myHouses.isLoading}
+            rooms={roomHistory.data}
+            roomsLoading={roomHistory.isLoading}
+            onSeeAllHouses={goHouseList}
+            onHousePress={goHouseDetail}
+            onRoomPress={goRoom}
+          />
         )}
       </ScrollView>
     </View>
