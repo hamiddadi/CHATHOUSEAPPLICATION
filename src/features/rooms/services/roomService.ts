@@ -34,7 +34,20 @@ interface RawUser {
   username: string | null;
   displayName: string | null;
   avatarUrl: string | null;
+  // Backend-computed: is this listener followed by the current viewer?
+  // Absent on legacy payloads — treated as `undefined` (see RoomScreen
+  // fallback that keeps the previous positional split when no flag exists).
+  followedByViewer?: boolean;
 }
+
+/**
+ * A room listener carries the optional `followedByViewer` enrichment on top
+ * of the lightweight `UserSummary`. Kept local to the service (domain types
+ * are frozen — the Prisma client can't be regenerated) so the RoomScreen can
+ * partition listeners into "followed by you" vs "others" without a positional
+ * heuristic.
+ */
+export type RoomListener = UserSummary & { followedByViewer?: boolean };
 
 interface RawParticipant {
   role: 'HOST' | 'MODERATOR' | 'SPEAKER' | 'LISTENER';
@@ -89,6 +102,17 @@ const toSummaryUser = (u: RawUser | undefined): UserSummary => ({
   avatarUrl: u?.avatarUrl ?? null,
 });
 
+// Like `toSummaryUser` but preserves the backend's `followedByViewer` flag so
+// the room view can split listeners into "followed by you" vs "others". The
+// flag is only forwarded when present (truthy or explicit boolean); legacy
+// payloads leave it `undefined`.
+const toListener = (u: RawUser | undefined): RoomListener => {
+  const base = toSummaryUser(u);
+  return u?.followedByViewer === undefined
+    ? base
+    : { ...base, followedByViewer: u.followedByViewer };
+};
+
 const pickCategory = (raw: RawRoom): RoomCategory => {
   const tags = [...(raw.topics ?? []), raw.topic ?? ''];
   for (const t of tags) {
@@ -110,7 +134,7 @@ const toParticipant = (p: RawParticipant): RoomParticipant => ({
 const toRoom = (raw: RawRoom): Room => {
   const participants = raw.participants ?? [];
   const speakers = participants.filter(p => p.role !== 'LISTENER').map(toParticipant);
-  const listeners = participants.filter(p => p.role === 'LISTENER').map(p => toSummaryUser(p.user));
+  const listeners = participants.filter(p => p.role === 'LISTENER').map(p => toListener(p.user));
 
   const category = pickCategory(raw);
   return {

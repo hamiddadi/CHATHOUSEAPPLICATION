@@ -22,6 +22,7 @@ const LOOKBACK_MS = 90 * 1000; // scan rooms created in the last 90s
 const DEDUP_KEY = (roomId: string) => `ext:fanout:notified:${roomId}`;
 const DEDUP_TTL_S = 24 * 3600;
 const FANOUT_CONCURRENCY = 20; // notifications dispatched in parallel per chunk
+const CLUB_MEMBER_CAP = 5000; // upper bound on club members fanned out per room
 
 let timer: NodeJS.Timeout | null = null;
 
@@ -54,25 +55,63 @@ export const fanoutOne = async (roomId: string): Promise<number> => {
   const title = room.host.displayName ?? room.host.username ?? 'Someone you follow';
   const body = `started a room: "${room.title}"`;
 
+  // Track every recipient we've already queued so a user who both follows the
+  // host AND belongs to the room's club is only notified once. Seed it with the
+  // host so they never get a "you started a room" ping about their own room.
+  const notified = new Set<string>([room.hostId]);
+
+  // Build the ordered recipient list: followers first, then any club members
+  // (NOTIF: notify CLUB members on a direct live room). De-dupe via `notified`.
+  const recipients: string[] = [];
+  for (const f of followers) {
+    if (!notified.has(f.followerId)) {
+      notified.add(f.followerId);
+      recipients.push(f.followerId);
+    }
+  }
+
+  // If the room is attached to a club, every club member should also learn the
+  // room went live — even when they don't follow the host. Reuse the same
+  // ROOM_STARTED type/data shape; the only differing attribution is the
+  // dispatch source tag. Bounded by CLUB_MEMBER_CAP for the same runaway-scan
+  // protection as the follower pull.
+  if (room.clubId) {
+    const members = await prisma.clubMember.findMany({
+      where: { clubId: room.clubId },
+      select: { userId: true },
+      take: CLUB_MEMBER_CAP,
+    });
+    for (const m of members) {
+      if (!notified.has(m.userId)) {
+        notified.add(m.userId);
+        recipients.push(m.userId);
+      }
+    }
+  }
+
+  const followerIds = new Set(followers.map(f => f.followerId));
+  const sourceFor = (userId: string): string =>
+    followerIds.has(userId) ? 'ext.fanout.follow' : 'ext.fanout.club';
+
   // Bounded-concurrency fan-out. We keep notificationsService.create per
-  // follower (it owns the WS emit, push dispatch and unread-badge bump that a
+  // recipient (it owns the WS emit, push dispatch and unread-badge bump that a
   // bare prisma.createMany would skip), but process FANOUT_CONCURRENCY at a
   // time instead of strictly serial — cutting wall-clock round-trips ~Nx for
   // viral hosts without a new dependency.
-  // TODO(audit): a true durable fan-out should enqueue per-follower jobs (e.g.
+  // TODO(audit): a true durable fan-out should enqueue per-recipient jobs (e.g.
   // BullMQ) rather than scan-and-batch in-process.
   let count = 0;
-  for (let i = 0; i < followers.length; i += FANOUT_CONCURRENCY) {
-    const chunk = followers.slice(i, i + FANOUT_CONCURRENCY);
+  for (let i = 0; i < recipients.length; i += FANOUT_CONCURRENCY) {
+    const chunk = recipients.slice(i, i + FANOUT_CONCURRENCY);
     const results = await Promise.allSettled(
-      chunk.map(f =>
+      chunk.map(userId =>
         notificationsService.create({
-          userId: f.followerId,
+          userId,
           actorId: room.hostId,
           type: 'ROOM_STARTED',
           title,
           body,
-          data: { roomId: room.id, source: 'ext.fanout.follow' },
+          data: { roomId: room.id, source: sourceFor(userId) },
           targetId: room.id,
           targetType: 'room',
         }),
@@ -84,7 +123,7 @@ export const fanoutOne = async (roomId: string): Promise<number> => {
       } else {
         logger.warn('ext.fanout: notify failed', {
           err: r.reason,
-          userId: chunk[idx]?.followerId,
+          userId: chunk[idx],
           roomId,
         });
       }

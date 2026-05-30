@@ -5,6 +5,7 @@ import { notificationsService } from '../notifications/notifications.service';
 import { getBlockedIdSet } from '../social/blocks';
 import { cancelEventReminder, scheduleEventReminder } from '../../queues/eventReminders';
 import { fanoutOne } from '../../extensions/queues/followFanout';
+import { emitRoomJoinedByFollowing } from '../../extensions/realtime/aliases';
 import { logger } from '../../config/logger';
 import {
   emitHallwayRoomClosed,
@@ -247,10 +248,38 @@ export const roomsService = {
     return room;
   },
 
-  async get(roomId: string) {
+  /**
+   * Fetch a room with its participants. When `viewerId` is supplied, each
+   * LISTENER participant is annotated with a `followedByViewer` boolean
+   * computed from the viewer's follow graph (a single `prisma.follow` query
+   * scoped to the listener ids). Speakers (HOST / MODERATOR / SPEAKER) are
+   * returned unchanged. With no viewer, `followedByViewer` is `false` on
+   * every listener.
+   */
+  async get(roomId: string, viewerId?: string) {
     const room = await prisma.room.findUnique({ where: { id: roomId }, include: roomInclude });
     if (!room) throw new AppError('ROOM_001');
-    return room;
+
+    // Collect listener ids so we can resolve the viewer's follow edges in a
+    // single query (scoped to listeners — we never expose the flag on
+    // speakers, whose shape must stay untouched).
+    const listenerIds = room.participants.filter(p => p.role === 'LISTENER').map(p => p.userId);
+
+    let followedSet = new Set<string>();
+    if (viewerId && listenerIds.length > 0) {
+      const edges = await prisma.follow.findMany({
+        where: { followerId: viewerId, followingId: { in: listenerIds } },
+        select: { followingId: true },
+      });
+      followedSet = new Set(edges.map(e => e.followingId));
+    }
+
+    return {
+      ...room,
+      participants: room.participants.map(p =>
+        p.role === 'LISTENER' ? { ...p, followedByViewer: followedSet.has(p.userId) } : p,
+      ),
+    };
   },
 
   async join(roomId: string, userId: string) {
@@ -320,9 +349,45 @@ export const roomsService = {
         prisma.room.update({ where: { id: roomId }, data: { participantCount: { increment: 1 } } }),
       ]);
       emitHallwayRoomUpdated(roomId, { participantCount: room.participantCount + 1 });
+
+      // Ephemeral "someone you follow just joined a room" realtime ping to
+      // the joiner's followers. Best-effort and fire-and-forget: it must
+      // never block (or fail) the join. Not persisted as a Prisma
+      // notification — there's no enum for it and the client can't be
+      // regenerated, so this stays purely on the realtime tier. Only fired
+      // for a genuinely new active presence (not a re-join of an already
+      // active participant).
+      void (async () => {
+        try {
+          const [joiner, followers] = await Promise.all([
+            prisma.user.findUnique({
+              where: { id: userId },
+              select: { id: true, username: true, displayName: true, avatarUrl: true },
+            }),
+            prisma.follow.findMany({
+              where: { followingId: userId },
+              select: { followerId: true },
+              take: 500,
+            }),
+          ]);
+          if (!joiner) return;
+          const payload = {
+            roomId,
+            userId: joiner.id,
+            username: joiner.username,
+            displayName: joiner.displayName,
+            avatarUrl: joiner.avatarUrl,
+          };
+          for (const f of followers) {
+            emitRoomJoinedByFollowing(f.followerId, payload);
+          }
+        } catch (err) {
+          logger.warn('rooms.join: follower join-activity emit failed', { err, roomId, userId });
+        }
+      })();
     }
 
-    return roomsService.get(roomId);
+    return roomsService.get(roomId, userId);
   },
 
   async leave(roomId: string, userId: string) {

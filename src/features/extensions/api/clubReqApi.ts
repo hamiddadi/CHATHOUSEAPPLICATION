@@ -5,6 +5,14 @@ export interface ClubJoinRequest {
   userId: string;
   message: string | null;
   createdAt: string;
+  /**
+   * Outcome discriminator returned by the backend on POST /request:
+   *   - 'joined'  : OPEN club — the caller is now a member (no approval needed)
+   *   - 'pending' : SOCIAL club — an admin must approve the request
+   * Optional so older callers (and the admin `list()` payload, which omits it)
+   * keep type-checking. PRIVATE clubs reject the request entirely (CLUB_003).
+   */
+  status?: 'joined' | 'pending';
 }
 
 export const clubReqApi = {

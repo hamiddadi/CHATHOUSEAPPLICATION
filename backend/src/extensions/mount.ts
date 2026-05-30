@@ -41,6 +41,8 @@ import { clubMetaRouter } from './modules/clubMeta/clubMeta.router';
 import { profileLinksRouter } from './modules/profileLinks/profileLinks.router';
 // Vague 17
 import { healthRouter as extHealthRouter } from './modules/health/health.router';
+// Invite-link sharing (additive)
+import { invitesRouter } from './modules/invites/invites.router';
 
 /**
  * Surgical re-insertion: `createApp()` already registered notFoundHandler
@@ -133,6 +135,8 @@ const mountAll = (app: Express): void => {
   app.use('/api/ext/search-history', searchHistoryRouter);
   app.use('/api/ext/club-meta', clubMetaRouter);
   app.use('/api/ext/profile-links', profileLinksRouter);
+  // Invite-link sharing (GET /api/ext/invites/link → { url, code })
+  app.use('/api/ext/invites', invitesRouter);
   // Vague 17 — unauthenticated health probe for the extension layer
   app.use('/api/ext/health', extHealthRouter);
   logger.info('extensions mounted: v1..v17 (+ unauth health probe at /api/ext/health)');

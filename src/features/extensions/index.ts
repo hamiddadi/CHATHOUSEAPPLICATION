@@ -49,6 +49,14 @@ export type { NetQualityReport } from './api/netqualityApi';
 // ─── Vague 5 ───
 export { clubReqApi } from './api/clubReqApi';
 export type { ClubJoinRequest } from './api/clubReqApi';
+export { useExtJoinHouse } from './hooks/useExtJoinHouse';
+export type {
+  ExtJoinPhase,
+  UseExtJoinHouseOpts,
+  UseExtJoinHouseResult,
+} from './hooks/useExtJoinHouse';
+export { ExtJoinHouseButton } from './components/ExtJoinHouseButton';
+export type { ExtJoinHouseButtonProps } from './components/ExtJoinHouseButton';
 
 // ─── Vague 6 ───
 export { useExtFontScale, useExtScaledFont } from './hooks/useExtFontScale';

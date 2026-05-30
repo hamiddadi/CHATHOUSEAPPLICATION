@@ -1,4 +1,4 @@
-import React, { memo, useMemo } from 'react';
+import React, { memo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { colors, spacing } from '../../../../../shared/constants/theme';
@@ -9,17 +9,16 @@ import { OtherCell } from './ListenerCell';
 const OTHER_AVATAR = 40;
 
 interface OthersGridProps {
+  /** Listeners NOT followed by the viewer (already filtered upstream). */
   participants: UserSummary[];
-  /** Number of leading listeners already shown in the "followed" row. */
-  skip: number;
   /** Count of listeners beyond what the API returned (renders the +N chip). */
   overflow: number;
   onTap: (listener: UserSummary) => void;
 }
 
-const OthersGrid: React.FC<OthersGridProps> = memo(({ participants, skip, overflow, onTap }) => {
+const OthersGrid: React.FC<OthersGridProps> = memo(({ participants, overflow, onTap }) => {
   const { t } = useTranslation();
-  const others = useMemo(() => participants.slice(skip), [participants, skip]);
+  const others = participants;
   if (others.length === 0 && overflow <= 0) return null;
   return (
     <View className="mb-huge">

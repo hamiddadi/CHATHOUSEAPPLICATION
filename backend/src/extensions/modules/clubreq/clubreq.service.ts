@@ -23,7 +23,7 @@ interface JoinRequest {
   createdAt: string;
   // Additive (optional) discriminator so existing consumers keep working:
   //  - 'joined'  : OPEN club, the caller was added directly as a member
-  //  - 'pending' : SOCIAL/PRIVATE club, an admin must approve the request
+  //  - 'pending' : SOCIAL club, an admin must approve the request
   status?: 'joined' | 'pending';
 }
 
@@ -51,6 +51,12 @@ export const clubReqService = {
       select: { id: true },
     });
     if (existingMember) throw new AppError('CLUB_002', 'Already a member');
+
+    // PRIVATE clubs stay invitation-only — mirror core clubsService.join()'s
+    // CLUB_003 guard so a join request can never be queued for them (the only
+    // way in is an admin's CLUB_INVITE → /clubs/:id/accept). SOCIAL is the
+    // sole "request + approval" privacy tier.
+    if (club.privacy === 'PRIVATE') throw new AppError('CLUB_003');
 
     const payload: JoinRequest = {
       clubId,
@@ -81,7 +87,7 @@ export const clubReqService = {
       return { ...payload, status: 'joined' };
     }
 
-    // SOCIAL/PRIVATE: queue (or refresh) a pending approval request. Only
+    // SOCIAL: queue (or refresh) a pending approval request. Only
     // notify admins on the FIRST submission so a user can't spam admins by
     // re-POSTing the same request (idempotent re-submission).
     const alreadyPending = await redis.exists(reqKey(clubId, callerId));
