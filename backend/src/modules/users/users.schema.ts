@@ -3,7 +3,7 @@ import { z } from 'zod';
 export const updateMeSchema = z
   .object({
     displayName: z.string().min(1).max(60).optional(),
-    bio: z.string().max(280).optional(),
+    bio: z.string().max(150).optional(),
     avatarUrl: z.string().url().max(500).optional(),
   })
   .strict();
@@ -57,7 +57,7 @@ export const setUsernameSchema = z.object({
 export const interestsSchema = z.object({
   // 1..10 keeps the interest pane manageable and prevents bloat. Tags
   // are free-form for now — the frontend curates the pickable list.
-  interests: z.array(z.string().min(1).max(32)).min(1).max(10),
+  interests: z.array(z.string().min(1).max(32)).min(3).max(10),
 });
 
 export const completeOnboardingSchema = z.object({
@@ -68,7 +68,7 @@ export const completeOnboardingSchema = z.object({
   displayName: z.string().min(1).max(60).optional(),
   bio: z.string().max(280).optional(),
   avatarUrl: z.string().url().max(500).nullish(),
-  interests: z.array(z.string().min(1).max(32)).min(1).max(10).optional(),
+  interests: z.array(z.string().min(1).max(32)).min(3).max(10).optional(),
 });
 
 export type UpdateMeInput = z.infer<typeof updateMeSchema>;

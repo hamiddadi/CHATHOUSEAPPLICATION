@@ -44,6 +44,7 @@
   },
   "settings": {
     "title": "Paramètres",
+    "notifications": "Notifications",
     "editProfile": "Modifier le profil",
     "wave": "Saluer",
     "moreA11y": "Plus d'options",
@@ -61,6 +62,7 @@
     "others": "Autres dans la room",
     "rec": "REC",
     "host": "HOST",
+    "moderator": "MOD",
     "speaker": "SPEAKER",
     "mute": "Mute",
     "unmute": "Unmute",
@@ -284,13 +286,13 @@
       "photoPermission": "Autorise l'accès aux photos pour choisir une image.",
       "errors": {
         "displayNameTooLong": "Maximum 60 caractères.",
-        "bioTooLong": "Maximum 280 caractères."
+        "bioTooLong": "Maximum 150 caractères."
       }
     },
     "interests": {
       "title": "Choisis quelques centres d'intérêt",
       "subtitle": "On s'en sert pour te proposer des rooms qui te plaisent.",
-      "minHint": "Au moins un.",
+      "minHint": "Au moins 3.",
       "maxHint": "10 maximum.",
       "finish": "Terminer",
       "categories": {
@@ -302,6 +304,25 @@
         "business": "Business",
         "health": "Santé"
       }
+    },
+    "suggestedFollows": {
+      "title": "Suggéré·es pour toi",
+      "subtitle": "Suis quelques personnes pour remplir ton hallway.",
+      "done": "Terminé",
+      "skip": "Plus tard"
     }
+  },
+  "notificationSettings": {
+    "title": "Notifications",
+    "subtitle": "Choisis ce pour quoi tu reçois des notifications.",
+    "newFollower": "Nouveaux abonnés",
+    "wave": "Waves",
+    "roomInvite": "Invitations à une room",
+    "clubInvite": "Invitations à un club",
+    "roomStarted": "Une room qui pourrait te plaire démarre",
+    "eventReminder": "Rappels de rooms planifiées",
+    "newMessage": "Nouveaux messages",
+    "handAccepted": "On t'invite à parler",
+    "mention": "Mentions"
   }
 }

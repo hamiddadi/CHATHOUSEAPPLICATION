@@ -46,6 +46,7 @@ export const linking: LinkingOptions<RootStackParamList> = {
         screens: {
           Onboarding: 'onboarding',
           InterestSelection: 'onboarding/interests',
+          SuggestedFollows: 'onboarding/suggested-follows',
         },
       },
       Main: {

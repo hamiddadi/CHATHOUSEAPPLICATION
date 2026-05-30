@@ -123,9 +123,13 @@ export const roomsController = {
       typeof topicQ === 'string' && topicQ.length > 0 ? topicQ.toLowerCase() : undefined;
     const followingQ = req.query['following'];
     const following = followingQ === 'true' || followingQ === '1';
+    // `clubs=true` restricts the feed to rooms attached to a club.
+    const clubsQ = req.query['clubs'];
+    const clubs = clubsQ === 'true' || clubsQ === '1';
     const rows = await roomsService.feed(requireUserId(req), limit, undefined, {
       topic,
       following,
+      clubs,
     });
     sendOk(res, rows);
   },

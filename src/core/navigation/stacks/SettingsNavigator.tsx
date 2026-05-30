@@ -3,6 +3,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import type { SettingsStackParamList } from '../types';
 import { colors } from '../../../shared/constants/theme';
 import { SettingsScreen } from '../../../features/settings/screens/SettingsScreen';
+import { NotificationSettingsScreen } from '../../../features/settings/screens/NotificationSettingsScreen';
 import { ProfileScreen } from '../../../features/profile/screens/ProfileScreen';
 import { EditProfileScreen } from '../../../features/profile/screens/EditProfileScreen';
 import { FollowersScreen } from '../../../features/profile/screens/FollowersScreen';
@@ -34,6 +35,7 @@ export const SettingsNavigator: React.FC = () => (
     <Stack.Screen name="Settings" component={SettingsScreen} />
     <Stack.Screen name="Profile" component={ProfileScreen} />
     <Stack.Screen name="EditProfile" component={EditProfileScreen} />
+    <Stack.Screen name="NotificationSettings" component={NotificationSettingsScreen} />
     <Stack.Screen name="Followers" component={FollowersScreen} />
     {/* Godmode — registered globally; the entry in SettingsScreen is the
         UX gate (only rendered for moderator+). The screens themselves

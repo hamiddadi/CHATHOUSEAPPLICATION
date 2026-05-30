@@ -52,6 +52,7 @@ const POPULARITY_BUCKET = 10;
 const roomInclude = {
   host: { select: publicUser },
   participants: { include: { user: { select: publicUser } }, where: { leftAt: null } },
+  club: { select: { id: true, name: true, iconUrl: true } },
   _count: { select: { rsvps: true } },
 } satisfies Prisma.RoomInclude;
 
@@ -553,7 +554,7 @@ export const roomsService = {
     viewerId: string,
     limit = 20,
     _cursor?: string,
-    filters: { topic?: string; following?: boolean } = {},
+    filters: { topic?: string; following?: boolean; clubs?: boolean } = {},
   ) {
     const CANDIDATE_POOL = 200;
     const topicLower = filters.topic?.toLowerCase();
@@ -575,6 +576,8 @@ export const roomsService = {
           isLive: true,
           isPrivate: false,
           endedAt: null,
+          // `clubs` filter narrows the pool to club-attached rooms only.
+          ...(filters.clubs ? { clubId: { not: null } } : {}),
           ...(topicLower
             ? {
                 OR: [
@@ -591,6 +594,7 @@ export const roomsService = {
             where: { leftAt: null },
             include: { user: { select: publicUser } },
           },
+          club: { select: { id: true, name: true, iconUrl: true } },
           _count: { select: { rsvps: true } },
         },
         orderBy: { createdAt: 'desc' },

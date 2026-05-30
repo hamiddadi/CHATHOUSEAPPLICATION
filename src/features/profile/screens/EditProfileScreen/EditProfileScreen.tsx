@@ -14,7 +14,7 @@ import { usernameFormSchema } from '../../../auth/schemas';
 import { useMe, useUpdateProfile } from '../../hooks/useProfile';
 
 const DISPLAY_NAME_MAX = 40;
-const BIO_MAX = 160;
+const BIO_MAX = 150;
 const AVATAR_SIZE = 100;
 
 export const EditProfileScreen: React.FC = () => {

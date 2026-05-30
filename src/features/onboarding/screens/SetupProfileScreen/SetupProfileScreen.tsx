@@ -27,6 +27,8 @@ import { useOnboardingStore } from '../../store/onboardingStore';
 
 type Nav = NativeStackNavigationProp<OnboardingStackParamList, 'Onboarding'>;
 
+const BIO_MAX = 150;
+
 export const SetupProfileScreen: React.FC = () => {
   const navigation = useNavigation<Nav>();
   const insets = useSafeAreaInsets();
@@ -166,10 +168,11 @@ export const SetupProfileScreen: React.FC = () => {
                 value={value ?? ''}
                 onChangeText={onChange}
                 onBlur={onBlur}
-                maxLength={280}
+                maxLength={BIO_MAX}
                 multiline
                 numberOfLines={4}
                 error={bioError}
+                helperText={`${(value ?? '').length} / ${BIO_MAX}`}
                 size="lg"
               />
             )}

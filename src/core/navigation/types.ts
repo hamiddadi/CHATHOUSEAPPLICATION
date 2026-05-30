@@ -30,6 +30,7 @@ export type LandingNavProp = NativeStackNavigationProp<AuthStackParamList, 'Land
 export type OnboardingStackParamList = {
   Onboarding: undefined;
   InterestSelection: undefined;
+  SuggestedFollows: undefined;
 };
 export type OnboardingStackScreenProps<T extends keyof OnboardingStackParamList> =
   NativeStackScreenProps<OnboardingStackParamList, T>;
@@ -72,6 +73,7 @@ export type SettingsStackParamList = {
   Settings: undefined;
   Profile: { userId?: string } | undefined;
   EditProfile: undefined;
+  NotificationSettings: undefined;
   Followers: { userId: string; initialTab?: 'followers' | 'following' };
 
   // Godmode — gated by appRole >= MODERATOR. The entry point in Settings

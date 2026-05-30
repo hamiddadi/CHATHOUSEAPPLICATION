@@ -138,6 +138,11 @@ export const SettingsScreen: React.FC = () => {
 
   const handleEditProfile = useCallback(() => navigation.navigate('EditProfile'), [navigation]);
 
+  const goNotificationSettings = useCallback(
+    () => navigation.navigate('NotificationSettings'),
+    [navigation],
+  );
+
   const handleToggleBio = useCallback(() => setBioExpanded(v => !v), []);
 
   const handleMore = useCallback(() => {
@@ -429,6 +434,11 @@ export const SettingsScreen: React.FC = () => {
           <Text className="text-xs font-body-bold uppercase tracking-widest text-ink-muted">
             Compte
           </Text>
+          <SettingsRow
+            icon="notifications"
+            label={t('settings.notifications')}
+            onPress={goNotificationSettings}
+          />
           <SettingsRow
             icon="delete-forever"
             label="Supprimer mon compte"

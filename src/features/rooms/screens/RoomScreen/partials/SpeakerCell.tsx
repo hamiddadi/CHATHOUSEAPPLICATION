@@ -25,8 +25,9 @@ const getRoleIconProps = (
   role: RoomRole,
   audio: RoomAudioState,
 ): { icon: RoleIconName; color: string } => {
-  if (role === 'host') return { icon: 'shield', color: ROLE_COLORS.shield };
   if (audio === 'muted') return { icon: 'mic-off', color: ROLE_COLORS.micOff };
+  if (role === 'host') return { icon: 'shield', color: ROLE_COLORS.shield };
+  if (role === 'moderator') return { icon: 'shield', color: '#3B82F6' };
   return { icon: 'mic', color: ROLE_COLORS.mic };
 };
 
@@ -36,11 +37,15 @@ const SpeakerCell: React.FC<{ speaker: RoomParticipant; isSpeakingLive?: boolean
     // active; `speaker.audio === 'speaking'` is a static fallback for the
     // unsupported case (no audio engine).
     const isSpeaking = isSpeakingLive || speaker.audio === 'speaking';
-    const isHost = speaker.role === 'host';
     const pulse = useAnimatedPress({ pulse: isSpeaking });
     const { icon: roleIcon, color: roleColor } = getRoleIconProps(speaker.role, speaker.audio);
     const { t } = useTranslation();
-    const roleLabel = isHost ? t('room.host') : t('room.speaker');
+    const roleLabel =
+      speaker.role === 'host'
+        ? t('room.host')
+        : speaker.role === 'moderator'
+          ? t('room.moderator')
+          : t('room.speaker');
 
     return (
       <View style={styles.speakerCell}>
