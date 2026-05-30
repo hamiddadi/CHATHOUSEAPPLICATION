@@ -3,13 +3,13 @@ import {
   ActivityIndicator,
   FlatList,
   Image,
-  Modal,
   Pressable,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
 import { clubsListApi, type ClubLite } from '../api/clubsListApi';
+import { ExtBottomSheet } from './ExtBottomSheet';
 
 interface Props {
   visible: boolean;
@@ -51,90 +51,72 @@ export const ExtClubPickerSheet: React.FC<Props> = ({
   }, [visible]);
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose}>
-        <Pressable style={styles.sheet} onPress={e => e.stopPropagation()}>
-          <View style={styles.handle} />
-          <Text style={styles.title}>Start in a Club</Text>
-          <Text style={styles.subtitle}>The room will appear on the Club page.</Text>
+    <ExtBottomSheet visible={visible} onClose={onClose} sheetStyle={styles.sheet}>
+      <Text style={styles.title}>Start in a Club</Text>
+      <Text style={styles.subtitle}>The room will appear on the Club page.</Text>
 
-          {loading ? (
-            <ActivityIndicator style={styles.loader} />
-          ) : (
-            <FlatList
-              data={[null, ...clubs] as (ClubLite | null)[]}
-              keyExtractor={(c, i) => c?.id ?? `none-${i}`}
-              renderItem={({ item }) => {
-                const isSelected =
-                  (item === null && (selectedClubId === null || selectedClubId === undefined)) ||
-                  (item !== null && selectedClubId === item.id);
-                return (
-                  <Pressable
-                    style={[styles.row, isSelected && styles.rowActive]}
-                    onPress={() => {
-                      onSelect(item);
-                      onClose();
-                    }}
-                    accessibilityRole="radio"
-                    accessibilityState={{ selected: isSelected }}
-                  >
-                    {item ? (
-                      item.iconUrl ? (
-                        <Image source={{ uri: item.iconUrl }} style={styles.icon} />
-                      ) : (
-                        <View style={[styles.icon, styles.iconFallback]}>
-                          <Text style={styles.iconText}>{item.name.slice(0, 1).toUpperCase()}</Text>
-                        </View>
-                      )
-                    ) : (
-                      <View style={[styles.icon, styles.iconNone]}>
-                        <Text style={styles.iconText}>—</Text>
-                      </View>
-                    )}
-                    <View style={styles.body}>
-                      <Text style={styles.name}>{item?.name ?? 'No Club (personal room)'}</Text>
-                      {item ? (
-                        <Text style={styles.meta} numberOfLines={1}>
-                          {item.memberCount} members • {item.privacy}
-                        </Text>
-                      ) : null}
+      {loading ? (
+        <ActivityIndicator style={styles.loader} />
+      ) : (
+        <FlatList
+          data={[null, ...clubs] as (ClubLite | null)[]}
+          keyExtractor={(c, i) => c?.id ?? `none-${i}`}
+          renderItem={({ item }) => {
+            const isSelected =
+              (item === null && (selectedClubId === null || selectedClubId === undefined)) ||
+              (item !== null && selectedClubId === item.id);
+            return (
+              <Pressable
+                style={[styles.row, isSelected && styles.rowActive]}
+                onPress={() => {
+                  onSelect(item);
+                  onClose();
+                }}
+                accessibilityRole="radio"
+                accessibilityState={{ selected: isSelected }}
+              >
+                {item ? (
+                  item.iconUrl ? (
+                    <Image source={{ uri: item.iconUrl }} style={styles.icon} />
+                  ) : (
+                    <View style={[styles.icon, styles.iconFallback]}>
+                      <Text style={styles.iconText}>{item.name.slice(0, 1).toUpperCase()}</Text>
                     </View>
-                    {isSelected ? <Text style={styles.check}>✓</Text> : null}
-                  </Pressable>
-                );
-              }}
-              ListEmptyComponent={
-                <Text style={styles.empty}>You don't belong to any Club yet.</Text>
-              }
-            />
-          )}
+                  )
+                ) : (
+                  <View style={[styles.icon, styles.iconNone]}>
+                    <Text style={styles.iconText}>—</Text>
+                  </View>
+                )}
+                <View style={styles.body}>
+                  <Text style={styles.name}>{item?.name ?? 'No Club (personal room)'}</Text>
+                  {item ? (
+                    <Text style={styles.meta} numberOfLines={1}>
+                      {item.memberCount} members • {item.privacy}
+                    </Text>
+                  ) : null}
+                </View>
+                {isSelected ? <Text style={styles.check}>✓</Text> : null}
+              </Pressable>
+            );
+          }}
+          ListEmptyComponent={<Text style={styles.empty}>You don't belong to any Club yet.</Text>}
+        />
+      )}
 
-          <Pressable style={styles.cancel} onPress={onClose}>
-            <Text style={styles.cancelText}>Cancel</Text>
-          </Pressable>
-        </Pressable>
+      <Pressable style={styles.cancel} onPress={onClose}>
+        <Text style={styles.cancelText}>Cancel</Text>
       </Pressable>
-    </Modal>
+    </ExtBottomSheet>
   );
 };
 
 const styles = StyleSheet.create({
-  backdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.4)' },
   sheet: {
-    backgroundColor: '#FFFFFF',
-    borderTopLeftRadius: 18,
-    borderTopRightRadius: 18,
     paddingHorizontal: 16,
     paddingTop: 8,
     paddingBottom: 24,
     maxHeight: '80%',
-  },
-  handle: {
-    alignSelf: 'center',
-    width: 36,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: '#CBD5E1',
   },
   loader: { marginVertical: 24 },
   title: { fontSize: 18, fontWeight: '700', marginTop: 12 },

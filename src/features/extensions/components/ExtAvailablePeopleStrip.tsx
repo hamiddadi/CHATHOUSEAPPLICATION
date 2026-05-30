@@ -2,6 +2,7 @@ import React from 'react';
 import { FlatList, Image, Pressable, Text, View, StyleSheet } from 'react-native';
 import { useExtAvailablePeople } from '../hooks/usePresence';
 import type { AvailableUser } from '../api/presenceApi';
+import { initialOf } from '../utils/extUi';
 
 interface Props {
   onWaveUser: (user: AvailableUser) => void;
@@ -39,7 +40,7 @@ export const ExtAvailablePeopleStrip: React.FC<Props> = ({ onWaveUser }) => {
               ) : (
                 <View style={[styles.avatar, styles.avatarFallback]}>
                   <Text style={styles.avatarFallbackText}>
-                    {(item.displayName ?? item.username ?? '?').slice(0, 1).toUpperCase()}
+                    {initialOf(item.displayName ?? item.username)}
                   </Text>
                 </View>
               )}

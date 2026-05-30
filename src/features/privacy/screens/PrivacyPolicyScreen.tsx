@@ -1,23 +1,10 @@
 import React from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { colors, spacing } from '../../../shared/constants/theme';
-
-interface SectionProps {
-  title: string;
-  children: React.ReactNode;
-}
-
-const Section: React.FC<SectionProps> = ({ title, children }) => (
-  <View style={styles.section}>
-    <Text style={styles.sectionTitle}>{title}</Text>
-    <View style={styles.sectionBody}>{children}</View>
-  </View>
-);
-
-const P: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <Text style={styles.body}>{children}</Text>
-);
+import {
+  LegalDoc,
+  LegalEmail,
+  LegalParagraph as P,
+  LegalSection as Section,
+} from '../components/LegalDoc';
 
 /**
  * Static privacy policy. Kept in-app rather than as a remote URL so it
@@ -25,22 +12,11 @@ const P: React.FC<{ children: React.ReactNode }> = ({ children }) => (
  * user sees. Update this file alongside any data-handling change.
  */
 export const PrivacyPolicyScreen: React.FC = () => {
-  const insets = useSafeAreaInsets();
   return (
-    <ScrollView
-      className="flex-1 bg-background"
-      contentContainerStyle={{
-        paddingTop: insets.top + spacing.xxl,
-        paddingHorizontal: spacing.xxl,
-        paddingBottom: insets.bottom + spacing.giant,
-        gap: spacing.lg,
-      }}
+    <LegalDoc
+      title="Politique de confidentialité"
+      lastUpdated="Dernière mise à jour : 25 avril 2026"
     >
-      <View>
-        <Text style={styles.h1}>Politique de confidentialité</Text>
-        <Text style={styles.lastUpdated}>Dernière mise à jour : 25 avril 2026</Text>
-      </View>
-
       <Section title="1. Quelles données nous collectons">
         <P>
           • Données de compte : numéro de téléphone, nom d&apos;utilisateur, photo de profil,
@@ -132,31 +108,9 @@ export const PrivacyPolicyScreen: React.FC = () => {
       <Section title="7. Contact">
         <P>
           Pour toute question relative à vos données :{' '}
-          <Text style={styles.email}>privacy@chathouse.app</Text>
+          <LegalEmail>privacy@chathouse.app</LegalEmail>
         </P>
       </Section>
-    </ScrollView>
+    </LegalDoc>
   );
 };
-
-const styles = StyleSheet.create({
-  h1: { color: colors.text, fontSize: 24, fontWeight: '700', marginBottom: 4 },
-  lastUpdated: { color: colors.textMuted, fontSize: 11 },
-  section: {
-    backgroundColor: 'rgba(255,255,255,0.04)',
-    borderRadius: 12,
-    padding: spacing.lg,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
-    gap: 8,
-  },
-  sectionTitle: {
-    color: colors.text,
-    fontSize: 14,
-    fontWeight: '700',
-    marginBottom: 4,
-  },
-  body: { color: colors.textMuted, fontSize: 13, lineHeight: 19 },
-  sectionBody: { gap: 6 },
-  email: { color: colors.primary },
-});

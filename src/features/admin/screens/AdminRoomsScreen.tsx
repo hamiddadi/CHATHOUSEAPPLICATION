@@ -5,8 +5,10 @@ import { Avatar } from '../../../shared/components/Avatar';
 import { EmptyState } from '../../../shared/components/EmptyState';
 import { Loader } from '../../../shared/components/Loader';
 import { colors, spacing } from '../../../shared/constants/theme';
+import { errorMessage } from '../../../shared/utils/errorMessage';
 import { AdminHeader } from '../components/AdminHeader';
 import { useAdminRooms, useForceEndRoom } from '../hooks/useAdmin';
+import { promptForReason } from '../promptForReason';
 import type { AdminRoom } from '../types/admin.types';
 
 const RoomRow: React.FC<{
@@ -59,38 +61,21 @@ export const AdminRoomsScreen: React.FC = () => {
   const forceEnd = useForceEndRoom();
 
   const handleForceEnd = (roomId: string, title: string) => {
-    // Alert.prompt is iOS-only; on Android we fall back to a generic reason.
     const fire = (reason: string) =>
       forceEnd.mutate(
         { roomId, reason },
-        { onError: e => Alert.alert('Erreur', e instanceof Error ? e.message : 'Échec') },
+        { onError: e => Alert.alert('Erreur', errorMessage(e, 'Échec')) },
       );
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    if ((Alert as any).prompt) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (Alert as any).prompt(
-        'Forcer la fin',
-        `"${title}" sera fermée pour tous les participants.\n\nMotif :`,
-        [
-          { text: 'Annuler', style: 'cancel' },
-          {
-            text: 'Fermer',
-            style: 'destructive',
-            onPress: (text: string | undefined) => fire((text ?? '').trim() || 'Fermeture admin'),
-          },
-        ],
-        'plain-text',
-      );
-    } else {
-      Alert.alert('Forcer la fin', `Fermer "${title}" ?`, [
-        { text: 'Annuler', style: 'cancel' },
-        {
-          text: 'Confirmer',
-          style: 'destructive',
-          onPress: () => fire('Fermeture admin'),
-        },
-      ]);
-    }
+    promptForReason(
+      {
+        title: 'Forcer la fin',
+        message: `"${title}" sera fermée pour tous les participants.\n\nMotif :`,
+        confirmLabel: 'Fermer',
+        defaultReason: 'Fermeture admin',
+        androidConfirm: { message: `Fermer "${title}" ?`, confirmLabel: 'Confirmer' },
+      },
+      fire,
+    );
   };
 
   return (

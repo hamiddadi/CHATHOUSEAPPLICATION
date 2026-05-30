@@ -1,36 +1,9 @@
 import React from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { colors, spacing } from '../../../shared/constants/theme';
-
-const Section: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => (
-  <View style={styles.section}>
-    <Text style={styles.sectionTitle}>{title}</Text>
-    <View style={styles.sectionBody}>{children}</View>
-  </View>
-);
-
-const P: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <Text style={styles.body}>{children}</Text>
-);
+import { LegalDoc, LegalParagraph as P, LegalSection as Section } from '../components/LegalDoc';
 
 export const TermsScreen: React.FC = () => {
-  const insets = useSafeAreaInsets();
   return (
-    <ScrollView
-      className="flex-1 bg-background"
-      contentContainerStyle={{
-        paddingTop: insets.top + spacing.xxl,
-        paddingHorizontal: spacing.xxl,
-        paddingBottom: insets.bottom + spacing.giant,
-        gap: spacing.lg,
-      }}
-    >
-      <View>
-        <Text style={styles.h1}>Conditions d&apos;utilisation</Text>
-        <Text style={styles.lastUpdated}>Dernière mise à jour : 25 avril 2026</Text>
-      </View>
-
+    <LegalDoc title="Conditions d'utilisation" lastUpdated="Dernière mise à jour : 25 avril 2026">
       <Section title="1. Acceptation">
         <P>
           En créant un compte ou en utilisant l&apos;application Chathouse, vous acceptez les
@@ -99,22 +72,6 @@ export const TermsScreen: React.FC = () => {
           compétence des tribunaux français, sauf disposition impérative contraire.
         </P>
       </Section>
-    </ScrollView>
+    </LegalDoc>
   );
 };
-
-const styles = StyleSheet.create({
-  h1: { color: colors.text, fontSize: 24, fontWeight: '700', marginBottom: 4 },
-  lastUpdated: { color: colors.textMuted, fontSize: 11 },
-  section: {
-    backgroundColor: 'rgba(255,255,255,0.04)',
-    borderRadius: 12,
-    padding: spacing.lg,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
-    gap: 8,
-  },
-  sectionTitle: { color: colors.text, fontSize: 14, fontWeight: '700', marginBottom: 4 },
-  body: { color: colors.textMuted, fontSize: 13, lineHeight: 19 },
-  sectionBody: { gap: 6 },
-});

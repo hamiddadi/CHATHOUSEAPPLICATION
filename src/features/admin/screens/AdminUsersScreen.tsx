@@ -1,4 +1,4 @@
-import React, { memo, useEffect, useMemo, useState } from 'react';
+import React, { memo, useMemo, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Avatar } from '../../../shared/components/Avatar';
@@ -6,6 +6,7 @@ import { EmptyState } from '../../../shared/components/EmptyState';
 import { Input } from '../../../shared/components/Input';
 import { Loader } from '../../../shared/components/Loader';
 import { colors, spacing } from '../../../shared/constants/theme';
+import { useDebouncedValue } from '../../../shared/hooks/useDebouncedValue';
 import { AdminHeader } from '../components/AdminHeader';
 import { useAdminUsers } from '../hooks/useAdmin';
 import type { AdminUser, AppRole } from '../types/admin.types';
@@ -89,13 +90,9 @@ export const AdminUsersScreen: React.FC<SettingsStackScreenProps<'AdminUsers'>> 
 }) => {
   const insets = useSafeAreaInsets();
   const [query, setQuery] = useState('');
-  const [debounced, setDebounced] = useState('');
   const [roleFilter, setRoleFilter] = useState<AppRole | 'ALL'>('ALL');
 
-  useEffect(() => {
-    const id = setTimeout(() => setDebounced(query.trim()), SEARCH_DEBOUNCE_MS);
-    return () => clearTimeout(id);
-  }, [query]);
+  const debounced = useDebouncedValue(query, SEARCH_DEBOUNCE_MS).trim();
 
   const params = useMemo(
     () => ({

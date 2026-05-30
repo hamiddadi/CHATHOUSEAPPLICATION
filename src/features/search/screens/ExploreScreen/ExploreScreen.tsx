@@ -1,4 +1,4 @@
-import React, { memo, useCallback, useEffect, useState } from 'react';
+import React, { memo, useCallback, useState } from 'react';
 import { FlatList, Pressable, ScrollView, Text, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
@@ -11,6 +11,7 @@ import { Loader } from '../../../../shared/components/Loader';
 import { EmptyState } from '../../../../shared/components/EmptyState';
 import { colors, spacing } from '../../../../shared/constants/theme';
 import type { RoomStackParamList } from '../../../../core/navigation/types';
+import { useDebouncedValue } from '../../../../shared/hooks/useDebouncedValue';
 import { useExplore, useSearch } from '../../hooks/useSearch';
 import type { SearchRoomHit } from '../../services/searchService';
 import type { ExploreClubHit, ExploreUserHit } from '../../services/exploreService';
@@ -113,12 +114,7 @@ export const ExploreScreen: React.FC = () => {
   const { t } = useTranslation();
 
   const [rawQuery, setRawQuery] = useState('');
-  const [debouncedQuery, setDebouncedQuery] = useState('');
-
-  useEffect(() => {
-    const id = setTimeout(() => setDebouncedQuery(rawQuery.trim()), DEBOUNCE_MS);
-    return () => clearTimeout(id);
-  }, [rawQuery]);
+  const debouncedQuery = useDebouncedValue(rawQuery.trim(), DEBOUNCE_MS);
 
   const explore = useExplore();
   const search = useSearch(debouncedQuery);
