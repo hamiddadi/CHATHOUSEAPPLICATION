@@ -1,5 +1,9 @@
 import http from 'node:http';
-import express, { json as expressJson, urlencoded as expressUrlencoded } from 'express';
+import express, {
+  json as expressJson,
+  urlencoded as expressUrlencoded,
+  static as expressStatic,
+} from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
 import compression from 'compression';
@@ -24,6 +28,8 @@ import { searchRouter } from './modules/search/search.router';
 import { exploreRouter } from './modules/explore/explore.router';
 import { pushRouter } from './modules/push/push.router';
 import { adminRouter } from './modules/admin/admin.router';
+import { uploadRouter } from './modules/upload/upload.router';
+import { UPLOADS_DIR } from './modules/upload/upload.service';
 import { createSocketServer } from './socket/socket.server';
 import { mountExtensions } from './extensions/mount';
 import { setRealtimeAliasServer } from './extensions/realtime/aliases';
@@ -71,6 +77,14 @@ export const createApp = (): express.Express => {
   // Health is unauthenticated and unratelimited (Kubernetes/ECS probes).
   app.use(healthRouter);
 
+  // Serve locally-stored uploads (avatars). Public + unratelimited so the
+  // mobile app's <Image> can fetch them without a bearer token, and mounted
+  // BEFORE the /api globalLimiter so image loads don't burn the API budget.
+  // express.static creates no directory itself; upload.service.ts mkdirs it
+  // on first write. The crossOriginResourcePolicy: 'cross-origin' helmet
+  // setting above lets RN/web clients on other origins load these.
+  app.use('/uploads', expressStatic(UPLOADS_DIR));
+
   // OpenAPI/Swagger UI — unauthenticated, so keep it out of production to
   // avoid handing an attacker a free map of the API surface. Browse the
   // contract in dev/staging, or front it with requireAuth+requireAdmin if
@@ -99,6 +113,9 @@ export const createApp = (): express.Express => {
   // inside the router. Always mounted so the `/api/admin/me` probe stays
   // available; the writable endpoints reject non-admins.
   app.use('/api/admin', adminRouter);
+  // Avatar upload (local-disk, no multer). Mounts its own 8 MB JSON parser
+  // internally since the global 1 MB cap is too small for base64 images.
+  app.use('/api/upload', uploadRouter);
 
   app.use(notFoundHandler);
   app.use(errorMiddleware);

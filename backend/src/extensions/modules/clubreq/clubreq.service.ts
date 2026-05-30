@@ -90,12 +90,12 @@ export const clubReqService = {
     // SOCIAL: queue (or refresh) a pending approval request. Only
     // notify admins on the FIRST submission so a user can't spam admins by
     // re-POSTing the same request (idempotent re-submission).
-    const alreadyPending = await redis.exists(reqKey(clubId, callerId));
-    await Promise.all([
-      redis.setEx(reqKey(clubId, callerId), TTL_S, JSON.stringify(payload)),
-      redis.sAdd(indexKey(clubId), callerId),
-    ]);
-    if (alreadyPending) {
+    // Atomic first-submission detection: sAdd returns 1 only when callerId is a
+    // brand-new member of the pending set, so two concurrent double-submits
+    // can't both fall through and spam admins (closes the exists()→setEx TOCTOU).
+    const isFirstRequest = (await redis.sAdd(indexKey(clubId), callerId)) === 1;
+    await redis.setEx(reqKey(clubId, callerId), TTL_S, JSON.stringify(payload));
+    if (!isFirstRequest) {
       return { ...payload, status: 'pending' };
     }
 
@@ -219,6 +219,10 @@ export const clubReqService = {
 
   async decline(callerId: string, clubId: string, requesterId: string) {
     if (!(await isAdmin(clubId, callerId))) throw new AppError('AUTH_008');
+    // Symmetric with approve(): reject if there's no pending request, so a
+    // declining admin can't fire a spurious "declined" notification.
+    const raw = await redis.get(reqKey(clubId, requesterId));
+    if (!raw) throw new AppError('CLUB_001', 'Request not found');
     await Promise.all([
       redis.del(reqKey(clubId, requesterId)),
       redis.sRem(indexKey(clubId), requesterId),

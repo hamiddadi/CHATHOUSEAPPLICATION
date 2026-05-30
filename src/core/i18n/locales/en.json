@@ -58,7 +58,7 @@
   "room": {
     "stage": "STAGE",
     "handRaised": "Hand raised",
-    "followedBy": "Followed by speakers",
+    "followedBy": "People you follow",
     "others": "Others in room",
     "rec": "REC",
     "host": "HOST",

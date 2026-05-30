@@ -1,6 +1,7 @@
 import type { NotificationPreference, NotificationType, Prisma } from '@prisma/client';
 import { prisma } from '../../config/database';
 import { redis } from '../../config/redis';
+import { logger } from '../../config/logger';
 import { AppError } from '../../middlewares/error.middleware';
 import { pushService } from '../push/push.service';
 import { emitNotification, emitNotificationCount } from '../../socket/realtime';
@@ -187,19 +188,18 @@ export const notificationsService = {
     // in place instead of re-running a full COUNT on every create (which
     // got hammered under reminder fan-out: one create per club member).
     const key = unreadCacheKey(input.userId);
-    let count: number;
-    const cached = await redis.get(key);
-    if (cached !== null) {
-      count = await redis.incr(key);
-      // Refresh the TTL so an active user's badge stays cache-served.
-      await redis.expire(key, UNREAD_CACHE_TTL);
-    } else {
-      // Cold cache: recompute once and seed it (single COUNT, then served
-      // from Redis until TTL expiry).
+    // Atomic INCR: creates the key at 1 if it was absent/expired. That single
+    // op closes the get→incr race (where the TTL expired between the two calls
+    // and the badge reset to 1). On a 1 result we self-heal by recomputing the
+    // true unread count once and seeding the cache.
+    let count = await redis.incr(key);
+    if (count === 1) {
       count = await prisma.notification.count({
         where: { userId: input.userId, isRead: false },
       });
       await redis.set(key, String(count), { EX: UNREAD_CACHE_TTL });
+    } else {
+      await redis.expire(key, UNREAD_CACHE_TTL);
     }
     emitNotificationCount(input.userId, count);
 
@@ -219,7 +219,7 @@ export const notificationsService = {
             : {}),
         },
       });
-    })();
+    })().catch(err => logger.warn('notif push dispatch failed', { err, userId: input.userId }));
     return row;
   },
 };

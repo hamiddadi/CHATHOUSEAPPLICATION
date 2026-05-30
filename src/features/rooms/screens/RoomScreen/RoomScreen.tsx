@@ -344,9 +344,15 @@ export const RoomScreen: React.FC = () => {
         otherListeners: listeners.slice(FOLLOWED_COUNT),
       };
     }
+    // Cap the followed row at FOLLOWED_COUNT and spill the overflow into
+    // "Others" so a viewer who follows >FOLLOWED_COUNT listeners never loses
+    // anyone (the followed partial only renders maxVisible avatars).
     return {
-      followedListeners: followed,
-      otherListeners: listeners.filter(l => !l.followedByViewer),
+      followedListeners: followed.slice(0, FOLLOWED_COUNT),
+      otherListeners: [
+        ...followed.slice(FOLLOWED_COUNT),
+        ...listeners.filter(l => !l.followedByViewer),
+      ],
     };
   }, [room?.listeners]);
 

@@ -10,6 +10,8 @@ import { Button } from '../../../../shared/components/Button';
 import { Input } from '../../../../shared/components/Input';
 import { Loader } from '../../../../shared/components/Loader';
 import { colors, spacing } from '../../../../shared/constants/theme';
+import { mediaService } from '../../../../shared/services/api/mediaService';
+import { errorMessage } from '../../../../shared/utils/errorMessage';
 import { usernameFormSchema } from '../../../auth/schemas';
 import { useMe, useUpdateProfile } from '../../hooks/useProfile';
 
@@ -26,7 +28,13 @@ export const EditProfileScreen: React.FC = () => {
   const [displayName, setDisplayName] = useState('');
   const [username, setUsername] = useState('');
   const [bio, setBio] = useState('');
+  // `avatarUri` is the local preview (file://). `avatarBase64`/`avatarMime`
+  // hold the freshly-picked image so we can upload it on save and swap the
+  // local URI for the remote https URL the backend returns.
   const [avatarUri, setAvatarUri] = useState<string | null>(null);
+  const [avatarBase64, setAvatarBase64] = useState<string | null>(null);
+  const [avatarMime, setAvatarMime] = useState<string | undefined>(undefined);
+  const [uploading, setUploading] = useState(false);
 
   useEffect(() => {
     if (me) {
@@ -42,10 +50,14 @@ export const EditProfileScreen: React.FC = () => {
       allowsEditing: true,
       aspect: [1, 1],
       quality: 0.8,
+      base64: true,
     });
 
-    if (!result.canceled && result.assets[0]) {
-      setAvatarUri(result.assets[0].uri);
+    const asset = result.canceled ? undefined : result.assets[0];
+    if (asset) {
+      setAvatarUri(asset.uri);
+      setAvatarBase64(asset.base64 ?? null);
+      setAvatarMime(asset.mimeType);
       void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     }
   };
@@ -54,24 +66,38 @@ export const EditProfileScreen: React.FC = () => {
 
   const handleSave = useCallback(async () => {
     try {
+      // A freshly-picked image is a local file:// URI + base64; upload it
+      // first and forward the REMOTE https URL (profileService.update only
+      // accepts an http(s) URL). With no new pick, leave avatarUrl undefined
+      // so the existing avatar is preserved.
+      let avatarUrl: string | undefined;
+      if (avatarBase64) {
+        setUploading(true);
+        avatarUrl = await mediaService.uploadAvatar(avatarBase64, avatarMime);
+      }
       await updateProfile.mutateAsync({
         displayName,
         username,
         bio,
-        avatarUrl: avatarUri || undefined,
+        avatarUrl,
       });
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       navigation.goBack();
-    } catch {
-      Alert.alert('Error', 'Failed to update profile. Please try again.');
+    } catch (err) {
+      Alert.alert('Error', errorMessage(err, 'Failed to update profile. Please try again.'));
+    } finally {
+      setUploading(false);
     }
-  }, [avatarUri, bio, displayName, navigation, updateProfile, username]);
+  }, [avatarBase64, avatarMime, bio, displayName, navigation, updateProfile, username]);
 
   // Validate the username against the same schema the auth flow uses
   // (3–24 chars, [a-z0-9_]) instead of the laxer `length >= 2` check, so
   // an invalid handle (spaces, symbols, too short) can't reach update().
   const usernameOk = usernameFormSchema.shape.username.safeParse(username).success;
-  const canSave = displayName.trim().length >= 2 && usernameOk && !updateProfile.isPending;
+  // `busy` covers both the avatar upload and the profile PATCH so the button
+  // shows a spinner and stays disabled across the whole save flow.
+  const busy = uploading || updateProfile.isPending;
+  const canSave = displayName.trim().length >= 2 && usernameOk && !busy;
 
   if (isLoading || !me) {
     return <Loader fullscreen accessibilityLabel="Loading profile" />;
@@ -164,7 +190,7 @@ export const EditProfileScreen: React.FC = () => {
             size="lg"
             fullWidth
             disabled={!canSave}
-            loading={updateProfile.isPending}
+            loading={busy}
             onPress={handleSave}
           />
         </View>

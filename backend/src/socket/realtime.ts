@@ -34,6 +34,15 @@ export const emitHallwayRoomClosed = (roomId: string): void => {
   ioRef?.to(HALLWAY_ROOM).emit('hallway:room_closed', { roomId });
 };
 
+/**
+ * Tells everyone still in a room that it has ended, so non-host participants
+ * leave the screen. The socket `room:end` handler already emits this; the REST
+ * end() path must emit it too (its clients never send the socket event).
+ */
+export const emitRoomEnded = (roomId: string): void => {
+  ioRef?.to(roomChannel(roomId)).emit('room:ended', { roomId });
+};
+
 export const emitHallwayRoomUpdated = (
   roomId: string,
   partial: { participantCount?: number; title?: string },

@@ -58,7 +58,7 @@
   "room": {
     "stage": "SCÈNE",
     "handRaised": "Main levée",
-    "followedBy": "Suivi·e·s par les speakers",
+    "followedBy": "Suivi·e·s par toi",
     "others": "Autres dans la room",
     "rec": "REC",
     "host": "HOST",

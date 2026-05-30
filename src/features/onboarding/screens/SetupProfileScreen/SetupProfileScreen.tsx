@@ -21,6 +21,8 @@ import { useTranslation } from 'react-i18next';
 import { Button } from '../../../../shared/components/Button';
 import { Input } from '../../../../shared/components/Input';
 import { colors, spacing } from '../../../../shared/constants/theme';
+import { mediaService } from '../../../../shared/services/api/mediaService';
+import { errorMessage } from '../../../../shared/utils/errorMessage';
 import type { OnboardingStackParamList } from '../../../../core/navigation/types';
 import { setupProfileFormSchema, type SetupProfileFormValues } from '../../schemas';
 import { useOnboardingStore } from '../../store/onboardingStore';
@@ -34,7 +36,12 @@ export const SetupProfileScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const setProfile = useOnboardingStore(s => s.setProfile);
   const { t } = useTranslation();
+  // `avatarUri` is the local preview; `avatarBase64`/`avatarMime` feed the
+  // upload that swaps it for a remote https URL before onboarding completes.
   const [avatarUri, setAvatarUri] = useState<string | null>(null);
+  const [avatarBase64, setAvatarBase64] = useState<string | null>(null);
+  const [avatarMime, setAvatarMime] = useState<string | undefined>(undefined);
+  const [uploading, setUploading] = useState(false);
 
   const pickImage = async () => {
     try {
@@ -54,10 +61,14 @@ export const SetupProfileScreen: React.FC = () => {
         allowsEditing: true,
         aspect: [1, 1], // For circular crop
         quality: 0.8,
+        base64: true,
       });
 
-      if (!result.canceled && result.assets[0]) {
-        setAvatarUri(result.assets[0].uri);
+      const asset = result.canceled ? undefined : result.assets[0];
+      if (asset) {
+        setAvatarUri(asset.uri);
+        setAvatarBase64(asset.base64 ?? null);
+        setAvatarMime(asset.mimeType);
         void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       }
     } catch {
@@ -76,22 +87,34 @@ export const SetupProfileScreen: React.FC = () => {
   });
 
   const onSubmit = useCallback(
-    (values: SetupProfileFormValues) => {
-      // TODO(audit): `avatarUri` is a local device URI (file://…). It must be
-      // uploaded (multipart → /uploads or presigned S3) and the resulting
-      // REMOTE url stored here before completeOnboarding sends it — a file://
-      // URI is unusable by the backend. Requires a mediaService.uploadAvatar
-      // helper + a backend upload endpoint (neither exists yet); wiring it is
-      // an external dependency outside this screen.
-      setProfile({
-        displayName: values.displayName || undefined,
-        bio: values.bio || undefined,
-        avatarUrl: avatarUri,
-      });
-      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      navigation.navigate('InterestSelection');
+    async (values: SetupProfileFormValues) => {
+      try {
+        // A locally-picked image is a file:// URI the backend can't read.
+        // Upload its base64 first and store the REMOTE https URL so the later
+        // completeOnboarding() flush (SuggestedFollows step) sends a usable
+        // avatarUrl. With no pick, leave it null/undefined.
+        let avatarUrl: string | null = null;
+        if (avatarBase64) {
+          setUploading(true);
+          avatarUrl = await mediaService.uploadAvatar(avatarBase64, avatarMime);
+        }
+        setProfile({
+          displayName: values.displayName || undefined,
+          bio: values.bio || undefined,
+          avatarUrl,
+        });
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        navigation.navigate('InterestSelection');
+      } catch (err) {
+        Alert.alert(
+          t('common.error', 'Something went wrong'),
+          errorMessage(err, t('common.error', 'Something went wrong')),
+        );
+      } finally {
+        setUploading(false);
+      }
     },
-    [navigation, setProfile, avatarUri],
+    [navigation, setProfile, avatarBase64, avatarMime, t],
   );
 
   const onSkip = useCallback(() => {
@@ -187,7 +210,8 @@ export const SetupProfileScreen: React.FC = () => {
             variant="primary"
             size="lg"
             fullWidth
-            loading={isSubmitting}
+            loading={isSubmitting || uploading}
+            disabled={isSubmitting || uploading}
             onPress={handleSubmit(onSubmit)}
           />
           <Pressable onPress={onSkip} accessibilityRole="button" className="items-center py-sm">
