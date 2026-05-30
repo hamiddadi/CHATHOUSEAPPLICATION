@@ -42,6 +42,18 @@ const intlIsLocaleAware = ((): boolean => {
   }
 })();
 
+/** Sentinel rendered for null/empty/invalid inputs. */
+const EMPTY_PLACEHOLDER = '—';
+const DATETIME_OPTS = { dateStyle: 'medium', timeStyle: 'short' } as const;
+const DATE_OPTS = { dateStyle: 'medium' } as const;
+
+/** Parse an ISO string to a valid Date, or null for empty/invalid input. */
+const parseIso = (iso?: string | null): Date | null => {
+  if (!iso) return null;
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? null : d;
+};
+
 const pad2 = (n: number): string => String(n).padStart(2, '0');
 
 // Deterministic, Intl-free fallbacks. Format mirrors common FR/EN ordering
@@ -64,23 +76,21 @@ const fallbackDateTime = (date: Date, locale: string): string =>
  * JSX without a guard.
  */
 export const formatDateTime = (iso: string | null | undefined): string => {
-  if (!iso) return '—';
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return '—';
+  const date = parseIso(iso);
+  if (!date) return EMPTY_PLACEHOLDER;
   const locale = resolveLocale();
   if (!intlIsLocaleAware) return fallbackDateTime(date, locale);
   // Freeze the options so the rendering is stable across engines/versions.
-  return new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' }).format(date);
+  return new Intl.DateTimeFormat(locale, DATETIME_OPTS).format(date);
 };
 
 /**
  * Date-only variant. Same null-safety contract as `formatDateTime`.
  */
 export const formatDate = (iso: string | null | undefined): string => {
-  if (!iso) return '—';
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return '—';
+  const date = parseIso(iso);
+  if (!date) return EMPTY_PLACEHOLDER;
   const locale = resolveLocale();
   if (!intlIsLocaleAware) return fallbackDate(date, locale);
-  return new Intl.DateTimeFormat(locale, { dateStyle: 'medium' }).format(date);
+  return new Intl.DateTimeFormat(locale, DATE_OPTS).format(date);
 };

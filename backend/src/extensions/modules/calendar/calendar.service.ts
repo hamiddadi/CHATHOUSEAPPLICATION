@@ -24,6 +24,11 @@ const formatIcsDate = (d: Date): string =>
 /** Default duration when the room has no defined end (60 min). */
 const DEFAULT_DURATION_MS = 60 * 60 * 1000;
 
+/** Domain used to build the globally-unique VEVENT UID. */
+const ICS_UID_DOMAIN = 'chathouse.app';
+/** Public base URL for a shareable room link (no trailing slash). */
+const ROOM_URL_BASE = 'https://app.chathouse.com/r';
+
 export const calendarService = {
   async icsForRoom(callerId: string, roomId: string): Promise<string> {
     const room = await prisma.room.findUnique({
@@ -57,13 +62,13 @@ export const calendarService = {
     const start = room.scheduledFor;
     const end = new Date(start.getTime() + DEFAULT_DURATION_MS);
     const now = new Date();
-    const uid = `${room.id}@chathouse.app`;
+    const uid = `${room.id}@${ICS_UID_DOMAIN}`;
     const summary = escapeIcs(`Chathouse — ${room.title}`);
     const description = escapeIcs(
       room.description ??
         `Live audio room hosted by ${room.host.displayName ?? room.host.username ?? 'a Chathouse user'}.`,
     );
-    const url = `https://app.chathouse.com/r/${room.id}`;
+    const url = `${ROOM_URL_BASE}/${room.id}`;
 
     const lines = [
       'BEGIN:VCALENDAR',

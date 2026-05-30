@@ -4,7 +4,8 @@ import { rateLimit } from 'express-rate-limit';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { requireAuth } from '../../middlewares/auth.middleware';
 import { sendOk } from '../../utils/response';
-import { AppError, ERROR_CODES } from '../../middlewares/error.middleware';
+import { ERROR_CODES } from '../../middlewares/error.middleware';
+import { authedUserId } from '../../utils/authedUserId';
 import { usersService } from '../users/users.service';
 import { locationSchema } from '../users/users.schema';
 
@@ -40,8 +41,8 @@ mapsRouter.use(requireAuth);
 mapsRouter.get(
   '/users',
   asyncHandler(async (req: Request, res: Response) => {
-    if (!req.userId) throw new AppError('AUTH_003');
-    const rows = await usersService.getOnlineLocations(req.userId);
+    const userId = authedUserId(req);
+    const rows = await usersService.getOnlineLocations(userId);
     sendOk(res, rows);
   }),
 );
@@ -52,8 +53,8 @@ mapsRouter.get(
 mapsRouter.get(
   '/followers',
   asyncHandler(async (req: Request, res: Response) => {
-    if (!req.userId) throw new AppError('AUTH_003');
-    const rows = await usersService.getFollowingOnMap(req.userId);
+    const userId = authedUserId(req);
+    const rows = await usersService.getFollowingOnMap(userId);
     sendOk(res, rows);
   }),
 );
@@ -62,9 +63,9 @@ mapsRouter.patch(
   '/location',
   locationLimiter,
   asyncHandler(async (req: Request, res: Response) => {
-    if (!req.userId) throw new AppError('AUTH_003');
+    const userId = authedUserId(req);
     const input = locationSchema.parse(req.body);
-    const row = await usersService.setLocation(req.userId, input);
+    const row = await usersService.setLocation(userId, input);
     sendOk(res, row);
   }),
 );

@@ -87,13 +87,7 @@ const EventCard: React.FC<CardProps> = memo(({ event, isMine, onToggle, disabled
             : 'rounded-pill bg-primary py-sm items-center'
         }
       >
-        <Text
-          className={
-            isMine
-              ? 'text-sm font-body-bold text-primary-on-container'
-              : 'text-sm font-body-bold text-primary-on-container'
-          }
-        >
+        <Text className="text-sm font-body-bold text-primary-on-container">
           {isMine ? t('events.rsvp') : t('events.notRsvp')}
         </Text>
       </Pressable>

@@ -2,6 +2,10 @@ import { PrismaClient } from '@prisma/client';
 import { env } from './env';
 import { logger } from './logger';
 
+// Queries slower than this (in dev) are logged as a warning to surface N+1s
+// and missing indexes early.
+const SLOW_QUERY_THRESHOLD_MS = 200;
+
 /**
  * Singleton Prisma client. Log levels surface query slowness in dev and errors
  * everywhere. Connection pooling is handled by the driver; use PgBouncer in
@@ -22,7 +26,7 @@ if (env.NODE_ENV === 'development') {
       $on: (evt: 'query', cb: (e: { duration: number; query: string }) => void) => void;
     }
   ).$on('query', e => {
-    if (e.duration > 200) {
+    if (e.duration > SLOW_QUERY_THRESHOLD_MS) {
       logger.warn(`slow query ${e.duration}ms`, { query: e.query });
     }
   });

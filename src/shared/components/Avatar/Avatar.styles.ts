@@ -1,3 +1,4 @@
+import { colors, palette } from '../../constants/theme';
 import type { AvatarShape, AvatarSize, AvatarStatus } from './types';
 
 export const AVATAR_SIZE_MAP: Record<AvatarSize, number> = {
@@ -13,14 +14,17 @@ export const INITIALS_FONT_RATIO = 0.42;
 export const STATUS_DOT_RATIO = 0.26;
 export const STATUS_BORDER_RATIO = 0.06;
 
+const ROUNDED_RADIUS = 12;
+const SQUIRCLE_RATIO = 0.32;
+
 export const getShapeRadius = (shape: AvatarShape, size: number): number => {
   switch (shape) {
     case 'circle':
       return size / 2;
     case 'rounded':
-      return 12;
+      return ROUNDED_RADIUS;
     case 'squircle':
-      return size * 0.32;
+      return size * SQUIRCLE_RATIO;
     default:
       return size / 2;
   }
@@ -29,13 +33,13 @@ export const getShapeRadius = (shape: AvatarShape, size: number): number => {
 export const getStatusColor = (status: AvatarStatus): string => {
   switch (status) {
     case 'online':
-      return '#00e475';
+      return colors.accent;
     case 'speaking':
-      return '#00e475';
+      return colors.accent;
     case 'muted':
-      return '#ffb4ab';
+      return colors.danger;
     case 'offline':
-      return '#8c90a0';
+      return palette.outline;
     case 'none':
     default:
       return 'transparent';

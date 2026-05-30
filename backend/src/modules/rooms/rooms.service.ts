@@ -37,6 +37,18 @@ const publicUser = {
   avatarUrl: true,
 } as const;
 
+const MS_PER_MINUTE = 60_000;
+// Default ban applied on kick when no explicit duration is given — long
+// enough to discourage immediate re-join, short enough to forgive a mistake.
+const DEFAULT_KICK_BAN_MINUTES = 30;
+
+// Hallway feed scoring weights (see `feed()` doc): a followed speaker is
+// worth more than a topic match, which beats raw popularity.
+const FOLLOW_SPEAKER_WEIGHT = 3;
+const TOPIC_MATCH_WEIGHT = 2;
+const POPULARITY_CAP = 5;
+const POPULARITY_BUCKET = 10;
+
 const roomInclude = {
   host: { select: publicUser },
   participants: { include: { user: { select: publicUser } }, where: { leftAt: null } },
@@ -620,9 +632,10 @@ export const roomsService = {
       }
 
       const listenerCount = room.participants.length;
-      const popularity = Math.min(5, Math.floor(listenerCount / 10));
+      const popularity = Math.min(POPULARITY_CAP, Math.floor(listenerCount / POPULARITY_BUCKET));
 
-      const score = followSpeakerCount * 3 + topicMatch * 2 + popularity;
+      const score =
+        followSpeakerCount * FOLLOW_SPEAKER_WEIGHT + topicMatch * TOPIC_MATCH_WEIGHT + popularity;
       return { room, score, followSpeakerCount };
     });
 
@@ -834,8 +847,8 @@ export const roomsService = {
 
     // Install ban so they can't bounce right back. banMinutes=0 → permanent.
     // Default 30 min keeps the friction proportionate to the offense.
-    const minutes = options.banMinutes ?? 30;
-    const expiresAt = minutes === 0 ? null : new Date(Date.now() + minutes * 60_000);
+    const minutes = options.banMinutes ?? DEFAULT_KICK_BAN_MINUTES;
+    const expiresAt = minutes === 0 ? null : new Date(Date.now() + minutes * MS_PER_MINUTE);
     await prisma.roomBan.upsert({
       where: { roomId_userId: { roomId, userId: targetUserId } },
       create: {

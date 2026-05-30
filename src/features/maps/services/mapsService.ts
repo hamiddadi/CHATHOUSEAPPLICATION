@@ -1,10 +1,6 @@
 import { apiClient } from '../../../shared/services/api/apiClient';
+import type { Envelope } from '../../../shared/types/api';
 import type { FollowerOnMap } from '../../../shared/types/domain';
-
-interface Envelope<T> {
-  success: true;
-  data: T;
-}
 
 // Shape returned by GET /maps/followers (backend getFollowingOnMap select).
 interface RawFollowerOnMap {

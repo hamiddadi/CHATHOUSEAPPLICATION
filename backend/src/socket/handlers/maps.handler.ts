@@ -2,6 +2,7 @@ import type { Server, Socket } from 'socket.io';
 import { usersService } from '../../modules/users/users.service';
 import { locationSchema, visibilitySchema } from '../../modules/users/users.schema';
 import { logger } from '../../config/logger';
+import { getUserId } from '../socket.middleware';
 
 const MAPS_CHANNEL = 'maps:presence';
 
@@ -13,7 +14,7 @@ const MAPS_CHANNEL = 'maps:presence';
  * suppressed at source here (we simply don't broadcast it).
  */
 export const registerMapsHandlers = (io: Server, socket: Socket): void => {
-  const me = (): string => socket.data.userId as string;
+  const me = (): string => getUserId(socket);
   void socket.join(MAPS_CHANNEL);
 
   socket.on('maps:update-location', async (payload: unknown, ack?: (ok: boolean) => void) => {

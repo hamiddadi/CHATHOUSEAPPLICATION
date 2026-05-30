@@ -7,6 +7,9 @@ import { extError } from '../../utils/ExtAppError';
  * URLs. No DB write.
  */
 
+/** Public base URL for shareable room links (deployment-environment value). */
+const ROOM_SHARE_BASE = 'https://app.chathouse.com';
+
 const truncate = (s: string, max = 200): string =>
   s.length <= max ? s : s.slice(0, max - 1) + '…';
 
@@ -26,7 +29,7 @@ export const shareService = {
     });
     if (!room) throw extError('CLUB_REQ_NOT_FOUND', 'Room not found');
 
-    const url = `https://app.chathouse.com/r/${room.id}`;
+    const url = `${ROOM_SHARE_BASE}/r/${room.id}`;
     const host = room.host.displayName ?? room.host.username ?? 'a host';
     const isScheduled = Boolean(room.scheduledFor);
     const verb = isScheduled ? 'Join me' : "I'm live";

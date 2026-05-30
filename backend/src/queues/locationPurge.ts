@@ -1,13 +1,9 @@
-import { Queue, Worker, type ConnectionOptions } from 'bullmq';
-import IORedis from 'ioredis';
-import { env } from '../config/env';
+import { Queue, Worker } from 'bullmq';
 import { logger } from '../config/logger';
 import { prisma } from '../config/database';
+import { bullConnection } from './connection';
 
 const QUEUE_NAME = 'location-purge';
-
-const bullConnection = (): ConnectionOptions =>
-  new IORedis(env.REDIS_URL, { maxRetriesPerRequest: null });
 
 let queue: Queue | null = null;
 let worker: Worker | null = null;

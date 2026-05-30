@@ -1,4 +1,5 @@
 import { apiClient } from '../../../shared/services/api/apiClient';
+import type { Envelope } from '../../../shared/types/api';
 import type { UserSummary } from '../../../shared/types/domain';
 
 /**
@@ -29,11 +30,6 @@ export interface CreateEventInput {
   clubId?: string;
   isPrivate?: boolean;
   maxSpeakers?: number;
-}
-
-interface Envelope<T> {
-  success: true;
-  data: T;
 }
 
 // Raw shape returned by the backend /api/rooms endpoints. The server

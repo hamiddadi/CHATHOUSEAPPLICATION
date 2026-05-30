@@ -34,6 +34,10 @@ declare module 'express-serve-static-core' {
 const blacklistKey = (token: string): string =>
   `blacklist:${createHash('sha256').update(token).digest('hex')}`;
 
+// Lockout-propagation window for the suspension cache: how long a cached
+// suspended/clear verdict is trusted before requireAuth re-reads the DB.
+const SUSPENSION_CACHE_TTL_SECONDS = 60;
+
 /**
  * Verify the bearer access token on every protected route. Supports the
  * Redis blacklist used by `POST /auth/logout` to revoke an unexpired token
@@ -72,7 +76,7 @@ export const requireAuth: RequestHandler = async (req, _res, next) => {
       const isSuspended = Boolean(user?.suspendedUntil && user.suspendedUntil > new Date());
       // Short TTL: a 60 s window between suspension and effective lockout
       // is acceptable, much shorter than the 15-min access-token lifetime.
-      await redis.setEx(cacheKey, 60, isSuspended ? '1' : '0');
+      await redis.setEx(cacheKey, SUSPENSION_CACHE_TTL_SECONDS, isSuspended ? '1' : '0');
       if (isSuspended) return next(new AppError('AUTH_007'));
       if (user) req.appRole = user.appRole;
     }

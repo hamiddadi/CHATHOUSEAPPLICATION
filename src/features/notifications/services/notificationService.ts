@@ -1,10 +1,6 @@
 import { apiClient } from '../../../shared/services/api/apiClient';
+import type { Envelope } from '../../../shared/types/api';
 import type { AppNotification, NotificationKind } from '../../../shared/types/domain';
-
-interface Envelope<T> {
-  success: true;
-  data: T;
-}
 
 type BackendType =
   | 'ROOM_INVITE'

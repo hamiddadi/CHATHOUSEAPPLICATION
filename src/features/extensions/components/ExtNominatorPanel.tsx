@@ -10,6 +10,9 @@ import {
 } from 'react-native';
 import { nominatorApi, type InvitationRecord } from '../api/nominatorApi';
 
+/** Shape of the nested error message returned by the API client. */
+type ApiError = { response?: { data?: { error?: { message?: string } } } };
+
 /**
  * Nominator panel — displays the user's remaining invitations + history,
  * plus a quick "invite by phone" form (Module 2.8 / PROFIL-008).
@@ -54,8 +57,7 @@ export const ExtNominatorPanel: React.FC = () => {
       setName('');
       setPhone('');
     } catch (err) {
-      const msg = (err as { response?: { data?: { error?: { message?: string } } } })?.response
-        ?.data?.error?.message;
+      const msg = (err as ApiError)?.response?.data?.error?.message;
       setError(msg ?? 'Invitation failed');
     } finally {
       setBusy(false);

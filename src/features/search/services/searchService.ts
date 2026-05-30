@@ -1,4 +1,5 @@
 import { apiClient } from '../../../shared/services/api/apiClient';
+import type { Envelope } from '../../../shared/types/api';
 import type { HouseSummary, UserSummary } from '../../../shared/types/domain';
 
 /**
@@ -30,11 +31,6 @@ export interface SearchResults {
 }
 
 type SearchType = 'users' | 'clubs' | 'rooms' | 'all';
-
-interface Envelope<T> {
-  success: true;
-  data: T;
-}
 
 export const searchService = {
   async search(q: string, type: SearchType = 'all', limit = 20): Promise<SearchResults> {

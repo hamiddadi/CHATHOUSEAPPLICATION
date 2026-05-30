@@ -1,11 +1,7 @@
 import { MOCK_USERS } from '../../../shared/mocks/users.mock';
 import { apiClient } from '../../../shared/services/api/apiClient';
+import type { Envelope } from '../../../shared/types/api';
 import type { User } from '../../../shared/types/domain';
-
-interface Envelope<T> {
-  success: true;
-  data: T;
-}
 
 // Shape returned by GET /api/users/me, PATCH /api/users/me and
 // GET /api/users/:id. The two backend selects (`meSelect`/`publicSelect`)
@@ -47,12 +43,25 @@ interface RawFollowList {
   hasMore: boolean;
 }
 
-const mapUser = (u: RawUser): User => ({
+// Fields shared by `mapUser` and `mapSummary`: the username/displayName/
+// createdAt normalization is identical for both payload shapes.
+const mapBaseUser = (
+  u: RawUser | RawSearchUser,
+): Pick<
+  User,
+  'id' | 'username' | 'displayName' | 'avatarUrl' | 'bio' | 'isOnline' | 'createdAt'
+> => ({
   id: u.id,
   username: u.username ?? '',
   displayName: u.displayName ?? u.username ?? '',
   avatarUrl: u.avatarUrl,
   bio: u.bio,
+  isOnline: u.isOnline ?? false,
+  createdAt: u.createdAt ?? new Date().toISOString(),
+});
+
+const mapUser = (u: RawUser): User => ({
+  ...mapBaseUser(u),
   // Backend denormalizes follower/following counts as `followerCount`
   // (singular); the domain type uses `followersCount`.
   followersCount: u.followerCount ?? 0,
@@ -61,24 +70,16 @@ const mapUser = (u: RawUser): User => ({
   // Follow table). GET /users/me omits it (you don't follow yourself) → the
   // ?? false default applies there, which is correct.
   isFollowedByMe: u.isFollowedByMe ?? false,
-  isOnline: u.isOnline ?? false,
-  createdAt: u.createdAt ?? new Date().toISOString(),
 });
 
 const mapSummary = (u: RawSearchUser): User => ({
-  id: u.id,
-  username: u.username ?? '',
-  displayName: u.displayName ?? u.username ?? '',
-  avatarUrl: u.avatarUrl,
-  bio: u.bio,
+  ...mapBaseUser(u),
   // These counts aren't part of the list payload (they'd require an N+1
   // lookup). Callers that need them should fetch the user detail via
   // `get(userId)`.
   followersCount: 0,
   followingCount: 0,
   isFollowedByMe: false,
-  isOnline: u.isOnline ?? false,
-  createdAt: u.createdAt ?? new Date().toISOString(),
 });
 
 export interface UpdateProfileInput {
@@ -140,12 +141,14 @@ export const profileService = {
     // Parameterized endpoint returns the target user's followers (works for
     // self too). Backend: GET /follow/:userId/followers → { data, nextCursor }.
     const res = await apiClient.get<Envelope<RawFollowList>>(`/follow/${userId}/followers`);
-    return res.data.data.data.map(mapSummary);
+    const { data } = res.data.data;
+    return data.map(mapSummary);
   },
 
   async following(userId: string): Promise<User[]> {
     const res = await apiClient.get<Envelope<RawFollowList>>(`/follow/${userId}/following`);
-    return res.data.data.data.map(mapSummary);
+    const { data } = res.data.data;
+    return data.map(mapSummary);
   },
 
   async search(query: string): Promise<User[]> {

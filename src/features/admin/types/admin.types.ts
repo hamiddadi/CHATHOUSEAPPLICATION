@@ -12,6 +12,14 @@ export type AuditAction =
   | 'IMPERSONATION_STARTED'
   | 'IMPERSONATION_ENDED';
 
+/** Minimal user reference embedded in reports / audit logs / rooms. */
+export interface AdminUserRef {
+  id: string;
+  username: string | null;
+  displayName: string | null;
+  avatarUrl: string | null;
+}
+
 export interface AdminUser {
   id: string;
   username: string | null;
@@ -49,18 +57,8 @@ export interface AdminStats {
 export interface AdminReport {
   id: string;
   reporterId: string;
-  reporter: {
-    id: string;
-    username: string | null;
-    displayName: string | null;
-    avatarUrl: string | null;
-  } | null;
-  reported: {
-    id: string;
-    username: string | null;
-    displayName: string | null;
-    avatarUrl: string | null;
-  } | null;
+  reporter: AdminUserRef | null;
+  reported: AdminUserRef | null;
   reportedRoom: { id: string; title: string; isLive: boolean; hostId: string } | null;
   targetKind: 'USER' | 'ROOM';
   reason: 'SPAM' | 'HARASSMENT' | 'FAKE_PROFILE' | 'OTHER';
@@ -72,20 +70,10 @@ export interface AdminReport {
 export interface AdminAuditLogEntry {
   id: string;
   actorId: string;
-  actor: {
-    id: string;
-    username: string | null;
-    displayName: string | null;
-    avatarUrl: string | null;
-  } | null;
+  actor: AdminUserRef | null;
   action: AuditAction;
   targetUserId: string | null;
-  targetUser: {
-    id: string;
-    username: string | null;
-    displayName: string | null;
-    avatarUrl: string | null;
-  } | null;
+  targetUser: AdminUserRef | null;
   targetRoomId: string | null;
   targetType: string | null;
   targetId: string | null;
@@ -102,12 +90,7 @@ export interface AdminRoom {
   isPrivate: boolean;
   participantCount: number;
   hostId: string;
-  host: {
-    id: string;
-    username: string | null;
-    displayName: string | null;
-    avatarUrl: string | null;
-  };
+  host: AdminUserRef;
   createdAt: string;
   endedAt: string | null;
   _count?: { participants?: number };

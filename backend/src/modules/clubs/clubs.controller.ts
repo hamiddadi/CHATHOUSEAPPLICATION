@@ -1,13 +1,9 @@
 import type { Request, Response } from 'express';
 import { sendOk } from '../../utils/response';
 import { AppError } from '../../middlewares/error.middleware';
+import { authedUserId as requireUserId } from '../../utils/authedUserId';
 import { createClubSchema, inviteSchema, listClubsSchema, updateClubSchema } from './clubs.schema';
 import { clubsService } from './clubs.service';
-
-const requireUserId = (req: Request): string => {
-  if (!req.userId) throw new AppError('AUTH_003');
-  return req.userId;
-};
 
 const paramId = (req: Request, key: string): string => {
   const raw = req.params[key];

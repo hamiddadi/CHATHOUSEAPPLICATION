@@ -6,8 +6,8 @@ import {
   closeProducersForUserInRoom,
 } from '../../webrtc/mediasoup.manager';
 import { isActiveRoomParticipant } from '../../webrtc/roomAuthz';
-
-const roomChannel = (roomId: string): string => `room:${roomId}`;
+import { roomChannel } from '../channels';
+import { getUserId } from '../socket.middleware';
 
 interface JoinPayload {
   roomId: string;
@@ -34,7 +34,7 @@ interface SpeakRequestPayload {
  * mediasoup audio events (rtc:*) are not wired in Phase 3 — see docs.
  */
 export const registerRoomHandlers = (io: Server, socket: Socket): void => {
-  const userId = (): string => socket.data.userId as string;
+  const userId = (): string => getUserId(socket);
 
   socket.on('room:join', async (payload: JoinPayload, ack?: (ok: boolean) => void) => {
     try {

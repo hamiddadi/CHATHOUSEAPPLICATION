@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { chatReactionsApi, type ReactionsByEmoji } from '../api/chatReactionsApi';
 
@@ -76,7 +76,10 @@ export const ExtChatReactionsBar: React.FC<Props> = ({ messageId, initial, onCha
     }
   };
 
-  const entries = Object.entries(reactions).filter(([, v]) => v.count > 0);
+  const entries = useMemo(
+    () => Object.entries(reactions).filter(([, v]) => v.count > 0),
+    [reactions],
+  );
   if (entries.length === 0) return null;
 
   return (

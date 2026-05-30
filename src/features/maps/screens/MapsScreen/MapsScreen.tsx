@@ -26,6 +26,24 @@ import { UserLocationPulse } from '../../components/UserLocationPulse';
 const HEADER_HEIGHT = 64;
 const SEARCH_BAR_TOP_OFFSET = HEADER_HEIGHT + 8;
 const MINI_CARD_BOTTOM_OFFSET = layout.tabBarHeight + layout.tabBarBottomOffset + spacing.xxxl;
+// Extra lift applied to the floating controls when the mini-card is visible,
+// so they sit above the card instead of being covered by it.
+const MINI_CARD_LIFT = 120;
+// Settle window during which markers keep tracking view changes so their
+// custom content rasterizes, before we stop continuous re-rasterization.
+const MARKER_TRACK_SETTLE_MS = 1500;
+// Default map zoom level used for auto-center / pin-press / recenter regions.
+const ZOOM_DELTA = 0.01;
+
+const regionFor = (
+  latitude: number,
+  longitude: number,
+): { latitude: number; longitude: number; latitudeDelta: number; longitudeDelta: number } => ({
+  latitude,
+  longitude,
+  latitudeDelta: ZOOM_DELTA,
+  longitudeDelta: ZOOM_DELTA,
+});
 
 const matches = (follower: FollowerOnMap, query: string): boolean => {
   const q = query.trim().toLowerCase();
@@ -52,7 +70,7 @@ export const MapsScreen: React.FC = () => {
   const didAutoCenterRef = useRef(false);
 
   useEffect(() => {
-    const id = setTimeout(() => setTracksMarkers(false), 1500);
+    const id = setTimeout(() => setTracksMarkers(false), MARKER_TRACK_SETTLE_MS);
     return () => clearTimeout(id);
   }, []);
 
@@ -61,15 +79,7 @@ export const MapsScreen: React.FC = () => {
   useEffect(() => {
     if (didAutoCenterRef.current || !coords) return;
     didAutoCenterRef.current = true;
-    mapRef.current?.animateToRegion(
-      {
-        latitude: coords.latitude,
-        longitude: coords.longitude,
-        latitudeDelta: 0.01,
-        longitudeDelta: 0.01,
-      },
-      1000,
-    );
+    mapRef.current?.animateToRegion(regionFor(coords.latitude, coords.longitude), 1000);
   }, [coords]);
 
   const filteredFollowers = useMemo(
@@ -82,12 +92,7 @@ export const MapsScreen: React.FC = () => {
   const handlePinPress = useCallback((follower: FollowerOnMap) => {
     setSelected(follower);
     mapRef.current?.animateToRegion(
-      {
-        latitude: follower.location.latitude,
-        longitude: follower.location.longitude,
-        latitudeDelta: 0.01,
-        longitudeDelta: 0.01,
-      },
+      regionFor(follower.location.latitude, follower.location.longitude),
       400,
     );
   }, []);
@@ -100,15 +105,7 @@ export const MapsScreen: React.FC = () => {
       await requestAgain();
       return;
     }
-    mapRef.current?.animateToRegion(
-      {
-        latitude: coords.latitude,
-        longitude: coords.longitude,
-        latitudeDelta: 0.01,
-        longitudeDelta: 0.01,
-      },
-      800,
-    );
+    mapRef.current?.animateToRegion(regionFor(coords.latitude, coords.longitude), 800);
   }, [coords, requestAgain]);
 
   const handleJoinRoom = useCallback(
@@ -131,15 +128,7 @@ export const MapsScreen: React.FC = () => {
   }, [navigation]);
 
   const initialRegion = useMemo(
-    () =>
-      coords
-        ? {
-            latitude: coords.latitude,
-            longitude: coords.longitude,
-            latitudeDelta: 0.01,
-            longitudeDelta: 0.01,
-          }
-        : DEFAULT_MAP_CENTER,
+    () => (coords ? regionFor(coords.latitude, coords.longitude) : DEFAULT_MAP_CENTER),
     [coords],
   );
 
@@ -243,7 +232,7 @@ export const MapsScreen: React.FC = () => {
         pointerEvents="box-none"
         style={[
           styles.floatingButtons,
-          { bottom: insets.bottom + MINI_CARD_BOTTOM_OFFSET + (selected ? 120 : 0) },
+          { bottom: insets.bottom + MINI_CARD_BOTTOM_OFFSET + (selected ? MINI_CARD_LIFT : 0) },
         ]}
       >
         <MyLocationButton onPress={handleRecenter} disabled={!coords} />

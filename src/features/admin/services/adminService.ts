@@ -10,11 +10,7 @@ import type {
   AuditAction,
   Paginated,
 } from '../types/admin.types';
-
-interface Envelope<T> {
-  success: true;
-  data: T;
-}
+import type { Envelope } from '../../../shared/types/api';
 
 export interface ListUsersParams {
   q?: string;

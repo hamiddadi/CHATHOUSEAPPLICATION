@@ -1,3 +1,4 @@
+import type { Prisma } from '@prisma/client';
 import { prisma } from '../../config/database';
 import { AppError } from '../../middlewares/error.middleware';
 import { getBlockedIdSet } from '../social/blocks';
@@ -45,6 +46,19 @@ const meSelect = {
   hasCompletedOnboarding: true,
   deletedAt: true,
 } as const;
+
+// Only surface users seen within this window on the live map.
+const ONLINE_WINDOW_MS = 30 * 60 * 1000;
+// Grace period between a deletion request and the permanent purge.
+const DELETION_GRACE_MS = 30 * 24 * 60 * 60 * 1000;
+// Hard caps on how many pins a single map query materialises.
+const ONLINE_MAP_LIMIT = 200;
+const FOLLOWING_MAP_LIMIT = 500;
+
+// Canonical interest list: trimmed, lowercased, de-duplicated.
+const normaliseInterests = (xs: string[]): string[] => [
+  ...new Set(xs.map(i => i.trim().toLowerCase())),
+];
 
 export const usersService = {
   async getMe(userId: string) {
@@ -176,7 +190,7 @@ export const usersService = {
   async setInterests(userId: string, input: InterestsInput) {
     // Lowercase + dedupe server-side so the list stored is canonical,
     // regardless of how the client sends it.
-    const normalised = [...new Set(input.interests.map(i => i.trim().toLowerCase()))];
+    const normalised = normaliseInterests(input.interests);
     return prisma.user.update({
       where: { id: userId },
       data: { interests: normalised },
@@ -185,14 +199,14 @@ export const usersService = {
   },
 
   async completeOnboarding(userId: string, input: CompleteOnboardingInput) {
-    const data: Parameters<typeof prisma.user.update>[0]['data'] = {
+    const data: Prisma.UserUpdateInput = {
       hasCompletedOnboarding: true,
     };
     if (input.displayName !== undefined) data.displayName = input.displayName;
     if (input.bio !== undefined) data.bio = input.bio;
     if (input.avatarUrl !== undefined) data.avatarUrl = input.avatarUrl;
     if (input.interests !== undefined) {
-      data.interests = [...new Set(input.interests.map(i => i.trim().toLowerCase()))];
+      data.interests = normaliseInterests(input.interests);
     }
     return prisma.user.update({
       where: { id: userId },
@@ -207,7 +221,7 @@ export const usersService = {
     // CRITICAL: also exclude blocked/blocking users — the map is the most
     // sensitive surface (precise GPS), so a blocked harasser must never be
     // able to locate (or be located by) the viewer. And hide soft-deleted.
-    const thirtyMinAgo = new Date(Date.now() - 30 * 60 * 1000);
+    const thirtyMinAgo = new Date(Date.now() - ONLINE_WINDOW_MS);
     const blocked = await getBlockedIdSet(viewerId);
     return prisma.user.findMany({
       where: {
@@ -229,7 +243,7 @@ export const usersService = {
         lastSeenAt: true,
         currentRoomId: true,
       },
-      take: 200,
+      take: ONLINE_MAP_LIMIT,
     });
   },
 
@@ -244,7 +258,7 @@ export const usersService = {
    * this and then relocates known followers live.
    */
   async getFollowingOnMap(viewerId: string) {
-    const thirtyMinAgo = new Date(Date.now() - 30 * 60 * 1000);
+    const thirtyMinAgo = new Date(Date.now() - ONLINE_WINDOW_MS);
     const blocked = await getBlockedIdSet(viewerId);
     const follows = await prisma.follow.findMany({
       where: { followerId: viewerId },
@@ -274,7 +288,7 @@ export const usersService = {
         // Live-room badge on the pin (only meaningful while the room is live).
         currentRoom: { select: { id: true, title: true, isLive: true } },
       },
-      take: 500,
+      take: FOLLOWING_MAP_LIMIT,
     });
   },
 
@@ -291,7 +305,7 @@ export const usersService = {
     });
     return {
       deletedAt: deletedAt.toISOString(),
-      permanentDeletionAt: new Date(deletedAt.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+      permanentDeletionAt: new Date(deletedAt.getTime() + DELETION_GRACE_MS).toISOString(),
     };
   },
 

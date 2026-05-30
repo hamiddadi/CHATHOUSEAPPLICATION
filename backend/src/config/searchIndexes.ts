@@ -3,16 +3,6 @@ import { logger } from './logger';
 import { env } from './env';
 
 /**
- * Module-level readiness flag. Stays `false` until the trigram indexes have
- * been ensured at least once so a readiness/health probe can surface a
- * silent degradation (seq-scans on /search and /explore). Exported so a
- * /health endpoint can reflect it.
- */
-let searchIndexesReady = false;
-
-export const isSearchIndexesReady = (): boolean => searchIndexesReady;
-
-/**
  * Idempotent search-index bootstrap. Ensures the pg_trgm extension is
  * installed and that GIN trigram indexes exist on the columns our /search
  * and /explore endpoints filter on. Safe to call on every boot — each
@@ -40,10 +30,8 @@ export const ensureSearchIndexes = async (): Promise<void> => {
     for (const stmt of statements) {
       await prisma.$executeRawUnsafe(stmt);
     }
-    searchIndexesReady = true;
     logger.info('search indexes ensured (pg_trgm)');
   } catch (err) {
-    searchIndexesReady = false;
     logger.error('ensureSearchIndexes failed', {
       err: err instanceof Error ? err.message : err,
     });

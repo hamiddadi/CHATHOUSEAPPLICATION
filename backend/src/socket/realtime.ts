@@ -1,5 +1,6 @@
 import type { Server } from 'socket.io';
 import { HALLWAY_ROOM } from './handlers/hallway.handler';
+import { roomChannel, userChannel } from './channels';
 
 /**
  * Side-channel the HTTP layer uses to fan events into the socket tier.
@@ -44,8 +45,6 @@ export const emitHallwayRoomUpdated = (
 // Targets the `room:<id>` group that room.handler auto-joins on connect
 // for every participant. Callers pass pre-serialised payloads (ISO dates,
 // no Prisma Date objects) so the socket side stays transport-pure.
-
-const roomChannel = (roomId: string) => `room:${roomId}`;
 
 export const emitRoomHandRaised = (
   roomId: string,
@@ -132,7 +131,6 @@ export const emitRoomMetaUpdated = (
 // ─── Per-user notification events ────────────────────────
 // Fires on the user's personal channel so they get live notification
 // badge updates without polling.
-const userChannel = (userId: string) => `user:${userId}`;
 
 export const emitNotification = (
   userId: string,

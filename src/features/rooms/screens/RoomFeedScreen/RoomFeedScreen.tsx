@@ -1,4 +1,4 @@
-import React, { memo, useCallback, useState } from 'react';
+import React, { memo, useCallback, useMemo, useState } from 'react';
 import { FlatList, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
@@ -246,7 +246,8 @@ export const RoomFeedScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const [activeFilter, setActiveFilter] = useState<Filter>('All');
   const fab = useAnimatedPress({ scaleTo: 0.9 });
-  const { data: rooms, isLoading, isError, refetch } = useRooms(filterToParams(activeFilter));
+  const filterParams = useMemo(() => filterToParams(activeFilter), [activeFilter]);
+  const { data: rooms, isLoading, isError, refetch } = useRooms(filterParams);
 
   // Subscribe to live hallway broadcasts — new/ended rooms invalidate
   // the scored feed so ranking stays fresh without manual refreshes.

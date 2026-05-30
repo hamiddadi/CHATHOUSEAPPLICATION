@@ -22,6 +22,10 @@ import type {
 // without intent. Anything past 9000 is effectively forever for app users.
 const PERMANENT_BAN_DATE = new Date('9999-12-31T23:59:59Z');
 
+// Cap on how long a suspension verdict is cached in Redis (1h), to avoid a
+// stale cache after a manual unsuspend.
+const SUSPENSION_CACHE_TTL_SEC = 60 * 60;
+
 // Hard cap on rows materialised in a single CSV export. Without cursor
 // streaming the whole result set is held in memory, so we bound it. When the
 // cap is hit the export is silently incomplete from the caller's point of
@@ -225,7 +229,7 @@ export const adminService = {
     // cache "suspended" up to the same expiry so requireAuth doesn't even
     // hit Postgres until the sanction lapses.
     const ttlSec = Math.min(
-      60 * 60, // cap 1h to avoid stale cache after a manual unsuspend
+      SUSPENSION_CACHE_TTL_SEC, // cap 1h to avoid stale cache after a manual unsuspend
       Math.max(30, Math.ceil((expiresAt.getTime() - Date.now()) / 1000)),
     );
     await redis.setEx(`user:susp:${targetUserId}`, ttlSec, '1');
@@ -315,7 +319,7 @@ export const adminService = {
         suspensionReason: 'Account scheduled for deletion (admin)',
       },
     });
-    await redis.setEx(`user:susp:${targetUserId}`, 3600, '1');
+    await redis.setEx(`user:susp:${targetUserId}`, SUSPENSION_CACHE_TTL_SEC, '1');
 
     await auditLogService.record({
       actorId,

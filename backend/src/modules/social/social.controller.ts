@@ -1,13 +1,9 @@
 import type { Request, Response } from 'express';
 import { sendOk } from '../../utils/response';
 import { AppError } from '../../middlewares/error.middleware';
+import { authedUserId as uid } from '../../utils/authedUserId';
 import { reportRoomSchema, reportSchema } from './social.schema';
 import { socialService } from './social.service';
-
-const uid = (req: Request): string => {
-  if (!req.userId) throw new AppError('AUTH_003');
-  return req.userId;
-};
 
 const targetId = (req: Request): string => {
   const raw = req.params['id'];

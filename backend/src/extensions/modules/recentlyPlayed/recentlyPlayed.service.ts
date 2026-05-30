@@ -29,8 +29,7 @@ export const recentlyPlayedService = {
 
   async listIds(userId: string, limit = 20): Promise<string[]> {
     // zRange with REV returns latest first
-    const items = await redis.zRange(key(userId), 0, limit - 1, { REV: true });
-    return items;
+    return redis.zRange(key(userId), 0, limit - 1, { REV: true });
   },
 
   /**

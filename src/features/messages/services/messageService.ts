@@ -1,5 +1,6 @@
 import { apiClient } from '../../../shared/services/api/apiClient';
 import { useAuthStore } from '../../auth/store/authStore';
+import type { Envelope } from '../../../shared/types/api';
 import type { Conversation, Message, UserSummary } from '../../../shared/types/domain';
 
 /**
@@ -20,11 +21,6 @@ import type { Conversation, Message, UserSummary } from '../../../shared/types/d
  * other. The backend returns 403 CHAT_004 otherwise; the send mutation
  * surfaces that error verbatim to the UI.
  */
-
-interface Envelope<T> {
-  success: true;
-  data: T;
-}
 
 interface RawUser {
   id: string;

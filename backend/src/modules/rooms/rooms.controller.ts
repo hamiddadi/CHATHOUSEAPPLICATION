@@ -3,6 +3,7 @@ import { sendOk } from '../../utils/response';
 import { AppError } from '../../middlewares/error.middleware';
 import { prisma } from '../../config/database';
 import { closeRoom as closeSfuRoom } from '../../webrtc/mediasoup.manager';
+import { authedUserId as requireUserId } from '../../utils/authedUserId';
 import { agoraService, type AgoraParticipantRole } from './agora.service';
 import {
   createRoomSchema,
@@ -19,16 +20,18 @@ import {
 } from './rooms.schema';
 import { roomsService } from './rooms.service';
 
-const requireUserId = (req: Request): string => {
-  if (!req.userId) throw new AppError('AUTH_003');
-  return req.userId;
-};
-
 const paramId = (req: Request, key: string): string => {
   const raw = req.params[key];
   const id = Array.isArray(raw) ? raw[0] : raw;
   if (!id) throw new AppError('ROOM_001');
   return id;
+};
+
+// Shared list pagination guard for the limit query param: parses to an int,
+// clamps to [1, max] and falls back to `def` for missing/non-numeric input.
+const parseLimit = (raw: unknown, def = 20, max = 50): number => {
+  const n = typeof raw === 'string' ? Number.parseInt(raw, 10) : NaN;
+  return Number.isFinite(n) ? Math.max(1, Math.min(max, n)) : def;
 };
 
 export const roomsController = {
@@ -105,17 +108,13 @@ export const roomsController = {
   },
 
   async myHistory(req: Request, res: Response) {
-    const raw = req.query['limit'];
-    const parsed = typeof raw === 'string' ? Number.parseInt(raw, 10) : NaN;
-    const limit = Number.isFinite(parsed) ? Math.max(1, Math.min(50, parsed)) : 20;
+    const limit = parseLimit(req.query['limit']);
     const rows = await roomsService.myRoomHistory(requireUserId(req), limit);
     sendOk(res, rows);
   },
 
   async feed(req: Request, res: Response) {
-    const raw = req.query['limit'];
-    const parsed = typeof raw === 'string' ? Number.parseInt(raw, 10) : NaN;
-    const limit = Number.isFinite(parsed) ? Math.max(1, Math.min(50, parsed)) : 20;
+    const limit = parseLimit(req.query['limit']);
     // Optional topic / following filter — passed through to the service so
     // the scoring pool is narrowed before ranking. `topic=tech` matches
     // both Room.topic (single) and Room.topics[] (array).

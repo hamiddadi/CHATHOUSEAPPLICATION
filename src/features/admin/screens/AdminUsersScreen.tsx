@@ -13,6 +13,8 @@ import type { SettingsStackScreenProps } from '../../../core/navigation/types';
 
 type Nav = SettingsStackScreenProps<'AdminUsers'>['navigation'];
 
+const SEARCH_DEBOUNCE_MS = 250;
+
 const ROLES: readonly { id: AppRole | 'ALL'; label: string }[] = [
   { id: 'ALL', label: 'Tous' },
   { id: 'USER', label: 'User' },
@@ -91,7 +93,7 @@ export const AdminUsersScreen: React.FC<SettingsStackScreenProps<'AdminUsers'>> 
   const [roleFilter, setRoleFilter] = useState<AppRole | 'ALL'>('ALL');
 
   useEffect(() => {
-    const id = setTimeout(() => setDebounced(query.trim()), 250);
+    const id = setTimeout(() => setDebounced(query.trim()), SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(id);
   }, [query]);
 

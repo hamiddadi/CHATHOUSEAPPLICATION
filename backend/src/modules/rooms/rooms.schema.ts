@@ -57,10 +57,6 @@ export const inviteToRoomSchema = z.object({
   userIds: z.array(z.string().min(1)).min(1).max(50),
 });
 
-export const pingUserSchema = z.object({
-  roomId: z.string().min(1),
-});
-
 export const sendReactionSchema = z.object({
   // Short emoji — covers most pictographs and ZWJ sequences up to 16 chars.
   emoji: z.string().min(1).max(16),
@@ -110,4 +106,3 @@ export type UpdateRoomTitleInput = z.infer<typeof updateRoomTitleSchema>;
 export type ToggleRoomChatInput = z.infer<typeof toggleRoomChatSchema>;
 export type MuteAllInput = z.infer<typeof muteAllSchema>;
 export type InviteToRoomInput = z.infer<typeof inviteToRoomSchema>;
-export type PingUserInput = z.infer<typeof pingUserSchema>;

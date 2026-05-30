@@ -8,6 +8,9 @@ interface Props {
   editable?: boolean;
 }
 
+/** Clubhouse-style cap on custom profile links (server enforces the same). */
+const MAX_PROFILE_LINKS = 5;
+
 /**
  * Display + (optional) inline editor for a user's custom profile links
  * (Module 2.2 / PROFIL-008). Backed by the Vague 14 `profileLinksApi`.
@@ -96,7 +99,7 @@ export const ExtProfileLinks: React.FC<Props> = ({ userId, editable = false }) =
         ))}
       </View>
 
-      {editable && links.length < 5 ? (
+      {editable && links.length < MAX_PROFILE_LINKS ? (
         <View style={styles.form}>
           <TextInput
             placeholder="Label (e.g. Newsletter)"

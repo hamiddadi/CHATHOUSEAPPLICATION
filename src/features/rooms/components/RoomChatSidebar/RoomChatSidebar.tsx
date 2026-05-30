@@ -18,6 +18,11 @@ import { colors, spacing } from '../../../../shared/constants/theme';
 import { getSocket } from '../../../../shared/services/realtime/socketClient';
 import { roomKeys, useRoomMessages, useSendRoomMessage } from '../../hooks/useRooms';
 
+// Defer the scroll-to-end so the FlatList finishes layout before scrolling.
+const SCROLL_DEFER_MS = 50;
+// Per-message character cap — mirrors the backend's room-message limit.
+const MAX_MESSAGE_LENGTH = 500;
+
 interface RoomChatSidebarProps {
   visible: boolean;
   roomId: string;
@@ -125,7 +130,10 @@ export const RoomChatSidebar: React.FC<RoomChatSidebarProps> = memo(
     useEffect(() => {
       if (visible && messages.length > 0) {
         // Defer scroll so the FlatList finishes layout first.
-        const id = setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 50);
+        const id = setTimeout(
+          () => listRef.current?.scrollToEnd({ animated: true }),
+          SCROLL_DEFER_MS,
+        );
         return () => clearTimeout(id);
       }
     }, [messages.length, visible]);
@@ -242,7 +250,7 @@ export const RoomChatSidebar: React.FC<RoomChatSidebarProps> = memo(
                   placeholderTextColor={colors.textMuted}
                   style={styles.input}
                   multiline
-                  maxLength={500}
+                  maxLength={MAX_MESSAGE_LENGTH}
                   accessibilityLabel="Message de chat"
                 />
                 <Pressable

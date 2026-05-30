@@ -26,6 +26,12 @@ interface StripeAccountMapping {
 
 const accountKey = (userId: string) => `ext:stripe:account:${userId}`;
 
+/** Fallback onboarding URLs when STRIPE_RETURN_URL / STRIPE_REFRESH_URL are unset. */
+const RETURN_URL_FALLBACK = 'https://example.com/return';
+const REFRESH_URL_FALLBACK = 'https://example.com/refresh';
+/** Window over which identical tip retries collapse onto the same intent (1 min). */
+const TIP_IDEMPOTENCY_WINDOW_MS = 60_000;
+
 const isConfigured = (): boolean => Boolean(process.env.STRIPE_SECRET_KEY);
 
 const loadStripe = async (): Promise<unknown | null> => {
@@ -100,8 +106,8 @@ export const paymentsService = {
           accountId = parsed.stripeAccountId;
           const link = await stripe.accountLinks.create({
             account: accountId,
-            return_url: process.env.STRIPE_RETURN_URL ?? 'https://example.com/return',
-            refresh_url: process.env.STRIPE_REFRESH_URL ?? 'https://example.com/refresh',
+            return_url: process.env.STRIPE_RETURN_URL ?? RETURN_URL_FALLBACK,
+            refresh_url: process.env.STRIPE_REFRESH_URL ?? REFRESH_URL_FALLBACK,
             type: 'account_onboarding',
           });
           return { url: link.url, accountId };
@@ -133,8 +139,8 @@ export const paymentsService = {
     }
     const link = await stripe.accountLinks.create({
       account: accountId,
-      return_url: process.env.STRIPE_RETURN_URL ?? 'https://example.com/return',
-      refresh_url: process.env.STRIPE_REFRESH_URL ?? 'https://example.com/refresh',
+      return_url: process.env.STRIPE_RETURN_URL ?? RETURN_URL_FALLBACK,
+      refresh_url: process.env.STRIPE_REFRESH_URL ?? REFRESH_URL_FALLBACK,
       type: 'account_onboarding',
     });
     return { url: link.url, accountId };
@@ -188,7 +194,7 @@ export const paymentsService = {
     // key is deterministic over (from, to, amount) within a 1-minute
     // window, so identical retries collapse onto the same intent while a
     // genuinely new tip a minute later still goes through.
-    const idemKey = `tip:${fromUserId}:${toUserId}:${amountCents}:${Math.floor(Date.now() / 60000)}`;
+    const idemKey = `tip:${fromUserId}:${toUserId}:${amountCents}:${Math.floor(Date.now() / TIP_IDEMPOTENCY_WINDOW_MS)}`;
     const intent = await stripe.paymentIntents.create(
       {
         amount: amountCents,

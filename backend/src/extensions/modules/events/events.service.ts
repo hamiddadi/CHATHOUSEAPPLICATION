@@ -55,10 +55,10 @@ export const extEventsService = {
       : `"${room.title}" was canceled by the host`;
 
     let notified = 0;
-    for (const userId of recipients) {
+    for (const recipientId of recipients) {
       try {
         await notificationsService.create({
-          userId,
+          userId: recipientId,
           actorId: room.hostId,
           type: 'ROOM_STARTED', // closest existing bucket; data.eventCancel=true marks it
           title,
@@ -69,7 +69,7 @@ export const extEventsService = {
         });
         notified += 1;
       } catch (err) {
-        logger.error('ext.events.cancel: failed to notify', { err, userId, roomId });
+        logger.error('ext.events.cancel: failed to notify', { err, userId: recipientId, roomId });
       }
     }
 
