@@ -13,6 +13,8 @@ interface RawUser {
   displayName: string | null;
   avatarUrl: string | null;
   bio: string | null;
+  twitter?: string | null;
+  instagram?: string | null;
   isOnline?: boolean;
   followerCount?: number;
   followingCount?: number;
@@ -49,13 +51,26 @@ const mapBaseUser = (
   u: RawUser | RawSearchUser,
 ): Pick<
   User,
-  'id' | 'username' | 'displayName' | 'avatarUrl' | 'bio' | 'isOnline' | 'createdAt'
+  | 'id'
+  | 'username'
+  | 'displayName'
+  | 'avatarUrl'
+  | 'bio'
+  | 'twitter'
+  | 'instagram'
+  | 'isOnline'
+  | 'createdAt'
 > => ({
   id: u.id,
   username: u.username ?? '',
   displayName: u.displayName ?? u.username ?? '',
   avatarUrl: u.avatarUrl,
   bio: u.bio,
+  // Social handles only ride on the detail payload (RawUser). The search/
+  // follow-list payload (RawSearchUser) omits them, so guard with `in` and
+  // fall back to null there.
+  twitter: 'twitter' in u ? (u.twitter ?? null) : null,
+  instagram: 'instagram' in u ? (u.instagram ?? null) : null,
   isOnline: u.isOnline ?? false,
   createdAt: u.createdAt ?? new Date().toISOString(),
 });

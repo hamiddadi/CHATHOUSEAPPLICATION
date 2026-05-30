@@ -3,6 +3,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { colors } from '../../shared/constants/theme';
 import { SetupProfileScreen } from '../../features/onboarding/screens/SetupProfileScreen';
 import { InterestSelectionScreen } from '../../features/onboarding/screens/InterestSelectionScreen';
+import { SuggestedFollowsRoute } from './SuggestedFollowsRoute';
 import type { OnboardingStackParamList } from './types';
 
 const Stack = createNativeStackNavigator<OnboardingStackParamList>();
@@ -19,6 +20,7 @@ export const OnboardingNavigator: React.FC = () => {
     >
       <Stack.Screen name="Onboarding" component={SetupProfileScreen} />
       <Stack.Screen name="InterestSelection" component={InterestSelectionScreen} />
+      <Stack.Screen name="SuggestedFollows" component={SuggestedFollowsRoute} />
     </Stack.Navigator>
   );
 };

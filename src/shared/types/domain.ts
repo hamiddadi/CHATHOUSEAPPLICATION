@@ -13,6 +13,8 @@ export interface User {
   displayName: string;
   bio: string | null;
   avatarUrl: string | null;
+  twitter?: string | null;
+  instagram?: string | null;
   followersCount: number;
   followingCount: number;
   isFollowedByMe: boolean;
@@ -45,11 +47,13 @@ export interface Room {
   visibility: RoomVisibility;
   houseId: string | null;
   houseName: string | null;
+  houseIcon?: string | null;
   hostId: string;
   speakers: RoomParticipant[];
   listeners: UserSummary[];
   speakersCount: number;
   listenersCount: number;
+  participantCount?: number;
   isLive: boolean;
   isRecording: boolean;
   chatEnabled: boolean;
@@ -64,6 +68,11 @@ export type RoomSummary = Pick<
 > & {
   topSpeakers: UserSummary[];
   topListeners: UserSummary[];
+  // Optional enrichments (populated by the feed mapper; absent in legacy mocks).
+  houseIcon?: string | null;
+  participantCount?: number;
+  scheduledFor?: string | null;
+  isLive?: boolean;
 };
 
 /* ============================================================

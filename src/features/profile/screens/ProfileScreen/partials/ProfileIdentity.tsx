@@ -1,7 +1,13 @@
 import React, { memo } from 'react';
 import { Pressable, Text, View } from 'react-native';
+import { FontAwesome } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import { Avatar } from '../../../../../shared/components/Avatar';
+import { colors } from '../../../../../shared/constants/theme';
+import {
+  openInstagramHandle,
+  openTwitterHandle,
+} from '../../../../extensions/utils/socialDeepLink';
 
 interface ProfileIdentityProps {
   avatarUrl: string | null | undefined;
@@ -14,6 +20,10 @@ interface ProfileIdentityProps {
   displayBio: string;
   isBioLong: boolean;
   bioExpanded: boolean;
+  /** Twitter / X handle (helpers sanitise the leading '@'). */
+  twitter?: string | null;
+  /** Instagram handle (helpers sanitise the leading '@'). */
+  instagram?: string | null;
   onCopyUsername: () => void;
   onToggleBio: () => void;
 }
@@ -28,10 +38,13 @@ const ProfileIdentity: React.FC<ProfileIdentityProps> = memo(
     displayBio,
     isBioLong,
     bioExpanded,
+    twitter,
+    instagram,
     onCopyUsername,
     onToggleBio,
   }) => {
     const { t } = useTranslation();
+    const hasSocial = Boolean(twitter || instagram);
     return (
       <>
         <Avatar
@@ -63,6 +76,33 @@ const ProfileIdentity: React.FC<ProfileIdentityProps> = memo(
                 </Text>
               </Pressable>
             )}
+          </View>
+        )}
+
+        {hasSocial && (
+          <View className="flex-row items-center justify-center gap-lg">
+            {twitter ? (
+              <Pressable
+                onPress={() => void openTwitterHandle(twitter)}
+                accessibilityRole="link"
+                accessibilityLabel={`Twitter @${twitter.replace(/^@+/, '')}`}
+                hitSlop={8}
+                className="active:opacity-60"
+              >
+                <FontAwesome name="twitter" size={22} color={colors.textMuted} />
+              </Pressable>
+            ) : null}
+            {instagram ? (
+              <Pressable
+                onPress={() => void openInstagramHandle(instagram)}
+                accessibilityRole="link"
+                accessibilityLabel={`Instagram @${instagram.replace(/^@+/, '')}`}
+                hitSlop={8}
+                className="active:opacity-60"
+              >
+                <FontAwesome name="instagram" size={22} color={colors.textMuted} />
+              </Pressable>
+            ) : null}
           </View>
         )}
       </>

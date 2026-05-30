@@ -23,6 +23,7 @@ export const useMyRoomHistory = (limit = 20) =>
 export interface RoomsFilter {
   topic?: string;
   following?: boolean;
+  clubs?: boolean;
 }
 
 export const useRooms = (filter: RoomsFilter = {}) =>

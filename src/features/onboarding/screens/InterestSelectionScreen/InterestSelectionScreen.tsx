@@ -1,34 +1,28 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
 import { useTranslation } from 'react-i18next';
 import { Button } from '../../../../shared/components/Button';
 import { colors, radii, spacing } from '../../../../shared/constants/theme';
-import { useApiErrorToast } from '../../../../shared/hooks/useApiErrorToast';
-import { useAuthStore } from '../../../auth/store/authStore';
 import { useOnboardingStore } from '../../store/onboardingStore';
 import { INTEREST_CATEGORIES, type InterestCategory } from '../../schemas';
+import type { OnboardingStackScreenProps } from '../../../../core/navigation/types';
 
+const MIN_INTERESTS = 3;
 const MAX_INTERESTS = 10;
 
 /**
- * Step 2 of onboarding. User toggles interest chips (min 1, max 10) and
- * taps "Finish" to flush the accumulated profile + interests to the
- * backend. On success the authStore's user.hasCompletedOnboarding flips,
- * which the root navigator uses to switch to the Main tabs.
+ * Step 2 of onboarding. User toggles interest chips (min 3, max 10) and
+ * taps "Next" to persist the selection into the onboarding store, then
+ * advances to the SuggestedFollows step — which owns the final
+ * completeOnboarding() call. The interests survive in the store until then.
  */
 export const InterestSelectionScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const { t } = useTranslation();
-  const complete = useAuthStore(s => s.completeOnboarding);
-  const profile = useOnboardingStore(s => ({
-    displayName: s.displayName,
-    bio: s.bio,
-    avatarUrl: s.avatarUrl,
-  }));
+  const navigation = useNavigation<OnboardingStackScreenProps<'InterestSelection'>['navigation']>();
   const setInterestsInStore = useOnboardingStore(s => s.setInterests);
-  const resetOnboarding = useOnboardingStore(s => s.reset);
-  const toastError = useApiErrorToast();
 
   const [selected, setSelected] = useState<Set<InterestCategory>>(new Set());
   const [submitting, setSubmitting] = useState(false);
@@ -46,31 +40,19 @@ export const InterestSelectionScreen: React.FC = () => {
   }, []);
 
   const interests = useMemo(() => [...selected], [selected]);
-  const canSubmit = interests.length >= 1 && !submitting;
+  const canSubmit = interests.length >= MIN_INTERESTS && !submitting;
 
-  const onFinish = useCallback(async () => {
-    if (interests.length === 0) return;
+  const onFinish = useCallback(() => {
+    if (interests.length < MIN_INTERESTS) return;
     setSubmitting(true);
-    try {
-      setInterestsInStore(interests);
-      await complete({
-        displayName: profile.displayName,
-        bio: profile.bio,
-        avatarUrl: profile.avatarUrl,
-        interests,
-      });
-      resetOnboarding();
-      // RootNavigator observes user.hasCompletedOnboarding and swaps to
-      // the Main stack automatically; no manual navigation here.
-    } catch (err) {
-      // Surface network/timeout/server (422) failures instead of failing
-      // silently. We intentionally do NOT resetOnboarding() here so the
-      // selected interests survive and the user can simply tap Finish again.
-      toastError(err);
-    } finally {
-      setSubmitting(false);
-    }
-  }, [complete, interests, profile, resetOnboarding, setInterestsInStore, toastError]);
+    // Persist the selection so the SuggestedFollows step can flush it to the
+    // backend when the user finishes onboarding there. We deliberately do NOT
+    // complete onboarding here — that now happens after the follow-suggestions
+    // step. Leaving `submitting` true keeps the button disabled during the
+    // navigation transition; the screen unmounts before it would matter.
+    setInterestsInStore(interests);
+    navigation.navigate('SuggestedFollows');
+  }, [interests, navigation, setInterestsInStore]);
 
   return (
     <View className="flex-1 bg-background" style={{ paddingTop: insets.top + spacing.xl }}>
@@ -84,7 +66,7 @@ export const InterestSelectionScreen: React.FC = () => {
           </Text>
           <Text className="text-md text-ink-muted">{t('onboarding.interests.subtitle')}</Text>
           <Text className="text-sm text-ink-muted">
-            {interests.length === 0
+            {interests.length < MIN_INTERESTS
               ? t('onboarding.interests.minHint')
               : `${interests.length} / ${MAX_INTERESTS}`}
           </Text>

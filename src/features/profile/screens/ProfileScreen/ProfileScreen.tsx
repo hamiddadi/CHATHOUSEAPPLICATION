@@ -231,6 +231,8 @@ export const ProfileScreen: React.FC = () => {
             displayBio={displayBio}
             isBioLong={isBioLong}
             bioExpanded={bioExpanded}
+            twitter={user.twitter}
+            instagram={user.instagram}
             onCopyUsername={handleCopyUsername}
             onToggleBio={() => setBioExpanded(!bioExpanded)}
           />

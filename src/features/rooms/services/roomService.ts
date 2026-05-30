@@ -59,6 +59,8 @@ interface RawRoom {
   endedAt: string | null;
   host?: RawUser;
   participants?: RawParticipant[];
+  club?: { id: string; name: string; iconUrl: string | null } | null;
+  participantCount?: number;
   _count?: { rsvps?: number; participants?: number };
   knownSpeakers?: RawUser[];
   hasKnownSpeakers?: boolean;
@@ -119,14 +121,16 @@ const toRoom = (raw: RawRoom): Room => {
     categoryEmoji: CATEGORY_EMOJI[category],
     visibility: pickVisibility(raw),
     houseId: raw.clubId,
-    // houseName would require a separate fetch; left null until the
-    // backend embeds the club in the room payload.
-    houseName: null,
+    // The backend now embeds the club (id/name/iconUrl) in the room
+    // payload, so we surface its name + icon directly.
+    houseName: raw.club?.name ?? null,
+    houseIcon: raw.club?.iconUrl ?? null,
     hostId: raw.hostId,
     speakers,
     listeners,
     speakersCount: speakers.length,
     listenersCount: listeners.length,
+    participantCount: raw.participantCount ?? speakers.length + listeners.length,
     isLive: raw.isLive,
     isRecording: false,
     chatEnabled: raw.chatEnabled ?? true,
@@ -146,9 +150,13 @@ const toSummary = (raw: RawRoom): RoomSummary => {
     title: raw.title,
     category,
     categoryEmoji: CATEGORY_EMOJI[category],
-    houseName: null,
+    houseName: raw.club?.name ?? null,
+    houseIcon: raw.club?.iconUrl ?? null,
     speakersCount: speakers.length,
     listenersCount: listeners.length,
+    participantCount: raw.participantCount ?? speakers.length + listeners.length,
+    scheduledFor: raw.scheduledFor,
+    isLive: raw.isLive,
     topSpeakers: speakers.slice(0, TOP_SPEAKERS_PREVIEW).map(p => toSummaryUser(p.user)),
     topListeners: listeners.slice(0, TOP_LISTENERS_PREVIEW).map(p => toSummaryUser(p.user)),
   };
@@ -175,15 +183,33 @@ const visibilityToBackend = (
 export interface RoomsListFilter {
   topic?: string;
   following?: boolean;
+  clubs?: boolean;
+  // When set, bypass the personalised feed and hit GET /rooms which honors
+  // the list filters (notably `upcoming` for scheduled rooms).
+  filter?: 'live' | 'upcoming' | 'mine';
 }
 
 export const roomService = {
   async list(filter: RoomsListFilter = {}): Promise<RoomSummary[]> {
+    // The `upcoming`/`mine`/`live` list filters live on GET /rooms (the
+    // personalised /rooms/feed only ranks live rooms). Route there when a
+    // `filter` is requested so the "À venir" band can pull scheduled rooms.
+    if (filter.filter) {
+      const res = await apiClient.get<Envelope<RawRoom[]>>('/rooms', {
+        params: {
+          limit: FEED_PAGE_SIZE,
+          filter: filter.filter,
+          ...(filter.clubs ? { clubs: 'true' } : {}),
+        },
+      });
+      return res.data.data.map(toSummary);
+    }
     const res = await apiClient.get<Envelope<RawRoom[]>>('/rooms/feed', {
       params: {
         limit: FEED_PAGE_SIZE,
         ...(filter.topic ? { topic: filter.topic } : {}),
         ...(filter.following ? { following: 'true' } : {}),
+        ...(filter.clubs ? { clubs: 'true' } : {}),
       },
     });
     return res.data.data.map(toSummary);
