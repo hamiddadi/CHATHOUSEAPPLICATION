@@ -7,7 +7,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated from 'react-native-reanimated';
 import { useQuery } from '@tanstack/react-query';
 import { Avatar } from '../../../../shared/components/Avatar';
-import { Loader } from '../../../../shared/components/Loader';
 import { EmptyState } from '../../../../shared/components/EmptyState';
 import { useAnimatedPress } from '../../../../shared/hooks/useAnimatedPress';
 import { colors, layout, spacing } from '../../../../shared/constants/theme';
@@ -17,6 +16,7 @@ import { useRooms, roomKeys } from '../../hooks/useRooms';
 import { roomService } from '../../services/roomService';
 import { useHallwaySocket } from '../../hooks/useHallwaySocket';
 import { useUnreadNotificationCount } from '../../../notifications/hooks/useNotifications';
+import { RoomFeedSkeleton } from './RoomFeedSkeleton';
 
 type Nav = NativeStackNavigationProp<RoomStackParamList, 'RoomFeed'>;
 
@@ -380,7 +380,7 @@ export const RoomFeedScreen: React.FC = () => {
       />
 
       {isLoading ? (
-        <Loader fullscreen accessibilityLabel="Loading live rooms" />
+        <RoomFeedSkeleton />
       ) : isError ? (
         <EmptyState
           title="Couldn't load rooms"

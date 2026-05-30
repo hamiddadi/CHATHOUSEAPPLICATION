@@ -1,11 +1,18 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { houseService, type CreateHouseInput } from '../services/houseService';
+import {
+  houseService,
+  type CreateHouseInput,
+  type HouseMemberRole,
+  type HouseRoom,
+} from '../services/houseService';
 import type { House, HouseSummary } from '../../../shared/types/domain';
 
 export const houseKeys = {
   all: ['houses'] as const,
   list: (filter: 'mine' | 'discover') => [...houseKeys.all, 'list', filter] as const,
   detail: (id: string) => [...houseKeys.all, 'detail', id] as const,
+  rooms: (id: string, filter: 'live' | 'upcoming') =>
+    [...houseKeys.all, 'rooms', id, filter] as const,
 };
 
 export const useHouses = (filter: 'mine' | 'discover' = 'mine') =>
@@ -57,3 +64,31 @@ export const useAcceptInvitation = () => {
     },
   });
 };
+
+export const useSetMemberRole = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      houseId,
+      userId,
+      role,
+    }: {
+      houseId: string;
+      userId: string;
+      role: HouseMemberRole;
+    }) => houseService.setMemberRole(houseId, userId, role),
+    onSuccess: updated => {
+      // The PATCH returns the refreshed club; seed the detail cache and
+      // invalidate so any list/membership-derived views refetch.
+      qc.setQueryData(houseKeys.detail(updated.id), updated);
+      void qc.invalidateQueries({ queryKey: houseKeys.all });
+    },
+  });
+};
+
+export const useHouseRooms = (houseId: string, filter: 'live' | 'upcoming') =>
+  useQuery<HouseRoom[]>({
+    queryKey: houseKeys.rooms(houseId, filter),
+    queryFn: () => houseService.listRooms(houseId, filter),
+    enabled: houseId.length > 0,
+  });

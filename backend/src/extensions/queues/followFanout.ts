@@ -25,7 +25,7 @@ const FANOUT_CONCURRENCY = 20; // notifications dispatched in parallel per chunk
 
 let timer: NodeJS.Timeout | null = null;
 
-const fanoutOne = async (roomId: string): Promise<number> => {
+export const fanoutOne = async (roomId: string): Promise<number> => {
   // Idempotency guard — atomic SET NX
   const claimed = await redis.set(DEDUP_KEY(roomId), '1', {
     NX: true,

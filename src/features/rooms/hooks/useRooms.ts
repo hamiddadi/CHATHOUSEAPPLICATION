@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { env } from '../../../config/env';
 import { roomService, type CreateRoomInput } from '../services/roomService';
 import type { Room, RoomSummary } from '../../../shared/types/domain';
@@ -30,6 +30,11 @@ export const useRooms = (filter: RoomsFilter = {}) =>
   useQuery<RoomSummary[]>({
     queryKey: [...roomKeys.list(), filter],
     queryFn: () => roomService.list(filter),
+    // Keep the previously-fetched feed on screen while a new filter loads so
+    // switching pills doesn't flash the skeleton. `isLoading` stays false on
+    // these transitions (data is defined), so the skeleton only shows on the
+    // genuine first load with an empty cache.
+    placeholderData: keepPreviousData,
   });
 
 export const useRoom = (roomId: string) =>

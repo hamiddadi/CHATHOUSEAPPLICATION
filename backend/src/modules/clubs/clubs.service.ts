@@ -1,9 +1,16 @@
-import type { Prisma } from '@prisma/client';
+import type { ClubMemberRole, Prisma } from '@prisma/client';
 import { prisma } from '../../config/database';
 import { AppError } from '../../middlewares/error.middleware';
 import { notificationsService } from '../notifications/notifications.service';
 import { clubInclude, privacyToDb, toApi, toSummary } from './clubs.mapper';
 import type { CreateClubInput, ListClubsInput, UpdateClubInput } from './clubs.schema';
+
+/** Map the frontend's lowercase role to the Prisma ClubMemberRole enum. */
+const roleToDb = (role: 'admin' | 'moderator' | 'member'): ClubMemberRole => {
+  if (role === 'admin') return 'ADMIN';
+  if (role === 'moderator') return 'MODERATOR';
+  return 'MEMBER';
+};
 
 /** Slugify a club name: lowercase, replace spaces with hyphens, strip non-alnum. */
 const slugify = (name: string): string =>
@@ -189,6 +196,43 @@ export const clubsService = {
       prisma.club.update({ where: { id: clubId }, data: { memberCount: { increment: 1 } } }),
     ]);
     return { joined: true as const };
+  },
+
+  /**
+   * Change a member's role within a club. Only an ADMIN member or the club
+   * owner may do this. The owner's role can never be altered (they remain the
+   * authoritative ADMIN), and the target must already be a member.
+   */
+  async setMemberRole(
+    viewerId: string,
+    clubId: string,
+    targetUserId: string,
+    role: 'admin' | 'moderator' | 'member',
+  ) {
+    const club = await prisma.club.findUnique({ where: { id: clubId } });
+    if (!club) throw new AppError('CLUB_001');
+
+    // Authorisation: viewer must be the owner or an ADMIN member.
+    const viewerMembership = await prisma.clubMember.findUnique({
+      where: { clubId_userId: { clubId, userId: viewerId } },
+    });
+    const isAdmin = viewerMembership?.role === 'ADMIN';
+    if (!isAdmin && club.ownerId !== viewerId) throw new AppError('CLUB_002');
+
+    // The owner's role is immutable — they always stay ADMIN.
+    if (club.ownerId === targetUserId) throw new AppError('CLUB_002');
+
+    const targetMembership = await prisma.clubMember.findUnique({
+      where: { clubId_userId: { clubId, userId: targetUserId } },
+    });
+    if (!targetMembership) throw new AppError('CLUB_002');
+
+    await prisma.clubMember.update({
+      where: { clubId_userId: { clubId, userId: targetUserId } },
+      data: { role: roleToDb(role) },
+    });
+
+    return this.get(viewerId, clubId);
   },
 
   /**
