@@ -64,7 +64,14 @@ const wireLifecycle = (s: Socket): void => {
  */
 export const getSocket = async (): Promise<Socket | null> => {
   if (!env.REALTIME_ENABLED) return null;
-  if (socket?.connected) return socket;
+  // Reuse the singleton even while it's mid-reconnect: returning it (and nudging
+  // .connect(), which is a no-op if already connecting) prevents a second io()
+  // instance — the old one would otherwise leak with its lifecycle handlers
+  // still attached, duplicating every server event.
+  if (socket) {
+    if (!socket.connected) socket.connect();
+    return socket;
+  }
   if (connecting) return connecting;
 
   connecting = (async () => {

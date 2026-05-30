@@ -10,6 +10,7 @@ import { Input } from '../../../../shared/components/Input';
 import { colors, spacing } from '../../../../shared/constants/theme';
 import type { RoomStackParamList } from '../../../../core/navigation/types';
 import { errorMessage } from '../../../../shared/utils/errorMessage';
+import { mediaService } from '../../../../shared/services/api/mediaService';
 import { useCreateHouse } from '../../hooks/useHouses';
 
 type Nav = NativeStackNavigationProp<RoomStackParamList, 'CreateHouse'>;
@@ -89,6 +90,9 @@ export const CreateHouseScreen: React.FC = () => {
   const [description, setDescription] = useState('');
   const [privacy, setPrivacy] = useState<Privacy>('open');
   const [iconUri, setIconUri] = useState<string | null>(null);
+  const [iconBase64, setIconBase64] = useState<string | null>(null);
+  const [iconMime, setIconMime] = useState<string | undefined>(undefined);
+  const [uploading, setUploading] = useState(false);
 
   const createHouse = useCreateHouse();
 
@@ -107,27 +111,42 @@ export const CreateHouseScreen: React.FC = () => {
       quality: 0.8,
       allowsEditing: true,
       aspect: [1, 1],
+      base64: true,
     });
     if (result.canceled) return;
-    const uri = result.assets[0]?.uri;
-    if (uri) setIconUri(uri);
+    const asset = result.assets[0];
+    if (asset) {
+      setIconUri(asset.uri);
+      setIconBase64(asset.base64 ?? null);
+      setIconMime(asset.mimeType);
+    }
   }, []);
 
   const handleCreate = useCallback(async () => {
     try {
+      // A freshly-picked icon is a local file:// URI — upload it first and send
+      // the REMOTE https URL. Sending file:// persisted an unusable path that
+      // never loaded for other members.
+      let iconUrl: string | undefined;
+      if (iconBase64) {
+        setUploading(true);
+        iconUrl = await mediaService.uploadAvatar(iconBase64, iconMime);
+      }
       await createHouse.mutateAsync({
         name,
         description,
         privacy,
-        iconUrl: iconUri,
+        iconUrl,
       });
       navigation.goBack();
     } catch (e) {
       Alert.alert('Erreur', errorMessage(e, 'Échec de la création'));
+    } finally {
+      setUploading(false);
     }
-  }, [createHouse, description, iconUri, name, navigation, privacy]);
+  }, [createHouse, description, iconBase64, iconMime, name, navigation, privacy]);
 
-  const canCreate = name.trim().length >= 2 && !createHouse.isPending;
+  const canCreate = name.trim().length >= 2 && !createHouse.isPending && !uploading;
 
   return (
     <View className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
@@ -211,7 +230,7 @@ export const CreateHouseScreen: React.FC = () => {
           size="lg"
           fullWidth
           disabled={!canCreate}
-          loading={createHouse.isPending}
+          loading={createHouse.isPending || uploading}
           onPress={handleCreate}
         />
       </ScrollView>

@@ -10,10 +10,11 @@ import { Loader } from '../../../../shared/components/Loader';
 import { EmptyState } from '../../../../shared/components/EmptyState';
 import { colors, spacing } from '../../../../shared/constants/theme';
 import type { RoomStackParamList } from '../../../../core/navigation/types';
+import { errorMessage } from '../../../../shared/utils/errorMessage';
 import { useAuthStore } from '../../../auth/store/authStore';
 import type { HouseMember } from '../../../../shared/types/domain';
 import type { HouseMemberRole, HouseRoom } from '../../services/houseService';
-import { useHouse, useHouseRooms, useSetMemberRole } from '../../hooks/useHouses';
+import { useHouse, useHouseRooms, useJoinHouse, useSetMemberRole } from '../../hooks/useHouses';
 
 type Nav = NativeStackNavigationProp<RoomStackParamList, 'HouseDetail'>;
 type Route = RouteProp<RoomStackParamList, 'HouseDetail'>;
@@ -33,6 +34,7 @@ export const HouseDetailScreen: React.FC = () => {
   const { data: liveRooms } = useHouseRooms(houseId, 'live');
   const { data: upcomingRooms } = useHouseRooms(houseId, 'upcoming');
   const setMemberRole = useSetMemberRole();
+  const joinHouse = useJoinHouse();
 
   const viewerId = useAuthStore(s => s.user?.id ?? null);
 
@@ -49,6 +51,11 @@ export const HouseDetailScreen: React.FC = () => {
     () => navigation.navigate('InviteMember', { houseId }),
     [navigation, houseId],
   );
+  const handleJoin = useCallback(() => {
+    joinHouse.mutate(houseId, {
+      onError: e => Alert.alert('Erreur', errorMessage(e, 'Impossible de rejoindre cette house.')),
+    });
+  }, [houseId, joinHouse]);
 
   const handleOptions = useCallback(() => {
     const shareUrl = `https://app.chathouse.com/h/${houseId}`;
@@ -108,9 +115,11 @@ export const HouseDetailScreen: React.FC = () => {
     return <EmptyState title="House unavailable" description="This house may have been deleted." />;
   }
 
-  // The owner is the lone admin whose role the viewer can't reassign; we still
-  // let admins manage every other member (including other admins/mods).
-  const isManageable = (member: HouseMember): boolean => canManageRoles && member.id !== viewerId;
+  // Admins can manage every member except themselves and the owner — the
+  // backend rejects any role change targeting the owner, so offering it would
+  // always fail. `house.ownerId` lets us distinguish the owner from other admins.
+  const isManageable = (member: HouseMember): boolean =>
+    canManageRoles && member.id !== viewerId && member.id !== house.ownerId;
 
   const renderRoomSection = (title: string, rooms: HouseRoom[] | undefined, live: boolean) => {
     if (!rooms || rooms.length === 0) return null;
@@ -198,12 +207,25 @@ export const HouseDetailScreen: React.FC = () => {
               <Text className="text-xs font-body text-ink-muted">rooms live</Text>
             </View>
           </View>
-          <Button
-            label="Invite members"
-            variant="primaryContainer"
-            size="md"
-            onPress={handleInvite}
-          />
+          {house.isJoinedByMe ? (
+            <Button
+              label="Invite members"
+              variant="primaryContainer"
+              size="md"
+              onPress={handleInvite}
+            />
+          ) : house.privacy === 'private' ? (
+            <Text className="text-xs font-body text-ink-muted">Sur invitation uniquement</Text>
+          ) : (
+            <Button
+              label="Rejoindre"
+              variant="primary"
+              size="md"
+              loading={joinHouse.isPending}
+              disabled={joinHouse.isPending}
+              onPress={handleJoin}
+            />
+          )}
         </View>
 
         {renderRoomSection('En direct', liveRooms, true)}

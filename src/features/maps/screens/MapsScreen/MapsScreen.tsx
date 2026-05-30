@@ -119,13 +119,18 @@ export const MapsScreen: React.FC = () => {
     [navigation],
   );
 
-  const handleSendMessage = useCallback(() => {
-    setSelected(null);
-    navigation.navigate('Main', {
-      screen: 'MessagesTab',
-      params: { screen: 'MessagesList' },
-    });
-  }, [navigation]);
+  const handleSendMessage = useCallback(
+    (userId: string) => {
+      setSelected(null);
+      // The DM service keys conversations by the peer's userId (conversationId
+      // === peerId), so open the thread directly with this follower.
+      navigation.navigate('Main', {
+        screen: 'MessagesTab',
+        params: { screen: 'ChatDetail', params: { conversationId: userId } },
+      });
+    },
+    [navigation],
+  );
 
   const initialRegion = useMemo(
     () => (coords ? regionFor(coords.latitude, coords.longitude) : DEFAULT_MAP_CENTER),

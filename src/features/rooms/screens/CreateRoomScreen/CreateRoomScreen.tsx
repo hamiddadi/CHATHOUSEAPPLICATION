@@ -261,7 +261,10 @@ export const CreateRoomScreen: React.FC = () => {
       });
       navigation.goBack();
     } catch (err) {
-      Alert.alert(t('createRoom.errorTitle'), errorMessage(err, t('createRoom.errorBody')));
+      Alert.alert(
+        t('createRoom.errorTitle', 'Création impossible'),
+        errorMessage(err, t('createRoom.errorBody', 'Impossible de créer la room. Réessaie.')),
+      );
     }
   }, [
     createRoom,

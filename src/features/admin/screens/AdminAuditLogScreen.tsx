@@ -105,7 +105,7 @@ Row.displayName = 'Row';
 
 export const AdminAuditLogScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
-  const { data, isLoading, isError, refetch } = useAdminAuditLog({ limit: 100 });
+  const { data, isLoading, isError, refetch, isRefetching } = useAdminAuditLog({ limit: 100 });
 
   return (
     <View className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
@@ -129,7 +129,7 @@ export const AdminAuditLogScreen: React.FC = () => {
           }}
           ListEmptyComponent={<EmptyState title="Vide" description="Aucune action enregistrée." />}
           onRefresh={refetch}
-          refreshing={isLoading}
+          refreshing={isRefetching}
           showsVerticalScrollIndicator={false}
         />
       )}

@@ -158,3 +158,14 @@ export const emitNotification = (
 export const emitNotificationCount = (userId: string, count: number): void => {
   ioRef?.to(userChannel(userId)).emit('notification:count', { count });
 };
+
+/**
+ * Pushes a freshly-created DM to both parties' personal channels so the
+ * recipient's client updates in realtime. The REST send path (chat.service)
+ * must call this — its clients never emit the `chat:send` socket event, so
+ * without it the recipient sees nothing until a manual refetch.
+ */
+export const emitChatMessage = (senderId: string, receiverId: string, msg: unknown): void => {
+  ioRef?.to(userChannel(senderId)).emit('chat:message', msg);
+  ioRef?.to(userChannel(receiverId)).emit('chat:message', msg);
+};

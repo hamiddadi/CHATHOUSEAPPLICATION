@@ -18,7 +18,12 @@ import type { MessageStackParamList } from '../../../../core/navigation/types';
 import type { Message, UserSummary } from '../../../../shared/types/domain';
 import { CURRENT_USER } from '../../../../shared/mocks/users.mock';
 import { useAuthStore } from '../../../auth/store/authStore';
-import { useConversation, useConversationMessages, useSendMessage } from '../../hooks/useMessages';
+import {
+  useConversation,
+  useConversationMessages,
+  useSendMessage,
+  useMarkConversationRead,
+} from '../../hooks/useMessages';
 import Bubble from './partials/Bubble';
 import DateSeparator from './partials/DateSeparator';
 import ChatHeader from './partials/ChatHeader';
@@ -113,6 +118,21 @@ export const ChatDetailScreen: React.FC = () => {
   const { data: conversation } = useConversation(route.params.conversationId);
   const { data: messages, isLoading } = useConversationMessages(route.params.conversationId);
   const sendMessage = useSendMessage();
+  const markRead = useMarkConversationRead();
+
+  // Opening a conversation with unread messages marks them read server-side so
+  // the row pip and the Messages tab badge clear. `markedRef` avoids re-firing
+  // on every render while the conversations cache re-hydrates to 0.
+  const markedRef = useRef(false);
+  useEffect(() => {
+    markedRef.current = false;
+  }, [route.params.conversationId]);
+  useEffect(() => {
+    if ((conversation?.unreadCount ?? 0) > 0 && !markedRef.current && !markRead.isPending) {
+      markedRef.current = true;
+      markRead.mutate(route.params.conversationId);
+    }
+  }, [conversation?.unreadCount, route.params.conversationId, markRead]);
 
   const handleBack = useCallback(() => navigation.goBack(), [navigation]);
   const handleSend = useCallback(async () => {

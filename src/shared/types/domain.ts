@@ -93,6 +93,8 @@ export interface House {
   categoryEmoji: string;
   iconUrl: string | null;
   privacy: HousePrivacy;
+  /** Owner's userId — used to keep the owner's role immutable in the UI. */
+  ownerId: string;
   membersCount: number;
   liveRoomsCount: number;
   isJoinedByMe: boolean;

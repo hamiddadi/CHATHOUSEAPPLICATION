@@ -73,8 +73,15 @@ export const useExtCaptions = (roomId: string | null) => {
       if (cancelled || !socket) return;
 
       const onLine = (payload: CaptionLine): void => {
-        const next = [...linesRef.current.filter(l => Date.now() - l.at < STALE_MS), payload];
-        if (next.length > ROLLING_WINDOW) next.splice(0, next.length - ROLLING_WINDOW);
+        // Upsert by id: an interim line (isFinal=false) and its final share the
+        // same id, so replace in place instead of appending — otherwise the
+        // rolling window holds duplicate-key rows and the caption repeats.
+        const fresh = linesRef.current.filter(l => Date.now() - l.at < STALE_MS);
+        const idx = fresh.findIndex(l => l.id === payload.id);
+        const merged =
+          idx >= 0 ? fresh.map((l, i) => (i === idx ? payload : l)) : [...fresh, payload];
+        const next =
+          merged.length > ROLLING_WINDOW ? merged.slice(merged.length - ROLLING_WINDOW) : merged;
         setLines(next);
       };
 

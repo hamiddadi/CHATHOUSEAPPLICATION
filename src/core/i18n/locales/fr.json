@@ -236,7 +236,9 @@
     "coHostsHint": "Invite jusqu'à 5 personnes à co-animer.",
     "coHostsSearchPlaceholder": "Rechercher par pseudo",
     "startRoom": "Démarrer",
-    "closeA11y": "Fermer sans démarrer"
+    "closeA11y": "Fermer sans démarrer",
+    "errorTitle": "Création impossible",
+    "errorBody": "Impossible de créer la room. Réessaie."
   },
   "notifications": {
     "title": "Notifications",

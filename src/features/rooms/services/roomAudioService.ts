@@ -115,8 +115,12 @@ const cuidToAgoraUid = (cuid: string): number => {
   let hash = 0x811c9dc5; // FNV-1a 32-bit offset basis
   for (let i = 0; i < cuid.length; i++) {
     hash ^= cuid.charCodeAt(i);
-    // 32-bit FNV prime multiply, kept inside 32 bits via `>>> 0`.
-    hash = (hash * 0x01000193) >>> 0;
+    // 32-bit FNV prime multiply. MUST use Math.imul (32-bit integer multiply),
+    // NOT `*`: the float product of `hash * 0x01000193` exceeds 2^53 and loses
+    // low bits before `>>> 0`, diverging from the backend hash
+    // (agora.service.ts uses Math.imul). Any drift breaks the agoraUid ↔ userId
+    // correlation and kills the remote-speaker indicator.
+    hash = Math.imul(hash, 0x01000193) >>> 0;
   }
   // Agora's UID range is 1..2^32-1; 0 is reserved for "auto-assign".
   return hash === 0 ? 1 : hash;

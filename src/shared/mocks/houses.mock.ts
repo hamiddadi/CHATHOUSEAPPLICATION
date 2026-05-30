@@ -14,6 +14,7 @@ const member = (idx: number, role: HouseMember['role']): HouseMember => ({
 export const MOCK_HOUSES: readonly House[] = [
   {
     id: 'h-yc',
+    ownerId: pickUser(13).id,
     name: 'Y Combinator',
     description: "The world's most prestigious startup accelerator.",
     category: 'business',
@@ -34,6 +35,7 @@ export const MOCK_HOUSES: readonly House[] = [
   },
   {
     id: 'h-indie',
+    ownerId: pickUser(0).id,
     name: 'Indie Hackers',
     description: 'Solo founders and small teams building public.',
     category: 'tech',
@@ -48,6 +50,7 @@ export const MOCK_HOUSES: readonly House[] = [
   },
   {
     id: 'h-design-mvts',
+    ownerId: pickUser(3).id,
     name: 'Design Movements',
     description: 'Where designers argue about grids.',
     category: 'design',
@@ -62,6 +65,7 @@ export const MOCK_HOUSES: readonly House[] = [
   },
   {
     id: 'h-dao',
+    ownerId: pickUser(7).id,
     name: 'DAO Global',
     description: 'Decentralized governance enthusiasts.',
     category: 'crypto',
@@ -76,6 +80,7 @@ export const MOCK_HOUSES: readonly House[] = [
   },
   {
     id: 'h-ai',
+    ownerId: pickUser(0).id,
     name: 'AI Weekly',
     description: 'Keep up with the bleeding edge of AI.',
     category: 'ai',
@@ -90,6 +95,7 @@ export const MOCK_HOUSES: readonly House[] = [
   },
   {
     id: 'h-women-tech',
+    ownerId: pickUser(1).id,
     name: 'Women in Tech',
     description: 'Community for women building in tech.',
     category: 'tech',
@@ -104,6 +110,7 @@ export const MOCK_HOUSES: readonly House[] = [
   },
   {
     id: 'h-ui-masters',
+    ownerId: pickUser(3).id,
     name: 'UI Masters Club',
     description: 'The craft of interfaces.',
     category: 'design',
@@ -118,6 +125,7 @@ export const MOCK_HOUSES: readonly House[] = [
   },
   {
     id: 'h-product-club',
+    ownerId: pickUser(2).id,
     name: 'The Product Club',
     description: 'PMs, designers, and engineers who ship.',
     category: 'business',

@@ -29,7 +29,8 @@ export const shareService = {
     });
     if (!room) throw extError('CLUB_REQ_NOT_FOUND', 'Room not found');
 
-    const url = `${ROOM_SHARE_BASE}/r/${room.id}`;
+    // Must match the deep-link route declared in the app (Room: 'room/:roomId').
+    const url = `${ROOM_SHARE_BASE}/room/${room.id}`;
     const host = room.host.displayName ?? room.host.username ?? 'a host';
     const isScheduled = Boolean(room.scheduledFor);
     const verb = isScheduled ? 'Join me' : "I'm live";

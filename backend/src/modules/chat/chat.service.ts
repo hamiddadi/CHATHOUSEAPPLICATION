@@ -1,6 +1,7 @@
 import { prisma } from '../../config/database';
 import { AppError } from '../../middlewares/error.middleware';
 import { notificationsService } from '../notifications/notifications.service';
+import { emitChatMessage } from '../../socket/realtime';
 import type { ListMessagesInput, SendMessageInput } from './chat.schema';
 
 const publicUser = {
@@ -196,9 +197,14 @@ export const chatService = {
       include: { sender: { select: publicUser } },
     });
 
-    // Fire-and-forget notification + push. The recipient's in-app socket
-    // gets the message directly via chat:message; the Notification row
-    // is the offline fallback that lights up the bell badge next launch.
+    // Push the message to both parties in realtime. REST is the only send path
+    // the clients use (they never emit `chat:send`), so this is what makes the
+    // recipient's conversation list / unread badge / open thread update live.
+    emitChatMessage(senderId, receiverId, msg);
+
+    // Fire-and-forget notification + push. The realtime emit above handles the
+    // in-app update; the Notification row is the offline fallback that lights
+    // up the bell badge next launch.
     void notificationsService.create({
       userId: receiverId,
       type: 'NEW_MESSAGE',

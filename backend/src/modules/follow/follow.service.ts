@@ -13,6 +13,16 @@ const publicUser = {
   bio: true,
 } as const;
 
+/** Subset of `ids` that `viewerId` currently follows — one query, no N+1. */
+const followedSubset = async (viewerId: string, ids: string[]): Promise<Set<string>> => {
+  if (ids.length === 0) return new Set();
+  const rows = await prisma.follow.findMany({
+    where: { followerId: viewerId, followingId: { in: ids } },
+    select: { followingId: true },
+  });
+  return new Set(rows.map(r => r.followingId));
+};
+
 export const followService = {
   async follow(followerId: string, followingId: string) {
     if (followerId === followingId) throw new AppError('USER_003');
@@ -91,7 +101,7 @@ export const followService = {
     return { following: false };
   },
 
-  async listFollowers(userId: string, limit = 50, cursor?: string) {
+  async listFollowers(userId: string, viewerId: string, limit = 50, cursor?: string) {
     const rows = await prisma.follow.findMany({
       where: {
         followingId: userId,
@@ -101,15 +111,22 @@ export const followService = {
       include: { follower: { select: publicUser } },
       take: limit + 1,
     });
-    return cursorPage(
+    const page = cursorPage(
       rows,
       limit,
       r => r.createdAt.toISOString(),
       r => r.follower,
     );
+    // Stamp the viewer's follow relationship so the client's Follow/Following
+    // toggle reflects reality (the public select can't carry this per-viewer flag).
+    const followed = await followedSubset(
+      viewerId,
+      page.data.map(u => u.id),
+    );
+    return { ...page, data: page.data.map(u => ({ ...u, isFollowedByMe: followed.has(u.id) })) };
   },
 
-  async listFollowing(userId: string, limit = 50, cursor?: string) {
+  async listFollowing(userId: string, viewerId: string, limit = 50, cursor?: string) {
     const rows = await prisma.follow.findMany({
       where: {
         followerId: userId,
@@ -119,12 +136,17 @@ export const followService = {
       include: { following: { select: publicUser } },
       take: limit + 1,
     });
-    return cursorPage(
+    const page = cursorPage(
       rows,
       limit,
       r => r.createdAt.toISOString(),
       r => r.following,
     );
+    const followed = await followedSubset(
+      viewerId,
+      page.data.map(u => u.id),
+    );
+    return { ...page, data: page.data.map(u => ({ ...u, isFollowedByMe: followed.has(u.id) })) };
   },
 
   /**

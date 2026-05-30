@@ -16,11 +16,20 @@ export const clubsListApi = {
    * Reuses existing `/clubs/me` route — falls back to `/users/me/clubs`.
    */
   async myClubs(): Promise<ClubLite[]> {
-    const paths = ['/clubs/me', '/users/me/clubs', '/clubs?member=me'];
+    // `filter=mine` is the param the backend actually honours (listClubsSchema);
+    // the other two paths are tolerated fallbacks for older deployments.
+    const paths = ['/clubs/me', '/users/me/clubs', '/clubs?filter=mine'];
     for (const p of paths) {
       try {
-        const { data } = await apiClient.get<{ items: ClubLite[] } | ClubLite[]>(p);
-        return Array.isArray(data) ? data : data.items;
+        const { data } = await apiClient.get<unknown>(p);
+        // sendOk wraps in { success, data }; also tolerate { items } and a bare
+        // array. NEVER return undefined — a non-array 200 just moves to the next
+        // path rather than poisoning the caller (the sheet spreads this value).
+        const payload = Array.isArray(data)
+          ? data
+          : ((data as { data?: ClubLite[]; items?: ClubLite[] })?.data ??
+            (data as { items?: ClubLite[] })?.items);
+        if (Array.isArray(payload)) return payload;
       } catch (err) {
         const status = (err as { response?: { status?: number } })?.response?.status;
         if (status && status !== 404 && status !== 405) throw err;

@@ -65,6 +65,10 @@ export const useFollowersOnMap = (): FollowerOnMap[] => {
           f.id === m.userId
             ? {
                 ...f,
+                // A follower emitting moves is by definition active right now —
+                // refresh freshness so the card doesn't show a stale "Nm ago".
+                presence: 'online',
+                lastSeenMinutesAgo: 0,
                 location: { ...f.location, latitude: m.latitude, longitude: m.longitude },
               }
             : f,

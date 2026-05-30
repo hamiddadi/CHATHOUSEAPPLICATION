@@ -3,7 +3,10 @@ import { topicsApi, type FlatTopic, type Topic } from '../api/topicsApi';
 
 export const extTopicsTreeKey = ['ext', 'topics', 'tree'] as const;
 export const extTopicsFlatKey = (q?: string, parent?: string | null) =>
-  ['ext', 'topics', 'flat', q ?? '', parent ?? 'root'] as const;
+  // Three distinct semantics must not collide in the cache:
+  // parent===null → roots only ('root'); parent===undefined → all topics ('all');
+  // parent==='<slug>' → children of that slug.
+  ['ext', 'topics', 'flat', q ?? '', parent === null ? 'root' : (parent ?? 'all')] as const;
 
 export const useExtTopicsTree = () =>
   useQuery({
@@ -15,7 +18,10 @@ export const useExtTopicsTree = () =>
 export const useExtTopicsFlat = (q?: string, parent?: string | null) =>
   useQuery<FlatTopic[]>({
     queryKey: extTopicsFlatKey(q, parent),
-    queryFn: () => topicsApi.flat({ q, parent: parent ?? undefined }),
+    // Pass `parent` through verbatim — topicsApi.flat distinguishes null
+    // (roots only) from undefined (all). Collapsing null→undefined here made
+    // the root filter unreachable.
+    queryFn: () => topicsApi.flat({ q, parent }),
     staleTime: 60_000,
   });
 

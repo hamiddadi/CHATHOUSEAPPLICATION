@@ -236,7 +236,9 @@
     "coHostsHint": "Invite up to 5 people to co-host.",
     "coHostsSearchPlaceholder": "Search by username",
     "startRoom": "Start Room",
-    "closeA11y": "Close without starting"
+    "closeA11y": "Close without starting",
+    "errorTitle": "Couldn't start the room",
+    "errorBody": "We couldn't create your room. Please try again."
   },
   "notifications": {
     "title": "Notifications",

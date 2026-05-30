@@ -16,6 +16,7 @@ import { useRooms, roomKeys } from '../../hooks/useRooms';
 import { roomService } from '../../services/roomService';
 import { useHallwaySocket } from '../../hooks/useHallwaySocket';
 import { useUnreadNotificationCount } from '../../../notifications/hooks/useNotifications';
+import { formatScheduled } from '../../../../shared/utils/formatScheduled';
 import { RoomFeedSkeleton } from './RoomFeedSkeleton';
 
 type Nav = NativeStackNavigationProp<RoomStackParamList, 'RoomFeed'>;
@@ -240,22 +241,6 @@ const HeaderIcon: React.FC<{
   </Pressable>
 );
 
-// Short, locale-aware "when" label for a scheduled room. Falls back to a
-// plain date for events further out than a week.
-const formatScheduled = (iso: string | null | undefined): string => {
-  if (!iso) return '';
-  const ts = new Date(iso).getTime();
-  if (Number.isNaN(ts)) return '';
-  const diffMin = Math.round((ts - Date.now()) / 60_000);
-  if (diffMin <= 0) return 'Starting soon';
-  if (diffMin < 60) return `in ${diffMin}m`;
-  const diffHr = Math.round(diffMin / 60);
-  if (diffHr < 24) return `in ${diffHr}h`;
-  const diffDay = Math.round(diffHr / 24);
-  if (diffDay <= 7) return `in ${diffDay}d`;
-  return new Date(ts).toLocaleDateString();
-};
-
 interface UpcomingRowProps {
   rooms: readonly RoomSummary[];
   onOpen: (roomId: string) => void;
@@ -339,7 +324,7 @@ export const RoomFeedScreen: React.FC = () => {
   const [activeFilter, setActiveFilter] = useState<Filter>('All');
   const fab = useAnimatedPress({ scaleTo: 0.9 });
   const filterParams = useMemo(() => filterToParams(activeFilter), [activeFilter]);
-  const { data: rooms, isLoading, isError, refetch } = useRooms(filterParams);
+  const { data: rooms, isLoading, isError, refetch, isRefetching } = useRooms(filterParams);
 
   // Scheduled rooms shown as a horizontal "Upcoming" band above Live Now.
   // Backend's `upcoming` filter already orders by scheduledFor ascending.
@@ -392,7 +377,7 @@ export const RoomFeedScreen: React.FC = () => {
           renderItem={renderItem}
           keyExtractor={keyExtractor}
           ItemSeparatorComponent={renderSeparator}
-          refreshing={isLoading}
+          refreshing={isRefetching}
           onRefresh={refetch}
           contentContainerStyle={[
             styles.listContent,

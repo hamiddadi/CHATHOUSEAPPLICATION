@@ -25,6 +25,10 @@ export const ExtChatReactionsBar: React.FC<Props> = ({ messageId, initial, onCha
   const [reactions, setReactions] = useState<ReactionsByEmoji>(initial ?? {});
   const [pending, setPending] = useState<string | null>(null);
 
+  // Compare `initial` by content, not reference: an inline object literal from
+  // the parent changes reference every render and would otherwise re-run this
+  // effect and clobber the user's optimistic toggle.
+  const initialKey = initial ? JSON.stringify(initial) : null;
   useEffect(() => {
     if (initial) {
       setReactions(initial);
@@ -40,7 +44,8 @@ export const ExtChatReactionsBar: React.FC<Props> = ({ messageId, initial, onCha
     return () => {
       cancelled = true;
     };
-  }, [messageId, initial]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: resync only on id or content change
+  }, [messageId, initialKey]);
 
   const toggle = async (emoji: string): Promise<void> => {
     setPending(emoji);
