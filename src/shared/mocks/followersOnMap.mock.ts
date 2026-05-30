@@ -1,14 +1,11 @@
 import type { FollowerOnMap } from '../types/domain';
-import { MOCK_USER_SUMMARIES } from './users.mock';
+import { pickUser as basePickUser } from './_helpers';
 
 const DEFAULT_LAT = 14.7167;
 const DEFAULT_LNG = -17.4677;
 
-const pickUser = (idx: number): (typeof MOCK_USER_SUMMARIES)[number] => {
-  const u = MOCK_USER_SUMMARIES[idx] ?? MOCK_USER_SUMMARIES[0];
-  if (!u) throw new Error('MOCK_USER_SUMMARIES is empty.');
-  return u;
-};
+const pickUser = (idx: number): ReturnType<typeof basePickUser> =>
+  basePickUser(idx, 'MOCK_USER_SUMMARIES is empty.');
 
 /**
  * Mock followers spread around a default Dakar centroid.

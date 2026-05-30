@@ -45,13 +45,34 @@ const isPushAllowed = async (userId: string, type: NotificationType): Promise<bo
  * NotificationType values. Kept in one place so the API contract and
  * the UI don't drift.
  */
-const FILTER_GROUPS: Record<string, NotificationType[]> = {
+const FILTER_GROUPS = {
   rooms: ['ROOM_INVITE', 'ROOM_STARTED', 'HAND_ACCEPTED', 'RSVP_REMINDER', 'SPEAKER_REQUEST'],
   social: ['NEW_FOLLOWER', 'WAVE', 'NEW_MESSAGE', 'MENTION'],
   clubs: ['CLUB_INVITE'],
-};
+} satisfies Record<string, NotificationType[]>;
 
 export type NotificationFilter = keyof typeof FILTER_GROUPS | 'all';
+
+/**
+ * The complete set of filter values accepted by the notifications list
+ * endpoint: every surface bucket plus the catch-all 'all'. Single source
+ * of truth — the router validates incoming query strings against this
+ * instead of re-listing the values.
+ */
+export const FILTER_VALUES: readonly NotificationFilter[] = [
+  'all',
+  ...(Object.keys(FILTER_GROUPS) as (keyof typeof FILTER_GROUPS)[]),
+];
+
+/**
+ * Coerce a raw (untrusted) query value into a valid NotificationFilter,
+ * falling back to 'all' for anything unrecognised — including non-string
+ * values such as repeated query params.
+ */
+export const parseFilter = (raw: unknown): NotificationFilter =>
+  typeof raw === 'string' && (FILTER_VALUES as readonly string[]).includes(raw)
+    ? (raw as NotificationFilter)
+    : 'all';
 
 const unreadCacheKey = (userId: string) => `notif:unread:${userId}`;
 const UNREAD_CACHE_TTL = 60; // 60s

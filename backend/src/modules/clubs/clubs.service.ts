@@ -1,7 +1,8 @@
-import type { Prisma, ClubMemberRole, ClubPrivacy } from '@prisma/client';
+import type { Prisma } from '@prisma/client';
 import { prisma } from '../../config/database';
 import { AppError } from '../../middlewares/error.middleware';
 import { notificationsService } from '../notifications/notifications.service';
+import { clubInclude, privacyToDb, toApi, toSummary } from './clubs.mapper';
 import type { CreateClubInput, ListClubsInput, UpdateClubInput } from './clubs.schema';
 
 /** Slugify a club name: lowercase, replace spaces with hyphens, strip non-alnum. */
@@ -12,94 +13,6 @@ const slugify = (name: string): string =>
     .replace(/\s+/g, '-')
     .replace(/[^a-z0-9-]/g, '')
     .slice(0, 60);
-
-const publicUser = {
-  id: true,
-  username: true,
-  displayName: true,
-  avatarUrl: true,
-  bio: true,
-} as const;
-
-const clubInclude = {
-  members: {
-    include: { user: { select: publicUser } },
-    orderBy: { joinedAt: 'asc' },
-  },
-  _count: {
-    select: {
-      members: true,
-      rooms: { where: { isLive: true, endedAt: null } },
-    },
-  },
-} satisfies Prisma.ClubInclude;
-
-type ClubWithRelations = Prisma.ClubGetPayload<{ include: typeof clubInclude }>;
-
-// Frontend expects lowercase; Prisma stores uppercase enum values.
-const privacyToApi = (p: ClubPrivacy): 'open' | 'private' | 'social' => {
-  if (p === 'PRIVATE') return 'private';
-  if (p === 'SOCIAL') return 'social';
-  return 'open';
-};
-
-const roleToApi = (r: ClubMemberRole): 'admin' | 'moderator' | 'member' => {
-  if (r === 'ADMIN') return 'admin';
-  if (r === 'MODERATOR') return 'moderator';
-  return 'member';
-};
-
-const privacyToDb = (
-  p: 'open' | 'private' | 'social' | 'OPEN' | 'PRIVATE' | 'SOCIAL',
-): ClubPrivacy => {
-  const upper = p.toUpperCase();
-  if (upper === 'PRIVATE') return 'PRIVATE';
-  if (upper === 'SOCIAL') return 'SOCIAL';
-  return 'OPEN';
-};
-
-const userToSummary = (u: {
-  id: string;
-  username: string | null;
-  displayName: string | null;
-  avatarUrl: string | null;
-  bio: string | null;
-}) => ({
-  id: u.id,
-  username: u.username ?? '',
-  displayName: u.displayName ?? u.username ?? '',
-  avatarUrl: u.avatarUrl,
-  bio: u.bio ?? null,
-});
-
-const toApi = (club: ClubWithRelations, viewerId: string) => ({
-  id: club.id,
-  name: club.name,
-  description: club.description ?? '',
-  category: club.category,
-  categoryEmoji: club.categoryEmoji,
-  iconUrl: club.iconUrl,
-  privacy: privacyToApi(club.privacy),
-  membersCount: club._count.members,
-  liveRoomsCount: club._count.rooms,
-  isJoinedByMe: club.members.some(m => m.userId === viewerId),
-  members: club.members.map(m => ({
-    ...userToSummary(m.user),
-    role: roleToApi(m.role),
-    joinedAt: m.joinedAt.toISOString(),
-  })),
-  createdAt: club.createdAt.toISOString(),
-});
-
-const toSummary = (club: ClubWithRelations) => ({
-  id: club.id,
-  name: club.name,
-  category: club.category,
-  categoryEmoji: club.categoryEmoji,
-  iconUrl: club.iconUrl,
-  membersCount: club._count.members,
-  privacy: privacyToApi(club.privacy),
-});
 
 export const clubsService = {
   async list(viewerId: string, input: ListClubsInput) {

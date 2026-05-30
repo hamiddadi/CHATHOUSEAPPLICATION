@@ -1,6 +1,6 @@
-import { redis } from '../../../config/redis';
 import { prisma } from '../../../config/database';
 import { extError } from '../../utils/ExtAppError';
+import { readJson, writeJson } from '../../utils/redisJson';
 
 /**
  * Per-room extended settings (Module 5.5 / ROOM-INT-009 — restrict hand
@@ -48,20 +48,15 @@ const requireHostOrMod = async (roomId: string, userId: string): Promise<void> =
 
 export const roomSettingsExtService = {
   async get(roomId: string): Promise<ExtRoomSettings> {
-    const raw = await redis.get(key(roomId));
-    if (!raw) return DEFAULTS;
-    try {
-      const parsed = JSON.parse(raw) as Partial<ExtRoomSettings>;
-      return {
-        handRaiseRestriction:
-          parsed.handRaiseRestriction === 'followers' || parsed.handRaiseRestriction === 'none'
-            ? parsed.handRaiseRestriction
-            : 'everyone',
-        coHostIds: Array.isArray(parsed.coHostIds) ? parsed.coHostIds : [],
-      };
-    } catch {
-      return DEFAULTS;
-    }
+    const parsed = await readJson<Partial<ExtRoomSettings>>(key(roomId));
+    if (!parsed) return DEFAULTS;
+    return {
+      handRaiseRestriction:
+        parsed.handRaiseRestriction === 'followers' || parsed.handRaiseRestriction === 'none'
+          ? parsed.handRaiseRestriction
+          : 'everyone',
+      coHostIds: Array.isArray(parsed.coHostIds) ? parsed.coHostIds : [],
+    };
   },
 
   async setHandRaise(
@@ -72,7 +67,7 @@ export const roomSettingsExtService = {
     await requireHostOrMod(roomId, callerId);
     const current = await this.get(roomId);
     const next: ExtRoomSettings = { ...current, handRaiseRestriction: restriction };
-    await redis.setEx(key(roomId), TTL_S, JSON.stringify(next));
+    await writeJson(key(roomId), next, TTL_S);
     return next;
   },
 
@@ -84,7 +79,7 @@ export const roomSettingsExtService = {
       ...current,
       coHostIds: [...current.coHostIds, coHostId],
     };
-    await redis.setEx(key(roomId), TTL_S, JSON.stringify(next));
+    await writeJson(key(roomId), next, TTL_S);
     return next;
   },
 
@@ -95,7 +90,7 @@ export const roomSettingsExtService = {
       ...current,
       coHostIds: current.coHostIds.filter(id => id !== coHostId),
     };
-    await redis.setEx(key(roomId), TTL_S, JSON.stringify(next));
+    await writeJson(key(roomId), next, TTL_S);
     return next;
   },
 

@@ -3,6 +3,7 @@ import { prisma } from '../../config/database';
 import { AppError } from '../../middlewares/error.middleware';
 import { notificationsService } from '../notifications/notifications.service';
 import { emitUserFollowerCount } from '../../socket/realtime';
+import { cursorPage } from '../../utils/paginate';
 
 const publicUser = {
   id: true,
@@ -100,14 +101,12 @@ export const followService = {
       include: { follower: { select: publicUser } },
       take: limit + 1,
     });
-    const hasMore = rows.length > limit;
-    const data = hasMore ? rows.slice(0, limit) : rows;
-    const nextCursor = hasMore ? data[data.length - 1]?.createdAt.toISOString() : null;
-    return {
-      data: data.map(r => r.follower),
-      nextCursor,
-      hasMore,
-    };
+    return cursorPage(
+      rows,
+      limit,
+      r => r.createdAt.toISOString(),
+      r => r.follower,
+    );
   },
 
   async listFollowing(userId: string, limit = 50, cursor?: string) {
@@ -120,14 +119,12 @@ export const followService = {
       include: { following: { select: publicUser } },
       take: limit + 1,
     });
-    const hasMore = rows.length > limit;
-    const data = hasMore ? rows.slice(0, limit) : rows;
-    const nextCursor = hasMore ? data[data.length - 1]?.createdAt.toISOString() : null;
-    return {
-      data: data.map(r => r.following),
-      nextCursor,
-      hasMore,
-    };
+    return cursorPage(
+      rows,
+      limit,
+      r => r.createdAt.toISOString(),
+      r => r.following,
+    );
   },
 
   /**

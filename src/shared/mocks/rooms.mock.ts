@@ -1,11 +1,9 @@
 import type { Room, RoomParticipant, RoomSummary } from '../types/domain';
+import { pickUser as basePickUser } from './_helpers';
 import { MOCK_USER_SUMMARIES } from './users.mock';
 
-const pickUser = (idx: number): (typeof MOCK_USER_SUMMARIES)[number] => {
-  const u = MOCK_USER_SUMMARIES[idx] ?? MOCK_USER_SUMMARIES[0];
-  if (!u) throw new Error('MOCK_USER_SUMMARIES is empty — cannot build mock rooms.');
-  return u;
-};
+const pickUser = (idx: number): ReturnType<typeof basePickUser> =>
+  basePickUser(idx, 'MOCK_USER_SUMMARIES is empty — cannot build mock rooms.');
 
 const speaker = (
   idx: number,

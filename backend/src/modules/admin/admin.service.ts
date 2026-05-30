@@ -89,6 +89,32 @@ const fetchActor = async (actorId: string) => {
   return actor;
 };
 
+/**
+ * Shared rank guard for actor→target moderation actions. You cannot act on a
+ * peer or a higher-ranked account; this mirrors the check previously inlined
+ * in setRole/suspend/unsuspend/deleteUser. Same exception/code (`ADMIN_002`).
+ */
+const assertCanActOn = (actor: { appRole: AppRole }, target: { appRole: AppRole }): void => {
+  if (ROLE_RANK[target.appRole] >= ROLE_RANK[actor.appRole]) {
+    throw new AppError('ADMIN_002');
+  }
+};
+
+/**
+ * CSV exports hold the whole result set in memory, so they are bounded by
+ * `CSV_EXPORT_LIMIT`. When the cap is hit the export is silently incomplete
+ * from the caller's point of view, so we log a warning to make the truncation
+ * visible operationally. `label` matches the per-exporter message previously
+ * inlined in each exporter.
+ */
+const warnIfCsvTruncated = (label: string, rowCount: number): void => {
+  if (rowCount === CSV_EXPORT_LIMIT) {
+    logger.warn(`${label} truncated at row cap — export is incomplete`, {
+      limit: CSV_EXPORT_LIMIT,
+    });
+  }
+};
+
 export const adminService = {
   // ──────────────────── Users ────────────────────
   async listUsers(input: ListUsersInput) {
@@ -161,9 +187,7 @@ export const adminService = {
     if (ROLE_RANK[input.role] > ROLE_RANK[actor.appRole]) {
       throw new AppError('ADMIN_002');
     }
-    if (ROLE_RANK[target.appRole] >= ROLE_RANK[actor.appRole]) {
-      throw new AppError('ADMIN_002');
-    }
+    assertCanActOn(actor, target);
     // Lockout protection — refuse to demote the last super-admin.
     if (target.appRole === 'SUPER_ADMIN' && input.role !== 'SUPER_ADMIN') {
       const remaining = await prisma.user.count({
@@ -207,9 +231,7 @@ export const adminService = {
       }),
     ]);
     if (!target) throw new AppError('USER_001');
-    if (ROLE_RANK[target.appRole] >= ROLE_RANK[actor.appRole]) {
-      throw new AppError('ADMIN_002');
-    }
+    assertCanActOn(actor, target);
 
     const expiresAt =
       input.durationMinutes && input.durationMinutes > 0
@@ -264,9 +286,7 @@ export const adminService = {
     // Mirror suspend/setRole/deleteUser: you cannot act on a peer or a
     // higher-ranked account. Without this a moderator could lift a sanction
     // an admin/super-admin placed on someone at or above the moderator's tier.
-    if (ROLE_RANK[target.appRole] >= ROLE_RANK[actor.appRole]) {
-      throw new AppError('ADMIN_002');
-    }
+    assertCanActOn(actor, target);
 
     const updated = await prisma.user.update({
       where: { id: targetUserId },
@@ -306,9 +326,7 @@ export const adminService = {
       }),
     ]);
     if (!target) throw new AppError('USER_001');
-    if (ROLE_RANK[target.appRole] >= ROLE_RANK[actor.appRole]) {
-      throw new AppError('ADMIN_002');
-    }
+    assertCanActOn(actor, target);
     if (target.deletedAt) return { deleted: true as const };
 
     await prisma.user.update({
@@ -625,11 +643,7 @@ export const adminService = {
       orderBy: { createdAt: 'desc' },
       take: CSV_EXPORT_LIMIT,
     });
-    if (rows.length === CSV_EXPORT_LIMIT) {
-      logger.warn('exportUsersCsv truncated at row cap — export is incomplete', {
-        limit: CSV_EXPORT_LIMIT,
-      });
-    }
+    warnIfCsvTruncated('exportUsersCsv', rows.length);
     const header = [
       'id',
       'username',
@@ -657,11 +671,7 @@ export const adminService = {
         targetUser: { select: { username: true, displayName: true } },
       },
     });
-    if (rows.length === CSV_EXPORT_LIMIT) {
-      logger.warn('exportAuditLogCsv truncated at row cap — export is incomplete', {
-        limit: CSV_EXPORT_LIMIT,
-      });
-    }
+    warnIfCsvTruncated('exportAuditLogCsv', rows.length);
     const flat = rows.map(r => ({
       id: r.id,
       createdAt: r.createdAt.toISOString(),
@@ -705,11 +715,7 @@ export const adminService = {
         reportedRoom: { select: { title: true } },
       },
     });
-    if (rows.length === CSV_EXPORT_LIMIT) {
-      logger.warn('exportReportsCsv truncated at row cap — export is incomplete', {
-        limit: CSV_EXPORT_LIMIT,
-      });
-    }
+    warnIfCsvTruncated('exportReportsCsv', rows.length);
     const flat = rows.map(r => ({
       id: r.id,
       createdAt: r.createdAt.toISOString(),
