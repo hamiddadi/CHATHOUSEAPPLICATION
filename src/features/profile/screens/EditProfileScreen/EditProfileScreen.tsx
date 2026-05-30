@@ -10,6 +10,7 @@ import { Button } from '../../../../shared/components/Button';
 import { Input } from '../../../../shared/components/Input';
 import { Loader } from '../../../../shared/components/Loader';
 import { colors, spacing } from '../../../../shared/constants/theme';
+import { usernameFormSchema } from '../../../auth/schemas';
 import { useMe, useUpdateProfile } from '../../hooks/useProfile';
 
 const DISPLAY_NAME_MAX = 40;
@@ -66,8 +67,11 @@ export const EditProfileScreen: React.FC = () => {
     }
   }, [avatarUri, bio, displayName, navigation, updateProfile, username]);
 
-  const canSave =
-    displayName.trim().length >= 2 && username.trim().length >= 2 && !updateProfile.isPending;
+  // Validate the username against the same schema the auth flow uses
+  // (3–24 chars, [a-z0-9_]) instead of the laxer `length >= 2` check, so
+  // an invalid handle (spaces, symbols, too short) can't reach update().
+  const usernameOk = usernameFormSchema.shape.username.safeParse(username).success;
+  const canSave = displayName.trim().length >= 2 && usernameOk && !updateProfile.isPending;
 
   if (isLoading || !me) {
     return <Loader fullscreen accessibilityLabel="Loading profile" />;

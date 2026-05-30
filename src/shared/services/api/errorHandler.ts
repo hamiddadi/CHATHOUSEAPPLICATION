@@ -27,9 +27,33 @@ export interface AppError {
   message: string;
   /** Field-level errors, filled by the backend on 422 validation failures. */
   fields?: Record<string, string>;
-  /** Raw cause, kept for logging but never shown to users. */
+  /**
+   * Sanitized cause, kept for logging but never shown to users. For Axios
+   * errors this is a scrubbed summary (no request/response headers, so the
+   * `Authorization: Bearer <token>` header and raw bodies never reach logs,
+   * Sentry breadcrumbs, or any console.error that serializes an AppError).
+   */
   cause?: unknown;
 }
+
+/**
+ * Minimal, secret-free summary of an AxiosError safe to attach as `cause`.
+ * Deliberately omits `err.config.headers` (Authorization token), `err.request`,
+ * and raw response bodies that may carry sensitive data.
+ */
+interface SafeCause {
+  code?: string;
+  status?: number;
+  method?: string;
+  url?: string;
+}
+
+const safeCause = (err: AxiosError): SafeCause => ({
+  code: err.code,
+  status: err.response?.status,
+  method: err.config?.method,
+  url: err.config?.url,
+});
 
 const messageByKind: Record<AppError['kind'], string> = {
   network: "We couldn't reach the server. Check your connection.",
@@ -53,11 +77,12 @@ export const toAppError = (err: unknown): AppError => {
 };
 
 const fromAxios = (err: AxiosError): AppError => {
+  const cause = safeCause(err);
   if (err.code === 'ECONNABORTED') {
-    return { kind: 'timeout', message: messageByKind.timeout, cause: err };
+    return { kind: 'timeout', message: messageByKind.timeout, cause };
   }
   if (!err.response) {
-    return { kind: 'network', message: messageByKind.network, cause: err };
+    return { kind: 'network', message: messageByKind.network, cause };
   }
 
   const status = err.response.status;
@@ -65,28 +90,26 @@ const fromAxios = (err: AxiosError): AppError => {
     | { message?: string; errors?: Record<string, string> }
     | undefined;
 
-  if (status === 401) return { kind: 'auth', status, message: messageByKind.auth, cause: err };
-  if (status === 403)
-    return { kind: 'forbidden', status, message: messageByKind.forbidden, cause: err };
-  if (status === 404)
-    return { kind: 'notFound', status, message: messageByKind.notFound, cause: err };
+  if (status === 401) return { kind: 'auth', status, message: messageByKind.auth, cause };
+  if (status === 403) return { kind: 'forbidden', status, message: messageByKind.forbidden, cause };
+  if (status === 404) return { kind: 'notFound', status, message: messageByKind.notFound, cause };
   if (status === 422) {
     return {
       kind: 'validation',
       status,
       message: data?.message ?? messageByKind.validation,
       fields: data?.errors,
-      cause: err,
+      cause,
     };
   }
   if (status >= 500) {
-    return { kind: 'server', status, message: messageByKind.server, cause: err };
+    return { kind: 'server', status, message: messageByKind.server, cause };
   }
 
   return {
     kind: 'unknown',
     status,
     message: data?.message ?? messageByKind.unknown,
-    cause: err,
+    cause,
   };
 };

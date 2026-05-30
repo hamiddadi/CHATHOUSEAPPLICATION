@@ -26,7 +26,11 @@ notificationsRouter.get(
   asyncHandler(async (req, res) => {
     const raw = req.query['filter'];
     const filter = isFilter(raw) ? raw : 'all';
-    const rows = await notificationsService.list(uid(req), filter);
+    const limitRaw = req.query['limit'];
+    const parsedLimit = typeof limitRaw === 'string' ? Number(limitRaw) : NaN;
+    const limit = Number.isFinite(parsedLimit) ? Math.min(50, Math.max(1, parsedLimit)) : 50;
+    const cursor = typeof req.query['cursor'] === 'string' ? req.query['cursor'] : undefined;
+    const rows = await notificationsService.list(uid(req), filter, limit, cursor);
     sendOk(res, rows);
   }),
 );

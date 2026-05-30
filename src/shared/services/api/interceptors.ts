@@ -73,12 +73,21 @@ export const attachInterceptors = (
     }
     // Impersonation override: when an active impersonation token is set,
     // it replaces the super-admin's own bearer for *this* request only.
-    // Admin endpoints under /admin/* skip the override so the actual
-    // super-admin keeps moderation powers in another tab/screen — the
-    // impersonation surface should only act as the target user.
+    // Admin endpoints skip the override so the actual super-admin keeps
+    // moderation powers — the impersonation surface should only act as the
+    // target user.
+    //
+    // Intent is expressed explicitly via the `X-Skip-Impersonation` header
+    // (set by adminService), which is robust regardless of how `config.url`
+    // is built. We keep a hardened URL fallback (normalized regex tolerating
+    // a missing leading slash and an optional `/api` prefix) so callers that
+    // predate the header still bypass impersonation correctly.
+    const skipImpersonationHeader = config.headers.get('X-Skip-Impersonation') === '1';
+    if (skipImpersonationHeader) config.headers.delete('X-Skip-Impersonation');
     const url = config.url ?? '';
-    const isAdminCall = url.startsWith('/admin') || url.includes('/api/admin');
-    const impToken = !isAdminCall ? getImpersonationToken() : null;
+    const isAdminUrl = /^\/?(?:api\/)?admin(?:\/|$|\?)/.test(url);
+    const skipImpersonation = skipImpersonationHeader || isAdminUrl;
+    const impToken = !skipImpersonation ? getImpersonationToken() : null;
     if (impToken) {
       config.headers.set('Authorization', `Bearer ${impToken}`);
       return config;

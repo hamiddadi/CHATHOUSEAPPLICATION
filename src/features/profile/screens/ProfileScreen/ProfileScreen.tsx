@@ -17,7 +17,7 @@ import { Loader } from '../../../../shared/components/Loader';
 import { EmptyState } from '../../../../shared/components/EmptyState';
 import { colors, spacing } from '../../../../shared/constants/theme';
 import type { RoomStackParamList, SettingsStackParamList } from '../../../../core/navigation/types';
-import { CURRENT_USER } from '../../../../shared/mocks/users.mock';
+import { useAuthStore } from '../../../auth/store/authStore';
 import { useFollow, useMe, useProfile, useUnfollow } from '../../hooks/useProfile';
 import { useBlock, useReport, useWave } from '../../../social/hooks/useSocial';
 import type { ReportReason } from '../../../social/services/socialService';
@@ -124,8 +124,13 @@ export const ProfileScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const { t } = useTranslation();
   const meQuery = useMe();
-  const userId = route.params?.userId ?? meQuery.data?.id ?? CURRENT_USER.id;
-  const isSelf = userId === (meQuery.data?.id ?? CURRENT_USER.id);
+  // Resolve the viewer's real id from the auth store (falling back to the
+  // freshly fetched `me` query) instead of the mock CURRENT_USER. When no
+  // route param is given and we don't yet know who "me" is, `userId` stays
+  // empty and the screen renders a Loader below.
+  const myId = useAuthStore(s => s.user?.id) ?? meQuery.data?.id;
+  const userId = route.params?.userId ?? myId ?? '';
+  const isSelf = !!myId && userId === myId;
 
   const { data: user, isLoading, isError } = useProfile(userId);
   const follow = useFollow();
@@ -164,8 +169,12 @@ export const ProfileScreen: React.FC = () => {
   const handleBack = useCallback(() => navigation.goBack(), [navigation]);
   const handleToggleFollow = useCallback(() => {
     if (!user) return;
-    if (user.isFollowedByMe) unfollow.mutate(user.id);
-    else follow.mutate(user.id);
+    // Surface follow/unfollow failures: the hook re-syncs the cache on
+    // error, but without this the button gives no feedback on a network
+    // failure (mirrors EditProfileScreen's save-error Alert).
+    const onError = (): void => Alert.alert('Error', 'Action failed. Please try again.');
+    if (user.isFollowedByMe) unfollow.mutate(user.id, { onError });
+    else follow.mutate(user.id, { onError });
   }, [follow, unfollow, user]);
   const handleShare = useCallback(async () => {
     if (!user) return;
@@ -260,7 +269,12 @@ export const ProfileScreen: React.FC = () => {
     );
   }, [handleBlock, handleReport, t, user]);
 
-  if (isLoading) return <Loader fullscreen accessibilityLabel="Loading profile" />;
+  // No route param and the viewer's id isn't known yet (auth store still
+  // hydrating): the detail query is disabled, so wait rather than fall
+  // through to the "unavailable" empty state.
+  if (userId.length === 0 || isLoading) {
+    return <Loader fullscreen accessibilityLabel="Loading profile" />;
+  }
   if (isError || !user) {
     return <EmptyState title="Profile unavailable" description="This user may not exist." />;
   }

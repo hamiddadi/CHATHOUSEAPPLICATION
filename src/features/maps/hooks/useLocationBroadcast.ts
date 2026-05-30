@@ -17,10 +17,11 @@ export const useLocationBroadcast = (coords: LocationObjectCoords | null): void 
     void (async () => {
       const socket = await getSocket();
       if (cancelled || !socket) return;
-      socket.emit('update_location', {
+      // Must match the backend listener name exactly (maps.handler.ts).
+      // The server's LocationPayload only reads latitude/longitude.
+      socket.emit('maps:update-location', {
         latitude: coords.latitude,
         longitude: coords.longitude,
-        accuracy: coords.accuracy,
       });
     })();
     return () => {

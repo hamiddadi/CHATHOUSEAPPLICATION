@@ -85,25 +85,29 @@ export const messageService = {
     return res.data.data.map(c => toConversation(c, me));
   },
 
-  async conversation(peerId: string): Promise<Conversation> {
-    // No dedicated endpoint; synthesise by filtering the conversations
-    // list. Cheap (server returns at most 500 rows) and keeps the API
-    // surface narrow. If we ever need deep metadata we can add a GET
-    // /chat/conversations/:peerId on the backend.
-    const list = await this.conversations();
-    const hit = list.find(c => c.id === peerId);
-    if (hit) return hit;
+  async conversation(
+    peerId: string,
+    // Optional accessor onto an already-fetched conversations list (e.g. the
+    // React Query cache). When it yields a hit we skip the network call
+    // entirely. Optional to keep the call-shape backward compatible.
+    getCachedConversations?: () => readonly Conversation[] | undefined,
+  ): Promise<Conversation> {
+    const cached = getCachedConversations?.()?.find(c => c.id === peerId);
+    if (cached) return cached;
 
-    // No history yet — fetch the peer user directly and return an empty
-    // conversation skeleton so the thread header renders in one RT.
-    const peerRes = await apiClient.get<Envelope<RawUser>>(`/users/${peerId}`);
-    const peer = toSummary(peerRes.data.data);
+    // Dedicated single-conversation endpoint: one round-trip, no O(all
+    // conversations) list scan. `lastMessage` is null when there's no history.
+    const res = await apiClient.get<
+      Envelope<{ peer: RawUser; lastMessage: RawMessage | null; unreadCount: number }>
+    >(`/chat/conversations/${peerId}`);
+    const me = currentUserId();
+    const { peer, lastMessage, unreadCount } = res.data.data;
     return {
-      id: peerId,
-      participants: [peer],
-      lastMessage: null,
-      unreadCount: 0,
-      updatedAt: new Date().toISOString(),
+      id: peer.id,
+      participants: [toSummary(peer)],
+      lastMessage: lastMessage ? toMessage(lastMessage, me, peer.id) : null,
+      unreadCount,
+      updatedAt: lastMessage ? lastMessage.createdAt : new Date().toISOString(),
     };
   },
 

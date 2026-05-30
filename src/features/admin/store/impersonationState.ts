@@ -30,15 +30,42 @@ interface State {
   clear: () => void;
 }
 
+/**
+ * Module-scoped expiry timer. Guarantees a proactive purge of the session at
+ * expiry without depending on an outgoing request (the interceptor read) or a
+ * mounted `<ImpersonationBanner/>` tick. `ReturnType<typeof setTimeout>` keeps
+ * this portable across the RN/Node typings (number vs Timeout).
+ */
+let expiryTimer: ReturnType<typeof setTimeout> | null = null;
+
+const clearExpiryTimer = (): void => {
+  if (expiryTimer !== null) {
+    clearTimeout(expiryTimer);
+    expiryTimer = null;
+  }
+};
+
 export const useImpersonationState = create<State>(set => ({
   token: null,
   user: null,
   expiresAt: null,
 
-  setSession: (token, user, expiresInSec) =>
-    set({ token, user, expiresAt: Date.now() + expiresInSec * 1000 }),
+  setSession: (token, user, expiresInSec) => {
+    clearExpiryTimer();
+    set({ token, user, expiresAt: Date.now() + expiresInSec * 1000 });
+    // Proactively drop the session at expiry so it can't linger in memory if
+    // no request fires and the banner isn't mounted to tick the purge.
+    const ms = Math.max(0, expiresInSec * 1000);
+    expiryTimer = setTimeout(() => {
+      expiryTimer = null;
+      set({ token: null, user: null, expiresAt: null });
+    }, ms);
+  },
 
-  clear: () => set({ token: null, user: null, expiresAt: null }),
+  clear: () => {
+    clearExpiryTimer();
+    set({ token: null, user: null, expiresAt: null });
+  },
 }));
 
 /**

@@ -1,0 +1,78 @@
+import { prisma } from '../../../config/database';
+import { AppError } from '../../../middlewares/error.middleware';
+import { notificationsService } from '../../../modules/notifications/notifications.service';
+import { cancelEventReminder } from '../../../queues/eventReminders';
+import { logger } from '../../../config/logger';
+
+/**
+ * Cancel a scheduled event before it goes live.
+ *
+ * Pure addition — does not touch the existing rooms.service. We:
+ *  1. Validate the caller is the host (no co-host shortcut for cancellation)
+ *  2. Mark the room as ended (endedAt now) so feed queries hide it
+ *  3. Cancel the BullMQ reminder so the 5-min push doesn't fire
+ *  4. Cancel the 15-min reminder (new worker) too
+ *  5. Notify every RSVP'd user with a NEW_MESSAGE-bucket cancellation alert
+ *     (we reuse ROOM_STARTED type — there's no CANCELLED type yet, and
+ *     we don't want to alter the existing schema)
+ */
+export const extEventsService = {
+  async cancel(userId: string, roomId: string, reason?: string): Promise<{ notified: number }> {
+    const room = await prisma.room.findUnique({
+      where: { id: roomId },
+      include: { rsvps: { select: { userId: true } } },
+    });
+    if (!room) throw new AppError('ROOM_001');
+    if (room.hostId !== userId) throw new AppError('AUTH_008'); // forbidden
+    if (room.endedAt) throw new AppError('ROOM_002', 'Already ended');
+    if (!room.scheduledFor) throw new AppError('ROOM_002', 'Room is not a scheduled event');
+
+    // 1. Soft close via endedAt (existing field — read-only schema use)
+    await prisma.room.update({
+      where: { id: roomId },
+      data: { endedAt: new Date(), isLive: false },
+    });
+
+    // 2. Cancel both reminder queues. The 15-min one is best-effort.
+    try {
+      await cancelEventReminder(roomId);
+    } catch (err) {
+      logger.warn('ext.events.cancel: cancelEventReminder failed', { err, roomId });
+    }
+    try {
+      const { cancelReminder15 } = await import('../../queues/reminder15');
+      await cancelReminder15(roomId);
+    } catch (err) {
+      logger.warn('ext.events.cancel: cancelReminder15 failed', { err, roomId });
+    }
+
+    // 3. Fan-out cancellation notification to RSVPs + host (the host gets one
+    // too as confirmation receipt). De-dup userIds in case host RSVP'd.
+    const recipients = Array.from(new Set([room.hostId, ...room.rsvps.map(r => r.userId)]));
+    const title = 'Event canceled';
+    const body = reason
+      ? `"${room.title}" was canceled — ${reason}`
+      : `"${room.title}" was canceled by the host`;
+
+    let notified = 0;
+    for (const userId of recipients) {
+      try {
+        await notificationsService.create({
+          userId,
+          actorId: room.hostId,
+          type: 'ROOM_STARTED', // closest existing bucket; data.eventCancel=true marks it
+          title,
+          body,
+          data: { eventCancel: true, roomId, reason: reason ?? null },
+          targetId: roomId,
+          targetType: 'room',
+        });
+        notified += 1;
+      } catch (err) {
+        logger.error('ext.events.cancel: failed to notify', { err, userId, roomId });
+      }
+    }
+
+    return { notified };
+  },
+};

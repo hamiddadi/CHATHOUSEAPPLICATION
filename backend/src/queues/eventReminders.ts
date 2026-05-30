@@ -132,9 +132,17 @@ const processReminder = async (job: Job<ReminderJobData>): Promise<void> => {
     for (const m of members) recipientIds.add(m.userId);
   }
 
-  if (recipientIds.size > 0) {
+  // Fan-out in bounded batches. notificationsService.create does several DB
+  // writes + a COUNT + a push dispatch per recipient; for a club of thousands
+  // of members an unbounded Promise.all could exhaust the Prisma/Redis pools
+  // and fail the job. Batching caps in-flight concurrency.
+  // TODO(audit): for very large clubs, prefer a single createMany for the rows
+  // plus one COUNT, and batch the push dispatch by recipient set.
+  const ids = [...recipientIds];
+  const BATCH = 50;
+  for (let i = 0; i < ids.length; i += BATCH) {
     await Promise.all(
-      [...recipientIds].map(userId =>
+      ids.slice(i, i + BATCH).map(userId =>
         notificationsService.create({
           userId,
           type: 'ROOM_STARTED',

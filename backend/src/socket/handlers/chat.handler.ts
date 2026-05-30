@@ -44,6 +44,13 @@ export const registerChatHandlers = (io: Server, socket: Socket): void => {
 
   socket.on('chat:read', async (payload: ReadPayload, ack?: (ok: boolean) => void) => {
     try {
+      // Validate the socket payload before hitting the service: an absent /
+      // non-string messageId would otherwise reach Prisma as
+      // `where: { id: undefined }`.
+      if (typeof payload?.messageId !== 'string' || !payload.messageId) {
+        ack?.(false);
+        return;
+      }
       const msg = await chatService.markRead(me(), payload.messageId);
       io.to(userChannel(msg.senderId)).emit('chat:read', { messageId: msg.id });
       ack?.(true);

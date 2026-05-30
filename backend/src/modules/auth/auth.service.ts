@@ -57,8 +57,12 @@ const issueTokenPair = async (userId: string) => {
 
 export const authService = {
   async register(input: RegisterInput) {
+    // Defensive normalization: the Zod schema already lowercases email, but
+    // normalize here too so the uniqueness check and the stored value stay
+    // consistent even if a future caller bypasses the schema.
+    const email = input.email.toLowerCase();
     const [emailTaken, usernameTaken] = await Promise.all([
-      prisma.user.findUnique({ where: { email: input.email } }),
+      prisma.user.findUnique({ where: { email } }),
       prisma.user.findUnique({ where: { username: input.username } }),
     ]);
     if (emailTaken) throw new AppError('AUTH_005');
@@ -68,7 +72,7 @@ export const authService = {
     const user = await prisma.user.create({
       data: {
         username: input.username,
-        email: input.email,
+        email,
         passwordHash,
         displayName: input.displayName ?? input.username,
       },
@@ -138,7 +142,8 @@ export const authService = {
    * `{ ok: true }` even when the email doesn't exist to avoid an oracle.
    */
   async forgotPassword(input: ForgotPasswordInput) {
-    const user = await prisma.user.findUnique({ where: { email: input.email } });
+    // Match the normalized (lowercase) email stored at registration time.
+    const user = await prisma.user.findUnique({ where: { email: input.email.toLowerCase() } });
     // Phone-only users (no email) can't use password reset either.
     if (!user || !user.email) {
       // Same response whether or not the user exists (anti-enumeration).
@@ -164,11 +169,12 @@ export const authService = {
       subject: 'Reset your Chathouse password',
       text: `Use this token within ${RESET_TOKEN_TTL_MINUTES} minutes to reset your password:\n\n${raw}`,
     });
-    // Dev-only: surface the raw token in logs so manual testing doesn't
-    // require SMTP. Never do this in production — gate on NODE_ENV.
-    logger.info(`[reset] issued token for ${user.email} (ttl ${RESET_TOKEN_TTL_MINUTES}m)`, {
-      raw,
-    });
+    // Never log the raw reset token, even in dev: logs are not a safe channel
+    // for a live, single-use credential. Log only a non-sensitive marker for
+    // manual testing; the raw token is delivered solely via email.
+    if (env.NODE_ENV === 'test') {
+      logger.debug(`[reset] token issued for user ${user.id} (ttl ${RESET_TOKEN_TTL_MINUTES}m)`);
+    }
 
     return { ok: true };
   },

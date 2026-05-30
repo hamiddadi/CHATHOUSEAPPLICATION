@@ -2,6 +2,21 @@ import 'dotenv/config';
 import { z } from 'zod';
 
 /**
+ * Strict boolean parser for env flags. `z.coerce.boolean()` applies
+ * `Boolean(string)`, so ANY non-empty string — including 'false', '0',
+ * 'off' — coerces to `true`. That silently broke kill-switches like
+ * GODMODE_ENABLED=false. This only treats 'true'/'1' (case-insensitive)
+ * as true; everything else (and unset) falls back to `def`.
+ */
+const boolFromString = (def: boolean) =>
+  z
+    .string()
+    .optional()
+    .transform(v =>
+      v === undefined ? def : v.trim().toLowerCase() === 'true' || v.trim() === '1',
+    );
+
+/**
  * Runtime environment — validated at process boot. Missing or malformed vars
  * cause the process to exit with code 1 before any route is registered.
  */
@@ -40,7 +55,13 @@ const envSchema = z.object({
   // Master switch for the Godmode admin surface. When false, every
   // /api/admin/* endpoint returns ADMIN_003 even for SUPER_ADMINs — useful
   // for an emergency lockdown without redeploying.
-  GODMODE_ENABLED: z.coerce.boolean().default(true),
+  GODMODE_ENABLED: boolFromString(true),
+
+  // When true, the main entry point (dist/app.js) also mounts the
+  // `/api/ext/*` extension routers so the API contract is identical
+  // regardless of which entry point boots. Default true so the documented
+  // extension features are actually reachable in production.
+  EXTENSIONS_ENABLED: boolFromString(true),
 
   // ─── Agora (audio engine) ──────────────────────────────────────────
   // APP_ID is shipped to clients (it's public). PRIMARY_CERTIFICATE is a
@@ -57,7 +78,7 @@ const envSchema = z.object({
 
   // mediasoup (phase 4). Disabled by default because the npm package compiles
   // C++ from source at install time — turn ON in docker-compose only.
-  MEDIASOUP_ENABLED: z.coerce.boolean().default(false),
+  MEDIASOUP_ENABLED: boolFromString(false),
   MEDIASOUP_ANNOUNCED_IP: z.string().default('127.0.0.1'),
   MEDIASOUP_LISTEN_IP: z.string().default('0.0.0.0'),
   MEDIASOUP_RTC_MIN_PORT: z.coerce.number().int().min(1024).max(65535).default(40000),
@@ -81,7 +102,7 @@ const envSchema = z.object({
   // When false (the default outside production), sendToExpo logs the
   // payload instead of calling the HTTP endpoint. Flip on in prod so
   // push actually reaches devices.
-  PUSH_DISPATCH_ENABLED: z.coerce.boolean().default(false),
+  PUSH_DISPATCH_ENABLED: boolFromString(false),
 
   // ICE servers — JSON array string sent to clients for NAT traversal.
   // Default uses Google's public STUN only; for prod add a TURN server
@@ -91,9 +112,16 @@ const envSchema = z.object({
     .default('[{"urls":"stun:stun.l.google.com:19302"}]')
     .transform((raw, ctx) => {
       try {
-        const parsed = JSON.parse(raw) as { urls: string | string[] }[];
+        const parsed: unknown = JSON.parse(raw);
         if (!Array.isArray(parsed)) throw new Error('not an array');
-        return parsed;
+        // Validate the element shape instead of blindly casting, so a
+        // malformed entry is caught at boot rather than at NAT-traversal time.
+        const iceServerSchema = z.object({
+          urls: z.union([z.string(), z.array(z.string())]),
+          username: z.string().optional(),
+          credential: z.string().optional(),
+        });
+        return z.array(iceServerSchema).parse(parsed);
       } catch (err) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,

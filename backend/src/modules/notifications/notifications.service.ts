@@ -151,9 +151,6 @@ export const notificationsService = {
       },
     });
 
-    // Invalidate unread cache
-    await redis.del(unreadCacheKey(input.userId));
-
     // Emit real-time notification over WebSocket
     emitNotification(input.userId, {
       id: row.id,
@@ -164,10 +161,25 @@ export const notificationsService = {
       createdAt: row.createdAt.toISOString(),
     });
 
-    // Emit updated badge count
-    const count = await prisma.notification.count({
-      where: { userId: input.userId, isRead: false },
-    });
+    // Bump the unread badge. A freshly created notification is always
+    // unread, so the cached count grows by exactly 1. Increment the cache
+    // in place instead of re-running a full COUNT on every create (which
+    // got hammered under reminder fan-out: one create per club member).
+    const key = unreadCacheKey(input.userId);
+    let count: number;
+    const cached = await redis.get(key);
+    if (cached !== null) {
+      count = await redis.incr(key);
+      // Refresh the TTL so an active user's badge stays cache-served.
+      await redis.expire(key, UNREAD_CACHE_TTL);
+    } else {
+      // Cold cache: recompute once and seed it (single COUNT, then served
+      // from Redis until TTL expiry).
+      count = await prisma.notification.count({
+        where: { userId: input.userId, isRead: false },
+      });
+      await redis.set(key, String(count), { EX: UNREAD_CACHE_TTL });
+    }
     emitNotificationCount(input.userId, count);
 
     // Fire-and-forget push dispatch — gated on the user's per-type

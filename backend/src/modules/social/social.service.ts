@@ -3,6 +3,7 @@ import { prisma } from '../../config/database';
 import { redis } from '../../config/redis';
 import { AppError } from '../../middlewares/error.middleware';
 import { notificationsService } from '../notifications/notifications.service';
+import { getBlockedIdSet } from './blocks';
 import type { ReportInput, ReportRoomInput } from './social.schema';
 
 // Anti-spam: a reporter can only file one report per target per 24h.
@@ -50,9 +51,14 @@ export const socialService = {
     if (senderId === targetId) throw new AppError('USER_003');
     const target = await prisma.user.findUnique({
       where: { id: targetId },
-      select: { id: true, username: true, displayName: true },
+      select: { id: true, username: true, displayName: true, allowWaves: true },
     });
     if (!target) throw new AppError('USER_001');
+
+    // Respect the recipient's opt-out and the block graph (symmetric).
+    if (!target.allowWaves) throw new AppError('USER_006');
+    const blocked = await getBlockedIdSet(senderId);
+    if (blocked.has(targetId)) throw new AppError('USER_004');
 
     // Rate-limit: 1 wave per (sender, target) per hour.
     const key = waveKey(senderId, targetId);

@@ -24,9 +24,12 @@ export const AuthNavigator: React.FC = () => {
   const [initialRoute, setInitialRoute] = useState<keyof AuthStackParamList | null>(null);
 
   useEffect(() => {
-    void welcomeStorage.hasSeen().then(seen => {
-      setInitialRoute(seen ? 'Landing' : 'WelcomeSlides');
-    });
+    welcomeStorage
+      .hasSeen()
+      .then(seen => setInitialRoute(seen ? 'Landing' : 'WelcomeSlides'))
+      // If the read rejects unexpectedly, default to Landing so we never
+      // leave the user stuck on a fullscreen Loader.
+      .catch(() => setInitialRoute('Landing'));
   }, []);
 
   if (!initialRoute) return <Loader fullscreen />;

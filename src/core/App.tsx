@@ -9,7 +9,7 @@ import { startNetworkListener } from '../shared/services/network/networkStore';
 import { ImpersonationBanner } from '../features/admin/components/ImpersonationBanner';
 import { SocketStatusBanner } from '../features/rooms/components/SocketStatusBanner';
 import { useAnalyticsConsentStore } from '../features/privacy';
-import { initReporter } from './observability/reporter';
+import { initReporter, reportException } from './observability/reporter';
 import { AppProviders } from './providers/AppProviders';
 import { RootNavigator } from './navigation/RootNavigator';
 
@@ -27,18 +27,23 @@ startNetworkListener();
 // Hydrate the GDPR analytics-consent store. Default = disabled, so until
 // the user opts in (Settings → Confidentialité → toggle), the reporter is
 // silent. Resolves quickly since SecureStore reads are synchronous-ish.
-void useAnalyticsConsentStore.getState().hydrate();
+// Capture the rejection so a failed SecureStore read (consent hydration)
+// surfaces in the reporter instead of becoming an unhandled rejection.
+void useAnalyticsConsentStore
+  .getState()
+  .hydrate()
+  .catch(err => reportException(err, { phase: 'consent-hydrate' }));
 
 export const App: React.FC = () => {
   const { loaded, error } = useAppFonts();
 
+  // Single source of truth for hiding the NATIVE splash: the navigation
+  // container's onReady (wired below as RootNavigator onReady). Hiding it
+  // here too — on fonts-ready, before the nav is ready — would expose the
+  // AnimatedSplashScreen during the fonts-ready/nav-not-ready window and
+  // cause a transient visual flash. The AnimatedSplashScreen stays as a
+  // cover while auth hydrates (onReady doesn't fire during hydration).
   const onLayoutRootView = useCallback(() => {
-    if (loaded || error) {
-      void SplashScreen.hideAsync();
-    }
-  }, [loaded, error]);
-
-  useEffect(() => {
     if (loaded || error) {
       void SplashScreen.hideAsync();
     }

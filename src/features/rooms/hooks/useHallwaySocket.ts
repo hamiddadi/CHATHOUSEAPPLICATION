@@ -20,11 +20,16 @@ export const useHallwaySocket = (): void => {
 
   useEffect(() => {
     if (!isAuthed) return;
+    // Race-safety: isAuthed can flip true→false (logout) while getSocket()
+    // is still pending. Without `cancelled`, the async block resumes after
+    // the cleanup already ran (unbind was undefined then), attaches the
+    // listeners, and they leak forever past disconnect.
+    let cancelled = false;
     let unbind: (() => void) | undefined;
 
     void (async () => {
       const socket = await getSocket();
-      if (!socket) return;
+      if (cancelled || !socket) return;
 
       const refreshFeed = (): void => {
         void qc.invalidateQueries({ queryKey: roomKeys.list() });
@@ -42,6 +47,7 @@ export const useHallwaySocket = (): void => {
     })();
 
     return () => {
+      cancelled = true;
       unbind?.();
     };
   }, [isAuthed, qc]);

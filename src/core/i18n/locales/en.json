@@ -6,7 +6,9 @@
     "close": "Close",
     "continue": "Continue",
     "loading": "Loading…",
-    "back": "Back"
+    "back": "Back",
+    "error": "Something went wrong",
+    "permissionDenied": "Permission required"
   },
   "errorBoundary": {
     "title": "Something went wrong",
@@ -133,9 +135,14 @@
       "placeholder": "123456",
       "submit": "Verify",
       "resend": "Resend code",
+      "sentTo": "Code sent to {{phone}}",
+      "attemptsRemaining": "{{count}} attempts remaining",
+      "verifying": "Verifying…",
+      "resendIn": "Resend in {{time}}",
       "errors": {
         "required": "Code is required.",
-        "invalid": "Invalid code. 6 digits expected."
+        "invalid": "Invalid code. 6 digits expected.",
+        "tooManyAttempts": "Too many attempts. Resend a new code."
       }
     },
     "username": {
@@ -182,6 +189,11 @@
     "emptyMyHouses": "You haven't joined any Houses yet.",
     "emptyRecentRooms": "You haven't hosted any rooms yet.",
     "seeAll": "See all",
+    "seeMore": "See more",
+    "seeLess": "See less",
+    "editProfile": "Edit profile",
+    "copied": "Copied",
+    "usernameCopied": "Username copied to clipboard",
     "wave": "Wave",
     "waveSent": "Wave sent 🌊",
     "waveRateLimited": "Already waved recently — try again later.",
@@ -268,6 +280,8 @@
       "bioPlaceholder": "Builder by day, storyteller by night.",
       "continue": "Continue",
       "skip": "Skip",
+      "addPhoto": "Add a photo",
+      "photoPermission": "Allow photo access to choose a picture.",
       "errors": {
         "displayNameTooLong": "Max 60 characters.",
         "bioTooLong": "Max 280 characters."

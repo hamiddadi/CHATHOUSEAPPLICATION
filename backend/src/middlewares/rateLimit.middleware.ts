@@ -24,7 +24,8 @@ export const globalLimiter = rateLimit({
 
 /**
  * Stricter ceiling for login/register/forgot-password — slows brute-force
- * without hurting the normal user flow.
+ * without hurting the normal user flow. `skipSuccessfulRequests` is fine
+ * here because a *successful* login is not abuse.
  */
 export const authLimiter = rateLimit({
   windowMs: env.RATE_LIMIT_WINDOW_MS,
@@ -32,5 +33,20 @@ export const authLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skipSuccessfulRequests: true,
+  message: baseMessage,
+});
+
+/**
+ * Ceiling for endpoints that trigger a COSTLY EXTERNAL side effect on
+ * success — outbound SMS (send-otp) and email (forgot-password). Unlike
+ * authLimiter this does NOT skip successful requests: a successful send IS
+ * the thing we must cap, otherwise an attacker rotating phone numbers can
+ * run up the Twilio/SMTP bill with zero HTTP throttling.
+ */
+export const sendLimiter = rateLimit({
+  windowMs: env.RATE_LIMIT_WINDOW_MS,
+  max: env.AUTH_RATE_LIMIT_MAX,
+  standardHeaders: true,
+  legacyHeaders: false,
   message: baseMessage,
 });

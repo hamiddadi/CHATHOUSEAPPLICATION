@@ -25,6 +25,7 @@ import { DEFAULTS } from '../../../../shared/constants/images';
 import type { MessageStackParamList } from '../../../../core/navigation/types';
 import type { Message, UserSummary } from '../../../../shared/types/domain';
 import { CURRENT_USER } from '../../../../shared/mocks/users.mock';
+import { useAuthStore } from '../../../auth/store/authStore';
 import { useConversation, useConversationMessages, useSendMessage } from '../../hooks/useMessages';
 
 type Nav = NativeStackNavigationProp<MessageStackParamList, 'ChatDetail'>;
@@ -178,6 +179,10 @@ export const ChatDetailScreen: React.FC = () => {
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const reportApiError = useApiErrorToast();
   const { t, i18n } = useTranslation();
+  // Identify "me" from the authenticated session, not a mock. Fall back to
+  // the CURRENT_USER mock id only when there is no live session (tests /
+  // unauthenticated render) so the participant resolution stays stable.
+  const myId = useAuthStore(s => s.user?.id) ?? CURRENT_USER.id;
 
   const scrollToEnd = useCallback(() => {
     requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
@@ -235,9 +240,8 @@ export const ChatDetailScreen: React.FC = () => {
     setDraft(d => `${d}${d.length > 0 && !d.endsWith(' ') ? ' ' : ''}🙂`);
   }, []);
 
-  const other: UserSummary | undefined = conversation?.participants.find(
-    p => p.id !== CURRENT_USER.id,
-  );
+  const other: UserSummary | undefined =
+    conversation?.participants.find(p => p.id !== myId) ?? conversation?.participants[0];
   const otherAvatar = other?.avatarUrl ?? null;
 
   const items = useMemo(() => buildChatItems(messages ?? []), [messages]);
@@ -269,7 +273,14 @@ export const ChatDetailScreen: React.FC = () => {
 
   const keyExtractor = useCallback((item: ChatListItem) => item.id, []);
 
-  const isOnline = true;
+  // Presence is not yet wired into the DM thread. The conversation payload
+  // carries no per-peer online flag, so we must not assert a green "online"
+  // dot unconditionally — that was a misleading indicator. Until a real
+  // presence source is plumbed through, treat the peer as offline (dot
+  // hidden).
+  // TODO(audit): wire to a real presence source (e.g. extensions presence
+  // API / socket presence events) instead of defaulting to offline.
+  const isOnline = false;
   const canSend = draft.trim().length > 0 && !sendMessage.isPending;
 
   return (

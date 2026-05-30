@@ -4,7 +4,7 @@ Audio social network (Clubhouse-like) built with Expo + React Native + TypeScrip
 
 ## Stack
 
-- Expo SDK 52 (React Native 0.76)
+- Expo SDK 55 (React Native 0.83)
 - TypeScript strict
 - React Navigation v7 (Native Stack + Bottom Tabs)
 - Zustand (client state) + TanStack Query (server state)
@@ -16,9 +16,18 @@ Audio social network (Clubhouse-like) built with Expo + React Native + TypeScrip
 ## Quick start
 
 ```bash
+# Frontend
 npm install
 npx expo install --check   # align native module versions with the Expo SDK
 npm run start
+
+# Backend (requires Docker)
+cd backend
+docker compose up -d postgres redis
+cp .env.example .env       # if applicable, configure env vars
+npm install
+npm run db:migrate
+npm run dev
 ```
 
 Open with Expo Go or an emulator (Android Studio / Xcode Simulator).

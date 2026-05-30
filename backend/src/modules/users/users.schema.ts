@@ -12,6 +12,22 @@ export const visibilitySchema = z.object({
   isVisible: z.boolean(),
 });
 
+// Whitelist of toggleable notification preferences. `.strict()` rejects any
+// unexpected key so the raw body can't be mass-assigned into prisma.upsert.
+export const notifPrefsSchema = z
+  .object({
+    newFollower: z.boolean().optional(),
+    wave: z.boolean().optional(),
+    roomInvite: z.boolean().optional(),
+    clubInvite: z.boolean().optional(),
+    roomStarted: z.boolean().optional(),
+    eventReminder: z.boolean().optional(),
+    newMessage: z.boolean().optional(),
+    handAccepted: z.boolean().optional(),
+    mention: z.boolean().optional(),
+  })
+  .strict();
+
 export const locationSchema = z.object({
   latitude: z.number().min(-90).max(90),
   longitude: z.number().min(-180).max(180),
@@ -57,6 +73,7 @@ export const completeOnboardingSchema = z.object({
 
 export type UpdateMeInput = z.infer<typeof updateMeSchema>;
 export type VisibilityInput = z.infer<typeof visibilitySchema>;
+export type NotifPrefsInput = z.infer<typeof notifPrefsSchema>;
 export type LocationInput = z.infer<typeof locationSchema>;
 export type SearchQueryInput = z.infer<typeof searchQuerySchema>;
 export type UsernameAvailabilityInput = z.infer<typeof usernameAvailabilitySchema>;

@@ -14,6 +14,7 @@ export const createRoomSchema = z
     isPrivate: z.boolean().default(false),
     roomType: z.enum(['OPEN', 'SOCIAL', 'CLOSED']).default('OPEN'),
     chatEnabled: z.boolean().default(true),
+    // TODO(phase-N): Dead flag. No server-side media recording pipeline exists yet.
     recordingEnabled: z.boolean().default(false),
     maxSpeakers: z.number().int().min(1).max(50).default(10),
     clubId: z.string().min(1).optional(),

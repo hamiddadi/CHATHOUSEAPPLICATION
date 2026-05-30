@@ -10,6 +10,9 @@ chatRouter.use(requireAuth);
 // Unread count + conversations list live at the root — no collision with
 // the peer-id catch-all below because Express matches literal paths first.
 chatRouter.get('/conversations', asyncHandler(chatController.conversations));
+// Dedicated single-conversation lookup (two-segment path; matched before the
+// single-segment '/:userId' thread route below).
+chatRouter.get('/conversations/:peerId', asyncHandler(chatController.conversationWithPeer));
 chatRouter.get('/unread-count', asyncHandler(chatController.unreadCount));
 
 // Per-message operations (mark-read, delete) live under /messages so the
