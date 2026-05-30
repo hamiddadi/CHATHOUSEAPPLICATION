@@ -69,6 +69,8 @@
     "raise": "Lever",
     "lower": "Baisser",
     "leave": "Quitter",
+    "leaveQuietly": "Quitter discrètement",
+    "invite": "Inviter",
     "waveA11y": "Envoyer un salut",
     "unavailable": "Room indisponible",
     "mayHaveEnded": "Cette room a peut-être pris fin.",

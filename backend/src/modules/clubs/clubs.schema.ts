@@ -32,7 +32,12 @@ export const updateClubSchema = z.object({
   iconUrl: z.string().url().max(500).nullish(),
 });
 
+export const setMemberRoleSchema = z.object({
+  role: z.enum(['admin', 'moderator', 'member']),
+});
+
 export type CreateClubInput = z.infer<typeof createClubSchema>;
 export type ListClubsInput = z.infer<typeof listClubsSchema>;
 export type InviteInput = z.infer<typeof inviteSchema>;
 export type UpdateClubInput = z.infer<typeof updateClubSchema>;
+export type SetMemberRoleInput = z.infer<typeof setMemberRoleSchema>;

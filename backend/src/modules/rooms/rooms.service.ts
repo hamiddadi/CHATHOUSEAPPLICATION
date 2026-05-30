@@ -4,6 +4,8 @@ import { AppError } from '../../middlewares/error.middleware';
 import { notificationsService } from '../notifications/notifications.service';
 import { getBlockedIdSet } from '../social/blocks';
 import { cancelEventReminder, scheduleEventReminder } from '../../queues/eventReminders';
+import { fanoutOne } from '../../extensions/queues/followFanout';
+import { logger } from '../../config/logger';
 import {
   emitHallwayRoomClosed,
   emitHallwayRoomCreated,
@@ -89,17 +91,27 @@ export const roomsService = {
     // callers keep working without code changes.
     const effectiveFilter = input.filter ?? (input.live === false ? undefined : 'live');
 
+    // 'past' lists ended rooms (e.g. a club's room archive) — so it must
+    // invert the default endedAt:null guard and instead require endedAt set.
+    const isPast = effectiveFilter === 'past';
+
     const where: Prisma.RoomWhereInput = {
-      endedAt: null,
+      ...(isPast ? { endedAt: { not: null } } : { endedAt: null }),
       isPrivate: false,
       ...(input.clubId ? { clubId: input.clubId } : {}),
     };
     if (effectiveFilter === 'live') where.isLive = true;
     if (effectiveFilter === 'upcoming') where.scheduledFor = { gte: new Date() };
 
+    const orderBy: Prisma.RoomOrderByWithRelationInput = isPast
+      ? { endedAt: 'desc' }
+      : effectiveFilter === 'upcoming'
+        ? { scheduledFor: 'asc' }
+        : { createdAt: 'desc' };
+
     return prisma.room.findMany({
       where,
-      orderBy: effectiveFilter === 'upcoming' ? { scheduledFor: 'asc' } : { createdAt: 'desc' },
+      orderBy,
       take: input.limit,
       include: roomInclude,
     });
@@ -219,6 +231,17 @@ export const roomsService = {
         scheduledFor: room.scheduledFor?.toISOString() ?? null,
         createdAt: room.createdAt.toISOString(),
       });
+
+      // Fan out a "started a room" notification to the host's followers
+      // immediately on create, rather than waiting up to 30s for the
+      // periodic scan worker. fanoutOne is idempotent (Redis SET NX on the
+      // same dedup key the scanner uses) so this never double-notifies even
+      // when the worker also picks the room up. Best-effort: a failure here
+      // must never block room creation, so we swallow + log and let the scan
+      // worker retry on its next pass.
+      void fanoutOne(room.id).catch(err =>
+        logger.warn('rooms.create: follower fan-out failed', { err, roomId: room.id }),
+      );
     }
 
     return room;
@@ -251,6 +274,17 @@ export const roomsService = {
     // even if they discovered the room id. The host themselves always passes.
     if (room.isPrivate && room.hostId !== userId && !existing) {
       throw new AppError('ROOM_007');
+    }
+
+    // SOCIAL rooms gate on the follow graph: anyone but the host or an
+    // existing participant must already follow the host to get in. This
+    // mirrors Clubhouse's "social" mode where rooms are open to the host's
+    // network rather than the whole hallway.
+    if (room.roomType === 'SOCIAL' && room.hostId !== userId && !existing) {
+      const f = await prisma.follow.findUnique({
+        where: { followerId_followingId: { followerId: userId, followingId: room.hostId } },
+      });
+      if (!f) throw new AppError('ROOM_007');
     }
 
     // Active ban check — a moderator-issued kick installs a RoomBan row;

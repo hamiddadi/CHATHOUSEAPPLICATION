@@ -18,6 +18,9 @@ clubsRouter.delete('/:id', asyncHandler(clubsController.remove));
 //   POST /:id/leave  → 200 (safe to call when not a member)
 //   POST /:id/accept → 200, or 403 CLUB_007 without a valid invitation
 // (handled in clubsService; see OpenAPI for the full response matrix).
+// Promote/demote a member. Guarded server-side: only an ADMIN member or the
+// club owner may change roles, and the owner's role is immutable.
+clubsRouter.patch('/:id/members/:userId/role', asyncHandler(clubsController.setMemberRole));
 clubsRouter.post('/:id/join', asyncHandler(clubsController.join));
 clubsRouter.post('/:id/leave', asyncHandler(clubsController.leave));
 clubsRouter.post('/:id/invite', asyncHandler(clubsController.invite));

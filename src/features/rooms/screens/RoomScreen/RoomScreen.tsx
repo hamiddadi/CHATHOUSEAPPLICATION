@@ -147,6 +147,14 @@ export const RoomScreen: React.FC = () => {
           'Un modérateur vous a expulsé de cette room. Vous ne pouvez pas y revenir avant 30 minutes.',
         );
       };
+      // The host closed the room (REST /rooms/:id/end or socket room:end).
+      // A missing roomId means "this room"; otherwise it must match the one
+      // we're viewing. Pop the screen and tell the user it's over.
+      const endedHandler = (payload: { roomId?: string }): void => {
+        if (payload.roomId && payload.roomId !== room.id) return;
+        navigation.goBack();
+        Alert.alert('Room terminée', "Cette room a été fermée par l'hôte.");
+      };
       const roleHandler = (payload: { userId: string; role: string; roomId?: string }): void => {
         if (payload.userId !== viewerId) return;
         if (payload.roomId && payload.roomId !== room.id) return;
@@ -167,10 +175,12 @@ export const RoomScreen: React.FC = () => {
       socket.on('room:mute-changed', muteHandler);
       socket.on('room:user_kicked', kickHandler);
       socket.on('room:role_changed', roleHandler);
+      socket.on('room:ended', endedHandler);
       cleanup = () => {
         socket.off('room:mute-changed', muteHandler);
         socket.off('room:user_kicked', kickHandler);
         socket.off('room:role_changed', roleHandler);
+        socket.off('room:ended', endedHandler);
       };
     })();
     return () => {
@@ -537,6 +547,7 @@ export const RoomScreen: React.FC = () => {
           isHandRaised={isHandRaised}
           onToggleMute={handleToggleMute}
           onToggleHand={handleToggleHand}
+          onInvite={() => navigation.navigate('InviteToRoom', { roomId: room.id })}
           onLeave={handleLeave}
         />
       </View>

@@ -64,7 +64,7 @@ export const sendReactionSchema = z.object({
 
 export const listRoomsSchema = z.object({
   live: z.coerce.boolean().optional(),
-  filter: z.enum(['live', 'upcoming', 'mine']).optional(),
+  filter: z.enum(['live', 'upcoming', 'mine', 'past']).optional(),
   clubId: z.string().min(1).optional(),
   // When true, restrict the hallway feed to club-attached rooms only.
   clubs: z.coerce.boolean().optional(),

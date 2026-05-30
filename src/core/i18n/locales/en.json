@@ -69,6 +69,8 @@
     "raise": "Raise",
     "lower": "Lower",
     "leave": "Leave",
+    "leaveQuietly": "Leave quietly",
+    "invite": "Invite",
     "waveA11y": "Send a wave",
     "unavailable": "Room unavailable",
     "mayHaveEnded": "This room may have ended.",

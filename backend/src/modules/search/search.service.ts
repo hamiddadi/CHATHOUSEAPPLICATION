@@ -62,10 +62,12 @@ const clubSelect = {
 const searchClubs = async (q: string, limit: number) => {
   const clubs = await prisma.club.findMany({
     where: {
-      privacy: 'OPEN',
+      // Discoverable clubs span OPEN + SOCIAL (PRIVATE stays hidden from search).
+      privacy: { in: ['OPEN', 'SOCIAL'] },
       OR: [
         { name: { contains: q, mode: 'insensitive' } },
         { description: { contains: q, mode: 'insensitive' } },
+        { category: { contains: q, mode: 'insensitive' } },
       ],
     },
     select: clubSelect,

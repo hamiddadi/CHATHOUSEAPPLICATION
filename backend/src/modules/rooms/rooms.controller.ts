@@ -2,7 +2,10 @@ import type { Request, Response } from 'express';
 import { sendOk } from '../../utils/response';
 import { AppError } from '../../middlewares/error.middleware';
 import { prisma } from '../../config/database';
-import { closeRoom as closeSfuRoom } from '../../webrtc/mediasoup.manager';
+import {
+  closeRoom as closeSfuRoom,
+  closeProducersForUserInRoom,
+} from '../../webrtc/mediasoup.manager';
 import { authedUserId as requireUserId } from '../../utils/authedUserId';
 import { agoraService, type AgoraParticipantRole } from './agora.service';
 import {
@@ -168,10 +171,17 @@ export const roomsController = {
 
   async kick(req: Request, res: Response) {
     const input = kickSchema.parse(req.body);
-    const result = await roomsService.kick(paramId(req, 'id'), requireUserId(req), input.userId, {
+    const roomId = paramId(req, 'id');
+    const result = await roomsService.kick(roomId, requireUserId(req), input.userId, {
       banMinutes: input.banMinutes,
       reason: input.reason,
     });
+    // Tear down the kicked user's SFU producers so peers stop consuming their
+    // audio immediately — the socket `room:user_kicked` broadcast (emitted by
+    // roomsService.kick) already pops the client out of the room. The Producer
+    // `close` handler fans out `rtc:producer-closed` so consumers clean up.
+    // Idempotent: a no-op (returns 0) if RTC wasn't in use for this user.
+    closeProducersForUserInRoom(roomId, input.userId);
     sendOk(res, result);
   },
 
