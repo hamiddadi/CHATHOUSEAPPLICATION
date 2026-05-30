@@ -163,12 +163,17 @@ const visibilityToBackend = (
   hint?: boolean,
 ): {
   isPrivate: boolean;
+  visibility: RoomVisibility;
 } => {
-  // Backend has a single `isPrivate` flag; "social" currently collapses
-  // onto "public" (gating by mutual-follow is client-side today). If
-  // `hint` (explicit isPrivate from the caller) is given it wins.
-  if (hint !== undefined) return { isPrivate: hint };
-  return { isPrivate: v === 'closed' };
+  // Backend has a single `isPrivate` flag today, so "social" maps onto a
+  // private-ish room. We additionally forward the explicit `visibility` so
+  // the server can enforce mutual-follow gating once supported instead of
+  // the client silently collapsing "social" → public (a privacy promise we
+  // couldn't keep). Unknown fields are ignored by the current backend.
+  // TODO(audit): backend must honor `visibility: 'social'` (mutual-follow
+  // gating on join) — until then 'Social' is hidden in CreateRoomScreen.
+  if (hint !== undefined) return { isPrivate: hint, visibility: v };
+  return { isPrivate: v === 'closed' || v === 'social', visibility: v };
 };
 
 export interface RoomsListFilter {
@@ -196,11 +201,12 @@ export const roomService = {
   async create(input: CreateRoomInput): Promise<Room> {
     const trimmed = input.title.trim();
     if (trimmed.length === 0) throw new Error('Title is required');
-    const { isPrivate } = visibilityToBackend(input.visibility, input.isPrivate);
+    const { isPrivate, visibility } = visibilityToBackend(input.visibility, input.isPrivate);
     const res = await apiClient.post<Envelope<RawRoom>>('/rooms', {
       title: trimmed,
       description: input.description?.trim() || undefined,
       isPrivate,
+      visibility,
       chatEnabled: input.chatEnabled ?? true,
       maxSpeakers: input.maxSpeakers,
       clubId: input.houseId ?? undefined,

@@ -21,6 +21,10 @@ roomsRouter.get('/events/mine', asyncHandler(roomsController.myUpcoming));
 // `/:id` for the same literal-precedence reason as /feed and /events.
 roomsRouter.get('/history/mine', asyncHandler(roomsController.myHistory));
 roomsRouter.get('/:id', asyncHandler(roomsController.get));
+// Ending a live room is a business-state transition (close + release SFU),
+// not a resource deletion. Prefer the explicit POST /:id/end action; the
+// DELETE /:id alias is kept for backward compatibility with existing clients.
+roomsRouter.post('/:id/end', asyncHandler(roomsController.end));
 roomsRouter.delete('/:id', asyncHandler(roomsController.end));
 roomsRouter.post('/:id/join', asyncHandler(roomsController.join));
 roomsRouter.post('/:id/leave', asyncHandler(roomsController.leave));
@@ -52,6 +56,8 @@ roomsRouter.post('/:id/mute-all', asyncHandler(roomsController.muteAll));
 
 // Invitations & pings — bulk add to room or notify a friend to join.
 roomsRouter.post('/:id/invite', asyncHandler(roomsController.invite));
+// Ping a single friend to come join (public rooms only — enforced in service).
+roomsRouter.post('/:id/ping/:userId', asyncHandler(roomsController.ping));
 
 // Report a room — moderation queue, rate-limited 1 per (reporter, room) per 24h.
 roomsRouter.post('/:id/report', asyncHandler(socialController.reportRoom));

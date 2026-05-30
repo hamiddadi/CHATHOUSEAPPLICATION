@@ -1,6 +1,7 @@
 import type { AppRole, Prisma } from '@prisma/client';
 import { prisma } from '../../config/database';
 import { redis } from '../../config/redis';
+import { logger } from '../../config/logger';
 import { AppError } from '../../middlewares/error.middleware';
 import { closeRoom as closeSfuRoom } from '../../webrtc/mediasoup.manager';
 import { emitHallwayRoomClosed, emitNotification } from '../../socket/realtime';
@@ -20,6 +21,15 @@ import type {
 // Sentinel for permanent bans — far enough that nothing routine compares it
 // without intent. Anything past 9000 is effectively forever for app users.
 const PERMANENT_BAN_DATE = new Date('9999-12-31T23:59:59Z');
+
+// Hard cap on rows materialised in a single CSV export. Without cursor
+// streaming the whole result set is held in memory, so we bound it. When the
+// cap is hit the export is silently incomplete from the caller's point of
+// view, so we log a warning to make the truncation visible operationally.
+// TODO(audit): stream exports in cursor batches instead of a flat cap, and
+// consider partial PII masking (email/phone) — both are product/architecture
+// decisions deferred here.
+const CSV_EXPORT_LIMIT = 5000;
 
 const csvCell = (v: unknown): string => {
   if (v === null || v === undefined) return '""';
@@ -239,11 +249,20 @@ export const adminService = {
   },
 
   async unsuspend(actorId: string, targetUserId: string, ctx: ActorContext) {
-    const target = await prisma.user.findUnique({
-      where: { id: targetUserId },
-      select: { id: true, suspendedUntil: true, suspensionReason: true },
-    });
+    const [actor, target] = await Promise.all([
+      fetchActor(actorId),
+      prisma.user.findUnique({
+        where: { id: targetUserId },
+        select: { id: true, appRole: true, suspendedUntil: true, suspensionReason: true },
+      }),
+    ]);
     if (!target) throw new AppError('USER_001');
+    // Mirror suspend/setRole/deleteUser: you cannot act on a peer or a
+    // higher-ranked account. Without this a moderator could lift a sanction
+    // an admin/super-admin placed on someone at or above the moderator's tier.
+    if (ROLE_RANK[target.appRole] >= ROLE_RANK[actor.appRole]) {
+      throw new AppError('ADMIN_002');
+    }
 
     const updated = await prisma.user.update({
       where: { id: targetUserId },
@@ -341,6 +360,12 @@ export const adminService = {
     input: ResolveReportInput,
     ctx: ActorContext,
   ) {
+    // Resolution is intentionally "flat": marking a report resolved/dismissed
+    // does NOT mutate the reported user/room — the actual sanction (suspend,
+    // force-end, role change) is a separate, rank-guarded call. We therefore
+    // deliberately apply no actor/target rank check here so moderators can
+    // triage the queue (including reports that happen to name a superior)
+    // without being able to penalise anyone above their tier.
     const report = await prisma.report.findUnique({ where: { id: reportId } });
     if (!report) throw new AppError('NOT_FOUND_001');
     if (report.resolvedAt) return { ok: true as const };
@@ -594,8 +619,13 @@ export const adminService = {
         lastSeenAt: true,
       },
       orderBy: { createdAt: 'desc' },
-      take: 5000,
+      take: CSV_EXPORT_LIMIT,
     });
+    if (rows.length === CSV_EXPORT_LIMIT) {
+      logger.warn('exportUsersCsv truncated at row cap — export is incomplete', {
+        limit: CSV_EXPORT_LIMIT,
+      });
+    }
     const header = [
       'id',
       'username',
@@ -617,12 +647,17 @@ export const adminService = {
   exportAuditLogCsv: async (): Promise<string> => {
     const rows = await prisma.auditLog.findMany({
       orderBy: { createdAt: 'desc' },
-      take: 5000,
+      take: CSV_EXPORT_LIMIT,
       include: {
         actor: { select: { username: true, displayName: true } },
         targetUser: { select: { username: true, displayName: true } },
       },
     });
+    if (rows.length === CSV_EXPORT_LIMIT) {
+      logger.warn('exportAuditLogCsv truncated at row cap — export is incomplete', {
+        limit: CSV_EXPORT_LIMIT,
+      });
+    }
     const flat = rows.map(r => ({
       id: r.id,
       createdAt: r.createdAt.toISOString(),
@@ -659,13 +694,18 @@ export const adminService = {
   exportReportsCsv: async (): Promise<string> => {
     const rows = await prisma.report.findMany({
       orderBy: { createdAt: 'desc' },
-      take: 5000,
+      take: CSV_EXPORT_LIMIT,
       include: {
         reporter: { select: { username: true } },
         reported: { select: { username: true } },
         reportedRoom: { select: { title: true } },
       },
     });
+    if (rows.length === CSV_EXPORT_LIMIT) {
+      logger.warn('exportReportsCsv truncated at row cap — export is incomplete', {
+        limit: CSV_EXPORT_LIMIT,
+      });
+    }
     const flat = rows.map(r => ({
       id: r.id,
       createdAt: r.createdAt.toISOString(),

@@ -3,7 +3,6 @@ import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { colors } from '../../../shared/constants/theme';
-import { AVATARS_10 } from '../../../shared/constants/images';
 import type { MessageStackParamList } from '../../../core/navigation/types';
 import { PulsingAvatar } from './PulsingAvatar';
 
@@ -28,20 +27,22 @@ export interface OnlineUser {
   avatar: string;
 }
 
-const DEFAULT_ONLINE_USERS: readonly OnlineUser[] = [
-  { id: '1', name: 'Amira', avatar: AVATARS_10[5] ?? '' },
-  { id: '2', name: 'Youssef', avatar: AVATARS_10[0] ?? '' },
-  { id: '3', name: 'Sara', avatar: AVATARS_10[6] ?? '' },
-  { id: '4', name: 'Karim', avatar: AVATARS_10[1] ?? '' },
-  { id: '5', name: 'Nadia', avatar: AVATARS_10[7] ?? '' },
-];
-
 export interface OnlineUsersListProps {
-  /** Defaults to a 5-user mock dataset when omitted. */
+  /**
+   * Online users to display. These MUST carry real backend user ids: tapping
+   * an item navigates to ChatDetail with the resolved conversation id, and the
+   * DM service treats that id as the peer id. When omitted/empty the band is
+   * not rendered (no mock fallback) so we never navigate to a non-existent
+   * conversation.
+   */
   users?: readonly OnlineUser[];
   /** Localized section title. Defaults to "Online". */
   title?: string;
-  /** Resolve a chat conversation id from a user id. Defaults to `conv-{id}`. */
+  /**
+   * Resolve a chat conversation id from a user id. Required to navigate; when
+   * omitted we use the user id verbatim (peer id == conversation id), which
+   * matches the DM service contract.
+   */
   resolveConversationId?: (userId: string) => string;
 }
 
@@ -78,14 +79,15 @@ UserItem.displayName = 'UserItem';
  * List
  * ========================================================== */
 export const OnlineUsersList: React.FC<OnlineUsersListProps> = memo(
-  ({ users = DEFAULT_ONLINE_USERS, title = 'Online', resolveConversationId }) => {
+  ({ users, title = 'Online', resolveConversationId }) => {
     const navigation = useNavigation<Nav>();
 
     const handleOpenChat = useCallback(
       (user: OnlineUser) => {
-        const conversationId = resolveConversationId
-          ? resolveConversationId(user.id)
-          : `conv-${user.id}`;
+        // Default to the user id verbatim — the DM service uses the peer id as
+        // the conversation id (see messageService). Never fabricate a `conv-{id}`
+        // id, which would resolve to a non-existent conversation and 404.
+        const conversationId = resolveConversationId ? resolveConversationId(user.id) : user.id;
         navigation.navigate('ChatDetail', { conversationId });
       },
       [navigation, resolveConversationId],
@@ -97,6 +99,14 @@ export const OnlineUsersList: React.FC<OnlineUsersListProps> = memo(
     );
     const keyExtractor = useCallback((item: OnlineUser) => item.id, []);
     const renderSeparator = useCallback(() => <View style={styles.itemSeparator} />, []);
+
+    // No real online-users source wired yet: render nothing rather than a mock
+    // band that navigates to broken chats.
+    // TODO(audit): feed `users` (with real backend ids) from MessagesScreen,
+    // e.g. from mutual followers / presence, then this band shows up.
+    if (!users || users.length === 0) {
+      return null;
+    }
 
     return (
       <View style={styles.block}>

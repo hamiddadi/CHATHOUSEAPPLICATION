@@ -18,8 +18,27 @@ const paramId = (req: Request, key: string, errorCode: 'CHAT_002' | 'USER_001') 
 
 export const chatController = {
   async conversations(req: Request, res: Response) {
-    const rows = await chatService.listConversations(requireUserId(req));
-    sendOk(res, rows);
+    const userId = requireUserId(req);
+    const limitRaw = req.query['limit'];
+    const cursorRaw = req.query['cursor'];
+    const hasPaging = limitRaw !== undefined || cursorRaw !== undefined;
+    // Default high so the unpaginated mobile call still returns every
+    // conversation in the scan window (no silent 30-row truncation).
+    const limit =
+      typeof limitRaw === 'string' ? Math.min(100, Math.max(1, Number(limitRaw) || 30)) : 500;
+    const cursor = typeof cursorRaw === 'string' ? cursorRaw : undefined;
+    const result = await chatService.listConversations(userId, limit, cursor);
+    // Back-compat: existing clients expect a bare array. Opt into the
+    // paginated { data, nextCursor, hasMore } envelope via ?limit/?cursor.
+    sendOk(res, hasPaging ? result : result.data);
+  },
+
+  async conversationWithPeer(req: Request, res: Response) {
+    const result = await chatService.conversationWith(
+      requireUserId(req),
+      paramId(req, 'peerId', 'USER_001'),
+    );
+    sendOk(res, result);
   },
 
   async withPeer(req: Request, res: Response) {

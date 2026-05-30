@@ -254,6 +254,21 @@ export const clubsService = {
     });
     if (existing) return { joined: true as const };
 
+    // SECURITY: require a real CLUB_INVITE addressed to this user for this
+    // club. Without this check any authenticated user could POST
+    // /clubs/:id/accept and join ANY club — including PRIVATE ones — bypassing
+    // the join() guard (CLUB_003). invite() materialises the invitation as a
+    // CLUB_INVITE notification carrying { clubId } in its data payload.
+    const invite = await prisma.notification.findFirst({
+      where: {
+        userId: viewerId,
+        type: 'CLUB_INVITE',
+        data: { path: ['clubId'], equals: clubId },
+      },
+      select: { id: true },
+    });
+    if (!invite) throw new AppError('CLUB_007');
+
     await prisma.$transaction([
       prisma.clubMember.create({
         data: { clubId, userId: viewerId, role: 'MEMBER' },

@@ -27,10 +27,15 @@ interface VisibilityOption {
 
 const VISIBILITY_OPTIONS: readonly VisibilityOption[] = [
   { id: 'public', icon: 'public', label: 'Open', description: 'Anyone in Chathouse can join' },
-  { id: 'social', icon: 'people', label: 'Social', description: 'Only people you follow can join' },
+  // 'Social' (mutual-follow gating) is hidden until the backend enforces it
+  // — otherwise the "Only people you follow can join" promise is unkept and
+  // the room is actually public. Re-add once `visibility: 'social'` is
+  // honored server-side.
+  // { id: 'social', icon: 'people', label: 'Social', description: 'Only people you follow can join' },
   { id: 'closed', icon: 'lock', label: 'Closed', description: 'Only people you invite' },
 ];
 
+const TITLE_MIN = 3;
 const TITLE_MAX = 80;
 const DESCRIPTION_MAX = 200;
 const MAX_TOPICS = 5;
@@ -260,7 +265,11 @@ export const CreateRoomScreen: React.FC = () => {
   ]);
   const handleToggleSchedule = useCallback(() => setIsScheduled(prev => !prev), []);
 
-  const canStart = title.trim().length > 0 && !createRoom.isPending;
+  // Align with TitleEditModal's bounds so creation and editing agree:
+  // a 1-char title was previously accepted on create but rejected on edit.
+  const trimmedTitle = title.trim();
+  const canStart =
+    trimmedTitle.length >= TITLE_MIN && trimmedTitle.length <= TITLE_MAX && !createRoom.isPending;
   const topicsArray = useMemo(() => [...topics], [topics]);
 
   return (

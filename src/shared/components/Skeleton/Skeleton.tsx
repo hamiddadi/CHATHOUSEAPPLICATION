@@ -1,4 +1,4 @@
-import React, { memo, useEffect } from 'react';
+import React, { memo, useEffect, useMemo } from 'react';
 import { StyleSheet, View, type ViewStyle } from 'react-native';
 import Animated, {
   useAnimatedStyle,
@@ -56,14 +56,25 @@ export const RoomCardSkeleton: React.FC = memo(() => (
 ));
 RoomCardSkeleton.displayName = 'RoomCardSkeleton';
 
+/**
+ * Builds a list of stable keys for `count` decorative placeholders. Avoids the
+ * index-as-key anti-pattern so Reanimated nodes stay correctly associated if
+ * `count` ever becomes dynamic.
+ */
+const useSkeletonKeys = (count: number): string[] =>
+  useMemo(() => Array.from({ length: count }, (_, i) => `skeleton-${i}`), [count]);
+
 /** Pre-composed skeleton for a list of room cards. */
-export const FeedSkeleton: React.FC<{ count?: number }> = memo(({ count = 4 }) => (
-  <View style={styles.feedContainer}>
-    {Array.from({ length: count }).map((_, i) => (
-      <RoomCardSkeleton key={i} />
-    ))}
-  </View>
-));
+export const FeedSkeleton: React.FC<{ count?: number }> = memo(({ count = 4 }) => {
+  const keys = useSkeletonKeys(count);
+  return (
+    <View style={styles.feedContainer}>
+      {keys.map(key => (
+        <RoomCardSkeleton key={key} />
+      ))}
+    </View>
+  );
+});
 FeedSkeleton.displayName = 'FeedSkeleton';
 
 /** Pre-composed skeleton for a user profile header. */
@@ -81,19 +92,22 @@ export const ProfileSkeleton: React.FC = memo(() => (
 ProfileSkeleton.displayName = 'ProfileSkeleton';
 
 /** Notification list skeleton */
-export const NotificationSkeleton: React.FC<{ count?: number }> = memo(({ count = 6 }) => (
-  <View style={styles.feedContainer}>
-    {Array.from({ length: count }).map((_, i) => (
-      <View key={i} style={styles.notifRow}>
-        <Skeleton width={40} height={40} borderRadius={20} />
-        <View style={styles.notifContent}>
-          <Skeleton width="90%" height={14} />
-          <Skeleton width="50%" height={10} />
+export const NotificationSkeleton: React.FC<{ count?: number }> = memo(({ count = 6 }) => {
+  const keys = useSkeletonKeys(count);
+  return (
+    <View style={styles.feedContainer}>
+      {keys.map(key => (
+        <View key={key} style={styles.notifRow}>
+          <Skeleton width={40} height={40} borderRadius={20} />
+          <View style={styles.notifContent}>
+            <Skeleton width="90%" height={14} />
+            <Skeleton width="50%" height={10} />
+          </View>
         </View>
-      </View>
-    ))}
-  </View>
-));
+      ))}
+    </View>
+  );
+});
 NotificationSkeleton.displayName = 'NotificationSkeleton';
 
 export { Skeleton as default };

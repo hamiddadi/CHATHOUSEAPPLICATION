@@ -11,7 +11,6 @@ import {
   listRoomsSchema,
   muteAllSchema,
   muteSchema,
-  pingUserSchema,
   sendReactionSchema,
   sendRoomMessageSchema,
   toggleRoomChatSchema,
@@ -92,7 +91,11 @@ export const roomsController = {
   },
 
   async listRsvps(req: Request, res: Response) {
-    const rows = await roomsService.listRsvps(paramId(req, 'id'));
+    const roomId = paramId(req, 'id');
+    const userId = requireUserId(req);
+    // viewerId lets the service hide the attendee list of private rooms from
+    // non-members (see roomsService.listRsvps).
+    const rows = await roomsService.listRsvps(roomId, userId);
     sendOk(res, rows);
   },
 
@@ -194,9 +197,11 @@ export const roomsController = {
   },
 
   async ping(req: Request, res: Response) {
-    const input = pingUserSchema.parse(req.body);
+    // roomId + targetUserId both come from the path so the endpoint is
+    // consistent with the rest of the file (no mixing body + params).
+    // Wired as POST /:id/ping/:userId in rooms.router.ts.
     const result = await roomsService.pingUser(
-      input.roomId,
+      paramId(req, 'id'),
       requireUserId(req),
       paramId(req, 'userId'),
     );

@@ -21,7 +21,15 @@
     "types": ["node", "jest"],
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["src/*"],
+      "@config/*": ["src/config/*"],
+      "@modules/*": ["src/modules/*"],
+      "@middlewares/*": ["src/middlewares/*"],
+      "@socket/*": ["src/socket/*"],
+      "@webrtc/*": ["src/webrtc/*"],
+      "@queues/*": ["src/queues/*"],
+      "@utils/*": ["src/utils/*"],
+      "@extensions/*": ["src/extensions/*"]
     }
   },
   "include": ["src/**/*.ts", "tests/**/*.ts"],

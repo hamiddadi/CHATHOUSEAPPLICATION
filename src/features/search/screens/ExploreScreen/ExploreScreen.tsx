@@ -52,7 +52,18 @@ const RoomRow: React.FC<{ room: SearchRoomHit; onPress: (id: string) => void }> 
 );
 RoomRow.displayName = 'RoomRow';
 
-const ClubRow: React.FC<{ club: ExploreClubHit; onPress: (id: string) => void }> = memo(
+// `liveRoomsCount`/`followersCount` are optional here so the search-results
+// view can pass its raw hits (which omit those counts) without allocating a
+// fresh `{ ...hit, count: 0 }` object on every render — that spread broke the
+// `memo` reference equality and re-rendered every row on each keystroke.
+type ClubRowData =
+  | ExploreClubHit
+  | (Omit<ExploreClubHit, 'liveRoomsCount'> & { liveRoomsCount?: number });
+type UserRowData =
+  | ExploreUserHit
+  | (Omit<ExploreUserHit, 'followersCount'> & { followersCount?: number });
+
+const ClubRow: React.FC<{ club: ClubRowData; onPress: (id: string) => void }> = memo(
   ({ club, onPress }) => (
     <Pressable
       onPress={() => onPress(club.id)}
@@ -67,7 +78,7 @@ const ClubRow: React.FC<{ club: ExploreClubHit; onPress: (id: string) => void }>
           {club.name}
         </Text>
         <Text className="text-xs text-ink-muted" numberOfLines={1}>
-          {club.membersCount} members · {club.liveRoomsCount} live
+          {club.membersCount} members · {club.liveRoomsCount ?? 0} live
         </Text>
       </View>
     </Pressable>
@@ -75,7 +86,7 @@ const ClubRow: React.FC<{ club: ExploreClubHit; onPress: (id: string) => void }>
 );
 ClubRow.displayName = 'ClubRow';
 
-const UserRow: React.FC<{ user: ExploreUserHit; onPress: (id: string) => void }> = memo(
+const UserRow: React.FC<{ user: UserRowData; onPress: (id: string) => void }> = memo(
   ({ user, onPress }) => (
     <Pressable
       onPress={() => onPress(user.id)}
@@ -88,7 +99,7 @@ const UserRow: React.FC<{ user: ExploreUserHit; onPress: (id: string) => void }>
           {user.displayName}
         </Text>
         <Text className="text-xs text-ink-muted" numberOfLines={1}>
-          @{user.username} · {user.followersCount} followers
+          @{user.username} · {user.followersCount ?? 0} followers
         </Text>
       </View>
     </Pressable>
@@ -168,16 +179,12 @@ export const ExploreScreen: React.FC = () => {
                 <Section
                   title={t('explore.peopleToFollow')}
                   items={search.data?.users}
-                  render={u => (
-                    <UserRow key={u.id} user={{ ...u, followersCount: 0 }} onPress={goUser} />
-                  )}
+                  render={u => <UserRow key={u.id} user={u} onPress={goUser} />}
                 />
                 <Section
                   title={t('explore.popularClubs')}
                   items={search.data?.clubs}
-                  render={c => (
-                    <ClubRow key={c.id} club={{ ...c, liveRoomsCount: 0 }} onPress={goClub} />
-                  )}
+                  render={c => <ClubRow key={c.id} club={c} onPress={goClub} />}
                 />
                 <Section
                   title={t('explore.trendingRooms')}

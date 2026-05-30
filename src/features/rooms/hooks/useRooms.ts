@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { env } from '../../../config/env';
 import { roomService, type CreateRoomInput } from '../services/roomService';
 import type { Room, RoomSummary } from '../../../shared/types/domain';
 import { useCurrentRoomStore } from '../store/currentRoomStore';
@@ -138,7 +139,14 @@ export const useHandRaises = (roomId: string | null) =>
     queryKey: [...roomKeys.all, 'hand-raises', roomId ?? ''] as const,
     queryFn: () => roomService.listHandRaises(roomId as string),
     enabled: Boolean(roomId),
-    refetchInterval: 10_000,
+    // When realtime is on, useRoomSocket already pushes hand_raised/lowered;
+    // the interval would be pure duplicate work, so disable it. Otherwise
+    // poll every 10s but never while the app is backgrounded (battery/data).
+    // TODO(audit): also invalidate this hand-raises key from useRoomSocket's
+    // room:hand_raised/lowered handlers so the list stays fresh when polling
+    // is off (useRoomSocket is outside this file's scope).
+    refetchInterval: env.REALTIME_ENABLED ? false : 10_000,
+    refetchIntervalInBackground: false,
   });
 
 export const useRoomMessages = (roomId: string | null) =>

@@ -1,4 +1,4 @@
-import React, { memo, useCallback, useState } from 'react';
+import React, { memo, useCallback, useEffect, useState } from 'react';
 import { Alert, FlatList, Pressable, Share, StyleSheet, Text, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
@@ -17,6 +17,15 @@ import { useInviteToHouse } from '../../hooks/useHouses';
 
 type Nav = NativeStackNavigationProp<RoomStackParamList, 'InviteMember'>;
 type Route = RouteProp<RoomStackParamList, 'InviteMember'>;
+
+// Single source of truth for the invite link so the copied/shared URL and the
+// on-screen text can never drift apart.
+const INVITE_HOST = 'app.chathouse.com';
+const INVITE_BASE_URL = `https://${INVITE_HOST}/invite`;
+
+// Match the debounce convention used by the other user-search screens
+// (InviteToRoomScreen / ExploreScreen) so each keystroke doesn't fire a request.
+const SEARCH_DEBOUNCE_MS = 250;
 
 interface UserRowProps {
   user: User;
@@ -54,14 +63,20 @@ export const InviteMemberScreen: React.FC = () => {
   const route = useRoute<Route>();
   const insets = useSafeAreaInsets();
   const [query, setQuery] = useState('');
+  const [debouncedQuery, setDebouncedQuery] = useState('');
   const [invited, setInvited] = useState<Record<string, boolean>>({});
 
-  const { data: users, isLoading } = useSearchUsers(query);
+  useEffect(() => {
+    const id = setTimeout(() => setDebouncedQuery(query.trim()), SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(id);
+  }, [query]);
+
+  const { data: users, isLoading } = useSearchUsers(debouncedQuery);
   const inviteToHouse = useInviteToHouse();
 
   const handleClose = useCallback(() => navigation.goBack(), [navigation]);
 
-  const inviteUrl = `https://app.chathouse.com/invite/${route.params.houseId}`;
+  const inviteUrl = `${INVITE_BASE_URL}/${route.params.houseId}`;
   const handleCopyLink = useCallback(async () => {
     try {
       await Clipboard.setStringAsync(inviteUrl);
@@ -81,15 +96,22 @@ export const InviteMemberScreen: React.FC = () => {
 
   const handleInvite = useCallback(
     (id: string) => {
-      setInvited(prev => {
-        const next = { ...prev, [id]: !prev[id] };
-        if (next[id]) {
-          inviteToHouse.mutate({ houseId: route.params.houseId, userIds: [id] });
-        }
-        return next;
-      });
+      // Invitation is a one-way, additive action — there is no un-invite endpoint.
+      // Once invited, a second tap must NOT silently flip the UI back to "Invite"
+      // (which would falsely suggest the invitation was cancelled). Also guard
+      // against double-submission while a request is in flight.
+      if (invited[id] || inviteToHouse.isPending) return;
+      inviteToHouse.mutate(
+        { houseId: route.params.houseId, userIds: [id] },
+        {
+          // Only mark as invited once the backend confirms — so a failed request
+          // doesn't leave a false-positive "Invited" badge.
+          onSuccess: () => setInvited(prev => ({ ...prev, [id]: true })),
+          onError: () => Alert.alert('Erreur', "L'invitation n'a pas pu être envoyée."),
+        },
+      );
     },
-    [inviteToHouse, route.params.houseId],
+    [invited, inviteToHouse, route.params.houseId],
   );
 
   const renderItem = useCallback(
@@ -120,7 +142,7 @@ export const InviteMemberScreen: React.FC = () => {
         <View className="flex-row items-center gap-sm p-md rounded-md bg-overlay-white-5 border border-overlay-white-10">
           <MaterialIcons name="link" size={18} color={colors.textMuted} />
           <Text className="flex-1 text-xs font-body text-ink-muted" numberOfLines={1}>
-            chathouse.app/invite/{route.params.houseId}
+            {`${INVITE_HOST}/invite/${route.params.houseId}`}
           </Text>
           <Pressable
             onPress={handleCopyLink}

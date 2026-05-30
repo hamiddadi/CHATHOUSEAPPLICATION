@@ -1,5 +1,6 @@
 import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
 import {
+  Alert,
   FlatList,
   KeyboardAvoidingView,
   Modal,
@@ -131,7 +132,10 @@ export const RoomChatSidebar: React.FC<RoomChatSidebarProps> = memo(
 
     const handleSend = useCallback(() => {
       const content = draft.trim();
-      if (content.length === 0) return;
+      // Guard against a double-tap firing two mutations before isPending
+      // flips (React state is async): otherwise the same message is sent
+      // twice since the draft is only cleared in onSuccess.
+      if (content.length === 0 || sendMessage.isPending) return;
       sendMessage.mutate(
         { roomId, content, replyToId: replyTo?.id },
         {
@@ -139,6 +143,7 @@ export const RoomChatSidebar: React.FC<RoomChatSidebarProps> = memo(
             setDraft('');
             setReplyTo(null);
           },
+          onError: e => Alert.alert('Erreur', e instanceof Error ? e.message : "Échec de l'envoi"),
         },
       );
     }, [draft, roomId, replyTo, sendMessage]);
@@ -204,6 +209,10 @@ export const RoomChatSidebar: React.FC<RoomChatSidebarProps> = memo(
                 keyExtractor={m => m.id}
                 contentContainerStyle={styles.listContent}
                 showsVerticalScrollIndicator={false}
+                initialNumToRender={20}
+                maxToRenderPerBatch={20}
+                windowSize={11}
+                removeClippedSubviews
               />
               {replyTo ? (
                 <View style={styles.replyBanner}>
@@ -243,7 +252,9 @@ export const RoomChatSidebar: React.FC<RoomChatSidebarProps> = memo(
                   accessibilityLabel="Envoyer"
                   style={[
                     styles.sendBtn,
-                    draft.trim().length === 0 ? styles.sendBtnDisabled : null,
+                    draft.trim().length === 0 || sendMessage.isPending
+                      ? styles.sendBtnDisabled
+                      : null,
                   ]}
                 >
                   <MaterialIcons name="send" size={18} color={colors.background} />

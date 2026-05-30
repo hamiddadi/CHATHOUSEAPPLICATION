@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { Alert, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -6,31 +6,57 @@ import { Button } from '../../../shared/components/Button';
 import { colors, spacing } from '../../../shared/constants/theme';
 import { privacyService } from '../services/privacyService';
 
-const SHARE_LIMIT = 50_000; // chars — Share sheet truncates anyway
-
 export const DataExportScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const [busy, setBusy] = useState(false);
   const [lastBytes, setLastBytes] = useState<number | null>(null);
+  const [copied, setCopied] = useState(false);
+  // Hold the archive in component memory only — never auto-persisted to the
+  // system clipboard. Copying is an explicit, opt-in action below.
+  const archiveRef = useRef<string | null>(null);
 
+  // Privacy: the export contains PII and message content. We hand it off via
+  // the OS Share sheet (which carries the FULL archive) instead of silently
+  // copying it to the system clipboard, where any other app can read it. A
+  // dedicated file export (expo-sharing / expo-file-system) would be ideal but
+  // those modules aren't installed in this build.
+  // TODO(audit): add expo-sharing + expo-file-system to write the archive to a
+  // private file and share it via the native file Share sheet.
   const handleExport = useCallback(async () => {
     setBusy(true);
+    setCopied(false);
     try {
       const json = await privacyService.exportMyData();
+      archiveRef.current = json;
       setLastBytes(json.length);
-      await Clipboard.setStringAsync(json);
-      // Truncate the share-sheet payload — the full archive is in the
-      // clipboard, the share message is just a preview/handoff.
-      const message =
-        json.length > SHARE_LIMIT
-          ? `${json.slice(0, SHARE_LIMIT)}\n…(tronqué — le fichier complet est dans le presse-papier)`
-          : json;
-      await Share.share({ message, title: 'Mon export Chathouse (RGPD)' });
+      // Share sheet carries the full archive (not truncated) — no clipboard.
+      await Share.share({ message: json, title: 'Mon export Chathouse (RGPD)' });
     } catch (e) {
       Alert.alert('Erreur', e instanceof Error ? e.message : 'Échec de l’export');
     } finally {
       setBusy(false);
     }
+  }, []);
+
+  // Explicit opt-in copy. Users who really want the clipboard can choose it,
+  // and we surface a one-tap way to wipe it again afterwards.
+  const handleCopy = useCallback(async () => {
+    if (!archiveRef.current) return;
+    try {
+      await Clipboard.setStringAsync(archiveRef.current);
+      setCopied(true);
+    } catch (e) {
+      Alert.alert('Erreur', e instanceof Error ? e.message : 'Échec de la copie');
+    }
+  }, []);
+
+  const handleClearClipboard = useCallback(async () => {
+    try {
+      await Clipboard.setStringAsync('');
+    } catch {
+      /* best-effort */
+    }
+    setCopied(false);
   }, []);
 
   return (
@@ -52,8 +78,9 @@ export const DataExportScreen: React.FC = () => {
         </Text>
         <Text style={styles.body}>
           L&apos;archive contient : votre profil, vos rooms hébergées, vos participations, votre
-          graphe d&apos;abonnements, vos messages directs, vos messages de room, vos RSVP, vos
-          tokens d&apos;appareils et vos préférences de notification.
+          graphe d&apos;abonnements, vos messages directs, vos messages de room, vos RSVP, la liste
+          de vos appareils (plateforme et dates, sans le jeton secret) et vos préférences de
+          notification.
         </Text>
         <Text style={styles.muted}>
           Note : le journal d&apos;audit (actions de modération) et les signalements émis contre
@@ -63,7 +90,7 @@ export const DataExportScreen: React.FC = () => {
       </View>
 
       <Button
-        label={busy ? 'Préparation…' : 'Générer mon export'}
+        label={busy ? 'Préparation…' : 'Générer et partager mon export'}
         variant="primary"
         size="lg"
         fullWidth
@@ -72,9 +99,32 @@ export const DataExportScreen: React.FC = () => {
       />
 
       {lastBytes !== null ? (
-        <Text style={styles.feedback}>
-          ✓ Export généré ({(lastBytes / 1024).toFixed(1)} Ko) — copié dans le presse-papier.
-        </Text>
+        <>
+          <Text style={styles.feedback}>
+            ✓ Export généré ({(lastBytes / 1024).toFixed(1)} Ko) — partagez-le via le menu de
+            partage.
+          </Text>
+          <Text style={styles.muted}>
+            Le presse-papier est lisible par d&apos;autres applications. Ne copiez l&apos;archive
+            que si nécessaire, puis effacez le presse-papier.
+          </Text>
+          <Button
+            label="Copier dans le presse-papier"
+            variant="ghost"
+            size="md"
+            fullWidth
+            onPress={handleCopy}
+          />
+          {copied ? (
+            <Button
+              label="Effacer le presse-papier"
+              variant="outline"
+              size="md"
+              fullWidth
+              onPress={handleClearClipboard}
+            />
+          ) : null}
+        </>
       ) : null}
     </ScrollView>
   );

@@ -1,5 +1,13 @@
 import React, { useCallback, useState } from 'react';
-import { KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import {
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -27,16 +35,31 @@ export const SetupProfileScreen: React.FC = () => {
   const [avatarUri, setAvatarUri] = useState<string | null>(null);
 
   const pickImage = async () => {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      allowsEditing: true,
-      aspect: [1, 1], // For circular crop
-      quality: 0.8,
-    });
+    try {
+      // Request media-library permission first; on some OSes launching the
+      // picker without it rejects with an unhandled promise.
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert(
+          t('common.permissionDenied', 'Permission required'),
+          t('onboarding.setupProfile.photoPermission', 'Allow photo access to choose a picture.'),
+        );
+        return;
+      }
 
-    if (!result.canceled && result.assets[0]) {
-      setAvatarUri(result.assets[0].uri);
-      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        aspect: [1, 1], // For circular crop
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets[0]) {
+        setAvatarUri(result.assets[0].uri);
+        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      }
+    } catch {
+      Alert.alert(t('common.error', 'Something went wrong'));
     }
   };
 
@@ -52,6 +75,12 @@ export const SetupProfileScreen: React.FC = () => {
 
   const onSubmit = useCallback(
     (values: SetupProfileFormValues) => {
+      // TODO(audit): `avatarUri` is a local device URI (file://…). It must be
+      // uploaded (multipart → /uploads or presigned S3) and the resulting
+      // REMOTE url stored here before completeOnboarding sends it — a file://
+      // URI is unusable by the backend. Requires a mediaService.uploadAvatar
+      // helper + a backend upload endpoint (neither exists yet); wiring it is
+      // an external dependency outside this screen.
       setProfile({
         displayName: values.displayName || undefined,
         bio: values.bio || undefined,

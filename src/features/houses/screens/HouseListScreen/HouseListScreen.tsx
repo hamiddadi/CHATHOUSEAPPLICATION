@@ -125,7 +125,7 @@ export const HouseListScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const [tab, setTab] = useState<Tab>('mine');
   const fab = useAnimatedPress({ scaleTo: 0.9 });
-  const { data: houses, isLoading, isError, refetch } = useHouses(tab);
+  const { data: houses, isLoading, isError, isFetching, refetch } = useHouses(tab);
 
   const handleBack = useCallback(() => navigation.goBack(), [navigation]);
   const handleOpenHouse = useCallback(
@@ -172,8 +172,8 @@ export const HouseListScreen: React.FC = () => {
           renderItem={renderItem}
           keyExtractor={keyExtractor}
           ItemSeparatorComponent={renderSeparator}
-          refreshing={isLoading}
-          onRefresh={refetch}
+          refreshing={isFetching}
+          onRefresh={() => void refetch()}
           contentContainerStyle={[
             styles.list,
             { paddingBottom: insets.bottom + FAB_BOTTOM_OFFSET + spacing.giant },

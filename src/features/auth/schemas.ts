@@ -17,6 +17,9 @@ export const phoneFormSchema = z.object({
     .string()
     .transform(s => s.replace(/[\s\-()]/g, ''))
     .pipe(z.string().min(1, 'auth.phone.errors.required').regex(E164, 'auth.phone.errors.invalid')),
+  ageConfirmed: z.boolean().refine(v => v === true, {
+    message: 'auth.phone.errors.ageVerification',
+  }),
 });
 
 export const otpFormSchema = z.object({

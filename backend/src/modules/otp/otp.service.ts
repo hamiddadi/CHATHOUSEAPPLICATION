@@ -82,7 +82,9 @@ export const otpService = {
 
     if (record.attempts >= env.OTP_MAX_ATTEMPTS) {
       await prisma.otpCode.update({ where: { id: record.id }, data: { isUsed: true } });
-      throw new AppError('AUTH_001', 'Too many attempts — request a new code.');
+      // 429 (RATE_LIMIT_001) so the client can distinguish exhausted attempts
+      // from an invalid code (AUTH_001/401) and prompt for a new code.
+      throw new AppError('RATE_LIMIT_001', 'Too many attempts — request a new code.');
     }
 
     const ok = await compare(input.code, record.codeHash);

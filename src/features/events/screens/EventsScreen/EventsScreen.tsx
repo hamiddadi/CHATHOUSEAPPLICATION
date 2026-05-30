@@ -1,5 +1,5 @@
 import React, { memo, useCallback, useMemo, useState } from 'react';
-import { FlatList, Pressable, Text, View } from 'react-native';
+import { Alert, FlatList, Pressable, Text, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -34,9 +34,10 @@ interface CardProps {
   event: ScheduledEvent;
   isMine: boolean;
   onToggle: (event: ScheduledEvent, nextState: boolean) => void;
+  disabled?: boolean;
 }
 
-const EventCard: React.FC<CardProps> = memo(({ event, isMine, onToggle }) => {
+const EventCard: React.FC<CardProps> = memo(({ event, isMine, onToggle, disabled = false }) => {
   const { t } = useTranslation();
   const handleToggle = useCallback(() => onToggle(event, !isMine), [event, isMine, onToggle]);
 
@@ -73,8 +74,13 @@ const EventCard: React.FC<CardProps> = memo(({ event, isMine, onToggle }) => {
 
       <Pressable
         onPress={handleToggle}
+        disabled={disabled}
         accessibilityRole="button"
-        accessibilityState={{ selected: isMine }}
+        accessibilityState={{ selected: isMine, disabled }}
+        // Compose the a11y label from existing i18n keys + the event title so a
+        // screen reader announces which event the button acts on. (No new locale
+        // keys are added here — those files are owned elsewhere.)
+        accessibilityLabel={`${isMine ? t('events.rsvp') : t('events.notRsvp')} · ${event.title}`}
         className={
           isMine
             ? 'rounded-pill bg-primary-container py-sm items-center'
@@ -112,21 +118,47 @@ export const EventsScreen: React.FC = () => {
 
   const goBack = useCallback(() => navigation.goBack(), [navigation]);
 
+  const mutating = rsvp.isPending || cancelRsvp.isPending;
+
   const onToggle = useCallback(
     (event: ScheduledEvent, next: boolean) => {
-      if (next) rsvp.mutate(event.id);
-      else cancelRsvp.mutate(event.id);
+      // Prevent double-submission while a RSVP/cancel is in flight.
+      if (rsvp.isPending || cancelRsvp.isPending) return;
+      const opts = {
+        onError: () => Alert.alert(t('events.title'), t('errorBoundary.fallbackMessage')),
+      };
+      if (next) rsvp.mutate(event.id, opts);
+      else cancelRsvp.mutate(event.id, opts);
     },
-    [rsvp, cancelRsvp],
+    [rsvp, cancelRsvp, t],
   );
 
   const activeList = tab === 'upcoming' ? upcoming : mine;
   const events = activeList.data ?? [];
 
+  const keyExtractor = useCallback((e: ScheduledEvent) => e.id, []);
+  const renderItem = useCallback(
+    ({ item }: { item: ScheduledEvent }) => (
+      <EventCard
+        event={item}
+        isMine={mineIds.has(item.id)}
+        onToggle={onToggle}
+        disabled={mutating}
+      />
+    ),
+    [mineIds, onToggle, mutating],
+  );
+  const renderSeparator = useCallback(() => <View className="h-md" />, []);
+
   return (
     <View className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
       <View className="flex-row items-center gap-md px-xxl py-lg">
-        <Pressable onPress={goBack} accessibilityRole="button" hitSlop={8}>
+        <Pressable
+          onPress={goBack}
+          accessibilityRole="button"
+          accessibilityLabel={t('common.back')}
+          hitSlop={8}
+        >
           <MaterialIcons name="arrow-back" size={24} color={colors.text} />
         </Pressable>
         <Text className="text-xl font-display text-ink flex-1">{t('events.title')}</Text>
@@ -155,11 +187,9 @@ export const EventsScreen: React.FC = () => {
       ) : (
         <FlatList
           data={events}
-          keyExtractor={e => e.id}
-          renderItem={({ item }) => (
-            <EventCard event={item} isMine={mineIds.has(item.id)} onToggle={onToggle} />
-          )}
-          ItemSeparatorComponent={() => <View className="h-md" />}
+          keyExtractor={keyExtractor}
+          renderItem={renderItem}
+          ItemSeparatorComponent={renderSeparator}
           contentContainerStyle={{
             paddingHorizontal: spacing.xxl,
             paddingBottom: insets.bottom + spacing.huge,

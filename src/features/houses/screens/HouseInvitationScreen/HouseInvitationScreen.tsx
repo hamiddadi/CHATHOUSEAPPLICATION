@@ -1,5 +1,5 @@
 import React, { useCallback } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { Alert, Pressable, Text, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -9,6 +9,7 @@ import { Button } from '../../../../shared/components/Button';
 import { resolveHouseIcon, resolveUserAvatar } from '../../../../shared/constants/images';
 import { colors, spacing } from '../../../../shared/constants/theme';
 import type { RoomStackParamList } from '../../../../core/navigation/types';
+import { useAcceptInvitation, useHouse } from '../../hooks/useHouses';
 
 type Nav = NativeStackNavigationProp<RoomStackParamList, 'HouseInvitation'>;
 type Route = RouteProp<RoomStackParamList, 'HouseInvitation'>;
@@ -22,10 +23,23 @@ export const HouseInvitationScreen: React.FC = () => {
 
   const { houseId, inviteToken } = route.params;
 
+  const { data: house } = useHouse(houseId);
+  const accept = useAcceptInvitation();
+
+  const houseName = house?.name ?? 'this house';
+  const memberCountLabel =
+    house !== undefined ? `${house.membersCount.toLocaleString()} members` : '';
+
   const handleBack = useCallback(() => navigation.goBack(), [navigation]);
-  const handleAccept = useCallback(() => {
-    navigation.navigate('HouseDetail', { houseId });
-  }, [houseId, navigation]);
+  const handleAccept = useCallback(async () => {
+    if (accept.isPending) return;
+    try {
+      await accept.mutateAsync({ houseId, inviteToken });
+      navigation.replace('HouseDetail', { houseId });
+    } catch (e) {
+      Alert.alert('Erreur', e instanceof Error ? e.message : "Impossible d'accepter l'invitation.");
+    }
+  }, [accept, houseId, inviteToken, navigation]);
   const handleDecline = useCallback(() => navigation.goBack(), [navigation]);
 
   return (
@@ -48,15 +62,17 @@ export const HouseInvitationScreen: React.FC = () => {
       >
         <View className="items-center gap-lg">
           <Avatar
-            uri={resolveHouseIcon(houseId)}
-            name="Y Combinator"
+            uri={house?.iconUrl ?? resolveHouseIcon(houseId)}
+            name={houseName}
             sizeValue={HOUSE_ICON_SIZE}
             shape="squircle"
           />
           <Text className="text-display font-display text-ink tracking-tight text-center">
-            Y Combinator
+            {houseName}
           </Text>
-          <Text className="text-sm font-body text-ink-muted text-center">12,400 members</Text>
+          {memberCountLabel !== '' && (
+            <Text className="text-sm font-body text-ink-muted text-center">{memberCountLabel}</Text>
+          )}
 
           <View className="flex-row items-center gap-sm mt-lg">
             <Avatar uri={resolveUserAvatar('u6')} name="John Doe" size="md" />
@@ -81,6 +97,8 @@ export const HouseInvitationScreen: React.FC = () => {
             variant="primary"
             size="lg"
             fullWidth
+            loading={accept.isPending}
+            disabled={accept.isPending}
             onPress={handleAccept}
           />
           <Button label="Decline" variant="ghost" size="md" fullWidth onPress={handleDecline} />

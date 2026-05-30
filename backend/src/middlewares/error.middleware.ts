@@ -20,7 +20,10 @@ export const ERROR_CODES = {
   AUTH_008: { status: 403, message: 'Insufficient privileges' },
   ADMIN_001: { status: 403, message: 'Cannot demote the only super-admin' },
   ADMIN_002: { status: 403, message: 'Cannot modify a higher-ranked admin' },
-  ADMIN_003: { status: 410, message: 'Godmode is disabled' },
+  // 403 Forbidden — the surface exists but is administratively disabled.
+  // 410 Gone implies permanent removal, which is wrong for a toggleable
+  // kill-switch and misleads clients/proxies into caching the failure.
+  ADMIN_003: { status: 403, message: 'Godmode is disabled' },
 
   AGORA_001: { status: 503, message: 'Agora is not configured on this server' },
 
@@ -39,6 +42,7 @@ export const ERROR_CODES = {
   USER_003: { status: 403, message: 'Cannot follow yourself' },
   USER_004: { status: 403, message: 'Cannot block yourself' },
   USER_005: { status: 429, message: 'Wave already sent recently' },
+  USER_006: { status: 403, message: 'User does not accept waves' },
 
   CHAT_001: { status: 404, message: 'Conversation not found' },
   CHAT_002: { status: 404, message: 'Message not found' },
@@ -51,6 +55,7 @@ export const ERROR_CODES = {
   CLUB_004: { status: 409, message: 'Already a member' },
   CLUB_005: { status: 403, message: 'Owner cannot leave their own club' },
   CLUB_006: { status: 403, message: 'Club creation limit reached' },
+  CLUB_007: { status: 403, message: 'A valid invitation is required to join this club' },
 
   ACCOUNT_001: { status: 409, message: 'Account already scheduled for deletion' },
 

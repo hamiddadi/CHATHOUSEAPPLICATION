@@ -48,7 +48,7 @@ export const PhoneScreen: React.FC = () => {
   } = useForm<PhoneFormValues>({
     resolver: zodResolver(phoneFormSchema),
     mode: 'onChange',
-    defaultValues: { phoneNumber: detectedCountry.callingCode },
+    defaultValues: { phoneNumber: detectedCountry.callingCode, ageConfirmed: false },
   });
 
   const handleApiError = useFormApiErrors(setError);
@@ -155,6 +155,30 @@ export const PhoneScreen: React.FC = () => {
         />
 
         <View className="flex-1" />
+
+        <Controller
+          control={control}
+          name="ageConfirmed"
+          render={({ field: { onChange, value } }) => (
+            <Pressable
+              onPress={() => onChange(!value)}
+              className="flex-row items-center gap-sm mb-md"
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: value }}
+            >
+              <View
+                className={`w-6 h-6 rounded border items-center justify-center ${
+                  value ? 'bg-primary border-primary' : 'border-overlay-white-30 bg-transparent'
+                }`}
+              >
+                {value && <MaterialIcons name="check" size={16} color="white" />}
+              </View>
+              <Text className="text-sm font-body-semibold text-ink flex-1">
+                {t('auth.phone.ageVerification', 'I confirm I am at least 16 years old')}
+              </Text>
+            </Pressable>
+          )}
+        />
 
         <Button
           label={t('auth.phone.submit', 'Next')}

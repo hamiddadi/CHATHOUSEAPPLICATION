@@ -25,8 +25,11 @@ import { exploreRouter } from './modules/explore/explore.router';
 import { pushRouter } from './modules/push/push.router';
 import { adminRouter } from './modules/admin/admin.router';
 import { createSocketServer } from './socket/socket.server';
+import { mountExtensions } from './extensions/mount';
+import { setRealtimeAliasServer } from './extensions/realtime/aliases';
 import { initMediasoup, shutdownMediasoup } from './webrtc/mediasoup.manager';
 import { startReminderWorker, shutdownReminders } from './queues/eventReminders';
+import { startLocationPurgeWorker, shutdownLocationPurge } from './queues/locationPurge';
 import { ensureSearchIndexes } from './config/searchIndexes';
 
 export const createApp = (): express.Express => {
@@ -65,9 +68,13 @@ export const createApp = (): express.Express => {
   // Health is unauthenticated and unratelimited (Kubernetes/ECS probes).
   app.use(healthRouter);
 
-  // OpenAPI/Swagger UI — also unauthenticated + unratelimited so consumers
-  // can browse the contract. Mount BEFORE the /api globalLimiter.
-  app.use('/api/docs', docsRouter);
+  // OpenAPI/Swagger UI — unauthenticated, so keep it out of production to
+  // avoid handing an attacker a free map of the API surface. Browse the
+  // contract in dev/staging, or front it with requireAuth+requireAdmin if
+  // you must expose it in prod. Mount BEFORE the /api globalLimiter.
+  if (env.NODE_ENV !== 'production') {
+    app.use('/api/docs', docsRouter);
+  }
 
   // Everything else is under /api and globally rate-limited.
   app.use('/api', globalLimiter);
@@ -107,9 +114,22 @@ const startServer = async (): Promise<void> => {
   // Boot the reminder worker in-process. Spin out to its own service when
   // scheduled-room volume warrants it.
   startReminderWorker();
+  await startLocationPurgeWorker();
   const app = createApp();
+  // Mount the `/api/ext/*` extension contract on the SAME entry point that
+  // production uses (`dist/app.js`), gated by env. Previously these routers
+  // were only mounted by the alternate `extensions/server.ts`, so the whole
+  // extension surface 404'd under the default `npm start`.
+  if (env.EXTENSIONS_ENABLED) {
+    mountExtensions(app);
+  }
   const server = http.createServer(app);
   const io = await createSocketServer(server);
+  // Bind the alias emitter so extension realtime events publish under their
+  // Clubhouse-spec names (e.g. `room_title_updated`).
+  if (env.EXTENSIONS_ENABLED) {
+    setRealtimeAliasServer(io);
+  }
 
   server.listen(env.PORT, env.HOST, () => {
     logger.info(
@@ -127,6 +147,7 @@ const startServer = async (): Promise<void> => {
       try {
         await shutdownMediasoup();
         await shutdownReminders();
+        await shutdownLocationPurge();
         await disconnectDatabase();
         await disconnectRedis();
         logger.info('server stopped cleanly');

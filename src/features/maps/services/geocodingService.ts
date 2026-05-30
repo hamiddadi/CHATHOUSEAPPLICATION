@@ -108,6 +108,16 @@ const toGeoPoint = (latitude: number, longitude: number): GeoPoint => ({
   updatedAt: now(),
 });
 
+/**
+ * Parse a coordinate from an upstream provider, rejecting non-finite values.
+ * Nominatim/Photon may return non-numeric or partial entries; an unchecked
+ * parseFloat yields NaN, which then poisons animateToRegion / OSRM route URLs.
+ */
+const parseCoord = (value: unknown): number | null => {
+  const n = typeof value === 'number' ? value : parseFloat(String(value));
+  return Number.isFinite(n) ? n : null;
+};
+
 const fetchJson = async <T>(url: string, init?: RequestInit): Promise<T> => {
   const res = await fetch(url, {
     ...init,
@@ -127,23 +137,32 @@ export const geocodingService = {
     if (trimmed.length === 0) return [];
     const url = `${NOMINATIM_BASE}/search?q=${encodeURIComponent(trimmed)}&format=json&limit=${limit}&addressdetails=1`;
     const raw = await fetchJson<NominatimPlace[]>(url);
-    return raw.map(p => ({
-      displayName: p.display_name,
-      point: toGeoPoint(parseFloat(p.lat), parseFloat(p.lon)),
-      osmType: p.osm_type,
-      osmId: p.osm_id,
-      countryCode: p.address?.country_code,
-    }));
+    return raw.flatMap(p => {
+      const lat = parseCoord(p.lat);
+      const lon = parseCoord(p.lon);
+      if (lat === null || lon === null) return [];
+      return [
+        {
+          displayName: p.display_name,
+          point: toGeoPoint(lat, lon),
+          osmType: p.osm_type,
+          osmId: p.osm_id,
+          countryCode: p.address?.country_code,
+        },
+      ];
+    });
   },
 
   /** Reverse geocoding — GeoPoint → closest address. */
   async reverseGeocode(latitude: number, longitude: number): Promise<GeocodeResult | null> {
     const url = `${NOMINATIM_BASE}/reverse?lat=${latitude}&lon=${longitude}&format=json&addressdetails=1`;
     const raw = await fetchJson<NominatimPlace>(url);
-    if (!raw.lat) return null;
+    const lat = parseCoord(raw.lat);
+    const lon = parseCoord(raw.lon);
+    if (lat === null || lon === null) return null;
     return {
       displayName: raw.display_name,
-      point: toGeoPoint(parseFloat(raw.lat), parseFloat(raw.lon)),
+      point: toGeoPoint(lat, lon),
       osmType: raw.osm_type,
       osmId: raw.osm_id,
       countryCode: raw.address?.country_code,
@@ -156,17 +175,22 @@ export const geocodingService = {
     if (trimmed.length < 2) return [];
     const url = `${PHOTON_BASE}?q=${encodeURIComponent(trimmed)}&lang=${lang}`;
     const raw = await fetchJson<PhotonResponse>(url);
-    return raw.features.map(f => {
-      const [lon, lat] = f.geometry.coordinates;
+    return raw.features.flatMap(f => {
+      const [rawLon, rawLat] = f.geometry.coordinates;
+      const lat = parseCoord(rawLat);
+      const lon = parseCoord(rawLon);
+      if (lat === null || lon === null) return [];
       const nameParts = [f.properties.name, f.properties.city, f.properties.country].filter(
         (s): s is string => typeof s === 'string' && s.length > 0,
       );
-      return {
-        id: String(f.properties.osm_id),
-        displayName: nameParts.join(', ') || 'Unknown',
-        point: toGeoPoint(lat, lon),
-        category: f.properties.osm_value,
-      };
+      return [
+        {
+          id: String(f.properties.osm_id),
+          displayName: nameParts.join(', ') || 'Unknown',
+          point: toGeoPoint(lat, lon),
+          category: f.properties.osm_value,
+        },
+      ];
     });
   },
 

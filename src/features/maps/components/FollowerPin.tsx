@@ -72,7 +72,12 @@ export const FollowerPin: React.FC<FollowerPinProps> = memo(({ follower }) => {
   }));
 
   return (
-    <View style={styles.container}>
+    <View
+      style={styles.container}
+      accessible
+      accessibilityRole="button"
+      accessibilityLabel={`${follower.displayName}${isInRoom ? ', live' : ''}`}
+    >
       {isInRoom && <Animated.View pointerEvents="none" style={[styles.pulseRing, ringStyle]} />}
 
       <View style={[styles.avatarWrapper, isInRoom && styles.avatarWrapperInRoom]}>

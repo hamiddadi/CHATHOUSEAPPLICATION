@@ -1,5 +1,6 @@
 import type { Socket } from 'socket.io';
 import { redis } from '../config/redis';
+import { prisma } from '../config/database';
 import { verifyAccessToken } from '../utils/jwt';
 
 export interface AuthedSocketData {
@@ -31,6 +32,24 @@ export const socketAuth = async (socket: Socket, next: (err?: Error) => void): P
     if (revoked) return next(new Error('TOKEN_REVOKED'));
 
     const claims = verifyAccessToken(token);
+
+    // Mirror HTTP requireAuth: a suspended user keeps a valid JWT for up to
+    // 15 min but must NOT be able to transact over realtime either (join
+    // rooms, publish audio, chat, broadcast location). Same short-TTL Redis
+    // cache as the HTTP path so unsuspend() invalidation is shared.
+    const cacheKey = `user:susp:${claims.sub}`;
+    const cached = await redis.get(cacheKey);
+    if (cached === '1') return next(new Error('ACCOUNT_SUSPENDED'));
+    if (cached === null) {
+      const user = await prisma.user.findUnique({
+        where: { id: claims.sub },
+        select: { suspendedUntil: true },
+      });
+      const isSuspended = Boolean(user?.suspendedUntil && user.suspendedUntil > new Date());
+      await redis.setEx(cacheKey, 60, isSuspended ? '1' : '0');
+      if (isSuspended) return next(new Error('ACCOUNT_SUSPENDED'));
+    }
+
     (socket.data as AuthedSocketData).userId = claims.sub;
     next();
   } catch {

@@ -12,6 +12,15 @@ import {
   resetPasswordSchema,
 } from '../modules/auth/auth.schema';
 import { locationSchema, updateMeSchema, visibilitySchema } from '../modules/users/users.schema';
+import {
+  createRoomSchema,
+  listRoomsSchema,
+  updateRoleSchema,
+  muteSchema,
+} from '../modules/rooms/rooms.schema';
+import { sendMessageSchema, listMessagesSchema } from '../modules/chat/chat.schema';
+import { createClubSchema, listClubsSchema, inviteSchema } from '../modules/clubs/clubs.schema';
+import { searchSchema } from '../modules/search/search.schema';
 
 // Register the `.openapi()` method on every Zod schema.
 extendZodWithOpenApi(z);
@@ -251,6 +260,264 @@ export const buildOpenApiDocument = () => {
     },
   });
 
+  // ─── ROOMS ──────────────────────────────────────────
+  registry.registerPath({
+    method: 'get',
+    path: '/api/rooms',
+    tags: ['Rooms'],
+    security: [{ bearerAuth: [] }],
+    request: { query: listRoomsSchema },
+    responses: {
+      200: {
+        description: 'Paginated list of rooms.',
+        content: {
+          'application/json': {
+            schema: z.object({
+              success: z.literal(true),
+              data: z.array(z.object({}).passthrough()),
+            }),
+          },
+        },
+      },
+    },
+  });
+
+  registry.registerPath({
+    method: 'post',
+    path: '/api/rooms',
+    tags: ['Rooms'],
+    security: [{ bearerAuth: [] }],
+    request: { body: { content: { 'application/json': { schema: createRoomSchema } } } },
+    responses: {
+      201: {
+        description: 'Room created.',
+        content: {
+          'application/json': {
+            schema: z.object({ success: z.literal(true), data: z.object({}).passthrough() }),
+          },
+        },
+      },
+      401: { description: 'Unauthorized', content: { 'application/json': { schema: ErrorBody } } },
+    },
+  });
+
+  registry.registerPath({
+    method: 'post',
+    path: '/api/rooms/{id}/join',
+    tags: ['Rooms'],
+    security: [{ bearerAuth: [] }],
+    request: { params: z.object({ id: z.string() }) },
+    responses: {
+      200: {
+        description: 'Joined room; returns participant list.',
+        content: {
+          'application/json': {
+            schema: z.object({ success: z.literal(true), data: z.object({}).passthrough() }),
+          },
+        },
+      },
+    },
+  });
+
+  registry.registerPath({
+    method: 'patch',
+    path: '/api/rooms/{id}/role',
+    tags: ['Rooms'],
+    security: [{ bearerAuth: [] }],
+    request: {
+      params: z.object({ id: z.string() }),
+      body: { content: { 'application/json': { schema: updateRoleSchema } } },
+    },
+    responses: {
+      200: {
+        description: 'Role updated.',
+        content: { 'application/json': { schema: SuccessVoid } },
+      },
+      403: {
+        description: 'Not a moderator',
+        content: { 'application/json': { schema: ErrorBody } },
+      },
+    },
+  });
+
+  registry.registerPath({
+    method: 'patch',
+    path: '/api/rooms/{id}/mute',
+    tags: ['Rooms'],
+    security: [{ bearerAuth: [] }],
+    request: {
+      params: z.object({ id: z.string() }),
+      body: { content: { 'application/json': { schema: muteSchema } } },
+    },
+    responses: {
+      200: {
+        description: 'Mute state changed.',
+        content: { 'application/json': { schema: SuccessVoid } },
+      },
+    },
+  });
+
+  // ─── CHAT ───────────────────────────────────────────
+  registry.registerPath({
+    method: 'get',
+    path: '/api/chat/{userId}',
+    tags: ['Chat'],
+    security: [{ bearerAuth: [] }],
+    request: { params: z.object({ userId: z.string() }), query: listMessagesSchema },
+    responses: {
+      200: {
+        description: 'Direct-message thread with a peer.',
+        content: {
+          'application/json': {
+            schema: z.object({
+              success: z.literal(true),
+              data: z.array(z.object({}).passthrough()),
+            }),
+          },
+        },
+      },
+    },
+  });
+
+  registry.registerPath({
+    method: 'post',
+    path: '/api/chat/{userId}',
+    tags: ['Chat'],
+    security: [{ bearerAuth: [] }],
+    request: {
+      params: z.object({ userId: z.string() }),
+      body: { content: { 'application/json': { schema: sendMessageSchema } } },
+    },
+    responses: {
+      201: {
+        description: 'Message sent.',
+        content: {
+          'application/json': {
+            schema: z.object({ success: z.literal(true), data: z.object({}).passthrough() }),
+          },
+        },
+      },
+      403: {
+        description: 'Blocked / not allowed',
+        content: { 'application/json': { schema: ErrorBody } },
+      },
+    },
+  });
+
+  // ─── CLUBS ──────────────────────────────────────────
+  registry.registerPath({
+    method: 'get',
+    path: '/api/clubs',
+    tags: ['Clubs'],
+    security: [{ bearerAuth: [] }],
+    request: { query: listClubsSchema },
+    responses: {
+      200: {
+        description: 'Paginated list of clubs.',
+        content: {
+          'application/json': {
+            schema: z.object({
+              success: z.literal(true),
+              data: z.array(z.object({}).passthrough()),
+            }),
+          },
+        },
+      },
+    },
+  });
+
+  registry.registerPath({
+    method: 'post',
+    path: '/api/clubs',
+    tags: ['Clubs'],
+    security: [{ bearerAuth: [] }],
+    request: { body: { content: { 'application/json': { schema: createClubSchema } } } },
+    responses: {
+      201: {
+        description: 'Club created.',
+        content: {
+          'application/json': {
+            schema: z.object({ success: z.literal(true), data: z.object({}).passthrough() }),
+          },
+        },
+      },
+    },
+  });
+
+  registry.registerPath({
+    method: 'post',
+    path: '/api/clubs/{id}/invite',
+    tags: ['Clubs'],
+    security: [{ bearerAuth: [] }],
+    request: {
+      params: z.object({ id: z.string() }),
+      body: { content: { 'application/json': { schema: inviteSchema } } },
+    },
+    responses: {
+      200: {
+        description: 'Invitation sent.',
+        content: { 'application/json': { schema: SuccessVoid } },
+      },
+      403: {
+        description: 'Invitation required',
+        content: { 'application/json': { schema: ErrorBody } },
+      },
+    },
+  });
+
+  // ─── SEARCH ─────────────────────────────────────────
+  registry.registerPath({
+    method: 'get',
+    path: '/api/search',
+    tags: ['Search'],
+    security: [{ bearerAuth: [] }],
+    request: { query: searchSchema },
+    responses: {
+      200: {
+        description: 'Trigram search across users, clubs and rooms.',
+        content: {
+          'application/json': {
+            schema: z.object({ success: z.literal(true), data: z.object({}).passthrough() }),
+          },
+        },
+      },
+    },
+  });
+
+  // ─── NOTIFICATIONS ──────────────────────────────────
+  registry.registerPath({
+    method: 'get',
+    path: '/api/notifications',
+    tags: ['Notifications'],
+    security: [{ bearerAuth: [] }],
+    responses: {
+      200: {
+        description: 'Paginated notification feed.',
+        content: {
+          'application/json': {
+            schema: z.object({
+              success: z.literal(true),
+              data: z.array(z.object({}).passthrough()),
+            }),
+          },
+        },
+      },
+    },
+  });
+
+  registry.registerPath({
+    method: 'patch',
+    path: '/api/notifications/read-all',
+    tags: ['Notifications'],
+    security: [{ bearerAuth: [] }],
+    responses: {
+      200: {
+        description: 'All notifications marked read.',
+        content: { 'application/json': { schema: SuccessVoid } },
+      },
+    },
+  });
+
   const generator = new OpenApiGeneratorV3(registry.definitions);
   return generator.generateDocument({
     openapi: '3.0.3',
@@ -258,8 +525,11 @@ export const buildOpenApiDocument = () => {
       title: 'Chathouse API',
       version: '0.1.0',
       description:
-        'Auth + Users documented; Rooms/Chat/Maps/Notifications follow the same pattern — `registry.registerPath(...)` per endpoint using their existing Zod schemas.',
+        'Auth, Users, Rooms, Chat, Clubs, Search and Notifications documented. Remaining modules (Maps, Explore, Push, Admin, /api/ext/*) follow the same pattern — `registry.registerPath(...)` per endpoint using their existing Zod schemas.',
     },
-    servers: [{ url: 'http://localhost:4000', description: 'dev' }],
+    servers: [
+      { url: 'https://api.chathouse.app', description: 'prod' },
+      { url: 'http://localhost:4000', description: 'dev' },
+    ],
   });
 };

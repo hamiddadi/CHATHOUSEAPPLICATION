@@ -101,6 +101,10 @@ enum RoomChatVisibility {
 model User {
   id           String    @id @default(cuid())
   username     String?   @unique
+  // NOTE(audit): PostgreSQL `text` is case-sensitive, so this @unique does not
+  // prevent 'A@x.com' vs 'a@x.com' duplicates. The auth layer now normalises
+  // email to lower-case before insert/lookup (auth.schema). For defence in
+  // depth, migrate this column to the `citext` type (CREATE EXTENSION citext).
   email        String?   @unique
   passwordHash String?
   phoneNumber  String?   @unique
@@ -113,7 +117,7 @@ model User {
   twitter      String?   @db.VarChar(50)
   instagram    String?   @db.VarChar(50)
   isOnline     Boolean   @default(false)
-  isVisible    Boolean   @default(true) // Ghost Mode off → visible on map
+  isVisible    Boolean   @default(false) // Ghost Mode ON by default → user must opt-in to map visibility (privacy-safe)
   allowWaves   Boolean   @default(true)
   isPrivateAccount Boolean @default(false)
   latitude     Float?
@@ -147,6 +151,7 @@ model User {
   roomBansIssued      RoomBan[]            @relation("BanIssuer")
   roomBansReceived    RoomBan[]            @relation("BanTarget")
   sentMessages        Message[]            @relation("MessageSender")
+  receivedMessages    Message[]            @relation("MessageReceiver")
   followers           Follow[]             @relation("Following")
   following           Follow[]             @relation("Follower")
   notifications       Notification[]       @relation("NotifRecipient")
@@ -174,6 +179,8 @@ model User {
   @@index([currentRoomId])
   @@index([appRole])
   @@index([suspendedUntil])
+  // Covers getOnlineLocations (map): visible + online + recently-seen.
+  @@index([isVisible, isOnline, lastSeenAt])
 }
 
 // ─── Room ───────────────────────────────────────────────
@@ -323,15 +330,18 @@ model Participant {
 // ─── Message (room + direct) ────────────────────────────
 model Message {
   id         String   @id @default(cuid())
-  content    String
+  content    String   @db.VarChar(4000) // was unbounded TEXT — cap payload size
   senderId   String
   roomId     String?
   receiverId String?
   isRead     Boolean  @default(false)
   createdAt  DateTime @default(now())
 
-  sender User  @relation("MessageSender", fields: [senderId], references: [id], onDelete: Cascade)
-  room   Room? @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  sender   User  @relation("MessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+  room     Room? @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  // receiverId now has a real FK + relation (was a dangling string) so DMs
+  // enforce referential integrity and cascade-clean on user deletion.
+  receiver User? @relation("MessageReceiver", fields: [receiverId], references: [id], onDelete: Cascade)
 
   @@index([senderId])
   @@index([receiverId])
@@ -360,8 +370,8 @@ model Notification {
   userId    String
   actorId   String?          // Who triggered the notification
   type      NotificationType
-  title     String
-  body      String
+  title     String           @db.VarChar(150) // was unbounded TEXT
+  body      String           @db.VarChar(500) // was unbounded TEXT
   data      Json?
   targetId  String?          // ID of the target entity (room, club, user)
   targetType String?         @db.VarChar(32) // 'room', 'club', 'user'
@@ -469,6 +479,8 @@ model OtpCode {
 
   @@index([phoneNumber])
   @@index([expiresAt])
+  // Covers the verify() lookup: latest unused, unexpired code for a phone.
+  @@index([phoneNumber, isUsed, expiresAt])
 }
 
 // ─── Password reset token ──────────────────────────────

@@ -136,6 +136,9 @@ export const roomsService = {
         isPrivate: input.isPrivate,
         roomType: input.roomType ?? 'OPEN',
         chatEnabled: input.chatEnabled,
+        // TODO(phase-N): recordingEnabled is a schema placeholder — no
+        // server-side recording pipeline (S3/GCS + transcoding) exists yet.
+        // Do NOT expose in client UI until the pipeline is implemented.
         recordingEnabled: input.recordingEnabled ?? false,
         maxSpeakers: input.maxSpeakers,
         hostId,
@@ -458,11 +461,35 @@ export const roomsService = {
     return { cancelled: true as const };
   },
 
-  async listRsvps(roomId: string) {
+  async listRsvps(roomId: string, viewerId?: string, opts?: { limit?: number; cursor?: string }) {
+    const room = await prisma.room.findUnique({
+      where: { id: roomId },
+      select: { id: true, hostId: true, isPrivate: true },
+    });
+    if (!room) throw new AppError('ROOM_001');
+
+    // AuthZ: the full RSVP list of a private/closed room is only visible to
+    // its host or an (active) participant — otherwise anyone who discovered
+    // the id could enumerate who's attending a private event. Public rooms
+    // stay open to any authenticated viewer.
+    if (room.isPrivate && viewerId !== undefined && room.hostId !== viewerId) {
+      const p = await prisma.participant.findUnique({
+        where: { userId_roomId: { userId: viewerId, roomId } },
+        select: { leftAt: true },
+      });
+      if (!p || p.leftAt) throw new AppError('ROOM_007');
+    }
+
+    // Cursor pagination so a room with tens of thousands of RSVPs doesn't
+    // return everything in one shot. `cursor` is a RoomRsvp id.
+    const limit = Math.max(1, Math.min(100, opts?.limit ?? 100));
+    const cursor = opts?.cursor;
     const rows = await prisma.roomRsvp.findMany({
       where: { roomId },
       include: { user: { select: publicUser } },
       orderBy: { createdAt: 'asc' },
+      take: limit,
+      ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
     });
     return rows.map(r => r.user);
   },
@@ -930,17 +957,18 @@ export const roomsService = {
     const validIds = existing.map(u => u.id);
 
     // Closed rooms: pre-seat invitees as LISTENER so the join guard accepts
-    // them. We use upsert so re-invites don't break unique constraints.
+    // them. Two bulk queries (createMany skipDuplicates + updateMany to
+    // un-leave re-invites) instead of N upserts — avoids up to 50 DB
+    // round-trips when inviting the full batch.
     if (room.isPrivate && validIds.length > 0) {
-      await Promise.all(
-        validIds.map(userId =>
-          prisma.participant.upsert({
-            where: { userId_roomId: { userId, roomId } },
-            create: { roomId, userId, role: 'LISTENER' },
-            update: { leftAt: null },
-          }),
-        ),
-      );
+      await prisma.participant.createMany({
+        data: validIds.map(userId => ({ roomId, userId, role: 'LISTENER' as const })),
+        skipDuplicates: true,
+      });
+      await prisma.participant.updateMany({
+        where: { roomId, userId: { in: validIds }, leftAt: { not: null } },
+        data: { leftAt: null },
+      });
     }
 
     await Promise.all(

@@ -1,4 +1,4 @@
-import React, { memo, useCallback } from 'react';
+import React, { memo, useCallback, useMemo } from 'react';
 import { Alert, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
@@ -41,7 +41,14 @@ interface ConvoRowProps {
 
 const ConvoRow: React.FC<ConvoRowProps> = memo(({ convo, onPress }) => {
   const handle = useCallback(() => onPress(convo.id), [convo.id, onPress]);
-  const other = otherParticipant(convo);
+  // Memoize the per-row derivations so they only recompute when the underlying
+  // conversation changes (the row is memo()'d on props). Note: the relative
+  // timestamp is intentionally frozen at render time — it refreshes whenever
+  // the conversation updates (which is what reshuffles the list anyway), not on
+  // a wall-clock tick. A global "now" ticker would be needed for live "2m → 3m"
+  // counting; that is deliberately out of scope here.
+  const other = useMemo(() => otherParticipant(convo), [convo]);
+  const timeLabel = useMemo(() => relativeTime(convo.updatedAt), [convo.updatedAt]);
   return (
     <Pressable
       onPress={handle}
@@ -55,7 +62,7 @@ const ConvoRow: React.FC<ConvoRowProps> = memo(({ convo, onPress }) => {
           <Text className="text-md font-body-bold text-ink" numberOfLines={1}>
             {other.displayName}
           </Text>
-          <Text className="text-xxs font-body text-ink-muted">{relativeTime(convo.updatedAt)}</Text>
+          <Text className="text-xxs font-body text-ink-muted">{timeLabel}</Text>
         </View>
         <View className="flex-row items-center justify-between mt-xxs">
           <Text

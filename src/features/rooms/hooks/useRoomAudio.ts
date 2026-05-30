@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { env } from '../../../config/env';
 import { getSocket } from '../../../shared/services/realtime/socketClient';
 import { startRoomAudio, type RoomAudioHandle } from '../services/roomAudioService';
@@ -115,19 +115,25 @@ export const useRoomAudio = ({
     };
   }, [roomId, enabled]);
 
+  // Keep the controls stable: scores changes ~5x/s (200ms VAD ticks), so
+  // binding these into the same memo would re-invalidate every consumer
+  // that depends on them. They only ever read handleRef.current.
+  const setMuted = useCallback(async (muted: boolean) => {
+    await handleRef.current?.setMuted(muted);
+  }, []);
+  const setPeerVolume = useCallback((userId: string, volume: number) => {
+    handleRef.current?.setPeerVolume(userId, volume);
+  }, []);
+
   return useMemo(
     () => ({
       status,
       error,
       scores,
-      setMuted: async (muted: boolean) => {
-        await handleRef.current?.setMuted(muted);
-      },
-      setPeerVolume: (userId: string, volume: number) => {
-        handleRef.current?.setPeerVolume(userId, volume);
-      },
+      setMuted,
+      setPeerVolume,
     }),
-    [error, scores, status],
+    [error, scores, status, setMuted, setPeerVolume],
   );
 };
 

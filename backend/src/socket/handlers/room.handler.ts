@@ -5,6 +5,7 @@ import {
   closeRoom as closeSfuRoom,
   closeProducersForUserInRoom,
 } from '../../webrtc/mediasoup.manager';
+import { isActiveRoomParticipant } from '../../webrtc/roomAuthz';
 
 const roomChannel = (roomId: string): string => `room:${roomId}`;
 
@@ -82,12 +83,29 @@ export const registerRoomHandlers = (io: Server, socket: Socket): void => {
     }
   });
 
-  socket.on('room:request-speak', (payload: SpeakRequestPayload) => {
-    io.to(roomChannel(payload.roomId)).emit('room:speak-request', {
-      userId: userId(),
-      roomId: payload.roomId,
-    });
-  });
+  socket.on(
+    'room:request-speak',
+    async (payload: SpeakRequestPayload, ack?: (ok: boolean) => void) => {
+      try {
+        // Only an active participant of the room may raise a speak request —
+        // mirrors the REST `raiseHand` path which calls requireActiveParticipant.
+        // Without this any authenticated socket could spam hosts / the speak
+        // queue of rooms it never joined.
+        if (!(await isActiveRoomParticipant(payload.roomId, userId()))) {
+          ack?.(false);
+          return;
+        }
+        io.to(roomChannel(payload.roomId)).emit('room:speak-request', {
+          userId: userId(),
+          roomId: payload.roomId,
+        });
+        ack?.(true);
+      } catch (err) {
+        logger.warn('room:request-speak failed', { err });
+        ack?.(false);
+      }
+    },
+  );
 
   socket.on('room:end', async (payload: EndPayload, ack?: (ok: boolean) => void) => {
     try {

@@ -38,14 +38,23 @@ const matches = (follower: FollowerOnMap, query: string): boolean => {
 export const MapsScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<NavigationProp<RootStackParamList>>();
-  const { permission, coords, requestAgain } = useCurrentLocation();
+  const { permission, coords, requestAgain, ready } = useCurrentLocation();
   useLocationBroadcast(coords);
   const followers = useFollowersOnMap();
 
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<FollowerOnMap | null>(null);
+  // Marker pins must track view changes briefly so their custom content
+  // rasterizes, then stop — otherwise "live" pins re-rasterize continuously,
+  // which is expensive on Android. We flip this to false shortly after mount.
+  const [tracksMarkers, setTracksMarkers] = useState(true);
   const mapRef = useRef<MapView>(null);
   const didAutoCenterRef = useRef(false);
+
+  useEffect(() => {
+    const id = setTimeout(() => setTracksMarkers(false), 1500);
+    return () => clearTimeout(id);
+  }, []);
 
   // Auto-center the map on the user's first GPS fix, one-shot. Subsequent
   // coord updates don't re-center (the user may have panned away deliberately).
@@ -160,7 +169,10 @@ export const MapsScreen: React.FC = () => {
 
   // Auto-center on mount — block the map render until we have a first GPS fix
   // so the user never sees a default (Dakar) centroid before their real position.
-  if (!coords) {
+  // Once the initial fix attempt has finished (or timed out) we render anyway and
+  // fall back to DEFAULT_MAP_CENTER, so a device without a GPS fix is never stuck
+  // on the loader indefinitely.
+  if (!coords && !ready) {
     return <Loader fullscreen accessibilityLabel="Locating you" />;
   }
 
@@ -191,7 +203,7 @@ export const MapsScreen: React.FC = () => {
           <Marker
             coordinate={{ latitude: coords.latitude, longitude: coords.longitude }}
             anchor={{ x: 0.5, y: 0.5 }}
-            tracksViewChanges
+            tracksViewChanges={tracksMarkers}
             accessibilityLabel="Your location"
           >
             <UserLocationPulse />
@@ -205,8 +217,9 @@ export const MapsScreen: React.FC = () => {
               longitude: f.location.longitude,
             }}
             onPress={() => handlePinPress(f)}
-            tracksViewChanges={f.liveRoomId !== null}
+            tracksViewChanges={tracksMarkers}
             anchor={{ x: 0.5, y: 0.5 }}
+            accessibilityLabel={`${f.displayName}${f.liveRoomId ? ', live' : ''}`}
           >
             <FollowerPin follower={f} />
           </Marker>

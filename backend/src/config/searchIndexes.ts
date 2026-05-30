@@ -1,5 +1,16 @@
 import { prisma } from './database';
 import { logger } from './logger';
+import { env } from './env';
+
+/**
+ * Module-level readiness flag. Stays `false` until the trigram indexes have
+ * been ensured at least once so a readiness/health probe can surface a
+ * silent degradation (seq-scans on /search and /explore). Exported so a
+ * /health endpoint can reflect it.
+ */
+let searchIndexesReady = false;
+
+export const isSearchIndexesReady = (): boolean => searchIndexesReady;
 
 /**
  * Idempotent search-index bootstrap. Ensures the pg_trgm extension is
@@ -29,10 +40,16 @@ export const ensureSearchIndexes = async (): Promise<void> => {
     for (const stmt of statements) {
       await prisma.$executeRawUnsafe(stmt);
     }
+    searchIndexesReady = true;
     logger.info('search indexes ensured (pg_trgm)');
   } catch (err) {
+    searchIndexesReady = false;
     logger.error('ensureSearchIndexes failed', {
       err: err instanceof Error ? err.message : err,
     });
+    // In production a missing pg_trgm extension / index means /search and
+    // /explore silently degrade to full seq-scans (or fail outright). Fail the
+    // boot so the degradation is visible rather than shipping a broken search.
+    if (env.NODE_ENV === 'production') throw err;
   }
 };

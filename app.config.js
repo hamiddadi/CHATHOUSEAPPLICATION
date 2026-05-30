@@ -23,14 +23,32 @@ module.exports = ({ config: _config }) => {
   // expoConfig.extra.
   const agoraAppId = process.env.AGORA_APP_ID;
   const agoraChannel = process.env.AGORA_CHANNEL_NAME ?? 'CHATHOUSE';
-  const agoraTempToken = process.env.AGORA_TEMP_TOKEN;
+  // The temp token is a dev-only convenience. NEVER ship it in a production
+  // bundle — prod must mint per-room tokens via the backend /agora-token
+  // endpoint. Drop it from `extra` when building for production.
+  const agoraTempToken = envTag === 'production' ? undefined : process.env.AGORA_TEMP_TOKEN;
+
+  // Pins for Module 13 / SEC-019 — comma-separated list per domain,
+  // env-driven so we can rotate without rebuilding the JS bundle.
+  //   PIN_DOMAIN_API=api.chathouse.com
+  //   PIN_API_PRIMARY=sha256/AAAA...      PIN_API_BACKUP=sha256/BBBB...
+  // Empty in dev → plugin no-ops. Set in EAS secrets for staging/prod.
+  const pinningDomains = {};
+  const pinDomainApi = process.env.PIN_DOMAIN_API;
+  const pinApiPins = [process.env.PIN_API_PRIMARY, process.env.PIN_API_BACKUP].filter(Boolean);
+  if (pinDomainApi && pinApiPins.length > 0) pinningDomains[pinDomainApi] = pinApiPins;
 
   return {
     ...base.expo,
-    // Append our local "JVM heap" plugin to the static plugins list. We
-    // can't put it in app.json because plugin paths in JSON have to be
-    // package names; relative file paths only work via app.config.js.
-    plugins: [...(base.expo.plugins ?? []), './plugins/with-gradle-jvm-heap'],
+    // Append our local plugins to the static plugins list. We can't put
+    // them in app.json because plugin paths in JSON have to be package
+    // names; relative file paths only work via app.config.js.
+    plugins: [
+      ...(base.expo.plugins ?? []),
+      './plugins/with-gradle-jvm-heap',
+      './plugins/with-audio-background',
+      ['./plugins/with-cert-pinning', { domains: pinningDomains, includeSubdomains: true }],
+    ],
     // Override a few fields that should vary per env. Keep name/slug stable.
     extra: {
       API_BASE_URL: apiBaseUrl,

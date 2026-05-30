@@ -114,9 +114,23 @@ export const pushService = {
   },
 
   /**
+   * Clear the in-memory device-token cache. The token itself is bound to the
+   * physical device (not the account), but the cache must be dropped on a user
+   * switch so a stale association can't be re-used. `signOut()` already calls
+   * `unregisterCurrentDevice()` (which clears the cache); expose this as an
+   * explicit, side-effect-free reset for any auth flow that swaps users without
+   * a full sign-out round-trip.
+   */
+  resetTokenCache(): void {
+    cachedToken = null;
+  },
+
+  /**
    * Register the current device's push token with the backend. Idempotent
-   * (backend upserts on `token`). Call once on app start after the user
-   * is authenticated.
+   * (backend upserts on `token`). Always re-POSTs — even when the token is
+   * cached — so calling it on every login re-associates the device with the
+   * current account. Invoke after each successful authentication, not only on
+   * first boot.
    */
   async registerWithBackend(): Promise<void> {
     const token = await this.getOrRequestToken();

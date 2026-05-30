@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { Button } from '../../../../shared/components/Button';
 import { colors, radii, spacing } from '../../../../shared/constants/theme';
+import { useApiErrorToast } from '../../../../shared/hooks/useApiErrorToast';
 import { useAuthStore } from '../../../auth/store/authStore';
 import { useOnboardingStore } from '../../store/onboardingStore';
 import { INTEREST_CATEGORIES, type InterestCategory } from '../../schemas';
@@ -25,6 +26,7 @@ export const InterestSelectionScreen: React.FC = () => {
   }));
   const setInterestsInStore = useOnboardingStore(s => s.setInterests);
   const resetOnboarding = useOnboardingStore(s => s.reset);
+  const toastError = useApiErrorToast();
 
   const [selected, setSelected] = useState<Set<InterestCategory>>(new Set());
   const [submitting, setSubmitting] = useState(false);
@@ -58,10 +60,15 @@ export const InterestSelectionScreen: React.FC = () => {
       resetOnboarding();
       // RootNavigator observes user.hasCompletedOnboarding and swaps to
       // the Main stack automatically; no manual navigation here.
+    } catch (err) {
+      // Surface network/timeout/server (422) failures instead of failing
+      // silently. We intentionally do NOT resetOnboarding() here so the
+      // selected interests survive and the user can simply tap Finish again.
+      toastError(err);
     } finally {
       setSubmitting(false);
     }
-  }, [complete, interests, profile, resetOnboarding, setInterestsInStore]);
+  }, [complete, interests, profile, resetOnboarding, setInterestsInStore, toastError]);
 
   return (
     <View className="flex-1 bg-background" style={{ paddingTop: insets.top + spacing.xl }}>
