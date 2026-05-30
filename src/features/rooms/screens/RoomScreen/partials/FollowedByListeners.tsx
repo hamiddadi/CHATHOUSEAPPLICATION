@@ -7,7 +7,9 @@ import SectionLabel from './SectionLabel';
 import { FollowedCell } from './ListenerCell';
 
 interface FollowedByListenersProps {
+  /** Listeners already filtered to those followed by the viewer. */
   participants: UserSummary[];
+  /** Cap on rendered avatars; the rest overflow into the "+N" pattern upstream. */
   maxVisible: number;
   onTap: (listener: UserSummary) => void;
 }

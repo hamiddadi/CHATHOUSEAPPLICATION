@@ -21,6 +21,7 @@ import {
   useRoom,
   useSetMute,
 } from '../../hooks/useRooms';
+import type { RoomListener } from '../../services/roomService';
 import { useRoomSocket } from '../../hooks/useRoomSocket';
 import {
   SPEAKING_SCORE_THRESHOLD,
@@ -327,6 +328,28 @@ export const RoomScreen: React.FC = () => {
   );
   const othersOverflow = room ? Math.max(0, room.listenersCount - room.listeners.length) : 0;
 
+  // Partition listeners into "followed by you" vs "others" using the
+  // backend-computed `followedByViewer` flag (carried on each listener by
+  // roomService). When NO listener is flagged — either a legacy payload
+  // without the flag, or genuinely none followed — we fall back to the
+  // previous positional behaviour (first FOLLOWED_COUNT in the followed row,
+  // the rest in the grid) so the layout never regresses.
+  const { followedListeners, otherListeners } = useMemo(() => {
+    const listeners = (room?.listeners ?? []) as RoomListener[];
+    const followed = listeners.filter(l => l.followedByViewer);
+    if (followed.length === 0) {
+      // No flagged followers → keep the historical positional split.
+      return {
+        followedListeners: listeners.slice(0, FOLLOWED_COUNT),
+        otherListeners: listeners.slice(FOLLOWED_COUNT),
+      };
+    }
+    return {
+      followedListeners: followed,
+      otherListeners: listeners.filter(l => !l.followedByViewer),
+    };
+  }, [room?.listeners]);
+
   // Live "is speaking" per speaker, keyed by speaker id. The mediasoup score
   // map keys the local user under SPEAKING_SELF_KEY; everyone else is keyed by
   // their user id. Computed here so the score graph stays in the orchestrator
@@ -512,14 +535,13 @@ export const RoomScreen: React.FC = () => {
         />
 
         <FollowedByListeners
-          participants={room.listeners}
+          participants={followedListeners}
           maxVisible={FOLLOWED_COUNT}
           onTap={handleListenerPress}
         />
 
         <OthersGrid
-          participants={room.listeners}
-          skip={FOLLOWED_COUNT}
+          participants={otherListeners}
           overflow={othersOverflow}
           onTap={handleListenerPress}
         />

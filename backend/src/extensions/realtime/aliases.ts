@@ -126,6 +126,26 @@ export const emitRoomStartedByFollowing = (
   },
 ): void => emitBoth(userChannel(followerUserId), null, 'room_started_by_following', payload);
 
+/**
+ * Ephemeral "someone you follow just joined a room" realtime ping.
+ *
+ * Emitted on the joiner's followers' personal user-channels when the
+ * joiner enters a room (see rooms.service.join). Intentionally NOT a
+ * persisted Prisma notification — there is no NotificationType for it and
+ * the Prisma client can't be regenerated, so this stays purely realtime
+ * (best-effort, fire-and-forget). Clients that don't listen simply miss it.
+ */
+export const emitRoomJoinedByFollowing = (
+  followerUserId: string,
+  payload: {
+    roomId: string;
+    userId: string;
+    username: string | null;
+    displayName: string | null;
+    avatarUrl: string | null;
+  },
+): void => emitBoth(userChannel(followerUserId), null, 'room_joined_by_following', payload);
+
 export const emitPingUser = (
   toUserId: string,
   payload: { fromUserId: string; roomId: string; type: 'ping' | 'wave' },

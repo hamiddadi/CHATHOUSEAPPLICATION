@@ -51,7 +51,12 @@ export const roomsController = {
   },
 
   async get(req: Request, res: Response) {
-    const room = await roomsService.get(paramId(req, 'id'));
+    // Pass the authenticated viewer so the service can annotate each
+    // LISTENER with `followedByViewer`. The rooms router mounts every route
+    // behind requireAuth, so req.userId is populated; it stays optional in
+    // the service (undefined → flag false everywhere) for callers without
+    // an authenticated viewer.
+    const room = await roomsService.get(paramId(req, 'id'), req.userId);
     sendOk(res, room);
   },
 
