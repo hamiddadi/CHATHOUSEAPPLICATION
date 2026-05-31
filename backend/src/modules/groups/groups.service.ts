@@ -6,6 +6,7 @@ import type {
   AddGroupMembersInput,
   CreateGroupInput,
   ListGroupMessagesInput,
+  RenameGroupInput,
   SendGroupMessageInput,
 } from './groups.schema';
 
@@ -217,6 +218,28 @@ export const groupsService = {
         });
       }
     }
+    return this.detail(userId, conversationId);
+  },
+
+  async rename(userId: string, conversationId: string, input: RenameGroupInput) {
+    // Any member can rename the thread (Clubhouse-style group chats).
+    await this.requireMembership(userId, conversationId);
+    await prisma.conversation.update({
+      where: { id: conversationId },
+      data: { title: input.title },
+    });
+    return this.detail(userId, conversationId);
+  },
+
+  async removeMember(userId: string, conversationId: string, targetId: string) {
+    const conv = await this.requireMembership(userId, conversationId);
+    // Only the owner can remove others; removing yourself goes through leave()
+    // so the empty-group cleanup runs.
+    if (conv.ownerId !== userId) throw new AppError('GROUP_004');
+    if (targetId === userId) throw new AppError('GROUP_005');
+    await prisma.conversationMember.deleteMany({
+      where: { conversationId, userId: targetId },
+    });
     return this.detail(userId, conversationId);
   },
 

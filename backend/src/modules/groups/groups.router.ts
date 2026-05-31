@@ -13,8 +13,10 @@ groupsRouter.post('/', asyncHandler(groupsController.create));
 
 // Per-conversation operations.
 groupsRouter.get('/:id', asyncHandler(groupsController.detail));
+groupsRouter.patch('/:id', asyncHandler(groupsController.rename));
 groupsRouter.get('/:id/messages', asyncHandler(groupsController.messages));
 groupsRouter.post('/:id/messages', asyncHandler(groupsController.send));
 groupsRouter.patch('/:id/read', asyncHandler(groupsController.markRead));
 groupsRouter.post('/:id/members', asyncHandler(groupsController.addMembers));
+groupsRouter.delete('/:id/members/:userId', asyncHandler(groupsController.removeMember));
 groupsRouter.post('/:id/leave', asyncHandler(groupsController.leave));

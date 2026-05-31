@@ -69,6 +69,8 @@ export type MessageStackParamList = {
   NewMessage: undefined;
   ChatDetail: { conversationId: string };
   GroupChat: { conversationId: string };
+  GroupInfo: { conversationId: string };
+  AddGroupMembers: { conversationId: string };
 };
 
 export type MapStackParamList = {

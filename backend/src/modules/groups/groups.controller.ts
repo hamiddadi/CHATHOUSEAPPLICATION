@@ -6,6 +6,7 @@ import {
   addGroupMembersSchema,
   createGroupSchema,
   listGroupMessagesSchema,
+  renameGroupSchema,
   sendGroupMessageSchema,
 } from './groups.schema';
 import { groupsService } from './groups.service';
@@ -54,6 +55,21 @@ export const groupsController = {
   async addMembers(req: Request, res: Response) {
     const input = addGroupMembersSchema.parse(req.body);
     const group = await groupsService.addMembers(authedUserId(req), paramId(req, 'id'), input);
+    sendOk(res, group);
+  },
+
+  async rename(req: Request, res: Response) {
+    const input = renameGroupSchema.parse(req.body);
+    const group = await groupsService.rename(authedUserId(req), paramId(req, 'id'), input);
+    sendOk(res, group);
+  },
+
+  async removeMember(req: Request, res: Response) {
+    const group = await groupsService.removeMember(
+      authedUserId(req),
+      paramId(req, 'id'),
+      paramId(req, 'userId'),
+    );
     sendOk(res, group);
   },
 

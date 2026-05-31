@@ -22,7 +22,12 @@ export const addGroupMembersSchema = z.object({
   userIds: z.array(z.string().min(1)).min(1).max(50),
 });
 
+export const renameGroupSchema = z.object({
+  title: z.string().trim().min(1).max(80),
+});
+
 export type CreateGroupInput = z.infer<typeof createGroupSchema>;
 export type SendGroupMessageInput = z.infer<typeof sendGroupMessageSchema>;
 export type ListGroupMessagesInput = z.infer<typeof listGroupMessagesSchema>;
 export type AddGroupMembersInput = z.infer<typeof addGroupMembersSchema>;
+export type RenameGroupInput = z.infer<typeof renameGroupSchema>;

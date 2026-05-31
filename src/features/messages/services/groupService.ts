@@ -122,4 +122,30 @@ export const groupService = {
     await apiClient.patch(`/groups/${id}/read`);
     return { read: true };
   },
+
+  async rename(id: string, title: string): Promise<GroupConversation> {
+    const res = await apiClient.patch<Envelope<RawGroupConversation>>(`/groups/${id}`, {
+      title: title.trim(),
+    });
+    return toConversation(res.data.data);
+  },
+
+  async addMembers(id: string, userIds: string[]): Promise<GroupConversation> {
+    const res = await apiClient.post<Envelope<RawGroupConversation>>(`/groups/${id}/members`, {
+      userIds,
+    });
+    return toConversation(res.data.data);
+  },
+
+  async removeMember(id: string, userId: string): Promise<GroupConversation> {
+    const res = await apiClient.delete<Envelope<RawGroupConversation>>(
+      `/groups/${id}/members/${userId}`,
+    );
+    return toConversation(res.data.data);
+  },
+
+  async leave(id: string): Promise<{ left: true }> {
+    await apiClient.post(`/groups/${id}/leave`);
+    return { left: true };
+  },
 };

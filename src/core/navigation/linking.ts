@@ -91,6 +91,8 @@ export const linking: LinkingOptions<RootStackParamList> = {
               NewMessage: 'messages/new',
               ChatDetail: 'chat/:conversationId',
               GroupChat: 'group/:conversationId',
+              GroupInfo: 'group/:conversationId/info',
+              AddGroupMembers: 'group/:conversationId/add',
             },
           },
           SettingsTab: {

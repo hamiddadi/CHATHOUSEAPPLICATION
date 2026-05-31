@@ -78,6 +78,10 @@ export const GroupChatScreen: React.FC = () => {
   }, [conversationId, draft, send]);
 
   const handleBack = useCallback(() => navigation.goBack(), [navigation]);
+  const handleOpenInfo = useCallback(
+    () => navigation.navigate('GroupInfo', { conversationId }),
+    [conversationId, navigation],
+  );
 
   const renderItem = useCallback(
     ({ item }: { item: GroupMessage }) => {
@@ -116,12 +120,25 @@ export const GroupChatScreen: React.FC = () => {
         <Pressable onPress={handleBack} accessibilityRole="button" hitSlop={8}>
           <MaterialIcons name="arrow-back" size={24} color={colors.text} />
         </Pressable>
-        <View className="flex-1">
+        <Pressable
+          onPress={handleOpenInfo}
+          accessibilityRole="button"
+          accessibilityLabel={t('messages.groupInfo', 'Group info')}
+          className="flex-1 active:opacity-70"
+        >
           <Text className="text-md font-body-bold text-ink" numberOfLines={1}>
             {title}
           </Text>
           <Text className="text-xxs font-body text-ink-muted">{memberCountLabel}</Text>
-        </View>
+        </Pressable>
+        <Pressable
+          onPress={handleOpenInfo}
+          accessibilityRole="button"
+          accessibilityLabel={t('messages.groupInfo', 'Group info')}
+          hitSlop={8}
+        >
+          <MaterialIcons name="info-outline" size={22} color={colors.textMuted} />
+        </Pressable>
       </View>
 
       {isLoading ? (
