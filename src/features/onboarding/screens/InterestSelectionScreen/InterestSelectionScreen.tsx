@@ -25,7 +25,6 @@ export const InterestSelectionScreen: React.FC = () => {
   const setInterestsInStore = useOnboardingStore(s => s.setInterests);
 
   const [selected, setSelected] = useState<Set<InterestCategory>>(new Set());
-  const [submitting, setSubmitting] = useState(false);
 
   const toggle = useCallback((cat: InterestCategory) => {
     setSelected(prev => {
@@ -40,16 +39,15 @@ export const InterestSelectionScreen: React.FC = () => {
   }, []);
 
   const interests = useMemo(() => [...selected], [selected]);
-  const canSubmit = interests.length >= MIN_INTERESTS && !submitting;
+  const canSubmit = interests.length >= MIN_INTERESTS;
 
   const onFinish = useCallback(() => {
     if (interests.length < MIN_INTERESTS) return;
-    setSubmitting(true);
     // Persist the selection so the SuggestedFollows step can flush it to the
-    // backend when the user finishes onboarding there. We deliberately do NOT
-    // complete onboarding here — that now happens after the follow-suggestions
-    // step. Leaving `submitting` true keeps the button disabled during the
-    // navigation transition; the screen unmounts before it would matter.
+    // backend when the user finishes onboarding there. No async work happens
+    // here (this screen stays mounted in the stack), so we don't gate on a
+    // `submitting` flag — doing so left the button stuck disabled after the
+    // user navigated back to this screen.
     setInterestsInStore(interests);
     navigation.navigate('NotificationsPermission');
   }, [interests, navigation, setInterestsInStore]);
@@ -97,7 +95,6 @@ export const InterestSelectionScreen: React.FC = () => {
           size="lg"
           fullWidth
           disabled={!canSubmit}
-          loading={submitting}
           onPress={onFinish}
         />
       </View>

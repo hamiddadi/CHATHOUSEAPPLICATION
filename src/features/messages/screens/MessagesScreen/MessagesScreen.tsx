@@ -159,7 +159,7 @@ export const MessagesScreen: React.FC = () => {
   useChatSocket();
   useGroupSocket();
   const myId = useAuthStore(s => s.user?.id ?? null);
-  const { data: conversations, isLoading, isError, refetch } = useConversations();
+  const { data: conversations, isLoading, isError, refetch, isFetching } = useConversations();
   const { data: groups } = useGroups();
 
   const handleOpen = useCallback(
@@ -230,7 +230,12 @@ export const MessagesScreen: React.FC = () => {
           keyExtractor={keyExtractor}
           ItemSeparatorComponent={renderSeparator}
           ListHeaderComponent={ListHeader}
-          refreshing={isLoading}
+          ListEmptyComponent={
+            (groups?.length ?? 0) === 0 ? (
+              <EmptyState title={t('messages.empty')} description={t('messages.startHint')} />
+            ) : null
+          }
+          refreshing={isFetching}
           onRefresh={refetch}
           contentContainerStyle={[
             styles.list,

@@ -47,13 +47,17 @@ const asString = (v: unknown): string | undefined =>
 const toAppNotification = (raw: RawNotification): AppNotification => {
   const data = raw.data ?? {};
   // Server stores the actor id under different keys depending on the
-  // event (followerId / inviterId / hostId). The frontend UI only
-  // needs something non-empty in `actor.id`; display info is carried
-  // by `message` (= body).
+  // event (followerId / inviterId / hostId / waverId / senderId). The
+  // frontend UI only needs something non-empty in `actor.id` so the tap
+  // deep-link fires; display info is carried by `message` (= body).
+  const d = data as Record<string, unknown>;
   const actorId =
-    asString((data as Record<string, unknown>).followerId) ??
-    asString((data as Record<string, unknown>).inviterId) ??
-    asString((data as Record<string, unknown>).hostId) ??
+    asString(d.followerId) ??
+    asString(d.inviterId) ??
+    asString(d.hostId) ??
+    asString(d.waverId) ??
+    asString(d.senderId) ??
+    asString(d.actorId) ??
     '';
   return {
     id: raw.id,

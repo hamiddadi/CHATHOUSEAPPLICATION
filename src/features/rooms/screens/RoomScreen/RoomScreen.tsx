@@ -76,6 +76,9 @@ export const RoomScreen: React.FC = () => {
   const endRoom = useEndRoom();
   const reportRoom = useReportRoom();
   const viewerId = useAuthStore(s => s.user?.id ?? null);
+  // Stable room id for effects that only need the identifier (not the whole
+  // `room` object, which gets a fresh reference on every React Query refetch).
+  const roomId = room?.id ?? null;
   const { data: handRaises = [] } = useHandRaises(room?.id ?? null);
   const [actionTarget, setActionTarget] = useState<RoomParticipant | null>(null);
   // Listener taps surface a profile sheet (follow / wave / ping); host taps
@@ -127,7 +130,7 @@ export const RoomScreen: React.FC = () => {
     let cancelled = false;
     let cleanup: (() => void) | undefined;
     void (async () => {
-      if (!room || !viewerId) return;
+      if (!roomId || !viewerId) return;
       const socket = await getSocket();
       if (cancelled || !socket) return;
       const muteHandler = (payload: {
@@ -136,12 +139,12 @@ export const RoomScreen: React.FC = () => {
         roomId?: string;
       }): void => {
         if (payload.userId !== viewerId) return;
-        if (payload.roomId && payload.roomId !== room.id) return;
+        if (payload.roomId && payload.roomId !== roomId) return;
         setIsMuted(payload.isMuted);
       };
       const kickHandler = (payload: { userId: string; roomId?: string }): void => {
         if (payload.userId !== viewerId) return;
-        if (payload.roomId && payload.roomId !== room.id) return;
+        if (payload.roomId && payload.roomId !== roomId) return;
         // Pop the screen first so the user lands somewhere safe even if
         // they dismiss the alert. The 30-min RoomBan installed by the
         // backend prevents an immediate re-join.
@@ -155,13 +158,13 @@ export const RoomScreen: React.FC = () => {
       // A missing roomId means "this room"; otherwise it must match the one
       // we're viewing. Pop the screen and tell the user it's over.
       const endedHandler = (payload: { roomId?: string }): void => {
-        if (payload.roomId && payload.roomId !== room.id) return;
+        if (payload.roomId && payload.roomId !== roomId) return;
         navigation.goBack();
         Alert.alert('Room terminée', "Cette room a été fermée par l'hôte.");
       };
       const roleHandler = (payload: { userId: string; role: string; roomId?: string }): void => {
         if (payload.userId !== viewerId) return;
-        if (payload.roomId && payload.roomId !== room.id) return;
+        if (payload.roomId && payload.roomId !== roomId) return;
         // Promotion to a publishing role — celebrate locally so the user
         // notices the new mic button before they wonder where it came from.
         if (payload.role === 'SPEAKER' || payload.role === 'MODERATOR' || payload.role === 'HOST') {
@@ -191,7 +194,7 @@ export const RoomScreen: React.FC = () => {
       cancelled = true;
       cleanup?.();
     };
-  }, [navigation, room, viewerId]);
+  }, [navigation, roomId, viewerId]);
 
   const { t } = useTranslation();
 

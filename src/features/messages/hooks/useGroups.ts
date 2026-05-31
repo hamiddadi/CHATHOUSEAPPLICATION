@@ -57,7 +57,10 @@ export const useMarkGroupRead = () => {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (conversationId: string) => groupService.markAsRead(conversationId),
-    onSuccess: () => {
+    onSuccess: (_res, conversationId) => {
+      // Invalidate the detail too so `useGroup().unreadCount` (read by the open
+      // thread + group-info screens) clears, not just the conversation list.
+      void qc.invalidateQueries({ queryKey: groupKeys.detail(conversationId) });
       void qc.invalidateQueries({ queryKey: groupKeys.list() });
     },
   });

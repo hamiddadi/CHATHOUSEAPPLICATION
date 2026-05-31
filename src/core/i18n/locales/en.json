@@ -79,6 +79,7 @@
     "noResults": "No one found",
     "noResultsHint": "Try a different name or username.",
     "empty": "No conversations yet",
+    "startHint": "Tap the compose icon to start a conversation.",
     "couldNotLoad": "Couldn't load messages",
     "pullToRetry": "Pull to retry."
   },
@@ -180,6 +181,7 @@
       "submit": "Verify",
       "resend": "Resend code",
       "sentTo": "Code sent to {{phone}}",
+      "attemptsRemaining_one": "{{count}} attempt remaining",
       "attemptsRemaining": "{{count}} attempts remaining",
       "verifying": "Verifying…",
       "resendIn": "Resend in {{time}}",
@@ -234,7 +236,9 @@
     "notRsvp": "RSVP",
     "hostBy": "by {{handle}}",
     "scheduledIn": "Starts in {{label}}",
-    "startsNow": "Starting now"
+    "startsNow": "Starting now",
+    "attendeeCount_one": "{{count}} attendee",
+    "attendeeCount": "{{count}} attendees"
   },
   "profile": {
     "myHouses": "My Houses",

@@ -83,9 +83,10 @@ export const MapsScreen: React.FC = () => {
   }, [coords]);
 
   const filteredFollowers = useMemo(
-    // Ghost Mode users are dropped upstream by the backend; here we also drop
-    // offline followers so the map only shows reachable, live-or-recent users.
-    () => followers.filter(f => f.presence !== 'offline' && matches(f, search)),
+    // Ghost Mode + offline users are already dropped upstream (backend roster +
+    // the maps:user-offline socket event), so the roster only ever holds
+    // online/recently-active followers — we just apply the search filter here.
+    () => followers.filter(f => matches(f, search)),
     [followers, search],
   );
 

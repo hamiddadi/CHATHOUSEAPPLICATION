@@ -1,11 +1,6 @@
 import React, { useCallback, useState } from 'react';
 import { Alert, ScrollView, Share, View } from 'react-native';
-import {
-  useNavigation,
-  useRoute,
-  type NavigationProp,
-  type RouteProp,
-} from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ExpoClipboard from 'expo-clipboard';
 import * as Haptics from 'expo-haptics';
@@ -13,7 +8,7 @@ import { useTranslation } from 'react-i18next';
 import { Loader } from '../../../../shared/components/Loader';
 import { EmptyState } from '../../../../shared/components/EmptyState';
 import { spacing } from '../../../../shared/constants/theme';
-import type { RoomStackParamList, SettingsStackParamList } from '../../../../core/navigation/types';
+import type { SettingsStackScreenProps } from '../../../../core/navigation/types';
 import { useAuthStore } from '../../../auth/store/authStore';
 import { useFollow, useMe, useProfile, useUnfollow } from '../../hooks/useProfile';
 import { useBlock, useReport, useWave } from '../../../social/hooks/useSocial';
@@ -26,7 +21,7 @@ import ProfileStats from './partials/ProfileStats';
 import ProfileActionButtons from './partials/ProfileActionButtons';
 import SelfSections from './partials/SelfSections';
 
-type Route = RouteProp<SettingsStackParamList, 'Profile'>;
+type Route = SettingsStackScreenProps<'Profile'>['route'];
 
 const BIO_TRUNCATE_LENGTH = 120;
 
@@ -38,7 +33,10 @@ const REPORT_REASONS: readonly ReportReason[] = [
 ] as const;
 
 export const ProfileScreen: React.FC = () => {
-  const navigation = useNavigation<NavigationProp<SettingsStackParamList>>();
+  // Composite nav type: ProfileScreen is registered in BOTH the Rooms and
+  // Settings stacks, so all navigation goes through the parent tabs (RoomsTab /
+  // SettingsTab) — that's the only form that resolves from either host stack.
+  const navigation = useNavigation<SettingsStackScreenProps<'Profile'>['navigation']>();
   const route = useRoute<Route>();
   const insets = useSafeAreaInsets();
   const { t } = useTranslation();
@@ -57,6 +55,11 @@ export const ProfileScreen: React.FC = () => {
   const wave = useWave();
   const block = useBlock();
   const report = useReport();
+  const goFollowers = useCallback(
+    (initialTab: 'followers' | 'following') =>
+      navigation.navigate('SettingsTab', { screen: 'Followers', params: { userId, initialTab } }),
+    [navigation, userId],
+  );
 
   const [bioExpanded, setBioExpanded] = useState(false);
 
@@ -64,9 +67,11 @@ export const ProfileScreen: React.FC = () => {
   // fire (React rule) but the render gates them on `isSelf`.
   const myHouses = useHouses('mine');
   const roomHistory = useMyRoomHistory(10);
-  const roomStackNav = useNavigation<NavigationProp<RoomStackParamList>>();
 
-  const goEdit = useCallback(() => navigation.navigate('EditProfile'), [navigation]);
+  const goEdit = useCallback(
+    () => navigation.navigate('SettingsTab', { screen: 'EditProfile' }),
+    [navigation],
+  );
 
   const handleCopyUsername = useCallback(async () => {
     if (!user?.username) return;
@@ -75,14 +80,18 @@ export const ProfileScreen: React.FC = () => {
     Alert.alert(t('profile.copied'), t('profile.usernameCopied'));
   }, [t, user?.username]);
 
-  const goHouseList = useCallback(() => roomStackNav.navigate('HouseList'), [roomStackNav]);
+  const goHouseList = useCallback(
+    () => navigation.navigate('RoomsTab', { screen: 'HouseList' }),
+    [navigation],
+  );
   const goHouseDetail = useCallback(
-    (houseId: string) => roomStackNav.navigate('HouseDetail', { houseId }),
-    [roomStackNav],
+    (houseId: string) =>
+      navigation.navigate('RoomsTab', { screen: 'HouseDetail', params: { houseId } }),
+    [navigation],
   );
   const goRoom = useCallback(
-    (roomId: string) => roomStackNav.navigate('Room', { roomId }),
-    [roomStackNav],
+    (roomId: string) => navigation.navigate('RoomsTab', { screen: 'Room', params: { roomId } }),
+    [navigation],
   );
 
   const handleBack = useCallback(() => navigation.goBack(), [navigation]);
@@ -241,7 +250,12 @@ export const ProfileScreen: React.FC = () => {
             onToggleBio={() => setBioExpanded(!bioExpanded)}
           />
 
-          <ProfileStats followingCount={user.followingCount} followersCount={user.followersCount} />
+          <ProfileStats
+            followingCount={user.followingCount}
+            followersCount={user.followersCount}
+            onPressFollowing={() => goFollowers('following')}
+            onPressFollowers={() => goFollowers('followers')}
+          />
 
           {!isSelf && (
             <ProfileActionButtons

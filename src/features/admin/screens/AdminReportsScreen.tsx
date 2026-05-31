@@ -159,7 +159,11 @@ export const AdminReportsScreen: React.FC = () => {
         <FlatList
           data={data.data}
           renderItem={({ item }) => (
-            <ReportRow report={item} onResolve={handleResolve} busy={resolve.isPending} />
+            <ReportRow
+              report={item}
+              onResolve={handleResolve}
+              busy={resolve.isPending && resolve.variables?.reportId === item.id}
+            />
           )}
           keyExtractor={r => r.id}
           ItemSeparatorComponent={() => <View style={{ height: spacing.sm }} />}

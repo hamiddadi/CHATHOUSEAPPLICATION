@@ -79,6 +79,7 @@
     "noResults": "Personne trouvée",
     "noResultsHint": "Essaie un autre nom ou pseudo.",
     "empty": "Pas encore de conversations",
+    "startHint": "Touche l'icône de rédaction pour démarrer une conversation.",
     "couldNotLoad": "Impossible de charger les messages",
     "pullToRetry": "Tire vers le bas pour réessayer."
   },
@@ -180,6 +181,7 @@
       "submit": "Vérifier",
       "resend": "Renvoyer le code",
       "sentTo": "Code envoyé au {{phone}}",
+      "attemptsRemaining_one": "{{count}} tentative restante",
       "attemptsRemaining": "{{count}} tentatives restantes",
       "verifying": "Vérification…",
       "resendIn": "Renvoyer dans {{time}}",
@@ -234,7 +236,9 @@
     "notRsvp": "RSVP",
     "hostBy": "par {{handle}}",
     "scheduledIn": "Commence dans {{label}}",
-    "startsNow": "Commence maintenant"
+    "startsNow": "Commence maintenant",
+    "attendeeCount_one": "{{count}} participant·e",
+    "attendeeCount": "{{count}} participant·e·s"
   },
   "profile": {
     "myHouses": "Mes Houses",

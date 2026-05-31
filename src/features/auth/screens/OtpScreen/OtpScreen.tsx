@@ -104,12 +104,12 @@ export const OtpScreen: React.FC = () => {
           const { isNewUser } = await verifyOtp(phoneNumber, newCode);
           // New users pick a real name first (Clubhouse order), then a username.
           if (isNewUser) navigation.navigate('Name', { phoneNumber });
-        } catch (err) {
-          const msg =
-            err && typeof err === 'object' && 'message' in err
-              ? (err as { message: string }).message
-              : t('auth.otp.errors.invalid');
-          setError(msg);
+        } catch {
+          // Almost every verify failure is a wrong/expired code. Show the
+          // localized message instead of leaking the raw HTTP error string
+          // (e.g. "Request failed with status code 401"); the attempt budget +
+          // "too many attempts" copy are tracked/surfaced separately.
+          setError(t('auth.otp.errors.invalid'));
           setAttempts(prev => prev + 1);
           triggerShake();
           setCode('');

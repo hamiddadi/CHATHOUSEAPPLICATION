@@ -1,4 +1,3 @@
-import { MOCK_USERS } from '../../../shared/mocks/users.mock';
 import { apiClient } from '../../../shared/services/api/apiClient';
 import type { Envelope } from '../../../shared/types/api';
 import type { User } from '../../../shared/types/domain';
@@ -197,10 +196,11 @@ export const profileService = {
 
   async search(query: string): Promise<User[]> {
     const q = query.trim();
-    // Backend rejects empty q; mimic the old "no query → list" behaviour
-    // from the frontend by short-circuiting to the mock list — this path
-    // only fires when the search box is empty.
-    if (q.length === 0) return [...MOCK_USERS];
+    // Empty query → no results (the backend rejects empty q). Previously this
+    // returned a hard-coded MOCK list, which surfaced fabricated users in the
+    // invite/search UIs — a real data bug. Callers should gate on a non-empty
+    // query; this guard keeps the behaviour safe regardless.
+    if (q.length === 0) return [];
 
     const res = await apiClient.get<Envelope<RawSearchUser[]>>('/users/search', {
       params: { q },

@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { Loader } from '../../../../shared/components/Loader';
 import { colors, spacing } from '../../../../shared/constants/theme';
+import { useApiErrorToast } from '../../../../shared/hooks/useApiErrorToast';
 import type { MessageStackParamList } from '../../../../core/navigation/types';
 import { useAuthStore } from '../../../auth/store/authStore';
 import {
@@ -40,17 +41,19 @@ export const GroupChatScreen: React.FC = () => {
   const { data: messages, isLoading } = useGroupMessages(conversationId);
   const send = useSendGroupMessage();
   const markRead = useMarkGroupRead();
+  const toastError = useApiErrorToast();
 
   const [draft, setDraft] = useState('');
   const listRef = useRef<FlatList<GroupMessage>>(null);
 
-  // Mark the thread read on open and whenever new messages land.
+  // Mark the thread read when there's something unread — on open and whenever
+  // new messages land. Guarded so we don't fire a redundant PATCH every render.
+  const unread = group?.unreadCount ?? 0;
   useEffect(() => {
-    if (conversationId) markRead.mutate(conversationId);
-    // markRead is stable from react-query; intentionally exclude to mark once
-    // per mount + message change.
+    if (conversationId && unread > 0) markRead.mutate(conversationId);
+    // markRead is stable from react-query; intentionally exclude it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [conversationId, messages?.length]);
+  }, [conversationId, unread, messages?.length]);
 
   const title = useMemo(() => {
     if (group?.title) return group.title;
@@ -74,8 +77,18 @@ export const GroupChatScreen: React.FC = () => {
     const text = draft.trim();
     if (text.length === 0) return;
     setDraft('');
-    send.mutate({ conversationId, text });
-  }, [conversationId, draft, send]);
+    send.mutate(
+      { conversationId, text },
+      {
+        // On failure, restore the text so the user doesn't silently lose their
+        // message, and surface the error.
+        onError: err => {
+          setDraft(text);
+          toastError(err);
+        },
+      },
+    );
+  }, [conversationId, draft, send, toastError]);
 
   const handleBack = useCallback(() => navigation.goBack(), [navigation]);
   const handleOpenInfo = useCallback(

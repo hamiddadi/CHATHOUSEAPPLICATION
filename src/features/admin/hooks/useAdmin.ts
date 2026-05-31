@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   adminService,
   type ListAuditLogParams,
@@ -39,6 +39,19 @@ export const useAdminUsers = (params: ListUsersParams = {}) =>
   useQuery({
     queryKey: adminKeys.users(params),
     queryFn: () => adminService.listUsers(params),
+  });
+
+/**
+ * Cursor-paginated user list for the admin moderation surface. The screen
+ * flattens `data.pages` and fetches the next page on scroll, so users beyond
+ * the first page are reachable (the plain `useAdminUsers` capped at one page).
+ */
+export const useAdminUsersInfinite = (params: Omit<ListUsersParams, 'cursor'> = {}) =>
+  useInfiniteQuery({
+    queryKey: adminKeys.users(params),
+    queryFn: ({ pageParam }) => adminService.listUsers({ ...params, cursor: pageParam }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: last => (last.hasMore ? (last.nextCursor ?? undefined) : undefined),
   });
 
 export const useAdminUser = (userId: string | null) =>

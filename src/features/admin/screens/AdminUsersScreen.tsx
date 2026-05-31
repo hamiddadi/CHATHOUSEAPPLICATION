@@ -8,7 +8,7 @@ import { Loader } from '../../../shared/components/Loader';
 import { colors, spacing } from '../../../shared/constants/theme';
 import { useDebouncedValue } from '../../../shared/hooks/useDebouncedValue';
 import { AdminHeader } from '../components/AdminHeader';
-import { useAdminUsers } from '../hooks/useAdmin';
+import { useAdminUsersInfinite } from '../hooks/useAdmin';
 import type { AdminUser, AppRole } from '../types/admin.types';
 import type { SettingsStackScreenProps } from '../../../core/navigation/types';
 
@@ -102,9 +102,23 @@ export const AdminUsersScreen: React.FC<SettingsStackScreenProps<'AdminUsers'>> 
     }),
     [debounced, roleFilter],
   );
-  const { data, isLoading, isError, refetch, isRefetching } = useAdminUsers(params);
+  const {
+    data,
+    isLoading,
+    isError,
+    refetch,
+    isRefetching,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useAdminUsersInfinite(params);
+  // Flatten the cursor pages into a single list for the FlatList.
+  const users = useMemo(() => data?.pages.flatMap(p => p.data) ?? [], [data]);
 
   const handleOpen = (id: string) => navigation.navigate('AdminUserDetail', { userId: id });
+  const handleEndReached = () => {
+    if (hasNextPage && !isFetchingNextPage) void fetchNextPage();
+  };
 
   return (
     <View className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
@@ -149,7 +163,7 @@ export const AdminUsersScreen: React.FC<SettingsStackScreenProps<'AdminUsers'>> 
         <EmptyState title="Erreur de chargement" description="Réessayez plus tard." />
       ) : (
         <FlatList
-          data={data.data}
+          data={users}
           renderItem={({ item }) => <UserRow user={item} onPress={handleOpen} />}
           keyExtractor={u => u.id}
           ItemSeparatorComponent={() => <View style={{ height: spacing.xs }} />}
@@ -160,6 +174,15 @@ export const AdminUsersScreen: React.FC<SettingsStackScreenProps<'AdminUsers'>> 
           }}
           ListEmptyComponent={
             <EmptyState title="Aucun utilisateur" description="Aucun résultat avec ces filtres." />
+          }
+          onEndReached={handleEndReached}
+          onEndReachedThreshold={0.5}
+          ListFooterComponent={
+            isFetchingNextPage ? (
+              <View style={{ paddingVertical: spacing.lg }}>
+                <Loader accessibilityLabel="Chargement…" />
+              </View>
+            ) : null
           }
           onRefresh={refetch}
           refreshing={isRefetching}

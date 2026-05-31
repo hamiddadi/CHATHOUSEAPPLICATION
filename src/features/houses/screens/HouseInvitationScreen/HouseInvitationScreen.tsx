@@ -6,7 +6,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Avatar } from '../../../../shared/components/Avatar';
 import { Button } from '../../../../shared/components/Button';
-import { resolveHouseIcon, resolveUserAvatar } from '../../../../shared/constants/images';
+import { resolveHouseIcon } from '../../../../shared/constants/images';
 import { colors, spacing } from '../../../../shared/constants/theme';
 import type { RoomStackParamList } from '../../../../core/navigation/types';
 import { errorMessage } from '../../../../shared/utils/errorMessage';
@@ -75,15 +75,11 @@ export const HouseInvitationScreen: React.FC = () => {
             <Text className="text-sm font-body text-ink-muted text-center">{memberCountLabel}</Text>
           )}
 
-          <View className="flex-row items-center gap-sm mt-lg">
-            <Avatar uri={resolveUserAvatar('u6')} name="John Doe" size="md" />
-            <View className="flex-1">
-              <Text className="text-md font-body-bold text-ink">John Doe</Text>
-              <Text className="text-xs font-body text-ink-muted">
-                invited you to join this house
-              </Text>
-            </View>
-          </View>
+          {/* The inviter isn't carried by the invite token/house payload, so we
+              keep the copy house-centric rather than showing a fabricated name. */}
+          <Text className="text-md font-body text-ink-muted text-center mt-lg">
+            You've been invited to join this house.
+          </Text>
 
           {inviteToken && (
             <Text className="text-xxs font-body text-ink-dim mt-md">

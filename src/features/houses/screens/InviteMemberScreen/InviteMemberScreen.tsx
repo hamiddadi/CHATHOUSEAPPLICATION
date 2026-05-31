@@ -8,6 +8,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Avatar } from '../../../../shared/components/Avatar';
 import { Button } from '../../../../shared/components/Button';
 import { Input } from '../../../../shared/components/Input';
+import { EmptyState } from '../../../../shared/components/EmptyState';
 import { Loader } from '../../../../shared/components/Loader';
 import { colors, spacing } from '../../../../shared/constants/theme';
 import type { RoomStackParamList } from '../../../../core/navigation/types';
@@ -170,6 +171,16 @@ export const InviteMemberScreen: React.FC = () => {
             styles.list,
             { paddingBottom: insets.bottom + spacing.giant, paddingTop: spacing.lg },
           ]}
+          ListEmptyComponent={
+            <EmptyState
+              title={debouncedQuery.length === 0 ? 'Inviter des membres' : 'Aucun résultat'}
+              description={
+                debouncedQuery.length === 0
+                  ? 'Recherche une personne par nom ou pseudo, ou partage le lien ci-dessus.'
+                  : 'Essaie un autre nom ou pseudo.'
+              }
+            />
+          }
           showsVerticalScrollIndicator={false}
         />
       )}

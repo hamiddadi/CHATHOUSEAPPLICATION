@@ -95,7 +95,11 @@ export const AdminRoomsScreen: React.FC = () => {
         <FlatList
           data={rooms}
           renderItem={({ item }) => (
-            <RoomRow room={item} onForceEnd={handleForceEnd} busy={forceEnd.isPending} />
+            <RoomRow
+              room={item}
+              onForceEnd={handleForceEnd}
+              busy={forceEnd.isPending && forceEnd.variables?.roomId === item.id}
+            />
           )}
           keyExtractor={r => r.id}
           ItemSeparatorComponent={() => <View style={{ height: spacing.sm }} />}

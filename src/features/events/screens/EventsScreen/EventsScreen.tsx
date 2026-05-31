@@ -66,7 +66,7 @@ const EventCard: React.FC<CardProps> = memo(({ event, isMine, onToggle, disabled
           <>
             <Text className="text-xs text-ink-dim">·</Text>
             <Text className="text-sm text-ink-muted">
-              {event.rsvpCount} {event.rsvpCount === 1 ? 'attendee' : 'attendees'}
+              {t('events.attendeeCount', { count: event.rsvpCount })}
             </Text>
           </>
         )}

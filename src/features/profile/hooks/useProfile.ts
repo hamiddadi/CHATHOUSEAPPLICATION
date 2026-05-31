@@ -84,5 +84,8 @@ export const useSearchUsers = (query: string) =>
   useQuery<User[]>({
     queryKey: profileKeys.search(query),
     queryFn: () => profileService.search(query),
+    // Don't fire on an empty query — there are no results to show and the
+    // backend rejects empty q. Callers render `data ?? []` → empty list.
+    enabled: query.trim().length > 0,
     staleTime: 1000 * 10,
   });

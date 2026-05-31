@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -25,6 +25,25 @@ interface Props {
  */
 export const ExtSuggestedFollowsScreen: React.FC<Props> = ({ onTapUser, onFollow }) => {
   const { data, isLoading, refetch, isRefetching } = useExtSuggestions(30);
+  // Track who we've already followed so a second tap can't fire a duplicate
+  // follow and the button reflects the new state.
+  const [followed, setFollowed] = useState<Set<string>>(new Set());
+
+  const handleFollow = useCallback(
+    (user: SuggestedUser) => {
+      if (followed.has(user.id)) return;
+      setFollowed(prev => new Set(prev).add(user.id));
+      void Promise.resolve(onFollow?.(user)).catch(() => {
+        // Roll back on failure so the user can retry.
+        setFollowed(prev => {
+          const next = new Set(prev);
+          next.delete(user.id);
+          return next;
+        });
+      });
+    },
+    [followed, onFollow],
+  );
 
   return (
     <SafeAreaView style={styles.container}>
@@ -69,12 +88,16 @@ export const ExtSuggestedFollowsScreen: React.FC<Props> = ({ onTapUser, onFollow
                 <Text style={styles.reason}>{reasonLabel(item)}</Text>
               </View>
               <Pressable
-                style={styles.followBtn}
-                onPress={() => onFollow?.(item)}
+                style={[styles.followBtn, followed.has(item.id) && styles.followBtnDone]}
+                onPress={() => handleFollow(item)}
+                disabled={followed.has(item.id)}
                 accessibilityRole="button"
+                accessibilityState={{ selected: followed.has(item.id) }}
                 accessibilityLabel={`Follow ${item.displayName ?? item.username}`}
               >
-                <Text style={styles.followBtnText}>Follow</Text>
+                <Text style={styles.followBtnText}>
+                  {followed.has(item.id) ? 'Following' : 'Follow'}
+                </Text>
               </Pressable>
             </Pressable>
           )}
@@ -122,6 +145,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     backgroundColor: '#1F2937',
   },
+  followBtnDone: { backgroundColor: '#94A3B8' },
   followBtnText: { color: '#FFFFFF', fontWeight: '600', fontSize: 13 },
   empty: { marginTop: 48, alignItems: 'center' },
   emptyText: { color: '#94A3B8' },
