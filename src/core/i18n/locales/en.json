@@ -33,7 +33,8 @@
     "sendA11y": "Send message",
     "emojiA11y": "Insert emoji",
     "attachA11y": "Attach file",
-    "micA11y": "Record voice message"
+    "micA11y": "Record voice message",
+    "typing": "typing…"
   },
   "messages": {
     "title": "Messages",

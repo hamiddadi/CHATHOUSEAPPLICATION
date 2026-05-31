@@ -15,6 +15,8 @@ interface ChatHeaderProps {
   topInset: number;
   otherAvatar: string | null;
   isOnline: boolean;
+  /** When true, the subtitle shows a live "typing…" hint instead of @username. */
+  isTyping?: boolean;
   displayName?: string;
   username?: string;
   onBack: () => void;
@@ -23,7 +25,17 @@ interface ChatHeaderProps {
 }
 
 const ChatHeader: React.FC<ChatHeaderProps> = memo(
-  ({ topInset, otherAvatar, isOnline, displayName, username, onBack, onCall, onMore }) => {
+  ({
+    topInset,
+    otherAvatar,
+    isOnline,
+    isTyping,
+    displayName,
+    username,
+    onBack,
+    onCall,
+    onMore,
+  }) => {
     const { t } = useTranslation();
 
     return (
@@ -52,7 +64,11 @@ const ChatHeader: React.FC<ChatHeaderProps> = memo(
             <Text className="text-md font-display text-primary tracking-tight">
               {displayName ?? 'Chat'}
             </Text>
-            <Text className="text-xs font-body-medium text-ink-muted">@{username ?? 'user'}</Text>
+            {isTyping ? (
+              <Text className="text-xs font-body-medium text-accent">{t('chat.typing')}</Text>
+            ) : (
+              <Text className="text-xs font-body-medium text-ink-muted">@{username ?? 'user'}</Text>
+            )}
           </View>
         </View>
         <View style={styles.headerActions}>

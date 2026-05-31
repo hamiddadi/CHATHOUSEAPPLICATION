@@ -33,7 +33,8 @@
     "sendA11y": "Envoyer le message",
     "emojiA11y": "Insérer un emoji",
     "attachA11y": "Joindre un fichier",
-    "micA11y": "Enregistrer un message vocal"
+    "micA11y": "Enregistrer un message vocal",
+    "typing": "écrit…"
   },
   "messages": {
     "title": "Messages",

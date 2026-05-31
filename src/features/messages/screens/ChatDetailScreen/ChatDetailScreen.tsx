@@ -24,6 +24,7 @@ import {
   useSendMessage,
   useMarkConversationRead,
 } from '../../hooks/useMessages';
+import { useTypingIndicator } from '../../hooks/useTypingIndicator';
 import Bubble from './partials/Bubble';
 import DateSeparator from './partials/DateSeparator';
 import ChatHeader from './partials/ChatHeader';
@@ -115,10 +116,24 @@ export const ChatDetailScreen: React.FC = () => {
     };
   }, []);
 
-  const { data: conversation } = useConversation(route.params.conversationId);
-  const { data: messages, isLoading } = useConversationMessages(route.params.conversationId);
+  // The conversation id IS the peer's user id (see messageService), so it
+  // doubles as the `receiverId` for the typing relay.
+  const peerId = route.params.conversationId;
+  const { data: conversation } = useConversation(peerId);
+  const { data: messages, isLoading } = useConversationMessages(peerId);
   const sendMessage = useSendMessage();
   const markRead = useMarkConversationRead();
+  const { isPeerTyping, notifyTyping } = useTypingIndicator(peerId);
+
+  // Wrap the draft setter so every keystroke also pings the peer (the hook
+  // throttles the actual socket emit).
+  const handleDraftChange = useCallback(
+    (text: string) => {
+      setDraft(text);
+      notifyTyping();
+    },
+    [notifyTyping],
+  );
 
   // Opening a conversation with unread messages marks them read server-side so
   // the row pip and the Messages tab badge clear. `markedRef` avoids re-firing
@@ -224,6 +239,7 @@ export const ChatDetailScreen: React.FC = () => {
         topInset={insets.top}
         otherAvatar={otherAvatar}
         isOnline={isOnline}
+        isTyping={isPeerTyping}
         displayName={other?.displayName}
         username={other?.username}
         onBack={handleBack}
@@ -250,7 +266,7 @@ export const ChatDetailScreen: React.FC = () => {
 
       <ChatInputBar
         value={draft}
-        onChangeText={setDraft}
+        onChangeText={handleDraftChange}
         onSend={handleSend}
         canSend={canSend}
         bottomInset={insets.bottom}

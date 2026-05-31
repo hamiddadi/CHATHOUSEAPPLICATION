@@ -8,6 +8,7 @@ import { colors, layout, radii, shadows, spacing } from '../../shared/constants/
 import { useUnreadMessageCount } from '../../features/messages/hooks/useMessages';
 import { useChatSocket } from '../../features/messages/hooks/useChatSocket';
 import { useNotificationSocket } from '../../features/notifications/hooks/useNotificationSocket';
+import { useFollowerCountSocket } from '../../features/profile/hooks/useFollowerCountSocket';
 import { RoomMiniBar } from '../../shared/components/RoomMiniBar';
 import type { MainTabParamList } from './types';
 import { RoomsNavigator } from './stacks/RoomsNavigator';
@@ -90,6 +91,9 @@ export const MainNavigator: React.FC = () => {
   // Same idea for notification:new / notification:count → keeps the
   // Notifications badge + list live without polling.
   useNotificationSocket();
+  // And user:follower_count → the signed-in user's follower total updates
+  // live when someone follows/unfollows them.
+  useFollowerCountSocket();
   return (
     <View style={styles.container}>
       <Tab.Navigator
