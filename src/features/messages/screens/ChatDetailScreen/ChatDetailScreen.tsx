@@ -18,7 +18,13 @@ import type { MessageStackParamList } from '../../../../core/navigation/types';
 import type { Message, UserSummary } from '../../../../shared/types/domain';
 import { CURRENT_USER } from '../../../../shared/mocks/users.mock';
 import { useAuthStore } from '../../../auth/store/authStore';
-import { useConversation, useConversationMessages, useSendMessage } from '../../hooks/useMessages';
+import {
+  useConversation,
+  useConversationMessages,
+  useSendMessage,
+  useMarkConversationRead,
+} from '../../hooks/useMessages';
+import { useTypingIndicator } from '../../hooks/useTypingIndicator';
 import Bubble from './partials/Bubble';
 import DateSeparator from './partials/DateSeparator';
 import ChatHeader from './partials/ChatHeader';
@@ -110,9 +116,38 @@ export const ChatDetailScreen: React.FC = () => {
     };
   }, []);
 
-  const { data: conversation } = useConversation(route.params.conversationId);
-  const { data: messages, isLoading } = useConversationMessages(route.params.conversationId);
+  // The conversation id IS the peer's user id (see messageService), so it
+  // doubles as the `receiverId` for the typing relay.
+  const peerId = route.params.conversationId;
+  const { data: conversation } = useConversation(peerId);
+  const { data: messages, isLoading } = useConversationMessages(peerId);
   const sendMessage = useSendMessage();
+  const markRead = useMarkConversationRead();
+  const { isPeerTyping, notifyTyping } = useTypingIndicator(peerId);
+
+  // Wrap the draft setter so every keystroke also pings the peer (the hook
+  // throttles the actual socket emit).
+  const handleDraftChange = useCallback(
+    (text: string) => {
+      setDraft(text);
+      notifyTyping();
+    },
+    [notifyTyping],
+  );
+
+  // Opening a conversation with unread messages marks them read server-side so
+  // the row pip and the Messages tab badge clear. `markedRef` avoids re-firing
+  // on every render while the conversations cache re-hydrates to 0.
+  const markedRef = useRef(false);
+  useEffect(() => {
+    markedRef.current = false;
+  }, [route.params.conversationId]);
+  useEffect(() => {
+    if ((conversation?.unreadCount ?? 0) > 0 && !markedRef.current && !markRead.isPending) {
+      markedRef.current = true;
+      markRead.mutate(route.params.conversationId);
+    }
+  }, [conversation?.unreadCount, route.params.conversationId, markRead]);
 
   const handleBack = useCallback(() => navigation.goBack(), [navigation]);
   const handleSend = useCallback(async () => {
@@ -204,6 +239,7 @@ export const ChatDetailScreen: React.FC = () => {
         topInset={insets.top}
         otherAvatar={otherAvatar}
         isOnline={isOnline}
+        isTyping={isPeerTyping}
         displayName={other?.displayName}
         username={other?.username}
         onBack={handleBack}
@@ -230,7 +266,7 @@ export const ChatDetailScreen: React.FC = () => {
 
       <ChatInputBar
         value={draft}
-        onChangeText={setDraft}
+        onChangeText={handleDraftChange}
         onSend={handleSend}
         canSend={canSend}
         bottomInset={insets.bottom}

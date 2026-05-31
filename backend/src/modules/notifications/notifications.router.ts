@@ -19,8 +19,11 @@ notificationsRouter.get(
     const parsedLimit = typeof limitRaw === 'string' ? Number(limitRaw) : NaN;
     const limit = Number.isFinite(parsedLimit) ? Math.min(50, Math.max(1, parsedLimit)) : 50;
     const cursor = typeof req.query['cursor'] === 'string' ? req.query['cursor'] : undefined;
-    const rows = await notificationsService.list(uid(req), filter, limit, cursor);
-    sendOk(res, rows);
+    const page = await notificationsService.list(uid(req), filter, limit, cursor);
+    // Return the array directly (matches the OpenAPI contract: data: array).
+    // The clients read `data` as the notification array; wrapping the paginated
+    // object here made them `.map` over an object and crash.
+    sendOk(res, page.data);
   }),
 );
 

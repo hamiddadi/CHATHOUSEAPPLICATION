@@ -67,6 +67,7 @@ export const toApi = (club: ClubWithRelations, viewerId: string) => ({
   categoryEmoji: club.categoryEmoji,
   iconUrl: club.iconUrl,
   privacy: privacyToApi(club.privacy),
+  ownerId: club.ownerId,
   membersCount: club._count.members,
   liveRoomsCount: club._count.rooms,
   isJoinedByMe: club.members.some(m => m.userId === viewerId),

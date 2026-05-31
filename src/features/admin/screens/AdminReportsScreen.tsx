@@ -111,7 +111,7 @@ ReportRow.displayName = 'ReportRow';
 export const AdminReportsScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const [tab, setTab] = useState<'open' | 'resolved' | 'all'>('open');
-  const { data, isLoading, isError, refetch } = useAdminReports({ status: tab });
+  const { data, isLoading, isError, refetch, isRefetching } = useAdminReports({ status: tab });
   const resolve = useResolveReport();
 
   const handleResolve = (reportId: string, outcome: 'resolved' | 'dismissed') => {
@@ -177,7 +177,7 @@ export const AdminReportsScreen: React.FC = () => {
             />
           }
           onRefresh={refetch}
-          refreshing={isLoading}
+          refreshing={isRefetching}
           showsVerticalScrollIndicator={false}
         />
       )}

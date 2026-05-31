@@ -1,4 +1,4 @@
-import React, { memo, useCallback, useEffect, useState } from 'react';
+import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -85,10 +85,16 @@ export const ExtActivityFeedScreen: React.FC<{ onTapItem?: (item: ActivityItem) 
   const [items, setItems] = useState<ActivityItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  // Monotonic request id: tab-switching fires overlapping fetches with no
+  // cancellation, so a slow earlier response could overwrite the current tab.
+  // Only the most recent request is allowed to commit.
+  const reqIdRef = useRef(0);
 
   const fetchItems = useCallback(async () => {
+    const myId = ++reqIdRef.current;
     try {
       const next = await activityApi.list(filter);
+      if (reqIdRef.current !== myId) return; // a newer filter request superseded this one
       // Merge: server entries win, but keep live socket entries the server
       // hasn't persisted yet — deduping by targetType+targetId so a live entry
       // and its later server counterpart don't both appear.
@@ -112,6 +118,7 @@ export const ExtActivityFeedScreen: React.FC<{ onTapItem?: (item: ActivityItem) 
   // Live prepend on alias broadcasts
   useExtSocketAliases({
     room_started_by_following: payload => {
+      if (filter !== 'all' && filter !== 'rooms') return; // ROOM_STARTED ∈ rooms
       setItems(prev =>
         prependCapped(prev, {
           id: `${LIVE_PREFIX}${payload.roomId}-${Date.now()}`,
@@ -133,6 +140,7 @@ export const ExtActivityFeedScreen: React.FC<{ onTapItem?: (item: ActivityItem) 
       );
     },
     join_request: payload => {
+      if (filter !== 'all' && filter !== 'clubs') return; // CLUB_INVITE ∈ clubs
       setItems(prev =>
         prependCapped(prev, {
           id: `${LIVE_PREFIX}jr-${payload.clubId}-${Date.now()}`,
@@ -149,6 +157,7 @@ export const ExtActivityFeedScreen: React.FC<{ onTapItem?: (item: ActivityItem) 
       );
     },
     ping_user: payload => {
+      if (filter !== 'all' && filter !== 'social') return; // WAVE ∈ social
       setItems(prev =>
         prependCapped(prev, {
           id: `${LIVE_PREFIX}ping-${payload.fromUserId}-${Date.now()}`,

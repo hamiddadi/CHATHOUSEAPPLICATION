@@ -33,7 +33,8 @@
     "sendA11y": "Envoyer le message",
     "emojiA11y": "Insérer un emoji",
     "attachA11y": "Joindre un fichier",
-    "micA11y": "Enregistrer un message vocal"
+    "micA11y": "Enregistrer un message vocal",
+    "typing": "écrit…"
   },
   "messages": {
     "title": "Messages",
@@ -58,7 +59,7 @@
   "room": {
     "stage": "SCÈNE",
     "handRaised": "Main levée",
-    "followedBy": "Suivi·e·s par les speakers",
+    "followedBy": "Suivi·e·s par toi",
     "others": "Autres dans la room",
     "rec": "REC",
     "host": "HOST",
@@ -236,7 +237,9 @@
     "coHostsHint": "Invite jusqu'à 5 personnes à co-animer.",
     "coHostsSearchPlaceholder": "Rechercher par pseudo",
     "startRoom": "Démarrer",
-    "closeA11y": "Fermer sans démarrer"
+    "closeA11y": "Fermer sans démarrer",
+    "errorTitle": "Création impossible",
+    "errorBody": "Impossible de créer la room. Réessaie."
   },
   "notifications": {
     "title": "Notifications",

@@ -55,8 +55,11 @@ export const useMarkConversationRead = () => {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (conversationId: string) => messageService.markAsRead(conversationId),
-    onSuccess: () => {
+    onSuccess: (_res, conversationId) => {
       void qc.invalidateQueries({ queryKey: messageKeys.conversations() });
+      // The tab badge reads messageKeys.unread() — without this it stays lit.
+      void qc.invalidateQueries({ queryKey: messageKeys.unread() });
+      void qc.invalidateQueries({ queryKey: messageKeys.conversation(conversationId) });
     },
   });
 };

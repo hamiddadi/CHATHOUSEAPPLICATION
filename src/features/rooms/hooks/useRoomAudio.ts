@@ -10,8 +10,17 @@ interface UseRoomAudioOptions {
 }
 
 interface UseRoomAudioState {
-  status: 'idle' | 'connecting' | 'live' | 'error' | 'unsupported';
+  status: 'idle' | 'connecting' | 'live' | 'reconnecting' | 'error' | 'unsupported';
   error: string | null;
+  /**
+   * Additive convenience flag for UI banners — `true` while the Agora SDK
+   * has lost the link and is auto-retrying (or we're driving a bounded
+   * manual rejoin). Equivalent to `status === 'reconnecting'`; exposed as a
+   * dedicated boolean so call sites can show a transient bandeau without
+   * widening their `status` checks. Always `false` on the unsupported
+   * (Expo Go) path, where connection-state callbacks never fire.
+   */
+  reconnecting: boolean;
   /**
    * Per-user "is currently speaking" flag, driven by Agora's VAD. Self
    * is keyed under `__self__`. The map shape (instead of a Set) keeps
@@ -83,6 +92,24 @@ export const useRoomAudio = ({
               return next;
             });
           },
+          onStatusChange: next => {
+            // Connection-health transitions from the Agora SDK. Only ever
+            // fires once the channel exists (never on the unsupported path),
+            // so it's safe to map straight onto the hook's status:
+            //   connected           → 'live'  (audio flowing again)
+            //   reconnecting/failed  → 'reconnecting'  (service auto-rejoins
+            //                          on failed; the banner stays up while
+            //                          the bounded retry runs)
+            // We never override a terminal 'error'/'unsupported' that the
+            // start() catch block set, nor flip back before start() resolves.
+            if (cancelled) return;
+            setStatus(prev => {
+              if (prev === 'error' || prev === 'unsupported' || prev === 'idle') {
+                return prev;
+              }
+              return next === 'connected' ? 'live' : 'reconnecting';
+            });
+          },
         });
         if (cancelled) {
           await handle.close();
@@ -129,6 +156,7 @@ export const useRoomAudio = ({
   return useMemo(
     () => ({
       status,
+      reconnecting: status === 'reconnecting',
       error,
       scores,
       setMuted,

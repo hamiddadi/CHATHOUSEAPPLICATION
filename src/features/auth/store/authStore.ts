@@ -47,7 +47,19 @@ export const useAuthStore = create<AuthState>((set, _get) => ({
       try {
         const user = await authService.getMe();
         set({ session, user, status: 'authenticated', isHydrating: false });
-      } catch {
+      } catch (e) {
+        const err = e as { kind?: string };
+        // A 401 here already ran the interceptor's onUnauthenticated → signOut
+        // (token cleared, status flipped to 'unauthenticated'). Seeing kind==='auth'
+        // OR a live status already 'unauthenticated' means the session is dead —
+        // do NOT revive it with the stale local `session`. A transient
+        // (network/server) failure is tolerated by keeping the cached token.
+        // (Check status, not session: the store's `session` is never populated
+        // before this point, so it's null on transient failures too.)
+        if (err?.kind === 'auth' || _get().status === 'unauthenticated') {
+          set({ session: null, user: null, status: 'unauthenticated', isHydrating: false });
+          return;
+        }
         set({ session, status: 'authenticated', isHydrating: false });
       }
       // Best-effort push registration after cold start too. The backend
@@ -83,6 +95,14 @@ export const useAuthStore = create<AuthState>((set, _get) => ({
     try {
       const { session, user, isNewUser } = await authService.verifyOtp(phoneNumber, code);
       await tokenStorage.set(session);
+      if (isNewUser) {
+        // Stay 'authenticating' (isAuthenticated=false) so the Auth stack stays
+        // mounted and OtpScreen can navigate to the Username step. Promoting to
+        // 'authenticated' here would unmount Auth and make Username unreachable.
+        // setUsername() completes the promotion.
+        set({ session, user, status: 'authenticating' });
+        return { isNewUser };
+      }
       set({ session, user, status: 'authenticated' });
       // Fire-and-forget: request a push token + register with the backend.
       // No-op in test/web environments without expo-notifications.
@@ -110,7 +130,11 @@ export const useAuthStore = create<AuthState>((set, _get) => ({
 
   setUsername: async username => {
     const { user } = await authService.setUsername(username);
-    set({ user });
+    // Promote to 'authenticated' now that the new user has a handle — this is
+    // what swaps the Auth stack for Onboarding/Main (verifyOtp left a new user
+    // in 'authenticating' precisely so Username could be reached first).
+    set({ user, status: 'authenticated' });
+    void pushService.registerWithBackend();
   },
 
   completeOnboarding: async input => {

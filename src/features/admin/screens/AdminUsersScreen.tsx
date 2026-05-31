@@ -102,7 +102,7 @@ export const AdminUsersScreen: React.FC<SettingsStackScreenProps<'AdminUsers'>> 
     }),
     [debounced, roleFilter],
   );
-  const { data, isLoading, isError, refetch } = useAdminUsers(params);
+  const { data, isLoading, isError, refetch, isRefetching } = useAdminUsers(params);
 
   const handleOpen = (id: string) => navigation.navigate('AdminUserDetail', { userId: id });
 
@@ -162,7 +162,7 @@ export const AdminUsersScreen: React.FC<SettingsStackScreenProps<'AdminUsers'>> 
             <EmptyState title="Aucun utilisateur" description="Aucun résultat avec ces filtres." />
           }
           onRefresh={refetch}
-          refreshing={isLoading}
+          refreshing={isRefetching}
           showsVerticalScrollIndicator={false}
         />
       )}

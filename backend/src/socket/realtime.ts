@@ -34,6 +34,15 @@ export const emitHallwayRoomClosed = (roomId: string): void => {
   ioRef?.to(HALLWAY_ROOM).emit('hallway:room_closed', { roomId });
 };
 
+/**
+ * Tells everyone still in a room that it has ended, so non-host participants
+ * leave the screen. The socket `room:end` handler already emits this; the REST
+ * end() path must emit it too (its clients never send the socket event).
+ */
+export const emitRoomEnded = (roomId: string): void => {
+  ioRef?.to(roomChannel(roomId)).emit('room:ended', { roomId });
+};
+
 export const emitHallwayRoomUpdated = (
   roomId: string,
   partial: { participantCount?: number; title?: string },
@@ -148,4 +157,15 @@ export const emitNotification = (
 
 export const emitNotificationCount = (userId: string, count: number): void => {
   ioRef?.to(userChannel(userId)).emit('notification:count', { count });
+};
+
+/**
+ * Pushes a freshly-created DM to both parties' personal channels so the
+ * recipient's client updates in realtime. The REST send path (chat.service)
+ * must call this — its clients never emit the `chat:send` socket event, so
+ * without it the recipient sees nothing until a manual refetch.
+ */
+export const emitChatMessage = (senderId: string, receiverId: string, msg: unknown): void => {
+  ioRef?.to(userChannel(senderId)).emit('chat:message', msg);
+  ioRef?.to(userChannel(receiverId)).emit('chat:message', msg);
 };

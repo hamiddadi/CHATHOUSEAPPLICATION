@@ -11,6 +11,7 @@ import {
   emitHallwayRoomClosed,
   emitHallwayRoomCreated,
   emitHallwayRoomUpdated,
+  emitRoomEnded,
   emitRoomHandLowered,
   emitRoomHandRaised,
   emitRoomMessage,
@@ -472,6 +473,9 @@ export const roomsService = {
     // Drop any pending reminder — the room is over.
     await cancelEventReminder(roomId);
     emitHallwayRoomClosed(roomId);
+    // Tell participants still in the room to leave (REST end() path; the socket
+    // room:end handler already emits this for the socket path).
+    emitRoomEnded(roomId);
     return { ended: true };
   },
 

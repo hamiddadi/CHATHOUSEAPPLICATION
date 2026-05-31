@@ -42,6 +42,7 @@ export const ExtClubPickerSheet: React.FC<Props> = ({
       .then(items => {
         if (!cancelled) setClubs(items);
       })
+      .catch(() => undefined) // 401/500 → keep the empty roster, no unhandled rejection
       .finally(() => {
         if (!cancelled) setLoading(false);
       });

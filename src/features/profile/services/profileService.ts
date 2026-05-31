@@ -34,6 +34,9 @@ interface RawSearchUser {
   bio: string | null;
   isOnline?: boolean;
   createdAt?: string;
+  // Follow-list endpoints now stamp this per-viewer so the Follow/Following
+  // toggle is correct. Optional: search payloads still omit it.
+  isFollowedByMe?: boolean;
 }
 
 // Follow list endpoints return a paginated envelope: { data, nextCursor,
@@ -94,7 +97,10 @@ const mapSummary = (u: RawSearchUser): User => ({
   // `get(userId)`.
   followersCount: 0,
   followingCount: 0,
-  isFollowedByMe: false,
+  // Follow-list endpoints stamp isFollowedByMe per-viewer; search payloads
+  // omit it → default false. Hardcoding false made the FollowersScreen toggle
+  // always show "Follow" (and re-follow instead of unfollow).
+  isFollowedByMe: u.isFollowedByMe ?? false,
 });
 
 export interface UpdateProfileInput {

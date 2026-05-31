@@ -70,6 +70,60 @@ const loadSdk = (): AgoraSdk | null => {
 
 export const AGORA_UNAVAILABLE_SENTINEL = 'AgoraEngine: react-native-agora not installed';
 
+/**
+ * Mirror of `react-native-agora`'s `ConnectionStateType` enum (AgoraBase).
+ * We re-declare the numeric constants locally instead of importing the SDK
+ * enum so the file keeps compiling/booting in Expo Go where the native
+ * module is absent. Values are part of the SDK ABI and stable across v4.x.
+ *
+ *   1 Disconnected  · 2 Connecting · 3 Connected · 4 Reconnecting · 5 Failed
+ */
+export const AgoraConnectionState = {
+  Disconnected: 1,
+  Connecting: 2,
+  Connected: 3,
+  Reconnecting: 4,
+  Failed: 5,
+} as const;
+
+export type AgoraConnectionStateValue =
+  (typeof AgoraConnectionState)[keyof typeof AgoraConnectionState];
+
+/**
+ * Semantic projection of the raw SDK connection state, consumed by
+ * `roomAudioService`. We deliberately collapse the five-state SDK enum
+ * onto the three states the rest of the app cares about so callers never
+ * have to know the numeric ABI:
+ *   - `connected`     → state CONNECTED(3): audio is flowing
+ *   - `reconnecting`  → state CONNECTING(2) / RECONNECTING(4): transient,
+ *                       the SDK is auto-retrying — surface a banner only
+ *   - `failed`        → state FAILED(5) or a lingering DISCONNECTED(1):
+ *                       the SDK gave up; the service kicks a bounded rejoin
+ */
+export type AgoraSemanticState = 'connected' | 'reconnecting' | 'failed';
+
+/**
+ * Map the SDK's numeric `ConnectionStateType` onto our 3-state semantic
+ * model. `DISCONNECTED` is treated as `failed` because by the time the
+ * SDK reports it (after exhausting its own retries) a manual rejoin is
+ * warranted; the genuinely transient drops surface as RECONNECTING first.
+ * Unknown/out-of-range values map to `reconnecting` (the safe, inert
+ * state — it shows a banner but never triggers a rejoin loop).
+ */
+export const mapAgoraConnectionState = (state: number): AgoraSemanticState => {
+  switch (state) {
+    case AgoraConnectionState.Connected:
+      return 'connected';
+    case AgoraConnectionState.Failed:
+    case AgoraConnectionState.Disconnected:
+      return 'failed';
+    case AgoraConnectionState.Connecting:
+    case AgoraConnectionState.Reconnecting:
+    default:
+      return 'reconnecting';
+  }
+};
+
 let engine: AgoraEngineNative | null = null;
 let sdk: AgoraSdk | null = null;
 let initialized = false;

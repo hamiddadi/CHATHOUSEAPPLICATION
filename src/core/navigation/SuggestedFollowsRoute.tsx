@@ -1,4 +1,5 @@
 import React, { useCallback, useState } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
@@ -23,12 +24,17 @@ export const SuggestedFollowsRoute: React.FC = () => {
   const { t } = useTranslation();
   const follow = useFollow();
   const complete = useAuthStore(s => s.completeOnboarding);
-  const profile = useOnboardingStore(s => ({
-    displayName: s.displayName,
-    bio: s.bio,
-    avatarUrl: s.avatarUrl,
-    interests: s.interests,
-  }));
+  // zustand v5 has no internal shallow-equality: a selector that builds a new
+  // object each call makes getSnapshot unstable → infinite render loop. Wrap in
+  // useShallow so the reference only changes when the slice's content changes.
+  const profile = useOnboardingStore(
+    useShallow(s => ({
+      displayName: s.displayName,
+      bio: s.bio,
+      avatarUrl: s.avatarUrl,
+      interests: s.interests,
+    })),
+  );
   const resetOnboarding = useOnboardingStore(s => s.reset);
   const toastError = useApiErrorToast();
 

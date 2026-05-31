@@ -57,7 +57,7 @@ RoomRow.displayName = 'RoomRow';
 
 export const AdminRoomsScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
-  const { data: rooms, isLoading, isError, refetch } = useAdminRooms({ live: true });
+  const { data: rooms, isLoading, isError, refetch, isRefetching } = useAdminRooms({ live: true });
   const forceEnd = useForceEndRoom();
 
   const handleForceEnd = (roomId: string, title: string) => {
@@ -108,7 +108,7 @@ export const AdminRoomsScreen: React.FC = () => {
             <EmptyState title="Aucune room en direct" description="Tout est calme." />
           }
           onRefresh={refetch}
-          refreshing={isLoading}
+          refreshing={isRefetching}
           showsVerticalScrollIndicator={false}
         />
       )}

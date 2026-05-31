@@ -80,6 +80,10 @@ export const useCurrentLocation = (): UseCurrentLocationReturn => {
       if (initial) setCoords(initial.coords);
       setReady(true);
 
+      // Defensive: drop any prior watcher before creating a new one, so a rapid
+      // re-invocation of start() (e.g. double-tap "Grant access") can't leak the
+      // previous subscription.
+      subRef.current?.remove();
       subRef.current = await Location.watchPositionAsync(
         {
           accuracy: Location.Accuracy.Balanced,

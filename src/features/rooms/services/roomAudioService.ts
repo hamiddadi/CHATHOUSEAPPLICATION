@@ -29,6 +29,7 @@ import {
   initAgora,
   joinAgoraChannel,
   leaveAgoraChannel,
+  mapAgoraConnectionState,
   registerAgoraHandlers,
   releaseAgora,
   renewAgoraToken,
@@ -74,6 +75,16 @@ export interface AudioLevelEvent {
   speaking: boolean;
 }
 
+/**
+ * Live connection status of the underlying Agora channel, derived from the
+ * SDK's `onConnectionStateChanged` callback. The hook maps this onto its
+ * own `status` field so a UI banner can show a "reconnecting…" state:
+ *   - `connected`     → channel is up, audio flowing
+ *   - `reconnecting`  → SDK lost the link and is auto-retrying (transient)
+ *   - `failed`        → SDK gave up; we kick a bounded manual rejoin
+ */
+export type AudioConnectionStatus = 'connected' | 'reconnecting' | 'failed';
+
 interface StartOptions {
   socket: Socket;
   roomId: string;
@@ -85,6 +96,12 @@ interface StartOptions {
   onLocalScore?: (level: number) => void;
   /** Per-peer audio level — drives the "who's speaking" UI. */
   onPeerScore?: (event: AudioLevelEvent) => void;
+  /**
+   * Connection-state transitions from the Agora SDK. Optional — when the
+   * native module is absent (Expo Go) this never fires, so the unsupported
+   * path stays a no-op.
+   */
+  onStatusChange?: (status: AudioConnectionStatus) => void;
 }
 
 /**
@@ -98,8 +115,12 @@ const cuidToAgoraUid = (cuid: string): number => {
   let hash = 0x811c9dc5; // FNV-1a 32-bit offset basis
   for (let i = 0; i < cuid.length; i++) {
     hash ^= cuid.charCodeAt(i);
-    // 32-bit FNV prime multiply, kept inside 32 bits via `>>> 0`.
-    hash = (hash * 0x01000193) >>> 0;
+    // 32-bit FNV prime multiply. MUST use Math.imul (32-bit integer multiply),
+    // NOT `*`: the float product of `hash * 0x01000193` exceeds 2^53 and loses
+    // low bits before `>>> 0`, diverging from the backend hash
+    // (agora.service.ts uses Math.imul). Any drift breaks the agoraUid ↔ userId
+    // correlation and kills the remote-speaker indicator.
+    hash = Math.imul(hash, 0x01000193) >>> 0;
   }
   // Agora's UID range is 1..2^32-1; 0 is reserved for "auto-assign".
   return hash === 0 ? 1 : hash;
@@ -136,6 +157,7 @@ export const startRoomAudio = async ({
   onPeerGone,
   onLocalScore,
   onPeerScore,
+  onStatusChange,
 }: StartOptions): Promise<RoomAudioHandle> => {
   // Mic permission — Agora's joinChannel will fail silently on Android
   // without RECORD_AUDIO. iOS prompts at first capture.
@@ -212,6 +234,35 @@ export const startRoomAudio = async ({
   // ─── Agora event handlers ─────────────────────────────────────────
   let renewTimer: ReturnType<typeof setTimeout> | null = null;
 
+  // ─── Auto-reconnect state ─────────────────────────────────────────
+  // The Agora SDK retries transient drops on its own (state RECONNECTING);
+  // we only step in when it reports FAILED (or a lingering DISCONNECTED),
+  // which means it has given up. The manual recovery is:
+  //   1) re-fetch a fresh Agora token (the old one may have expired or
+  //      been revoked, which is a common cause of a hard failure),
+  //   2) re-join the channel with the role we currently hold.
+  // Guards keep this from degenerating into a tight loop:
+  //   - `closed`        — set by close(); every async step bails on it so
+  //                       a rejoin scheduled just before teardown is inert.
+  //   - `rejoinInFlight`— idempotency latch: only one rejoin attempt runs
+  //                       at a time, so a burst of FAILED callbacks (the
+  //                       SDK can fire several) collapses into one attempt.
+  //   - `rejoinAttempts`— bounded retry budget; once exhausted we stop and
+  //                       leave the channel in `failed` so the UI shows the
+  //                       error banner rather than spinning forever.
+  //   - back-off timer  — spaces successive attempts (2s · 4s · 8s …) to
+  //                       avoid hammering the token endpoint / Agora edge.
+  const MAX_REJOIN_ATTEMPTS = 5;
+  let closed = false;
+  let rejoinInFlight = false;
+  let rejoinAttempts = 0;
+  let rejoinTimer: ReturnType<typeof setTimeout> | null = null;
+
+  // Tracks the last semantic state we surfaced so we don't spam the
+  // callback (the SDK can report the same state repeatedly) and so a
+  // successful (re)connect resets the retry budget exactly once.
+  let lastStatus: AudioConnectionStatus | null = null;
+
   const scheduleRenewal = (expiresAtMs: number | null): void => {
     if (renewTimer) clearTimeout(renewTimer);
     if (!expiresAtMs) return; // env fallback — no scheduled renewal possible
@@ -236,10 +287,80 @@ export const startRoomAudio = async ({
     }, delay);
   };
 
+  // Re-run the join pipeline (fresh token → joinAgoraChannel) after a hard
+  // failure. Idempotent and bounded — see the guard comments above. Safe
+  // on the unsupported path: it's only ever reached from the SDK callback,
+  // which never fires when the native module is absent.
+  const attemptRejoin = (): void => {
+    if (closed || rejoinInFlight) return;
+    if (rejoinAttempts >= MAX_REJOIN_ATTEMPTS) {
+      // Budget exhausted — leave the channel in `failed`; the hook keeps
+      // the error/reconnecting banner up and the next screen mount retries.
+      return;
+    }
+    rejoinInFlight = true;
+    rejoinAttempts += 1;
+    // Exponential back-off, capped at 30s: 2s, 4s, 8s, 16s, 30s.
+    const backoff = Math.min(30_000, 2_000 * 2 ** (rejoinAttempts - 1));
+    if (rejoinTimer) clearTimeout(rejoinTimer);
+    rejoinTimer = setTimeout(() => {
+      void (async () => {
+        try {
+          if (closed) return;
+          const next = await fetchToken();
+          if (closed) return;
+          await joinAgoraChannel({
+            channelName: next.channel,
+            uid: next.uid,
+            role: currentRole,
+            token: next.token,
+          });
+          // Reschedule token renewal against the freshly-fetched token.
+          scheduleRenewal(next.expiresAtMs);
+          // We don't flip to 'connected' here — the SDK will emit a
+          // CONNECTED state change once the rejoin actually lands, which
+          // resets the retry budget through the normal status path.
+        } catch {
+          // This attempt failed; if the SDK fires FAILED again we'll get
+          // another shot until the budget runs out.
+        } finally {
+          rejoinInFlight = false;
+        }
+      })();
+    }, backoff);
+  };
+
   const handlers: AgoraEventHandlers = {
     onJoinChannelSuccess: () => {
       // No-op — the hook flips status to 'live' on its own when start()
       // resolves; this handler is here for diagnostics only.
+    },
+    onConnectionStateChanged: (_conn, state) => {
+      // The single seam for connection health. We collapse Agora's 5-state
+      // enum onto our 3-state model, surface every distinct transition to
+      // the hook (for the UI banner), and on a hard `failed` kick the
+      // bounded manual rejoin. Inert on the unsupported path — never fires
+      // without the native module.
+      const status = mapAgoraConnectionState(state);
+      if (status !== lastStatus) {
+        lastStatus = status;
+        onStatusChange?.(status);
+      }
+      if (status === 'connected') {
+        // A good connection clears any pending rejoin and resets the budget
+        // so a *future*, unrelated drop gets its own full retry allowance.
+        if (rejoinTimer) {
+          clearTimeout(rejoinTimer);
+          rejoinTimer = null;
+        }
+        rejoinAttempts = 0;
+        return;
+      }
+      if (status === 'failed') {
+        attemptRejoin();
+      }
+      // 'reconnecting' → do nothing; the SDK is auto-retrying. The status
+      // callback above already let the UI raise a "reconnecting…" banner.
     },
     onUserJoined: (_conn, remoteUid) => {
       const userId = bindings.userIdFor(remoteUid);
@@ -386,9 +507,15 @@ export const startRoomAudio = async ({
 
   return {
     close: async () => {
+      // Latch first so any in-flight / scheduled rejoin becomes a no-op.
+      closed = true;
       if (renewTimer) {
         clearTimeout(renewTimer);
         renewTimer = null;
+      }
+      if (rejoinTimer) {
+        clearTimeout(rejoinTimer);
+        rejoinTimer = null;
       }
       socket.off('room:user-joined', handleSocketJoin);
       socket.off('room:role_changed', handleSocketRoleChange);

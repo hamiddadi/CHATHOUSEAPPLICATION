@@ -27,10 +27,9 @@ export const registerChatHandlers = (io: Server, socket: Socket): void => {
 
   socket.on('chat:send', async (payload: SendPayload, ack?: (ok: boolean) => void) => {
     try {
-      const msg = await chatService.send(me(), payload.receiverId, { content: payload.content });
-      // Emit to both the sender (for echo/UI confirmation) and the receiver.
-      io.to(userChannel(me())).emit('chat:message', msg);
-      io.to(userChannel(payload.receiverId)).emit('chat:message', msg);
+      // chatService.send now emits `chat:message` to both parties itself
+      // (so the REST path is covered too) — don't double-emit here.
+      await chatService.send(me(), payload.receiverId, { content: payload.content });
       ack?.(true);
     } catch (err) {
       logger.warn('chat:send failed', { err });

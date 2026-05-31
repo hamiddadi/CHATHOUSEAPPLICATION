@@ -37,6 +37,7 @@ import { TitleEditModal } from '../../components/TitleEditModal';
 import { RoomTimer } from '../../components/RoomTimer';
 import { useAuthStore } from '../../../auth/store/authStore';
 import { getSocket } from '../../../../shared/services/realtime/socketClient';
+import { formatScheduled } from '../../../../shared/utils/formatScheduled';
 import StageGrid from './partials/StageGrid';
 import HandRaiseQueue from './partials/HandRaiseQueue';
 import FollowedByListeners from './partials/FollowedByListeners';
@@ -45,8 +46,10 @@ import RoomActionBar from './partials/RoomActionBar';
 
 // Public landing URL for share-sheet messages. Universal Links (iOS) /
 // App Links (Android) on this domain redirect to chathouse:// when the
-// app is installed; the prefixes are declared in core/navigation/linking.ts.
-const ROOM_SHARE_BASE_URL = 'https://app.chathouse.com/r';
+// app is installed. The path MUST match the route declared in
+// core/navigation/linking.ts (Room: 'room/:roomId') — `/r/<id>` matched no
+// screen and silently failed to open the room.
+const ROOM_SHARE_BASE_URL = 'https://app.chathouse.com/room';
 
 type Nav = NativeStackNavigationProp<RoomStackParamList, 'Room'>;
 type Route = RouteProp<RoomStackParamList, 'Room'>;
@@ -344,9 +347,15 @@ export const RoomScreen: React.FC = () => {
         otherListeners: listeners.slice(FOLLOWED_COUNT),
       };
     }
+    // Cap the followed row at FOLLOWED_COUNT and spill the overflow into
+    // "Others" so a viewer who follows >FOLLOWED_COUNT listeners never loses
+    // anyone (the followed partial only renders maxVisible avatars).
     return {
-      followedListeners: followed,
-      otherListeners: listeners.filter(l => !l.followedByViewer),
+      followedListeners: followed.slice(0, FOLLOWED_COUNT),
+      otherListeners: [
+        ...followed.slice(FOLLOWED_COUNT),
+        ...listeners.filter(l => !l.followedByViewer),
+      ],
     };
   }, [room?.listeners]);
 
@@ -514,7 +523,16 @@ export const RoomScreen: React.FC = () => {
             </Text>
           </Pressable>
           <View className="flex-row items-center gap-sm mt-xs">
-            <RoomTimer startedAt={room.startedAt} />
+            {room.isLive ? (
+              // Only count elapsed time for a live room. `startedAt` maps to
+              // createdAt, so a scheduled (not-yet-live) room would otherwise
+              // show a huge bogus duration — show its scheduled time instead.
+              <RoomTimer startedAt={room.startedAt} />
+            ) : (
+              <Text className="text-[10px] text-ink-dim">
+                {room.scheduledFor ? formatScheduled(room.scheduledFor) : 'À venir'}
+              </Text>
+            )}
             <Text className="text-[10px] text-ink-dim">
               {room.speakersCount} speakers · {room.listenersCount} listeners
             </Text>
