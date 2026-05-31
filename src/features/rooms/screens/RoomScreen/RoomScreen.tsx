@@ -607,7 +607,14 @@ export const RoomScreen: React.FC = () => {
         viewerId={viewerId}
         onClose={() => setProfileTarget(null)}
       />
-      <RoomChatSidebar visible={chatOpen} roomId={room.id} onClose={() => setChatOpen(false)} />
+      <RoomChatSidebar
+        visible={chatOpen}
+        roomId={room.id}
+        onClose={() => setChatOpen(false)}
+        chatEnabled={room.chatEnabled}
+        chatVisibility={room.chatVisibility}
+        canModerate={viewerCanModerate}
+      />
       <RoomControlsSheet
         visible={controlsOpen}
         roomId={room.id}

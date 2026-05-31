@@ -47,16 +47,24 @@ export const ExtShareSheet: React.FC<Props> = ({ roomId, visible, onClose }) => 
 
   const handleOpen = async (option: (typeof OPTIONS)[number]['key']): Promise<void> => {
     if (!links) return;
-    if (option === 'system') {
-      await Share.share({ message: `${links.text} ${links.url}`, url: links.url });
-    } else if (option === 'twitter') {
-      await Linking.openURL(links.twitter);
-    } else if (option === 'whatsapp') {
-      await Linking.openURL(links.whatsapp);
-    } else if (option === 'telegram') {
-      await Linking.openURL(links.telegram);
+    // openURL rejects when the target app isn't installed (e.g. Telegram), and
+    // Share.share can reject too. Swallow so it isn't an unhandled rejection,
+    // and always close the sheet (the old code left it open on failure).
+    try {
+      if (option === 'system') {
+        await Share.share({ message: `${links.text} ${links.url}`, url: links.url });
+      } else if (option === 'twitter') {
+        await Linking.openURL(links.twitter);
+      } else if (option === 'whatsapp') {
+        await Linking.openURL(links.whatsapp);
+      } else if (option === 'telegram') {
+        await Linking.openURL(links.telegram);
+      }
+    } catch {
+      /* best-effort share — target app may not be installed */
+    } finally {
+      onClose();
     }
-    onClose();
   };
 
   return (

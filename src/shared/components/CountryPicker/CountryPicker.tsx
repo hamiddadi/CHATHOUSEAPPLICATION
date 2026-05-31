@@ -51,7 +51,12 @@ export const CountryPicker: React.FC<CountryPickerProps> = ({ visible, onClose, 
   }, [search]);
 
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
+    <Modal
+      visible={visible}
+      animationType="slide"
+      presentationStyle="pageSheet"
+      onRequestClose={onClose}
+    >
       <SafeAreaView className="flex-1 bg-background">
         <View className="px-lg py-md flex-row items-center border-b border-surface-border">
           <Pressable onPress={onClose} hitSlop={10} className="mr-md">

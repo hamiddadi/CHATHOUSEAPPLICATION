@@ -28,6 +28,12 @@ interface RoomChatSidebarProps {
   visible: boolean;
   roomId: string;
   onClose: () => void;
+  // Posting gate (defaults keep the composer enabled for backward compat). The
+  // backend enforces these too; surfacing them here avoids a misleading composer
+  // that only errors on send.
+  chatEnabled?: boolean;
+  chatVisibility?: 'ALL' | 'MODS_ONLY';
+  canModerate?: boolean;
 }
 
 interface ChatUser {
@@ -76,7 +82,20 @@ const normalizeUser = (u: IncomingChatPayload['user']): ChatUser => ({
 });
 
 export const RoomChatSidebar: React.FC<RoomChatSidebarProps> = memo(
-  ({ visible, roomId, onClose }) => {
+  ({
+    visible,
+    roomId,
+    onClose,
+    chatEnabled = true,
+    chatVisibility = 'ALL',
+    canModerate = false,
+  }) => {
+    // Can the viewer post? Chat must be on, and either open to all or the viewer
+    // is a host/moderator. When they can't, we replace the composer with a note.
+    const canPost = chatEnabled && (chatVisibility !== 'MODS_ONLY' || canModerate);
+    const cantPostNotice = !chatEnabled
+      ? 'Le chat est désactivé pour cette room.'
+      : 'Le chat est réservé aux modérateurs.';
     const { data: messages = [] } = useRoomMessages(visible ? roomId : null);
     const sendMessage = useSendRoomMessage();
     const qc = useQueryClient();
@@ -243,32 +262,39 @@ export const RoomChatSidebar: React.FC<RoomChatSidebarProps> = memo(
                   </Pressable>
                 </View>
               ) : null}
-              <View style={styles.composer}>
-                <TextInput
-                  value={draft}
-                  onChangeText={setDraft}
-                  placeholder={replyTo ? 'Réponse…' : 'Écrire…'}
-                  placeholderTextColor={colors.textMuted}
-                  style={styles.input}
-                  multiline
-                  maxLength={MAX_MESSAGE_LENGTH}
-                  accessibilityLabel="Message de chat"
-                />
-                <Pressable
-                  onPress={handleSend}
-                  disabled={draft.trim().length === 0 || sendMessage.isPending}
-                  accessibilityRole="button"
-                  accessibilityLabel="Envoyer"
-                  style={[
-                    styles.sendBtn,
-                    draft.trim().length === 0 || sendMessage.isPending
-                      ? styles.sendBtnDisabled
-                      : null,
-                  ]}
-                >
-                  <MaterialIcons name="send" size={18} color={colors.background} />
-                </Pressable>
-              </View>
+              {canPost ? (
+                <View style={styles.composer}>
+                  <TextInput
+                    value={draft}
+                    onChangeText={setDraft}
+                    placeholder={replyTo ? 'Réponse…' : 'Écrire…'}
+                    placeholderTextColor={colors.textMuted}
+                    style={styles.input}
+                    multiline
+                    maxLength={MAX_MESSAGE_LENGTH}
+                    accessibilityLabel="Message de chat"
+                  />
+                  <Pressable
+                    onPress={handleSend}
+                    disabled={draft.trim().length === 0 || sendMessage.isPending}
+                    accessibilityRole="button"
+                    accessibilityLabel="Envoyer"
+                    style={[
+                      styles.sendBtn,
+                      draft.trim().length === 0 || sendMessage.isPending
+                        ? styles.sendBtnDisabled
+                        : null,
+                    ]}
+                  >
+                    <MaterialIcons name="send" size={18} color={colors.background} />
+                  </Pressable>
+                </View>
+              ) : (
+                <View style={styles.composerDisabled}>
+                  <MaterialIcons name="lock" size={16} color={colors.textMuted} />
+                  <Text style={styles.composerDisabledText}>{cantPostNotice}</Text>
+                </View>
+              )}
             </KeyboardAvoidingView>
           </Pressable>
         </Pressable>
@@ -320,6 +346,16 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: 'rgba(255,255,255,0.08)',
   },
+  composerDisabled: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    padding: spacing.lg,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(255,255,255,0.08)',
+  },
+  composerDisabledText: { color: colors.textMuted, fontSize: 13 },
   input: {
     flex: 1,
     color: colors.text,

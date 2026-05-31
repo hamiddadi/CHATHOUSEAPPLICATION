@@ -18,9 +18,12 @@ export const useBlock = () => {
   return useMutation({
     mutationFn: (userId: string) => socialService.block(userId),
     onSuccess: (_d, userId) => {
-      // The blocked user's isFollowedByMe state is now false in both
-      // directions; refetch their profile card + the blocked list.
+      // Blocking deletes the follow edge in BOTH directions server-side, so the
+      // viewer's own follower/following counts + any rendered follow lists
+      // change too — invalidate the whole profile namespace (mirrors useFollow),
+      // plus the blocked list.
       void qc.invalidateQueries({ queryKey: profileKeys.detail(userId) });
+      void qc.invalidateQueries({ queryKey: profileKeys.all });
       void qc.invalidateQueries({ queryKey: socialKeys.blocked() });
     },
   });
@@ -30,7 +33,10 @@ export const useUnblock = () => {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (userId: string) => socialService.unblock(userId),
-    onSuccess: () => {
+    onSuccess: (_d, userId) => {
+      // Refresh the unblocked user's profile card (block badge / follow state)
+      // in addition to the blocked list.
+      void qc.invalidateQueries({ queryKey: profileKeys.detail(userId) });
       void qc.invalidateQueries({ queryKey: socialKeys.blocked() });
     },
   });

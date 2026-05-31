@@ -2,6 +2,10 @@ import { create } from 'zustand';
 import { authService } from '../services/authService';
 import { tokenStorage } from '../services/tokenStorage';
 import { pushService } from '../../notifications/services/pushService';
+import { useOnboardingStore } from '../../onboarding/store/onboardingStore';
+import { useInviteStore } from '../../extensions/store/inviteStore';
+import { useCurrentRoomStore } from '../../rooms/store/currentRoomStore';
+import { useImpersonationState } from '../../admin/store/impersonationState';
 import type { AuthSession, AuthStatus, AuthUser } from '../types/auth.types';
 
 interface AuthState {
@@ -165,5 +169,13 @@ export const useAuthStore = create<AuthState>((set, _get) => ({
     await authService.signOut();
     await tokenStorage.clear();
     set({ user: null, session: null, status: 'unauthenticated' });
+    // Reset cross-session stores so the next user on this device can't inherit
+    // the previous user's state: an onboarding draft (name/interests/avatar), a
+    // pending invite code, the current-room mini-bar, or an active admin
+    // impersonation. GhostMode is a per-device preference, so it's left intact.
+    useOnboardingStore.getState().reset();
+    useInviteStore.getState().clear();
+    useCurrentRoomStore.getState().clear();
+    useImpersonationState.getState().clear();
   },
 }));

@@ -17,7 +17,6 @@ const DAYS_AHEAD = 14;
 const MINUTE_STEP = 5;
 const HOURS = Array.from({ length: 24 }, (_, h) => h);
 const MINUTES = Array.from({ length: 60 / MINUTE_STEP }, (_, i) => i * MINUTE_STEP);
-const MS_PER_DAY = 24 * 60 * 60 * 1000;
 // Smallest sensible lead time so a "now-ish" pick still lands in the future
 // by the time the request reaches the backend.
 const MIN_LEAD_MS = 60 * 1000;
@@ -128,14 +127,19 @@ export const DateTimePickerInline: React.FC<DateTimePickerInlineProps> = ({ valu
     setTodayStart(startOfDayMs(new Date()));
   }, [value]);
 
-  const days = useMemo<DayOption[]>(
-    () =>
-      Array.from({ length: DAYS_AHEAD }, (_, offset) => ({
-        offset,
-        startOfDay: todayStart + offset * MS_PER_DAY,
-      })),
-    [todayStart],
-  );
+  const days = useMemo<DayOption[]>(() => {
+    // Build each day as TRUE local midnight via the calendar (Date constructor
+    // handles month rollover + DST), not by adding a fixed 86,400,000 ms — the
+    // latter drifts ±1h across a DST boundary, so the selected-day comparison
+    // (`item.startOfDay === parsed.startOfDay`) failed for days past the shift.
+    const base = new Date(todayStart);
+    return Array.from({ length: DAYS_AHEAD }, (_, offset) => ({
+      offset,
+      startOfDay: startOfDayMs(
+        new Date(base.getFullYear(), base.getMonth(), base.getDate() + offset),
+      ),
+    }));
+  }, [todayStart]);
 
   const dateFormatter = useMemo(
     () =>

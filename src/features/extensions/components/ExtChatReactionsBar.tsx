@@ -49,20 +49,20 @@ export const ExtChatReactionsBar: React.FC<Props> = ({ messageId, initial, onCha
 
   const toggle = async (emoji: string): Promise<void> => {
     setPending(emoji);
-    // Optimistic update
-    setReactions(prev => {
-      const next = { ...prev };
-      const current = next[emoji];
-      if (current?.byMe) {
-        const c = current.count - 1;
-        if (c <= 0) delete next[emoji];
-        else next[emoji] = { count: c, byMe: false };
-      } else {
-        next[emoji] = { count: (current?.count ?? 0) + 1, byMe: true };
-      }
-      onChange?.(next);
-      return next;
-    });
+    // Optimistic update — compute the next map from current state, then apply
+    // and notify OUTSIDE the state updater (React may run updater functions
+    // more than once, which would fire `onChange` multiple times per toggle).
+    const next = { ...reactions };
+    const current = next[emoji];
+    if (current?.byMe) {
+      const c = current.count - 1;
+      if (c <= 0) delete next[emoji];
+      else next[emoji] = { count: c, byMe: false };
+    } else {
+      next[emoji] = { count: (current?.count ?? 0) + 1, byMe: true };
+    }
+    setReactions(next);
+    onChange?.(next);
     try {
       const truth = await chatReactionsApi.toggle(messageId, emoji);
       setReactions(truth);

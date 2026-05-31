@@ -36,6 +36,15 @@ export const useExtSearchHistory = () => {
     };
   }, []);
 
+  // Clear the pending debounce timer on unmount so `record()` doesn't fire a
+  // POST after the component is gone (the load effect's cleanup didn't cover it).
+  useEffect(
+    () => () => {
+      if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    },
+    [],
+  );
+
   /**
    * Commit a query to history. Debounces RECORD_DEBOUNCE_MS so a fast typist
    * doesn't spam the server with intermediate strings.

@@ -66,7 +66,25 @@ const messageByKind: Record<AppError['kind'], string> = {
   unknown: 'Unexpected error.',
 };
 
+/**
+ * An already-normalized AppError (a plain object with a string `kind` +
+ * `message`). The axios response interceptor rejects with one of these, so
+ * `toAppError` MUST be idempotent — otherwise re-normalizing it (it's neither
+ * an AxiosError nor an `instanceof Error`) collapsed every error to
+ * `kind:'unknown'`/"Unexpected error.", breaking every toast + form validation.
+ */
+const isAppError = (e: unknown): e is AppError =>
+  typeof e === 'object' &&
+  e !== null &&
+  'kind' in e &&
+  typeof (e as AppError).kind === 'string' &&
+  'message' in e &&
+  typeof (e as AppError).message === 'string';
+
 export const toAppError = (err: unknown): AppError => {
+  if (isAppError(err)) {
+    return err;
+  }
   if (isAxiosError(err)) {
     return fromAxios(err);
   }
@@ -74,6 +92,21 @@ export const toAppError = (err: unknown): AppError => {
     return { kind: 'unknown', message: err.message, cause: err };
   }
   return { kind: 'unknown', message: messageByKind.unknown, cause: err };
+};
+
+/**
+ * Flatten the backend's validation `details` (Zod `flatten().fieldErrors`,
+ * shape `Record<string, string[]>`) into one message per field. Also tolerates
+ * the legacy flat `Record<string, string>` shape. Returns undefined when empty.
+ */
+const flattenFieldErrors = (details: unknown): Record<string, string> | undefined => {
+  if (!details || typeof details !== 'object') return undefined;
+  const out: Record<string, string> = {};
+  for (const [field, val] of Object.entries(details as Record<string, unknown>)) {
+    if (Array.isArray(val) && typeof val[0] === 'string') out[field] = val[0];
+    else if (typeof val === 'string') out[field] = val;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
 };
 
 const fromAxios = (err: AxiosError): AppError => {
@@ -86,30 +119,39 @@ const fromAxios = (err: AxiosError): AppError => {
   }
 
   const status = err.response.status;
-  const data = err.response.data as
-    | { message?: string; errors?: Record<string, string> }
+  // Backend envelope: { success:false, error:{ code, message, details? } }.
+  // Fall back to a flat { message, errors } shape for resilience.
+  const body = err.response.data as
+    | {
+        error?: { code?: string; message?: string; details?: unknown };
+        message?: string;
+        errors?: unknown;
+      }
     | undefined;
+  const backendMessage = body?.error?.message ?? body?.message;
+  const code = body?.error?.code;
+  const fields = flattenFieldErrors(body?.error?.details ?? body?.errors);
+  // Backend reports validation failures as 400 VALIDATION_001 (Zod), not 422.
+  const isValidation =
+    status === 422 || code === 'VALIDATION_001' || (status === 400 && fields !== undefined);
 
-  if (status === 401) return { kind: 'auth', status, message: messageByKind.auth, cause };
-  if (status === 403) return { kind: 'forbidden', status, message: messageByKind.forbidden, cause };
-  if (status === 404) return { kind: 'notFound', status, message: messageByKind.notFound, cause };
-  if (status === 422) {
+  if (status === 401)
+    return { kind: 'auth', status, message: backendMessage ?? messageByKind.auth, cause };
+  if (status === 403)
+    return { kind: 'forbidden', status, message: backendMessage ?? messageByKind.forbidden, cause };
+  if (status === 404)
+    return { kind: 'notFound', status, message: backendMessage ?? messageByKind.notFound, cause };
+  if (isValidation) {
     return {
       kind: 'validation',
       status,
-      message: data?.message ?? messageByKind.validation,
-      fields: data?.errors,
+      message: backendMessage ?? messageByKind.validation,
+      fields,
       cause,
     };
   }
   if (status >= 500) {
-    return { kind: 'server', status, message: messageByKind.server, cause };
+    return { kind: 'server', status, message: backendMessage ?? messageByKind.server, cause };
   }
-
-  return {
-    kind: 'unknown',
-    status,
-    message: data?.message ?? messageByKind.unknown,
-    cause,
-  };
+  return { kind: 'unknown', status, message: backendMessage ?? messageByKind.unknown, cause };
 };

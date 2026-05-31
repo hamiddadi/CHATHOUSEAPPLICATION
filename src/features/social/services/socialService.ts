@@ -9,6 +9,13 @@ import type { UserSummary } from '../../../shared/types/domain';
 
 export type ReportReason = 'spam' | 'harassment' | 'fake_profile' | 'other';
 
+interface RawBlockedUser {
+  id: string;
+  username: string | null;
+  displayName: string | null;
+  avatarUrl: string | null;
+}
+
 export interface ReportInput {
   reason: ReportReason;
   details?: string;
@@ -31,8 +38,16 @@ export const socialService = {
   },
 
   async listBlocked(): Promise<UserSummary[]> {
-    const res = await apiClient.get<Envelope<UserSummary[]>>('/users/me/blocked');
-    return res.data.data;
+    // The backend `publicUser` select yields nullable username/displayName/
+    // avatarUrl. Coalesce so the non-null `UserSummary` contract holds and a
+    // null displayName doesn't render as a blank row.
+    const res = await apiClient.get<Envelope<RawBlockedUser[]>>('/users/me/blocked');
+    return res.data.data.map(u => ({
+      id: u.id,
+      username: u.username ?? '',
+      displayName: u.displayName ?? u.username ?? '',
+      avatarUrl: u.avatarUrl,
+    }));
   },
 
   async report(userId: string, input: ReportInput): Promise<{ reportId: string }> {

@@ -29,9 +29,14 @@ export const mediaService = {
    * URI), so call this first and pass the returned URL through as avatarUrl.
    */
   async uploadAvatar(base64: string, mime?: string): Promise<string> {
-    const res = await apiClient.post<AvatarUploadEnvelope>('/upload/avatar', {
-      dataUrl: toDataUrl(base64, mime),
-    });
+    const res = await apiClient.post<AvatarUploadEnvelope>(
+      '/upload/avatar',
+      { dataUrl: toDataUrl(base64, mime) },
+      // A base64 image is much larger/slower than a normal JSON call; the
+      // global 15s timeout would abort an otherwise-succeeding upload on a slow
+      // connection. Give this request a generous 60s.
+      { timeout: 60_000 },
+    );
     const url = res.data?.data?.url ?? res.data?.url;
     if (!url) {
       throw new Error('Upload failed: no URL returned');

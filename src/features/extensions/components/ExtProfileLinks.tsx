@@ -76,7 +76,7 @@ export const ExtProfileLinks: React.FC<Props> = ({ userId, editable = false }) =
         {links.map(l => (
           <View key={l.id} style={styles.chip}>
             <Pressable
-              onPress={() => void Linking.openURL(l.url)}
+              onPress={() => void Linking.openURL(l.url).catch(() => undefined)}
               style={styles.chipTap}
               accessibilityRole="link"
               accessibilityLabel={`${l.label} link`}

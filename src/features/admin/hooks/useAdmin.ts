@@ -12,6 +12,11 @@ export const adminKeys = {
   whoami: () => [...adminKeys.all, 'whoami'] as const,
   stats: () => [...adminKeys.all, 'stats'] as const,
   users: (p?: ListUsersParams) => [...adminKeys.all, 'users', p ?? {}] as const,
+  // Distinct from `users` so a flat useQuery and the useInfiniteQuery never
+  // share a cache entry (their data shapes differ: Paginated vs InfiniteData).
+  // Still covered by the `[...all,'users']`-prefix invalidations after mutations.
+  usersInfinite: (p?: Omit<ListUsersParams, 'cursor'>) =>
+    [...adminKeys.all, 'users', 'infinite', p ?? {}] as const,
   user: (id: string) => [...adminKeys.all, 'user', id] as const,
   reports: (p?: ListReportsParams) => [...adminKeys.all, 'reports', p ?? {}] as const,
   rooms: (p?: { live?: boolean }) => [...adminKeys.all, 'rooms', p ?? {}] as const,
@@ -48,7 +53,7 @@ export const useAdminUsers = (params: ListUsersParams = {}) =>
  */
 export const useAdminUsersInfinite = (params: Omit<ListUsersParams, 'cursor'> = {}) =>
   useInfiniteQuery({
-    queryKey: adminKeys.users(params),
+    queryKey: adminKeys.usersInfinite(params),
     queryFn: ({ pageParam }) => adminService.listUsers({ ...params, cursor: pageParam }),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: last => (last.hasMore ? (last.nextCursor ?? undefined) : undefined),
