@@ -169,3 +169,15 @@ export const emitChatMessage = (senderId: string, receiverId: string, msg: unkno
   ioRef?.to(userChannel(senderId)).emit('chat:message', msg);
   ioRef?.to(userChannel(receiverId)).emit('chat:message', msg);
 };
+
+/**
+ * Fan a new group message out to every member's personal channel so their
+ * conversation list / open thread updates live. Group conversations have no
+ * dedicated socket room, so we target each member's `user:<id>` channel (the
+ * same one chat + notifications already use).
+ */
+export const emitGroupMessage = (memberIds: readonly string[], payload: unknown): void => {
+  for (const id of memberIds) {
+    ioRef?.to(userChannel(id)).emit('group:message', payload);
+  }
+};

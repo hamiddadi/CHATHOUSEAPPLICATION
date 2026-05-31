@@ -133,6 +133,13 @@ model User {
   // ─── Onboarding ─────────────────────────
   interests              String[]  @default([])
   hasCompletedOnboarding Boolean   @default(false)
+  // ─── Referral / invites (Clubhouse-style virality) ───
+  // `invitedById` records who brought this user in (set once, at redemption,
+  // only while null → idempotent). `invitesRemaining` is the per-user invite
+  // quota consumed when someone redeems this user's link. Self-relation
+  // "UserInvites": invitedBy (the inviter) ←→ invitedUsers (people I invited).
+  invitedById      String?
+  invitesRemaining Int       @default(3)
   // ─── Account deletion ───────────────────
   deletedAt    DateTime? // Soft delete: non-null = pending deletion
   // ─── Platform admin role + suspension ───
@@ -152,6 +159,9 @@ model User {
   roomBansReceived    RoomBan[]            @relation("BanTarget")
   sentMessages        Message[]            @relation("MessageSender")
   receivedMessages    Message[]            @relation("MessageReceiver")
+  ownedConversations      Conversation[]       @relation("ConvOwner")
+  conversationMemberships ConversationMember[] @relation("ConvMembership")
+  groupMessagesSent       GroupMessage[]       @relation("GroupMsgSender")
   followers           Follow[]             @relation("Following")
   following           Follow[]             @relation("Follower")
   notifications       Notification[]       @relation("NotifRecipient")
@@ -172,6 +182,9 @@ model User {
   notifPreferences    NotificationPreference?
   auditLogsAuthored   AuditLog[]            @relation("AuditActor")
   auditLogsTargeted   AuditLog[]            @relation("AuditTargetUser")
+  // Referral self-relation: the user who invited me, and everyone I invited.
+  invitedBy           User?                @relation("UserInvites", fields: [invitedById], references: [id], onDelete: SetNull)
+  invitedUsers        User[]               @relation("UserInvites")
 
   @@index([isOnline])
   @@index([isVisible])
@@ -179,6 +192,7 @@ model User {
   @@index([currentRoomId])
   @@index([appRole])
   @@index([suspendedUntil])
+  @@index([invitedById])
   // Covers getOnlineLocations (map): visible + online + recently-seen.
   @@index([isVisible, isOnline, lastSeenAt])
 }
@@ -347,6 +361,56 @@ model Message {
   @@index([receiverId])
   @@index([roomId])
   @@index([createdAt])
+}
+
+// ─── Group DM (Backchannel groups) ─────────────────────
+// Group conversations live in their own tables, separate from the 1:1
+// `Message` table (which stays peer/receiverId based). This keeps the
+// existing DM path untouched while adding multi-party threads. A
+// Conversation has N members and an append-only message log.
+model Conversation {
+  id        String   @id @default(cuid())
+  title     String?  @db.VarChar(80) // optional group name; UI falls back to member names
+  ownerId   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  owner    User                 @relation("ConvOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  members  ConversationMember[]
+  messages GroupMessage[]
+
+  @@index([ownerId])
+}
+
+model ConversationMember {
+  id             String    @id @default(cuid())
+  conversationId String
+  userId         String
+  // High-water mark for unread computation: messages newer than this (and not
+  // sent by the member) are unread. NULL = never opened.
+  lastReadAt     DateTime?
+  joinedAt       DateTime  @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user         User         @relation("ConvMembership", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, userId])
+  @@index([userId])
+  @@index([conversationId])
+}
+
+model GroupMessage {
+  id             String   @id @default(cuid())
+  conversationId String
+  senderId       String
+  content        String   @db.VarChar(2000)
+  createdAt      DateTime @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender       User         @relation("GroupMsgSender", fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+  @@index([senderId])
 }
 
 // ─── Follow ─────────────────────────────────────────────

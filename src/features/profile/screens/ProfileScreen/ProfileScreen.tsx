@@ -225,7 +225,11 @@ export const ProfileScreen: React.FC = () => {
           <ProfileIdentity
             avatarUrl={user.avatarUrl}
             displayName={user.displayName}
+            firstName={user.firstName}
+            lastName={user.lastName}
             username={user.username}
+            joinedAt={user.createdAt}
+            invitedByUsername={user.invitedBy?.username}
             isOnline={user.isOnline}
             bio={bio}
             displayBio={displayBio}

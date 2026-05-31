@@ -19,6 +19,8 @@ interface AuthState {
   setUsername: (username: string) => Promise<void>;
   completeOnboarding: (input: {
     displayName?: string;
+    firstName?: string;
+    lastName?: string;
     bio?: string;
     avatarUrl?: string | null;
     interests?: string[];

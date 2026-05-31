@@ -102,7 +102,8 @@ export const OtpScreen: React.FC = () => {
         setIsSubmitting(true);
         try {
           const { isNewUser } = await verifyOtp(phoneNumber, newCode);
-          if (isNewUser) navigation.navigate('Username', { phoneNumber });
+          // New users pick a real name first (Clubhouse order), then a username.
+          if (isNewUser) navigation.navigate('Name', { phoneNumber });
         } catch (err) {
           const msg =
             err && typeof err === 'object' && 'message' in err

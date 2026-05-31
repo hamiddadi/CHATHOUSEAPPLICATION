@@ -12,7 +12,14 @@ import {
 interface ProfileIdentityProps {
   avatarUrl: string | null | undefined;
   displayName: string;
+  /** Real name parts (Clubhouse-style). When present, shown as the headline. */
+  firstName?: string | null;
+  lastName?: string | null;
   username: string | null | undefined;
+  /** Account creation date (ISO) → rendered as "Joined {month year}". */
+  joinedAt?: string | null;
+  /** Username of the inviter → rendered as "Nominated by @inviter". */
+  invitedByUsername?: string | null;
   isOnline: boolean;
   /** Full bio text (empty string when none). */
   bio: string;
@@ -32,7 +39,11 @@ const ProfileIdentity: React.FC<ProfileIdentityProps> = memo(
   ({
     avatarUrl,
     displayName,
+    firstName,
+    lastName,
     username,
+    joinedAt,
+    invitedByUsername,
     isOnline,
     bio,
     displayBio,
@@ -45,16 +56,32 @@ const ProfileIdentity: React.FC<ProfileIdentityProps> = memo(
   }) => {
     const { t } = useTranslation();
     const hasSocial = Boolean(twitter || instagram);
+    // Real name takes the headline when set (Clubhouse identity); otherwise
+    // fall back to the public displayName so the layout never goes blank.
+    const fullName = [firstName, lastName].filter(Boolean).join(' ').trim();
+    const headlineName = fullName || displayName;
+    // "Joined March 2026" — month + year is enough and locale-aware. Guard a
+    // malformed/absent date so we simply omit the line rather than crash.
+    let joinedLabel: string | null = null;
+    if (joinedAt) {
+      const d = new Date(joinedAt);
+      if (!Number.isNaN(d.getTime())) {
+        joinedLabel = t('profile.joined', {
+          date: d.toLocaleDateString(undefined, { month: 'long', year: 'numeric' }),
+          defaultValue: `Joined ${d.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}`,
+        });
+      }
+    }
     return (
       <>
         <Avatar
           uri={avatarUrl ?? undefined}
-          name={displayName}
+          name={headlineName}
           sizeValue={120}
           status={isOnline ? 'online' : 'none'}
         />
         <View className="items-center gap-xxs">
-          <Text className="text-xxxl font-display text-ink tracking-tight">{displayName}</Text>
+          <Text className="text-xxxl font-display text-ink tracking-tight">{headlineName}</Text>
           <Pressable
             onPress={onCopyUsername}
             accessibilityRole="button"
@@ -62,6 +89,17 @@ const ProfileIdentity: React.FC<ProfileIdentityProps> = memo(
           >
             <Text className="text-sm font-body text-ink-muted">@{username}</Text>
           </Pressable>
+          {joinedLabel ? (
+            <Text className="text-xs font-body text-ink-dim mt-xxs">{joinedLabel}</Text>
+          ) : null}
+          {invitedByUsername ? (
+            <Text className="text-xs font-body text-ink-dim">
+              {t('profile.nominatedBy', {
+                handle: invitedByUsername,
+                defaultValue: `Nominated by @${invitedByUsername}`,
+              })}
+            </Text>
+          ) : null}
         </View>
 
         {bio.length > 0 && (

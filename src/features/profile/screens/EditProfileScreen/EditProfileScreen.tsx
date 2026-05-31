@@ -16,6 +16,7 @@ import { usernameFormSchema } from '../../../auth/schemas';
 import { useMe, useUpdateProfile } from '../../hooks/useProfile';
 
 const DISPLAY_NAME_MAX = 40;
+const NAME_MAX = 50;
 const BIO_MAX = 150;
 const AVATAR_SIZE = 100;
 
@@ -26,6 +27,8 @@ export const EditProfileScreen: React.FC = () => {
   const updateProfile = useUpdateProfile();
 
   const [displayName, setDisplayName] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [username, setUsername] = useState('');
   const [bio, setBio] = useState('');
   // `avatarUri` is the local preview (file://). `avatarBase64`/`avatarMime`
@@ -39,6 +42,8 @@ export const EditProfileScreen: React.FC = () => {
   useEffect(() => {
     if (me) {
       setDisplayName(me.displayName);
+      setFirstName(me.firstName ?? '');
+      setLastName(me.lastName ?? '');
       setUsername(me.username);
       setBio(me.bio ?? '');
     }
@@ -77,6 +82,8 @@ export const EditProfileScreen: React.FC = () => {
       }
       await updateProfile.mutateAsync({
         displayName,
+        firstName,
+        lastName,
         username,
         bio,
         avatarUrl,
@@ -88,7 +95,17 @@ export const EditProfileScreen: React.FC = () => {
     } finally {
       setUploading(false);
     }
-  }, [avatarBase64, avatarMime, bio, displayName, navigation, updateProfile, username]);
+  }, [
+    avatarBase64,
+    avatarMime,
+    bio,
+    displayName,
+    firstName,
+    lastName,
+    navigation,
+    updateProfile,
+    username,
+  ]);
 
   // Validate the username against the same schema the auth flow uses
   // (3–24 chars, [a-z0-9_]) instead of the laxer `length >= 2` check, so
@@ -154,6 +171,27 @@ export const EditProfileScreen: React.FC = () => {
             </Pressable>
           </View>
           <Text className="text-xs font-body text-ink-muted">Tap to change photo</Text>
+        </View>
+
+        <View className="flex-row gap-md">
+          <View className="flex-1">
+            <Input
+              label="First name"
+              value={firstName}
+              onChangeText={setFirstName}
+              maxLength={NAME_MAX}
+              autoCapitalize="words"
+            />
+          </View>
+          <View className="flex-1">
+            <Input
+              label="Last name"
+              value={lastName}
+              onChangeText={setLastName}
+              maxLength={NAME_MAX}
+              autoCapitalize="words"
+            />
+          </View>
         </View>
 
         <Input

@@ -1,4 +1,13 @@
 {
+  "invite": {
+    "inviteFriends": "Inviter des amis",
+    "shareHint": "Partage ton lien personnel",
+    "remaining": "{{count}} invitation restante",
+    "remaining_other": "{{count}} invitations restantes",
+    "shareMessage": "Rejoins-moi sur Chathouse 👋 {{url}}",
+    "noneLeftTitle": "Plus d'invitations",
+    "noneLeftBody": "Tu as utilisé toutes tes invitations pour l'instant."
+  },
   "common": {
     "retry": "Réessayer",
     "cancel": "Annuler",
@@ -39,6 +48,20 @@
   "messages": {
     "title": "Messages",
     "newChatA11y": "Nouvelle conversation",
+    "newMessageTitle": "Nouveau message",
+    "searchPeople": "Rechercher une personne",
+    "searchHint": "Recherche quelqu'un pour démarrer une conversation.",
+    "searchGroupHint": "Recherche des personnes. Choisis-en une pour un message privé, ou plusieurs pour créer un groupe.",
+    "message": "Message",
+    "createGroupN": "Créer le groupe · {{count}}",
+    "groupError": "Impossible de créer le groupe. Réessaie.",
+    "groups": "Groupes",
+    "group": "Groupe",
+    "memberCount": "{{count}} membre",
+    "memberCount_other": "{{count}} membres",
+    "messagePlaceholder": "Message",
+    "noResults": "Personne trouvée",
+    "noResultsHint": "Essaie un autre nom ou pseudo.",
     "empty": "Pas encore de conversations",
     "couldNotLoad": "Impossible de charger les messages",
     "pullToRetry": "Tire vers le bas pour réessayer."
@@ -150,6 +173,15 @@
         "tooManyAttempts": "Trop de tentatives. Renvoie un nouveau code."
       }
     },
+    "name": {
+      "title": "Comment t'appelles-tu ?",
+      "subtitle": "C'est ainsi que les autres te reconnaîtront sur Chathouse.",
+      "firstNameLabel": "Prénom",
+      "firstNamePlaceholder": "Jeanne",
+      "lastNameLabel": "Nom",
+      "lastNamePlaceholder": "Dupont",
+      "submit": "Suivant"
+    },
     "username": {
       "title": "Choisis un pseudo",
       "placeholder": "jean_doe",
@@ -196,6 +228,8 @@
     "seeAll": "Tout voir",
     "seeMore": "Voir plus",
     "seeLess": "Voir moins",
+    "joined": "Membre depuis {{date}}",
+    "nominatedBy": "Invité par @{{handle}}",
     "editProfile": "Modifier le profil",
     "copied": "Copié",
     "usernameCopied": "Pseudo copié dans le presse-papier",
@@ -315,6 +349,17 @@
       "subtitle": "Suis quelques personnes pour remplir ton hallway.",
       "done": "Terminé",
       "skip": "Plus tard"
+    },
+    "notifications": {
+      "title": "Reste connecté·e",
+      "subtitle": "Sois prévenu·e quand tes amis passent en live, t'écrivent ou te suivent.",
+      "enable": "Activer les notifications",
+      "notNow": "Plus tard",
+      "benefits": {
+        "roomsStarted": "Sache dès qu'une personne que tu suis lance une room.",
+        "messages": "Ne rate aucun message privé.",
+        "follows": "Vois quand quelqu'un commence à te suivre."
+      }
     }
   },
   "notificationSettings": {

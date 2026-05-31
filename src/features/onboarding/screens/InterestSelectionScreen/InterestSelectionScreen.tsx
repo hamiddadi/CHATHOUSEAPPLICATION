@@ -51,7 +51,7 @@ export const InterestSelectionScreen: React.FC = () => {
     // step. Leaving `submitting` true keeps the button disabled during the
     // navigation transition; the screen unmounts before it would matter.
     setInterestsInStore(interests);
-    navigation.navigate('SuggestedFollows');
+    navigation.navigate('NotificationsPermission');
   }, [interests, navigation, setInterestsInStore]);
 
   return (

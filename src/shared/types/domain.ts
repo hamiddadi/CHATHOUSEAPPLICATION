@@ -11,6 +11,10 @@ export interface User {
   id: string;
   username: string;
   displayName: string;
+  // Real name (Clubhouse-style identity), optional and distinct from the
+  // public displayName. Backend returns them on the me/public selects.
+  firstName?: string | null;
+  lastName?: string | null;
   bio: string | null;
   avatarUrl: string | null;
   twitter?: string | null;
@@ -20,6 +24,9 @@ export interface User {
   isFollowedByMe: boolean;
   isOnline: boolean;
   createdAt: string;
+  // Who invited this user (Clubhouse "Nominated by"). Only present on the
+  // profile-detail payload; null when the account joined without a referral.
+  invitedBy?: { username: string | null; displayName: string | null } | null;
 }
 
 export type UserSummary = Pick<User, 'id' | 'username' | 'displayName' | 'avatarUrl'>;

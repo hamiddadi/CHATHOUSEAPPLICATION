@@ -11,6 +11,8 @@ interface RawUser {
   id: string;
   username: string | null;
   displayName: string | null;
+  firstName?: string | null;
+  lastName?: string | null;
   avatarUrl: string | null;
   bio: string | null;
   twitter?: string | null;
@@ -20,6 +22,8 @@ interface RawUser {
   followingCount?: number;
   isFollowedByMe?: boolean;
   createdAt?: string;
+  // Inviter relation — only on the detail payload (GET /users/:id).
+  invitedBy?: { id: string; username: string | null; displayName: string | null } | null;
 }
 
 // Shape returned by GET /api/users/search and the follow list endpoints
@@ -30,6 +34,8 @@ interface RawSearchUser {
   id: string;
   username: string | null;
   displayName: string | null;
+  firstName?: string | null;
+  lastName?: string | null;
   avatarUrl: string | null;
   bio: string | null;
   isOnline?: boolean;
@@ -57,6 +63,8 @@ const mapBaseUser = (
   | 'id'
   | 'username'
   | 'displayName'
+  | 'firstName'
+  | 'lastName'
   | 'avatarUrl'
   | 'bio'
   | 'twitter'
@@ -67,6 +75,8 @@ const mapBaseUser = (
   id: u.id,
   username: u.username ?? '',
   displayName: u.displayName ?? u.username ?? '',
+  firstName: u.firstName ?? null,
+  lastName: u.lastName ?? null,
   avatarUrl: u.avatarUrl,
   bio: u.bio,
   // Social handles only ride on the detail payload (RawUser). The search/
@@ -84,6 +94,9 @@ const mapUser = (u: RawUser): User => ({
   // (singular); the domain type uses `followersCount`.
   followersCount: u.followerCount ?? 0,
   followingCount: u.followingCount ?? 0,
+  invitedBy: u.invitedBy
+    ? { username: u.invitedBy.username, displayName: u.invitedBy.displayName }
+    : null,
   // GET /users/:id now returns `isFollowedByMe` per-viewer (derived from the
   // Follow table). GET /users/me omits it (you don't follow yourself) → the
   // ?? false default applies there, which is correct.
@@ -105,6 +118,8 @@ const mapSummary = (u: RawSearchUser): User => ({
 
 export interface UpdateProfileInput {
   displayName?: string;
+  firstName?: string;
+  lastName?: string;
   username?: string;
   bio?: string;
   avatarUrl?: string | null;
@@ -127,8 +142,16 @@ export const profileService = {
     // keys so we never send a key the schema would reject, and skip
     // avatarUrl when it isn't a remote URL (the schema requires a valid
     // URL; local ImagePicker `file://` URIs must be uploaded first).
-    const body: { displayName?: string; bio?: string; avatarUrl?: string } = {};
+    const body: {
+      displayName?: string;
+      firstName?: string;
+      lastName?: string;
+      bio?: string;
+      avatarUrl?: string;
+    } = {};
     if (input.displayName !== undefined) body.displayName = input.displayName.trim();
+    if (input.firstName !== undefined) body.firstName = input.firstName.trim();
+    if (input.lastName !== undefined) body.lastName = input.lastName.trim();
     if (input.bio !== undefined) body.bio = input.bio.trim();
     if (typeof input.avatarUrl === 'string' && /^https?:\/\//i.test(input.avatarUrl)) {
       body.avatarUrl = input.avatarUrl;

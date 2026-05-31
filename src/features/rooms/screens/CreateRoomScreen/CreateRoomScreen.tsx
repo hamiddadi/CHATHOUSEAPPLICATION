@@ -29,11 +29,10 @@ interface VisibilityOption {
 
 const VISIBILITY_OPTIONS: readonly VisibilityOption[] = [
   { id: 'public', icon: 'public', label: 'Open', description: 'Anyone in Chathouse can join' },
-  // 'Social' (mutual-follow gating) is hidden until the backend enforces it
-  // — otherwise the "Only people you follow can join" promise is unkept and
-  // the room is actually public. Re-add once `visibility: 'social'` is
-  // honored server-side.
-  // { id: 'social', icon: 'people', label: 'Social', description: 'Only people you follow can join' },
+  // 'Social' is enforced server-side: rooms.service gates join on the follow
+  // graph (roomType=SOCIAL) — only the host and people who follow the host can
+  // enter. Mapping lives in roomService.visibilityToBackend.
+  { id: 'social', icon: 'people', label: 'Social', description: 'Only people you follow can join' },
   { id: 'closed', icon: 'lock', label: 'Closed', description: 'Only people you invite' },
 ];
 

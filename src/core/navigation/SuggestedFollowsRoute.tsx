@@ -10,6 +10,8 @@ import { useAuthStore } from '../../features/auth/store/authStore';
 import { useOnboardingStore } from '../../features/onboarding/store/onboardingStore';
 import { useFollow } from '../../features/profile/hooks/useProfile';
 import { ExtSuggestedFollowsScreen } from '../../features/extensions';
+import { invitesApi } from '../../features/extensions/api/invitesApi';
+import { useInviteStore } from '../../features/extensions/store/inviteStore';
 
 /**
  * Final onboarding step. Wraps the (otherwise standalone) extension screen
@@ -30,12 +32,16 @@ export const SuggestedFollowsRoute: React.FC = () => {
   const profile = useOnboardingStore(
     useShallow(s => ({
       displayName: s.displayName,
+      firstName: s.firstName,
+      lastName: s.lastName,
       bio: s.bio,
       avatarUrl: s.avatarUrl,
       interests: s.interests,
     })),
   );
   const resetOnboarding = useOnboardingStore(s => s.reset);
+  const pendingInvite = useInviteStore(s => s.pendingCode);
+  const clearInvite = useInviteStore(s => s.clear);
   const toastError = useApiErrorToast();
 
   const [finishing, setFinishing] = useState(false);
@@ -46,10 +52,23 @@ export const SuggestedFollowsRoute: React.FC = () => {
     try {
       await complete({
         displayName: profile.displayName,
+        firstName: profile.firstName,
+        lastName: profile.lastName,
         bio: profile.bio,
         avatarUrl: profile.avatarUrl,
         interests: profile.interests,
       });
+      // Redeem a pending referral code now that the user is authenticated and
+      // onboarded. Non-blocking: attribution failures must never stop the user
+      // from entering the app.
+      if (pendingInvite) {
+        try {
+          await invitesApi.redeem(pendingInvite);
+        } catch {
+          /* ignore — attribution is best-effort */
+        }
+        clearInvite();
+      }
       resetOnboarding();
       // RootNavigator observes user.hasCompletedOnboarding and swaps to the
       // Main stack automatically; no manual navigation here.
@@ -60,7 +79,7 @@ export const SuggestedFollowsRoute: React.FC = () => {
     } finally {
       setFinishing(false);
     }
-  }, [complete, finishing, profile, resetOnboarding, toastError]);
+  }, [complete, finishing, profile, resetOnboarding, pendingInvite, clearInvite, toastError]);
 
   return (
     <View style={styles.container}>

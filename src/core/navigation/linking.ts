@@ -1,7 +1,17 @@
 import { getStateFromPath } from '@react-navigation/native';
 import type { LinkingOptions } from '@react-navigation/native';
 import * as Linking from 'expo-linking';
+import { useInviteStore } from '../../features/extensions/store/inviteStore';
 import type { RootStackParamList } from './types';
+
+// Referral deep link: `…/invite/<code>` where <code> = <base64url>.<sig>.
+// We capture the code into the invite store (redeemed after onboarding) and
+// then let navigation fall through to the default screen rather than routing
+// to a dedicated invite screen — so an authenticated user isn't bounced to a
+// pre-auth route, and a new user lands on the normal Landing/onboarding flow.
+const CAPTURE_INVITE = /(?:^|\/)invite\/([^/?#]+)/i;
+// Codes are url-safe base64url with a single '.' separator. Bound the length.
+const SAFE_INVITE_CODE = /^[A-Za-z0-9._~-]{1,512}$/;
 
 // Defense-in-depth for the `house/:houseId/invite/:inviteToken?` deep link.
 // The invite token arrives in the URL in clear text. Authoritative
@@ -30,7 +40,16 @@ const sanitizeInvitePath = (path: string): string =>
 export const linking: LinkingOptions<RootStackParamList> = {
   prefixes: [Linking.createURL('/'), 'chathouse://', 'https://app.chathouse.com'],
   // Normalize/sanitize the invite token before the navigator parses params.
-  getStateFromPath: (path, options) => getStateFromPath(sanitizeInvitePath(path), options),
+  getStateFromPath: (path, options) => {
+    // Referral link → stash the code for post-onboarding redemption, then fall
+    // through to the default screen (no explicit navigation target).
+    const inviteCode = path.match(CAPTURE_INVITE)?.[1];
+    if (inviteCode && SAFE_INVITE_CODE.test(inviteCode)) {
+      useInviteStore.getState().setPendingCode(inviteCode);
+      return undefined;
+    }
+    return getStateFromPath(sanitizeInvitePath(path), options);
+  },
   config: {
     screens: {
       Auth: {
@@ -46,6 +65,7 @@ export const linking: LinkingOptions<RootStackParamList> = {
         screens: {
           Onboarding: 'onboarding',
           InterestSelection: 'onboarding/interests',
+          NotificationsPermission: 'onboarding/notifications',
           SuggestedFollows: 'onboarding/suggested-follows',
         },
       },
@@ -68,7 +88,9 @@ export const linking: LinkingOptions<RootStackParamList> = {
           MessagesTab: {
             screens: {
               MessagesList: 'messages',
+              NewMessage: 'messages/new',
               ChatDetail: 'chat/:conversationId',
+              GroupChat: 'group/:conversationId',
             },
           },
           SettingsTab: {

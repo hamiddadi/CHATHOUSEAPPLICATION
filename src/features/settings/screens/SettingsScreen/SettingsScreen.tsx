@@ -1,11 +1,13 @@
 import React, { memo, useCallback, useMemo, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
+import { useQuery } from '@tanstack/react-query';
+import { invitesApi } from '../../../extensions/api/invitesApi';
 import { useAuthStore } from '../../../auth/store/authStore';
 import { useMe } from '../../../profile/hooks/useProfile';
 import { useHouses } from '../../../houses/hooks/useHouses';
@@ -142,6 +144,37 @@ export const SettingsScreen: React.FC = () => {
     () => navigation.navigate('NotificationSettings'),
     [navigation],
   );
+
+  // Personal signed invite link + remaining quota. Cached so re-entering
+  // Settings doesn't re-fetch; failure leaves `invite` undefined (the row
+  // shows a neutral hint and the share handler surfaces an error).
+  const { data: invite } = useQuery({
+    queryKey: ['ext', 'invite', 'link'],
+    queryFn: () => invitesApi.getLink(),
+    staleTime: 60_000,
+  });
+
+  const handleInviteFriends = useCallback(async () => {
+    try {
+      const link = invite ?? (await invitesApi.getLink());
+      if (link.remaining <= 0) {
+        Alert.alert(
+          t('invite.noneLeftTitle', "Plus d'invitations"),
+          t('invite.noneLeftBody', "Tu as utilisé toutes tes invitations pour l'instant."),
+        );
+        return;
+      }
+      await Share.share({
+        message: t('invite.shareMessage', {
+          url: link.url,
+          defaultValue: `Rejoins-moi sur Chathouse 👋 ${link.url}`,
+        }),
+        url: link.url,
+      });
+    } catch {
+      Alert.alert(t('common.error', 'Une erreur est survenue'));
+    }
+  }, [invite, t]);
 
   const handleToggleBio = useCallback(() => setBioExpanded(v => !v), []);
 
@@ -434,6 +467,19 @@ export const SettingsScreen: React.FC = () => {
           <Text className="text-xs font-body-bold uppercase tracking-widest text-ink-muted">
             Compte
           </Text>
+          <SettingsRow
+            icon="person-add"
+            label={t('invite.inviteFriends', 'Inviter des amis')}
+            hint={
+              invite
+                ? t('invite.remaining', {
+                    count: invite.remaining,
+                    defaultValue: `${invite.remaining} invitation(s) restante(s)`,
+                  })
+                : t('invite.shareHint', 'Partage ton lien personnel')
+            }
+            onPress={handleInviteFriends}
+          />
           <SettingsRow
             icon="notifications"
             label={t('settings.notifications')}

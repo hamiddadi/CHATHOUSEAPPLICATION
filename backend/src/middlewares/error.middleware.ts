@@ -49,6 +49,10 @@ export const ERROR_CODES = {
   CHAT_003: { status: 403, message: 'Not your message' },
   CHAT_004: { status: 403, message: 'Direct messages are limited to mutual follows' },
 
+  GROUP_001: { status: 404, message: 'Group conversation not found' },
+  GROUP_002: { status: 403, message: 'Not a member of this group' },
+  GROUP_003: { status: 400, message: 'A group needs at least two other members' },
+
   CLUB_001: { status: 404, message: 'Club not found' },
   CLUB_002: { status: 403, message: 'Not a club admin' },
   CLUB_003: { status: 403, message: 'Private club — join forbidden' },

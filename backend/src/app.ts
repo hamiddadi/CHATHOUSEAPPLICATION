@@ -21,6 +21,7 @@ import { usersRouter } from './modules/users/users.router';
 import { followRouter } from './modules/follow/follow.router';
 import { roomsRouter } from './modules/rooms/rooms.router';
 import { chatRouter } from './modules/chat/chat.router';
+import { groupsRouter } from './modules/groups/groups.router';
 import { mapsRouter } from './modules/maps/maps.router';
 import { notificationsRouter } from './modules/notifications/notifications.router';
 import { clubsRouter } from './modules/clubs/clubs.router';
@@ -103,6 +104,7 @@ export const createApp = (): express.Express => {
   // Phase 3 feature routers
   app.use('/api/rooms', roomsRouter);
   app.use('/api/chat', chatRouter);
+  app.use('/api/groups', groupsRouter);
   app.use('/api/maps', mapsRouter);
   app.use('/api/notifications', notificationsRouter);
   app.use('/api/clubs', clubsRouter);

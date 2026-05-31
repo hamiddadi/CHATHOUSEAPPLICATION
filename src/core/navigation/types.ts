@@ -13,6 +13,9 @@ export type AuthStackParamList = {
   Landing: undefined;
   Phone: undefined;
   Otp: { phoneNumber: string };
+  // Real name (Clubhouse asks name BEFORE username). Collected into the
+  // onboarding store and flushed at completeOnboarding.
+  Name: { phoneNumber: string };
   Username: { phoneNumber: string };
   Waitlist: undefined;
 };
@@ -30,6 +33,7 @@ export type LandingNavProp = NativeStackNavigationProp<AuthStackParamList, 'Land
 export type OnboardingStackParamList = {
   Onboarding: undefined;
   InterestSelection: undefined;
+  NotificationsPermission: undefined;
   SuggestedFollows: undefined;
 };
 export type OnboardingStackScreenProps<T extends keyof OnboardingStackParamList> =
@@ -62,7 +66,9 @@ export type RoomStackParamList = {
 
 export type MessageStackParamList = {
   MessagesList: undefined;
+  NewMessage: undefined;
   ChatDetail: { conversationId: string };
+  GroupChat: { conversationId: string };
 };
 
 export type MapStackParamList = {

@@ -1,4 +1,13 @@
 {
+  "invite": {
+    "inviteFriends": "Invite friends",
+    "shareHint": "Share your personal link",
+    "remaining": "{{count}} invite left",
+    "remaining_other": "{{count}} invites left",
+    "shareMessage": "Join me on Chathouse 👋 {{url}}",
+    "noneLeftTitle": "No invites left",
+    "noneLeftBody": "You've used all your invites for now."
+  },
   "common": {
     "retry": "Retry",
     "cancel": "Cancel",
@@ -39,6 +48,20 @@
   "messages": {
     "title": "Messages",
     "newChatA11y": "Start new conversation",
+    "newMessageTitle": "New message",
+    "searchPeople": "Search people",
+    "searchHint": "Search for someone to start a conversation.",
+    "searchGroupHint": "Search for people. Pick one for a direct message, or several to start a group.",
+    "message": "Message",
+    "createGroupN": "Create group · {{count}}",
+    "groupError": "Couldn't create the group. Try again.",
+    "groups": "Groups",
+    "group": "Group",
+    "memberCount": "{{count}} member",
+    "memberCount_other": "{{count}} members",
+    "messagePlaceholder": "Message",
+    "noResults": "No one found",
+    "noResultsHint": "Try a different name or username.",
     "empty": "No conversations yet",
     "couldNotLoad": "Couldn't load messages",
     "pullToRetry": "Pull to retry."
@@ -150,6 +173,15 @@
         "tooManyAttempts": "Too many attempts. Resend a new code."
       }
     },
+    "name": {
+      "title": "What's your name?",
+      "subtitle": "This is how people will know you on Chathouse.",
+      "firstNameLabel": "First name",
+      "firstNamePlaceholder": "Jane",
+      "lastNameLabel": "Last name",
+      "lastNamePlaceholder": "Doe",
+      "submit": "Next"
+    },
     "username": {
       "title": "Pick a username",
       "placeholder": "jane_doe",
@@ -196,6 +228,8 @@
     "seeAll": "See all",
     "seeMore": "See more",
     "seeLess": "See less",
+    "joined": "Joined {{date}}",
+    "nominatedBy": "Nominated by @{{handle}}",
     "editProfile": "Edit profile",
     "copied": "Copied",
     "usernameCopied": "Username copied to clipboard",
@@ -315,6 +349,17 @@
       "subtitle": "Follow a few people to fill your hallway.",
       "done": "Done",
       "skip": "Skip for now"
+    },
+    "notifications": {
+      "title": "Stay in the loop",
+      "subtitle": "Get notified when your friends go live, message you, or follow you.",
+      "enable": "Enable notifications",
+      "notNow": "Not now",
+      "benefits": {
+        "roomsStarted": "Know the moment someone you follow starts a room.",
+        "messages": "Never miss a direct message.",
+        "follows": "See when someone new follows you."
+      }
     }
   },
   "notificationSettings": {

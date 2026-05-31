@@ -5,6 +5,7 @@ import { Loader } from '../../shared/components/Loader';
 import { LandingScreen } from '../../features/auth/screens/LandingScreen';
 import { PhoneScreen } from '../../features/auth/screens/PhoneScreen';
 import { OtpScreen } from '../../features/auth/screens/OtpScreen';
+import { NameScreen } from '../../features/auth/screens/NameScreen';
 import { UsernameScreen } from '../../features/auth/screens/UsernameScreen';
 import { WaitlistScreen } from '../../features/auth/screens/WaitlistScreen';
 import { WelcomeSlidesScreen } from '../../features/onboarding/screens/WelcomeSlidesScreen';
@@ -47,6 +48,7 @@ export const AuthNavigator: React.FC = () => {
       <Stack.Screen name="Landing" component={LandingScreen} />
       <Stack.Screen name="Phone" component={PhoneScreen} />
       <Stack.Screen name="Otp" component={OtpScreen} />
+      <Stack.Screen name="Name" component={NameScreen} />
       <Stack.Screen name="Username" component={UsernameScreen} />
       <Stack.Screen name="Waitlist" component={WaitlistScreen} />
     </Stack.Navigator>

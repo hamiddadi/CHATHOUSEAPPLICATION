@@ -63,6 +63,10 @@ interface RawRoom {
   clubId: string | null;
   isLive: boolean;
   isPrivate: boolean;
+  // Mutual-follow gating tier. Spread verbatim from the Prisma room in the
+  // backend `get` serializer, so it's present on fetched rooms (absent on
+  // some legacy/feed payloads — `pickVisibility` falls back to isPrivate).
+  roomType?: 'OPEN' | 'SOCIAL' | 'CLOSED';
   chatEnabled?: boolean;
   chatVisibility?: 'ALL' | 'MODS_ONLY';
   topic: string | null;
@@ -122,7 +126,14 @@ const pickCategory = (raw: RawRoom): RoomCategory => {
   return 'tech';
 };
 
-const pickVisibility = (raw: RawRoom): RoomVisibility => (raw.isPrivate ? 'closed' : 'public');
+const pickVisibility = (raw: RawRoom): RoomVisibility => {
+  // Prefer the explicit roomType when the backend sends it; fall back to the
+  // legacy isPrivate flag so feed/legacy payloads without roomType still read
+  // correctly (closed when private, public otherwise).
+  if (raw.roomType === 'CLOSED' || raw.isPrivate) return 'closed';
+  if (raw.roomType === 'SOCIAL') return 'social';
+  return 'public';
+};
 
 const toParticipant = (p: RawParticipant): RoomParticipant => ({
   ...toSummaryUser(p.user),
@@ -191,17 +202,19 @@ const visibilityToBackend = (
   hint?: boolean,
 ): {
   isPrivate: boolean;
-  visibility: RoomVisibility;
+  roomType: 'OPEN' | 'SOCIAL' | 'CLOSED';
 } => {
-  // Backend has a single `isPrivate` flag today, so "social" maps onto a
-  // private-ish room. We additionally forward the explicit `visibility` so
-  // the server can enforce mutual-follow gating once supported instead of
-  // the client silently collapsing "social" → public (a privacy promise we
-  // couldn't keep). Unknown fields are ignored by the current backend.
-  // TODO(audit): backend must honor `visibility: 'social'` (mutual-follow
-  // gating on join) — until then 'Social' is hidden in CreateRoomScreen.
-  if (hint !== undefined) return { isPrivate: hint, visibility: v };
-  return { isPrivate: v === 'closed' || v === 'social', visibility: v };
+  // Map the 3-way UI visibility onto the backend's two independent gating
+  // mechanisms (both enforced in rooms.service.join):
+  //   - 'closed' → isPrivate=true,  roomType=CLOSED → invite-only
+  //   - 'social' → isPrivate=false, roomType=SOCIAL → mutual-follow gate
+  //   - 'public' → isPrivate=false, roomType=OPEN   → anyone can join
+  // SOCIAL must keep isPrivate=false so the follow-gate path runs rather than
+  // the stricter invite-only path. `hint` (explicit isPrivate override) only
+  // forces the private flag; roomType still follows the chosen visibility.
+  const roomType = v === 'closed' ? 'CLOSED' : v === 'social' ? 'SOCIAL' : 'OPEN';
+  const isPrivate = hint !== undefined ? hint : v === 'closed';
+  return { isPrivate, roomType };
 };
 
 export interface RoomsListFilter {
@@ -247,12 +260,12 @@ export const roomService = {
   async create(input: CreateRoomInput): Promise<Room> {
     const trimmed = input.title.trim();
     if (trimmed.length === 0) throw new Error('Title is required');
-    const { isPrivate, visibility } = visibilityToBackend(input.visibility, input.isPrivate);
+    const { isPrivate, roomType } = visibilityToBackend(input.visibility, input.isPrivate);
     const res = await apiClient.post<Envelope<RawRoom>>('/rooms', {
       title: trimmed,
       description: input.description?.trim() || undefined,
       isPrivate,
-      visibility,
+      roomType,
       chatEnabled: input.chatEnabled ?? true,
       maxSpeakers: input.maxSpeakers,
       clubId: input.houseId ?? undefined,

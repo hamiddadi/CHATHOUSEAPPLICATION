@@ -100,7 +100,13 @@ export const usersService = {
     }
     const user = await prisma.user.findFirst({
       where: { id, deletedAt: null },
-      select: publicSelect,
+      // Inline the inviter relation here (not in the shared publicSelect) so
+      // the "Nominated by @inviter" line rides on the detail payload without
+      // adding a join to every search-result row.
+      select: {
+        ...publicSelect,
+        invitedBy: { select: { id: true, username: true, displayName: true } },
+      },
     });
     if (!user) throw new AppError('USER_001');
 
@@ -203,6 +209,8 @@ export const usersService = {
       hasCompletedOnboarding: true,
     };
     if (input.displayName !== undefined) data.displayName = input.displayName;
+    if (input.firstName !== undefined) data.firstName = input.firstName;
+    if (input.lastName !== undefined) data.lastName = input.lastName;
     if (input.bio !== undefined) data.bio = input.bio;
     if (input.avatarUrl !== undefined) data.avatarUrl = input.avatarUrl;
     if (input.interests !== undefined) {
