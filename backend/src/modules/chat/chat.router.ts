@@ -23,4 +23,5 @@ chatRouter.delete('/messages/:messageId', asyncHandler(chatController.remove));
 // Peer-scoped thread operations.
 chatRouter.get('/:userId', asyncHandler(chatController.withPeer));
 chatRouter.post('/:userId', asyncHandler(chatController.send));
+chatRouter.post('/:userId/voice', asyncHandler(chatController.sendVoice));
 chatRouter.patch('/:userId/read', asyncHandler(chatController.markReadWithPeer));

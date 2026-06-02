@@ -8,12 +8,12 @@ import { uploadService } from './upload.service';
 
 export const uploadRouter: Router = Router();
 
-// Avatar payloads are base64 JSON, which is ~33% larger than the raw image.
-// The global parser caps bodies at 1 MB (app.ts), far too small for a ~5 MB
-// image (~6.7 MB encoded), so this router installs its own 8 MB JSON parser
-// BEFORE requireAuth. Scoped to /api/upload only — it never relaxes the limit
-// for the rest of the API.
-uploadRouter.use(expressJson({ limit: '8mb' }));
+// Avatar + voice-note payloads are base64 JSON, ~33% larger than the raw
+// bytes. The global parser caps bodies at 1 MB (app.ts) — far too small for a
+// ~5 MB image (~6.7 MB encoded) or an ~8 MB voice clip (~10.7 MB encoded) — so
+// this router installs its own 12 MB JSON parser BEFORE requireAuth. Scoped to
+// /api/upload only; it never relaxes the limit for the rest of the API.
+uploadRouter.use(expressJson({ limit: '12mb' }));
 
 uploadRouter.use(requireAuth);
 
@@ -38,6 +38,18 @@ uploadRouter.post(
     // returned link is correct behind a proxy/CDN in production.
     const origin = `${req.protocol}://${req.get('host')}`;
     const result = uploadService.uploadAvatar(body, origin);
+    sendOk(res, result, 201);
+  }),
+);
+
+// Voice notes for async "Chats". Same wire shape as the avatar route (data URL
+// or { base64, mime }); the service enforces audio mime + the 8 MB ceiling.
+uploadRouter.post(
+  '/voice',
+  asyncHandler(async (req: Request, res: Response) => {
+    const body = avatarBodySchema.parse(req.body);
+    const origin = `${req.protocol}://${req.get('host')}`;
+    const result = uploadService.uploadVoice(body, origin);
     sendOk(res, result, 201);
   }),
 );

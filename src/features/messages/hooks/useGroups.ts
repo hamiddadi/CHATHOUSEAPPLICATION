@@ -42,6 +42,27 @@ export const useSendGroupMessage = () => {
   });
 };
 
+export const useSendGroupVoice = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      conversationId,
+      audioUrl,
+      durationMs,
+    }: {
+      conversationId: string;
+      audioUrl: string;
+      durationMs: number;
+    }) => groupService.sendVoice(conversationId, audioUrl, durationMs),
+    onSuccess: message => {
+      qc.setQueryData<GroupMessage[]>(groupKeys.messages(message.conversationId), prev =>
+        prev ? [...prev, message] : [message],
+      );
+      void qc.invalidateQueries({ queryKey: groupKeys.list() });
+    },
+  });
+};
+
 export const useCreateGroup = () => {
   const qc = useQueryClient();
   return useMutation({

@@ -48,8 +48,11 @@ module.exports = ({ config: _config }) => {
         '@config-plugins/react-native-webrtc',
         {
           cameraPermission: false,
+          // Applied last, so this is the final iOS NSMicrophoneUsageDescription.
+          // Covers both live rooms (LiveKit/WebRTC) and async voice messages
+          // (expo-audio), which share the same OS microphone permission.
           microphonePermission:
-            'Chathouse uses your microphone so you can speak in audio rooms.',
+            'Chathouse uses your microphone so you can speak in audio rooms and record voice messages.',
         },
       ],
       './plugins/with-gradle-jvm-heap',

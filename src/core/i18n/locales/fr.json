@@ -48,6 +48,18 @@
     "micA11y": "Enregistrer un message vocal",
     "typing": "écrit…"
   },
+  "voice": {
+    "preview": "🎤 Message vocal",
+    "recording": "Enregistrement…",
+    "sending": "Envoi…",
+    "recordA11y": "Enregistrer un message vocal",
+    "playA11y": "Lire le message vocal",
+    "pauseA11y": "Mettre en pause",
+    "cancelA11y": "Annuler l'enregistrement",
+    "sendA11y": "Envoyer le message vocal",
+    "micNeededTitle": "Micro nécessaire",
+    "micNeededBody": "Autorisez l'accès au micro dans les Réglages pour enregistrer un message vocal."
+  },
   "messages": {
     "title": "Messages",
     "newChatA11y": "Nouvelle conversation",

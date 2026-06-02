@@ -44,7 +44,13 @@ interface ConvoRowProps {
 }
 
 const ConvoRow: React.FC<ConvoRowProps> = memo(({ convo, onPress }) => {
+  const { t } = useTranslation();
   const handle = useCallback(() => onPress(convo.id), [convo.id, onPress]);
+  // Voice notes have no text body — show a 🎤 marker instead of an empty line.
+  let lastText = 'No messages yet';
+  if (convo.lastMessage) {
+    lastText = convo.lastMessage.kind === 'voice' ? t('voice.preview') : convo.lastMessage.text;
+  }
   // Memoize the per-row derivations so they only recompute when the underlying
   // conversation changes (the row is memo()'d on props). Note: the relative
   // timestamp is intentionally frozen at render time — it refreshes whenever
@@ -77,7 +83,7 @@ const ConvoRow: React.FC<ConvoRowProps> = memo(({ convo, onPress }) => {
             }
             numberOfLines={1}
           >
-            {convo.lastMessage?.text ?? 'No messages yet'}
+            {lastText}
           </Text>
           {convo.unreadCount > 0 && (
             <View className="bg-primary rounded-pill px-xs min-w-[20px] items-center justify-center h-[20px]">
@@ -100,7 +106,13 @@ interface GroupRowProps {
 }
 
 const GroupRow: React.FC<GroupRowProps> = memo(({ group, myId, onPress }) => {
+  const { t } = useTranslation();
   const handle = useCallback(() => onPress(group.id), [group.id, onPress]);
+  let lastText = 'No messages yet';
+  if (group.lastMessage) {
+    lastText =
+      group.lastMessage.kind === 'voice' ? t('voice.preview') : (group.lastMessage.content ?? '');
+  }
   const title = useMemo(() => {
     if (group.title) return group.title;
     const others = group.members.filter(m => m.id !== myId);
@@ -133,7 +145,7 @@ const GroupRow: React.FC<GroupRowProps> = memo(({ group, myId, onPress }) => {
             }
             numberOfLines={1}
           >
-            {group.lastMessage?.content ?? 'No messages yet'}
+            {lastText}
           </Text>
           {group.unreadCount > 0 && (
             <View className="bg-primary rounded-pill px-xs min-w-[20px] items-center justify-center h-[20px]">

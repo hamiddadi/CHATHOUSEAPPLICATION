@@ -13,6 +13,9 @@ const msg = (
   conversationId,
   authorId,
   text,
+  kind: 'text',
+  audioUrl: null,
+  durationMs: null,
   sentAt,
   isMine: authorId === CURRENT_USER.id,
 });

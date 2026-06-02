@@ -12,6 +12,14 @@ export const sendGroupMessageSchema = z.object({
   content: z.string().trim().min(1).max(2000),
 });
 
+// Voice note: the client uploads the clip to /upload/voice first, then posts
+// the returned URL + the clip length here. durationMs is capped at 5 min to
+// match the client-side recording ceiling.
+export const sendGroupVoiceSchema = z.object({
+  audioUrl: z.string().url().max(2048),
+  durationMs: z.number().int().min(300).max(300_000),
+});
+
 export const listGroupMessagesSchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(30),
   // ISO 8601 cursor — return messages strictly older than this.
@@ -28,6 +36,7 @@ export const renameGroupSchema = z.object({
 
 export type CreateGroupInput = z.infer<typeof createGroupSchema>;
 export type SendGroupMessageInput = z.infer<typeof sendGroupMessageSchema>;
+export type SendGroupVoiceInput = z.infer<typeof sendGroupVoiceSchema>;
 export type ListGroupMessagesInput = z.infer<typeof listGroupMessagesSchema>;
 export type AddGroupMembersInput = z.infer<typeof addGroupMembersSchema>;
 export type RenameGroupInput = z.infer<typeof renameGroupSchema>;

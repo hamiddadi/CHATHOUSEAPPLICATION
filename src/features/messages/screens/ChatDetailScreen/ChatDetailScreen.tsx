@@ -22,9 +22,12 @@ import {
   useConversation,
   useConversationMessages,
   useSendMessage,
+  useSendVoiceMessage,
   useMarkConversationRead,
 } from '../../hooks/useMessages';
 import { useTypingIndicator } from '../../hooks/useTypingIndicator';
+import { useVoiceMessage } from '../../hooks/useVoiceMessage';
+import VoiceRecordingBar from '../../components/VoiceRecordingBar';
 import Bubble from './partials/Bubble';
 import DateSeparator from './partials/DateSeparator';
 import ChatHeader from './partials/ChatHeader';
@@ -124,8 +127,25 @@ export const ChatDetailScreen: React.FC = () => {
   const { data: conversation } = useConversation(peerId);
   const { data: messages, isLoading } = useConversationMessages(peerId);
   const sendMessage = useSendMessage();
+  const sendVoice = useSendVoiceMessage();
   const markRead = useMarkConversationRead();
   const { isPeerTyping, notifyTyping } = useTypingIndicator(peerId);
+
+  // Voice notes: record → upload → send, then pin the thread to the bottom.
+  const voiceSend = useCallback(
+    async (audioUrl: string, durationMs: number) => {
+      await sendVoice.mutateAsync({ conversationId: peerId, audioUrl, durationMs });
+      scrollToBottom();
+    },
+    [sendVoice, peerId, scrollToBottom],
+  );
+  const voice = useVoiceMessage(voiceSend);
+  const handleMic = useCallback(() => {
+    void voice.startRecording();
+  }, [voice]);
+  const handleVoiceSend = useCallback(() => {
+    void voice.sendRecording();
+  }, [voice]);
 
   // Wrap the draft setter so every keystroke also pings the peer (the hook
   // throttles the actual socket emit).
@@ -166,11 +186,11 @@ export const ChatDetailScreen: React.FC = () => {
     }
   }, [draft, reportApiError, route.params.conversationId, scrollToBottom, sendMessage]);
 
-  // Features below are not yet implemented end-to-end (no voice infra,
-  // no attachment upload pipeline). Rather than no-op handlers — which
-  // make the buttons feel broken — we surface a single "Coming soon"
-  // alert so the user gets immediate feedback. Replace each handler when
-  // the underlying feature ships.
+  // Features below are not yet implemented end-to-end (no attachment upload
+  // pipeline). Rather than no-op handlers — which make the buttons feel
+  // broken — we surface a single "Coming soon" alert so the user gets
+  // immediate feedback. Replace each handler when the underlying feature ships.
+  // (Voice messages now ship for real — see handleMic/handleVoiceSend above.)
   const showComingSoon = useCallback((label: string) => {
     Alert.alert(label, 'Cette fonctionnalité arrive bientôt.');
   }, []);
@@ -180,7 +200,6 @@ export const ChatDetailScreen: React.FC = () => {
     () => showComingSoon('Options de la conversation'),
     [showComingSoon],
   );
-  const handleMicInput = useCallback(() => showComingSoon('Message vocal'), [showComingSoon]);
   const handleAttach = useCallback(() => showComingSoon('Pièce jointe'), [showComingSoon]);
   const handleEmoji = useCallback(() => {
     // Quick-insert: append a smiley to the draft. Real emoji picker is a
@@ -269,18 +288,29 @@ export const ChatDetailScreen: React.FC = () => {
         />
       )}
 
-      <ChatInputBar
-        value={draft}
-        onChangeText={handleDraftChange}
-        onSend={handleSend}
-        canSend={canSend}
-        bottomInset={insets.bottom}
-        keyboardVisible={keyboardVisible}
-        onEmoji={handleEmoji}
-        onAttach={handleAttach}
-        onMic={handleMicInput}
-        onInputFocus={scrollToBottom}
-      />
+      {voice.isActive ? (
+        <VoiceRecordingBar
+          elapsedMs={voice.elapsedMs}
+          isUploading={voice.isUploading}
+          onCancel={voice.cancelRecording}
+          onSend={handleVoiceSend}
+          bottomInset={insets.bottom}
+          keyboardVisible={keyboardVisible}
+        />
+      ) : (
+        <ChatInputBar
+          value={draft}
+          onChangeText={handleDraftChange}
+          onSend={handleSend}
+          canSend={canSend}
+          bottomInset={insets.bottom}
+          keyboardVisible={keyboardVisible}
+          onEmoji={handleEmoji}
+          onAttach={handleAttach}
+          onMic={handleMic}
+          onInputFocus={scrollToBottom}
+        />
+      )}
     </KeyboardAvoidingView>
   );
 };

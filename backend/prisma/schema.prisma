@@ -341,15 +341,27 @@ model Participant {
   @@index([userId])
 }
 
+// Discriminates a text message from an async voice note (Clubhouse-style
+// "Chats"). VOICE rows carry audioUrl + audioDurationMs and a null content;
+// TEXT rows keep content and leave the audio columns null.
+enum MessageKind {
+  TEXT
+  VOICE
+}
+
 // ─── Message (room + direct) ────────────────────────────
 model Message {
-  id         String   @id @default(cuid())
-  content    String   @db.VarChar(4000) // was unbounded TEXT — cap payload size
+  id         String      @id @default(cuid())
+  // Nullable since a voice note has no text body. TEXT messages still carry it.
+  content    String?     @db.VarChar(4000) // was unbounded TEXT — cap payload size
+  kind       MessageKind @default(TEXT)
+  audioUrl   String?     @db.VarChar(2048) // public URL of the stored voice clip
+  audioDurationMs Int?    // clip length in ms, captured client-side at record time
   senderId   String
   roomId     String?
   receiverId String?
-  isRead     Boolean  @default(false)
-  createdAt  DateTime @default(now())
+  isRead     Boolean     @default(false)
+  createdAt  DateTime    @default(now())
 
   sender   User  @relation("MessageSender", fields: [senderId], references: [id], onDelete: Cascade)
   room     Room? @relation(fields: [roomId], references: [id], onDelete: Cascade)
@@ -400,11 +412,15 @@ model ConversationMember {
 }
 
 model GroupMessage {
-  id             String   @id @default(cuid())
+  id             String      @id @default(cuid())
   conversationId String
   senderId       String
-  content        String   @db.VarChar(2000)
-  createdAt      DateTime @default(now())
+  // Nullable: voice notes have no text body (kind=VOICE + audioUrl instead).
+  content        String?     @db.VarChar(2000)
+  kind           MessageKind @default(TEXT)
+  audioUrl       String?     @db.VarChar(2048)
+  audioDurationMs Int?
+  createdAt      DateTime    @default(now())
 
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   sender       User         @relation("GroupMsgSender", fields: [senderId], references: [id], onDelete: Cascade)

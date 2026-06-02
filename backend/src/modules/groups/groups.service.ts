@@ -1,3 +1,4 @@
+import type { MessageKind } from '@prisma/client';
 import { prisma } from '../../config/database';
 import { AppError } from '../../middlewares/error.middleware';
 import { notificationsService } from '../notifications/notifications.service';
@@ -8,6 +9,7 @@ import type {
   ListGroupMessagesInput,
   RenameGroupInput,
   SendGroupMessageInput,
+  SendGroupVoiceInput,
 } from './groups.schema';
 
 const publicUser = {
@@ -32,6 +34,36 @@ const toUser = (u: PublicUser) => ({
 });
 
 const uniq = (xs: string[]): string[] => [...new Set(xs)];
+
+// A GroupMessage row joined with its sender, as returned by the Prisma queries
+// below. Voice notes carry { kind: 'VOICE', audioUrl, audioDurationMs } and a
+// null content; text messages carry content and leave the audio fields null.
+interface RawGroupMessage {
+  id: string;
+  conversationId: string;
+  senderId: string;
+  content: string | null;
+  kind: MessageKind;
+  audioUrl: string | null;
+  audioDurationMs: number | null;
+  createdAt: Date;
+  sender: PublicUser;
+}
+
+// Single source of truth for the wire shape of a group message — used by the
+// list endpoint, the realtime fan-out, and both send paths so text and voice
+// messages look identical to the client (just different `kind`).
+const toMessagePayload = (m: RawGroupMessage) => ({
+  id: m.id,
+  conversationId: m.conversationId,
+  senderId: m.senderId,
+  kind: m.kind,
+  content: m.content,
+  audioUrl: m.audioUrl,
+  durationMs: m.audioDurationMs,
+  createdAt: m.createdAt,
+  sender: toUser(m.sender),
+});
 
 export const groupsService = {
   /**
@@ -138,14 +170,7 @@ export const groupsService = {
       take: input.limit,
       include: { sender: { select: publicUser } },
     });
-    return messages.reverse().map(m => ({
-      id: m.id,
-      conversationId,
-      senderId: m.senderId,
-      content: m.content,
-      createdAt: m.createdAt,
-      sender: toUser(m.sender),
-    }));
+    return messages.reverse().map(toMessagePayload);
   },
 
   async send(userId: string, conversationId: string, input: SendGroupMessageInput) {
@@ -162,14 +187,7 @@ export const groupsService = {
       data: { updatedAt: new Date() },
     });
 
-    const payload = {
-      id: msg.id,
-      conversationId,
-      senderId: userId,
-      content: msg.content,
-      createdAt: msg.createdAt,
-      sender: toUser(msg.sender),
-    };
+    const payload = toMessagePayload(msg);
 
     // Realtime fan-out to every member (sender included, so their other
     // devices stay in sync).
@@ -185,6 +203,50 @@ export const groupsService = {
         type: 'NEW_MESSAGE',
         title,
         body: `${handle}: ${input.content.slice(0, 140)}`,
+        data: { conversationId, senderId: userId, conversation: 'group' },
+      });
+    }
+
+    return payload;
+  },
+
+  /**
+   * Send an async voice note to a group. The client has already uploaded the
+   * clip to /upload/voice; we persist a VOICE-kind message pointing at the
+   * stored URL, fan it out in realtime, and notify the other members. Mirrors
+   * {@link send} but with a 🎤 notification body instead of a text preview.
+   */
+  async sendVoice(userId: string, conversationId: string, input: SendGroupVoiceInput) {
+    const conv = await this.requireMembership(userId, conversationId);
+    const memberIds = conv.members.map(m => m.userId);
+
+    const msg = await prisma.groupMessage.create({
+      data: {
+        conversationId,
+        senderId: userId,
+        kind: 'VOICE',
+        audioUrl: input.audioUrl,
+        audioDurationMs: input.durationMs,
+      },
+      include: { sender: { select: publicUser } },
+    });
+    await prisma.conversation.update({
+      where: { id: conversationId },
+      data: { updatedAt: new Date() },
+    });
+
+    const payload = toMessagePayload(msg);
+    emitGroupMessage(memberIds, payload);
+
+    const handle = msg.sender.displayName ?? msg.sender.username ?? 'Someone';
+    const title = conv.title ?? handle;
+    for (const memberId of memberIds) {
+      if (memberId === userId) continue;
+      void notificationsService.create({
+        userId: memberId,
+        type: 'NEW_MESSAGE',
+        title,
+        body: `${handle}: 🎤 Voice message`,
         data: { conversationId, senderId: userId, conversation: 'group' },
       });
     }
@@ -263,7 +325,13 @@ export const groupsService = {
       updatedAt: Date;
       members: { user: PublicUser }[];
     },
-    lastMessage: { id: string; senderId: string; content: string; createdAt: Date } | null,
+    lastMessage: {
+      id: string;
+      senderId: string;
+      content: string | null;
+      kind: MessageKind;
+      createdAt: Date;
+    } | null,
     unreadCount: number,
   ) {
     return {
@@ -271,11 +339,14 @@ export const groupsService = {
       title: conv.title,
       ownerId: conv.ownerId,
       members: conv.members.map(m => toUser(m.user)),
+      // `kind` lets the client render a "🎤 Voice message" preview instead of
+      // the (null) content for voice notes.
       lastMessage: lastMessage
         ? {
             id: lastMessage.id,
             senderId: lastMessage.senderId,
             content: lastMessage.content,
+            kind: lastMessage.kind,
             createdAt: lastMessage.createdAt,
           }
         : null,

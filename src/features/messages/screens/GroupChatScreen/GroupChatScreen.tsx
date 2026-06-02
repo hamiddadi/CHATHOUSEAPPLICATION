@@ -23,7 +23,11 @@ import {
   useGroupMessages,
   useMarkGroupRead,
   useSendGroupMessage,
+  useSendGroupVoice,
 } from '../../hooks/useGroups';
+import { useVoiceMessage } from '../../hooks/useVoiceMessage';
+import VoiceRecordingBar from '../../components/VoiceRecordingBar';
+import VoiceMessageBubble from '../../components/VoiceMessageBubble';
 import type { GroupMessage } from '../../services/groupService';
 
 type Nav = NativeStackNavigationProp<MessageStackParamList, 'GroupChat'>;
@@ -40,8 +44,24 @@ export const GroupChatScreen: React.FC = () => {
   const { data: group } = useGroup(conversationId);
   const { data: messages, isLoading } = useGroupMessages(conversationId);
   const send = useSendGroupMessage();
+  const sendVoice = useSendGroupVoice();
   const markRead = useMarkGroupRead();
   const toastError = useApiErrorToast();
+
+  // Voice notes: record → upload → send to the group.
+  const voiceSend = useCallback(
+    async (audioUrl: string, durationMs: number) => {
+      await sendVoice.mutateAsync({ conversationId, audioUrl, durationMs });
+    },
+    [sendVoice, conversationId],
+  );
+  const voice = useVoiceMessage(voiceSend);
+  const handleMic = useCallback(() => {
+    void voice.startRecording();
+  }, [voice]);
+  const handleVoiceSend = useCallback(() => {
+    void voice.sendRecording();
+  }, [voice]);
 
   const [draft, setDraft] = useState('');
   const listRef = useRef<FlatList<GroupMessage>>(null);
@@ -117,9 +137,17 @@ export const GroupChatScreen: React.FC = () => {
                 : 'bg-overlay-white-10 rounded-2xl rounded-tl-sm px-md py-sm max-w-[80%]'
             }
           >
-            <Text className={isMine ? 'text-sm text-primary-on-container' : 'text-sm text-ink'}>
-              {item.content}
-            </Text>
+            {item.kind === 'voice' && item.audioUrl ? (
+              <VoiceMessageBubble
+                audioUrl={item.audioUrl}
+                durationMs={item.durationMs}
+                isMine={isMine}
+              />
+            ) : (
+              <Text className={isMine ? 'text-sm text-primary-on-container' : 'text-sm text-ink'}>
+                {item.content}
+              </Text>
+            )}
           </View>
         </View>
       );
@@ -172,32 +200,50 @@ export const GroupChatScreen: React.FC = () => {
         />
       )}
 
-      <View
-        className="flex-row items-end gap-sm px-xxl py-sm border-t border-overlay-white-5"
-        style={{ paddingBottom: insets.bottom + spacing.sm }}
-      >
-        <TextInput
-          value={draft}
-          onChangeText={setDraft}
-          placeholder={t('messages.messagePlaceholder', 'Message')}
-          placeholderTextColor={colors.textMuted}
-          multiline
-          className="flex-1 max-h-28 bg-overlay-white-5 rounded-2xl px-md py-sm text-ink"
+      {voice.isActive ? (
+        <VoiceRecordingBar
+          elapsedMs={voice.elapsedMs}
+          isUploading={voice.isUploading}
+          onCancel={voice.cancelRecording}
+          onSend={handleVoiceSend}
+          bottomInset={insets.bottom}
+          keyboardVisible={false}
         />
-        <Pressable
-          onPress={handleSend}
-          disabled={draft.trim().length === 0 || send.isPending}
-          accessibilityRole="button"
-          accessibilityLabel={t('common.send', 'Send')}
-          className={
-            draft.trim().length === 0
-              ? 'w-11 h-11 rounded-pill bg-overlay-white-10 items-center justify-center opacity-50'
-              : 'w-11 h-11 rounded-pill bg-primary items-center justify-center'
-          }
+      ) : (
+        <View
+          className="flex-row items-end gap-sm px-xxl py-sm border-t border-overlay-white-5"
+          style={{ paddingBottom: insets.bottom + spacing.sm }}
         >
-          <MaterialIcons name="send" size={20} color={colors.onPrimary} />
-        </Pressable>
-      </View>
+          <TextInput
+            value={draft}
+            onChangeText={setDraft}
+            placeholder={t('messages.messagePlaceholder', 'Message')}
+            placeholderTextColor={colors.textMuted}
+            multiline
+            className="flex-1 max-h-28 bg-overlay-white-5 rounded-2xl px-md py-sm text-ink"
+          />
+          {draft.trim().length > 0 ? (
+            <Pressable
+              onPress={handleSend}
+              disabled={send.isPending}
+              accessibilityRole="button"
+              accessibilityLabel={t('common.send', 'Send')}
+              className="w-11 h-11 rounded-pill bg-primary items-center justify-center"
+            >
+              <MaterialIcons name="send" size={20} color={colors.onPrimary} />
+            </Pressable>
+          ) : (
+            <Pressable
+              onPress={handleMic}
+              accessibilityRole="button"
+              accessibilityLabel={t('voice.recordA11y')}
+              className="w-11 h-11 rounded-pill bg-overlay-white-10 items-center justify-center"
+            >
+              <MaterialIcons name="mic" size={20} color={colors.text} />
+            </Pressable>
+          )}
+        </View>
+      )}
     </KeyboardAvoidingView>
   );
 };

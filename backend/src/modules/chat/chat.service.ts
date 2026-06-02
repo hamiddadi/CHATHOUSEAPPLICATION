@@ -2,7 +2,7 @@ import { prisma } from '../../config/database';
 import { AppError } from '../../middlewares/error.middleware';
 import { notificationsService } from '../notifications/notifications.service';
 import { emitChatMessage } from '../../socket/realtime';
-import type { ListMessagesInput, SendMessageInput } from './chat.schema';
+import type { ListMessagesInput, SendMessageInput, SendVoiceMessageInput } from './chat.schema';
 
 const publicUser = {
   id: true,
@@ -210,6 +210,52 @@ export const chatService = {
       type: 'NEW_MESSAGE',
       title: handle,
       body: input.content.slice(0, 160),
+      data: { messageId: msg.id, senderId, conversation: 'dm' },
+    });
+
+    return msg;
+  },
+
+  /**
+   * Send an async voice note to a peer. The clip is already uploaded to
+   * /upload/voice; we persist a VOICE-kind message and fan it out exactly like
+   * {@link send} (same mutual-follow gate, same realtime emit), with a 🎤
+   * notification body instead of the text preview.
+   */
+  async sendVoice(senderId: string, receiverId: string, input: SendVoiceMessageInput) {
+    if (senderId === receiverId) throw new AppError('CHAT_001');
+    const peer = await prisma.user.findUnique({
+      where: { id: receiverId },
+      select: { id: true, username: true, displayName: true },
+    });
+    if (!peer) throw new AppError('USER_001');
+
+    await assertMutualFollow(senderId, receiverId);
+
+    const sender = await prisma.user.findUnique({
+      where: { id: senderId },
+      select: { username: true, displayName: true },
+    });
+    const handle = sender?.displayName ?? sender?.username ?? 'Someone';
+
+    const msg = await prisma.message.create({
+      data: {
+        senderId,
+        receiverId,
+        kind: 'VOICE',
+        audioUrl: input.audioUrl,
+        audioDurationMs: input.durationMs,
+      },
+      include: { sender: { select: publicUser } },
+    });
+
+    emitChatMessage(senderId, receiverId, msg);
+
+    void notificationsService.create({
+      userId: receiverId,
+      type: 'NEW_MESSAGE',
+      title: handle,
+      body: '🎤 Voice message',
       data: { messageId: msg.id, senderId, conversation: 'dm' },
     });
 

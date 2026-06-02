@@ -2,7 +2,7 @@ import type { Request, Response } from 'express';
 import { sendOk } from '../../utils/response';
 import { AppError } from '../../middlewares/error.middleware';
 import { authedUserId as requireUserId } from '../../utils/authedUserId';
-import { listMessagesSchema, sendMessageSchema } from './chat.schema';
+import { listMessagesSchema, sendMessageSchema, sendVoiceMessageSchema } from './chat.schema';
 import { chatService } from './chat.service';
 
 const paramId = (req: Request, key: string, errorCode: 'CHAT_002' | 'USER_001') => {
@@ -50,6 +50,16 @@ export const chatController = {
   async send(req: Request, res: Response) {
     const input = sendMessageSchema.parse(req.body);
     const msg = await chatService.send(
+      requireUserId(req),
+      paramId(req, 'userId', 'USER_001'),
+      input,
+    );
+    sendOk(res, msg, 201);
+  },
+
+  async sendVoice(req: Request, res: Response) {
+    const input = sendVoiceMessageSchema.parse(req.body);
+    const msg = await chatService.sendVoice(
       requireUserId(req),
       paramId(req, 'userId', 'USER_001'),
       input,

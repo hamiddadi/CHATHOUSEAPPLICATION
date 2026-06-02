@@ -8,6 +8,7 @@ import {
   listGroupMessagesSchema,
   renameGroupSchema,
   sendGroupMessageSchema,
+  sendGroupVoiceSchema,
 } from './groups.schema';
 import { groupsService } from './groups.service';
 
@@ -44,6 +45,12 @@ export const groupsController = {
   async send(req: Request, res: Response) {
     const input = sendGroupMessageSchema.parse(req.body);
     const message = await groupsService.send(authedUserId(req), paramId(req, 'id'), input);
+    sendOk(res, message, 201);
+  },
+
+  async sendVoice(req: Request, res: Response) {
+    const input = sendGroupVoiceSchema.parse(req.body);
+    const message = await groupsService.sendVoice(authedUserId(req), paramId(req, 'id'), input);
     sendOk(res, message, 201);
   },
 

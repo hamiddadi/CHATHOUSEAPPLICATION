@@ -33,7 +33,11 @@ interface RawMessage {
   id: string;
   senderId: string;
   receiverId: string | null;
-  content: string;
+  // Nullable now that a message can be a voice note (kind === 'VOICE').
+  content: string | null;
+  kind?: 'TEXT' | 'VOICE';
+  audioUrl?: string | null;
+  audioDurationMs?: number | null;
   isRead: boolean;
   createdAt: string;
   sender?: RawUser;
@@ -58,7 +62,10 @@ const toMessage = (raw: RawMessage, viewerId: string, peerId: string): Message =
   id: raw.id,
   conversationId: peerId,
   authorId: raw.senderId,
-  text: raw.content,
+  text: raw.content ?? '',
+  kind: raw.kind === 'VOICE' ? 'voice' : 'text',
+  audioUrl: raw.audioUrl ?? null,
+  durationMs: raw.audioDurationMs ?? null,
   sentAt: raw.createdAt,
   isMine: raw.senderId === viewerId,
 });
@@ -118,6 +125,19 @@ export const messageService = {
     if (trimmed.length === 0) throw new Error('Message cannot be empty');
     const res = await apiClient.post<Envelope<RawMessage>>(`/chat/${peerId}`, {
       content: trimmed,
+    });
+    return toMessage(res.data.data, currentUserId(), peerId);
+  },
+
+  /**
+   * Send a voice note. The clip must already be uploaded (see voiceService);
+   * we post the stored URL + clip length. DM is still gated on mutual follow
+   * server-side (403 CHAT_004), surfaced to the caller verbatim.
+   */
+  async sendVoice(peerId: string, audioUrl: string, durationMs: number): Promise<Message> {
+    const res = await apiClient.post<Envelope<RawMessage>>(`/chat/${peerId}/voice`, {
+      audioUrl,
+      durationMs,
     });
     return toMessage(res.data.data, currentUserId(), peerId);
   },

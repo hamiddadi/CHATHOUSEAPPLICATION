@@ -48,6 +48,18 @@
     "micA11y": "Record voice message",
     "typing": "typing…"
   },
+  "voice": {
+    "preview": "🎤 Voice message",
+    "recording": "Recording…",
+    "sending": "Sending…",
+    "recordA11y": "Record a voice message",
+    "playA11y": "Play voice message",
+    "pauseA11y": "Pause voice message",
+    "cancelA11y": "Cancel recording",
+    "sendA11y": "Send voice message",
+    "micNeededTitle": "Microphone needed",
+    "micNeededBody": "Allow microphone access in Settings to record a voice message."
+  },
   "messages": {
     "title": "Messages",
     "newChatA11y": "Start new conversation",

@@ -115,6 +115,90 @@ export const saveAvatar = (image: DecodedImage): string => {
   return filename;
 };
 
+// ─── Voice notes (async "Chats") ───────────────────────────────────────────
+// Decoded byte ceiling for a voice clip. A multi-minute AAC note stays well
+// under this; the router's 12 MB JSON limit covers the ~33% base64 inflation.
+const MAX_AUDIO_BYTES = 8 * 1024 * 1024;
+
+// Allowed audio container MIME types → file extension. expo-audio's
+// HIGH_QUALITY preset records .m4a (AAC) on both iOS and Android; the others
+// are tolerated so a different recorder/codec still uploads cleanly.
+const AUDIO_MIME_EXT: Record<string, string> = {
+  'audio/m4a': 'm4a',
+  'audio/x-m4a': 'm4a',
+  'audio/mp4': 'm4a',
+  'audio/aac': 'aac',
+  'audio/mpeg': 'mp3',
+  'audio/wav': 'wav',
+  'audio/x-wav': 'wav',
+  'audio/webm': 'webm',
+  'audio/3gpp': '3gp',
+  'audio/x-caf': 'caf',
+};
+
+export interface DecodedAudio {
+  mime: string;
+  ext: string;
+  buffer: Buffer;
+}
+
+/**
+ * Validate + decode a voice-note payload. Accepts either a data URL or an
+ * explicit base64 + mime pair (mirrors {@link decodeAvatar}). Throws
+ * VALIDATION_001 for an unsupported mime or an over-size clip.
+ */
+export const decodeAudio = (input: {
+  dataUrl?: string;
+  base64?: string;
+  mime?: string;
+}): DecodedAudio => {
+  let mime: string | undefined;
+  let base64: string | undefined;
+
+  if (typeof input.dataUrl === 'string' && input.dataUrl.length > 0) {
+    const parsed = parseDataUrl(input.dataUrl);
+    if (!parsed) throw new AppError('VALIDATION_001', 'Malformed data URL');
+    mime = parsed.mime;
+    base64 = parsed.base64;
+  } else if (typeof input.base64 === 'string' && input.base64.length > 0) {
+    base64 = input.base64;
+    mime = typeof input.mime === 'string' ? input.mime.toLowerCase() : undefined;
+  }
+
+  if (!base64 || !mime) {
+    throw new AppError('VALIDATION_001', 'Missing audio data');
+  }
+
+  const ext = AUDIO_MIME_EXT[mime];
+  if (!ext) {
+    throw new AppError('VALIDATION_001', 'Unsupported audio type');
+  }
+
+  const clean = base64.replace(/\s/g, '');
+  const buffer = Buffer.from(clean, 'base64');
+  if (buffer.byteLength === 0) {
+    throw new AppError('VALIDATION_001', 'Empty audio data');
+  }
+  if (buffer.byteLength > MAX_AUDIO_BYTES) {
+    throw new AppError('VALIDATION_001', 'Voice note exceeds 8MB limit');
+  }
+
+  return { mime, ext, buffer };
+};
+
+/**
+ * Persist a decoded voice note. Shares the uploads dir + server-generated
+ * `<uuid>.<ext>` naming with {@link saveAvatar}, so there's no user-controlled
+ * path segment (no traversal surface).
+ */
+export const saveVoice = (audio: DecodedAudio): string => {
+  mkdirSync(UPLOADS_DIR, { recursive: true });
+  const filename = `${randomUUID()}.${audio.ext}`;
+  // eslint-disable-next-line security/detect-non-literal-fs-filename
+  writeFileSync(path.join(UPLOADS_DIR, filename), audio.buffer);
+  return filename;
+};
+
 /**
  * Build the public URL for a stored upload. Prefers PUBLIC_URL (set this in
  * production behind a proxy/CDN so the link points at the externally-reachable
@@ -136,6 +220,19 @@ export const uploadService = {
   ): { url: string } {
     const image = decodeAvatar(input);
     const filename = saveAvatar(image);
+    return { url: publicUrlFor(origin, filename) };
+  },
+
+  /**
+   * Validate, decode, and store a voice note. Returns the public URL the
+   * client attaches to the voice message it then sends to /groups or /chat.
+   */
+  uploadVoice(
+    input: { dataUrl?: string; base64?: string; mime?: string },
+    origin: string,
+  ): { url: string } {
+    const audio = decodeAudio(input);
+    const filename = saveVoice(audio);
     return { url: publicUrlFor(origin, filename) };
   },
 };

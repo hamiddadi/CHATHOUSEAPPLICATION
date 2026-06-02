@@ -1,6 +1,6 @@
 import { apiClient } from '../../../shared/services/api/apiClient';
 import type { Envelope } from '../../../shared/types/api';
-import type { UserSummary } from '../../../shared/types/domain';
+import type { MessageKind, UserSummary } from '../../../shared/types/domain';
 
 /**
  * Group DM (Backchannel groups) service. Separate from the 1:1 messageService
@@ -25,9 +25,21 @@ interface RawGroupMessage {
   id: string;
   conversationId: string;
   senderId: string;
-  content: string;
+  // Nullable now that a group message can be a voice note (kind === 'VOICE').
+  content: string | null;
+  kind?: 'TEXT' | 'VOICE';
+  audioUrl?: string | null;
+  durationMs?: number | null;
   createdAt: string;
   sender?: RawUser;
+}
+
+interface RawLastMessage {
+  id: string;
+  senderId: string;
+  content: string | null;
+  kind?: 'TEXT' | 'VOICE';
+  createdAt: string;
 }
 
 interface RawGroupConversation {
@@ -35,7 +47,7 @@ interface RawGroupConversation {
   title: string | null;
   ownerId: string;
   members: RawUser[];
-  lastMessage: { id: string; senderId: string; content: string; createdAt: string } | null;
+  lastMessage: RawLastMessage | null;
   unreadCount: number;
   updatedAt: string;
 }
@@ -44,9 +56,21 @@ export interface GroupMessage {
   id: string;
   conversationId: string;
   senderId: string;
-  content: string;
+  // Empty/null for voice notes (use audioUrl + durationMs instead).
+  content: string | null;
+  kind: MessageKind;
+  audioUrl: string | null;
+  durationMs: number | null;
   createdAt: string;
   sender: UserSummary | null;
+}
+
+export interface GroupLastMessage {
+  id: string;
+  senderId: string;
+  content: string | null;
+  kind: MessageKind;
+  createdAt: string;
 }
 
 export interface GroupConversation {
@@ -54,7 +78,7 @@ export interface GroupConversation {
   title: string | null;
   ownerId: string;
   members: UserSummary[];
-  lastMessage: { id: string; senderId: string; content: string; createdAt: string } | null;
+  lastMessage: GroupLastMessage | null;
   unreadCount: number;
   updatedAt: string;
 }
@@ -66,21 +90,37 @@ const toSummary = (u: RawUser): UserSummary => ({
   avatarUrl: u.avatarUrl,
 });
 
+const toKind = (raw?: 'TEXT' | 'VOICE'): MessageKind => (raw === 'VOICE' ? 'voice' : 'text');
+
 const toMessage = (m: RawGroupMessage): GroupMessage => ({
   id: m.id,
   conversationId: m.conversationId,
   senderId: m.senderId,
   content: m.content,
+  kind: toKind(m.kind),
+  audioUrl: m.audioUrl ?? null,
+  durationMs: m.durationMs ?? null,
   createdAt: m.createdAt,
   sender: m.sender ? toSummary(m.sender) : null,
 });
+
+const toLastMessage = (m: RawLastMessage | null): GroupLastMessage | null =>
+  m
+    ? {
+        id: m.id,
+        senderId: m.senderId,
+        content: m.content,
+        kind: toKind(m.kind),
+        createdAt: m.createdAt,
+      }
+    : null;
 
 const toConversation = (c: RawGroupConversation): GroupConversation => ({
   id: c.id,
   title: c.title,
   ownerId: c.ownerId,
   members: c.members.map(toSummary),
-  lastMessage: c.lastMessage,
+  lastMessage: toLastMessage(c.lastMessage),
   unreadCount: c.unreadCount,
   updatedAt: c.updatedAt,
 });
@@ -106,6 +146,18 @@ export const groupService = {
     if (trimmed.length === 0) throw new Error('Message cannot be empty');
     const res = await apiClient.post<Envelope<RawGroupMessage>>(`/groups/${id}/messages`, {
       content: trimmed,
+    });
+    return toMessage(res.data.data);
+  },
+
+  /**
+   * Send a voice note to a group. The clip must already be uploaded (see
+   * voiceService); we post the stored URL + clip length to /groups/:id/voice.
+   */
+  async sendVoice(id: string, audioUrl: string, durationMs: number): Promise<GroupMessage> {
+    const res = await apiClient.post<Envelope<RawGroupMessage>>(`/groups/${id}/voice`, {
+      audioUrl,
+      durationMs,
     });
     return toMessage(res.data.data);
   },

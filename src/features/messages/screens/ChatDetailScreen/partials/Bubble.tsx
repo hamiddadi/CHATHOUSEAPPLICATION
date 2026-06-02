@@ -6,6 +6,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { colors, spacing } from '../../../../../shared/constants/theme';
 import { DEFAULTS } from '../../../../../shared/constants/images';
 import type { Message } from '../../../../../shared/types/domain';
+import VoiceMessageBubble from '../../../components/VoiceMessageBubble';
 
 const AVATAR_BUBBLE_SIZE = 32;
 const BUBBLE_CORNER = 20;
@@ -38,7 +39,15 @@ const Bubble: React.FC<BubbleProps> = memo(({ message, otherAvatar, showAvatar }
           end={{ x: 1, y: 1 }}
           style={styles.sentBubble}
         >
-          <Text className="text-sm font-body text-white leading-relaxed">{message.text}</Text>
+          {message.kind === 'voice' && message.audioUrl ? (
+            <VoiceMessageBubble
+              audioUrl={message.audioUrl}
+              durationMs={message.durationMs}
+              isMine
+            />
+          ) : (
+            <Text className="text-sm font-body text-white leading-relaxed">{message.text}</Text>
+          )}
         </LinearGradient>
         <View style={styles.metaRowRight}>
           <Text className="text-[10px] text-ink-muted">{formatTime(message.sentAt)}</Text>
@@ -62,7 +71,15 @@ const Bubble: React.FC<BubbleProps> = memo(({ message, otherAvatar, showAvatar }
       )}
       <View style={styles.receivedContent}>
         <View style={styles.receivedBubble}>
-          <Text className="text-sm font-body text-ink leading-relaxed">{message.text}</Text>
+          {message.kind === 'voice' && message.audioUrl ? (
+            <VoiceMessageBubble
+              audioUrl={message.audioUrl}
+              durationMs={message.durationMs}
+              isMine={false}
+            />
+          ) : (
+            <Text className="text-sm font-body text-ink leading-relaxed">{message.text}</Text>
+          )}
         </View>
         <Text className="text-[10px] text-ink-muted ml-xs mt-xxs">
           {formatTime(message.sentAt)}

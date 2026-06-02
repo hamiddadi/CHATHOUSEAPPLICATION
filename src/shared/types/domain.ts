@@ -117,11 +117,20 @@ export type HouseSummary = Pick<
 /* ============================================================
  * Messages / Conversations
  * ========================================================== */
+// A text message vs. an async voice note (Clubhouse-style "Chats").
+export type MessageKind = 'text' | 'voice';
+
 export interface Message {
   id: string;
   conversationId: string;
   authorId: string;
+  // Text body. Empty string for voice notes (use audioUrl + durationMs).
   text: string;
+  // 'voice' messages carry a playable audioUrl + clip length; 'text' leaves
+  // both null. Defaults to 'text' so legacy mocks/payloads stay valid.
+  kind: MessageKind;
+  audioUrl: string | null;
+  durationMs: number | null;
   sentAt: string;
   isMine: boolean;
 }
