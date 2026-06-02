@@ -2,6 +2,7 @@ import type { Prisma } from '@prisma/client';
 import { prisma } from '../../config/database';
 import { AppError } from '../../middlewares/error.middleware';
 import { notificationsService } from '../notifications/notifications.service';
+import { recordingsService } from '../recordings/recordings.service';
 import { getBlockedIdSet } from '../social/blocks';
 import { cancelEventReminder, scheduleEventReminder } from '../../queues/eventReminders';
 import { fanoutOne } from '../../extensions/queues/followFanout';
@@ -246,6 +247,17 @@ export const roomsService = {
       );
     }
 
+    // Kick off the Replay recording when the host opted in (Room.recordingEnabled)
+    // and egress is configured. Best-effort + gated — a no-op when egress is off,
+    // and a failure here must never block room creation.
+    if (isLive && room.recordingEnabled) {
+      void recordingsService
+        .startForRoom(room.id)
+        .catch(err =>
+          logger.warn('rooms.create: recording start failed', { err, roomId: room.id }),
+        );
+    }
+
     return room;
   },
 
@@ -435,6 +447,10 @@ export const roomsService = {
             });
             await cancelEventReminder(roomId);
             emitHallwayRoomClosed(roomId);
+            // Finalize the Replay when an empty room auto-closes (gated/no-op).
+            void recordingsService
+              .stopForRoom(roomId)
+              .catch(err => logger.warn('rooms.leave: recording stop failed', { err, roomId }));
           }
         }
       }
@@ -476,6 +492,10 @@ export const roomsService = {
     // Tell participants still in the room to leave (REST end() path; the socket
     // room:end handler already emits this for the socket path).
     emitRoomEnded(roomId);
+    // Stop + finalize the Replay recording if one is running (gated/no-op).
+    void recordingsService
+      .stopForRoom(roomId)
+      .catch(err => logger.warn('rooms.end: recording stop failed', { err, roomId }));
     return { ended: true };
   },
 

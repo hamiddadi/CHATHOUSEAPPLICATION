@@ -15,6 +15,7 @@ import { InviteMemberScreen } from '../../../features/houses/screens/InviteMembe
 import { ExploreScreen } from '../../../features/search/screens/ExploreScreen';
 import { EventsScreen } from '../../../features/events/screens/EventsScreen';
 import { NotificationsScreen } from '../../../features/notifications/screens/NotificationsScreen';
+import { ReplaysScreen } from '../../../features/rooms/screens/ReplaysScreen';
 
 const Stack = createNativeStackNavigator<RoomStackParamList>();
 
@@ -59,5 +60,6 @@ export const RoomsNavigator: React.FC = () => (
     <Stack.Screen name="Explore" component={ExploreScreen} />
     <Stack.Screen name="Events" component={EventsScreen} />
     <Stack.Screen name="Notifications" component={NotificationsScreen} />
+    <Stack.Screen name="Replays" component={ReplaysScreen} />
   </Stack.Navigator>
 );

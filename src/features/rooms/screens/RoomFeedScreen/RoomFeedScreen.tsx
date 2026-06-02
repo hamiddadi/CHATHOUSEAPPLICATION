@@ -214,6 +214,7 @@ RoomCard.displayName = 'RoomCard';
 interface HeaderProps {
   onSearch: () => void;
   onEvents: () => void;
+  onReplays: () => void;
   onNotifications: () => void;
   unreadCount: number;
 }
@@ -304,7 +305,7 @@ const UpcomingRow: React.FC<UpcomingRowProps> = memo(({ rooms, onOpen }) => {
 UpcomingRow.displayName = 'UpcomingRow';
 
 const Header: React.FC<HeaderProps> = memo(
-  ({ onSearch, onEvents, onNotifications, unreadCount }) => {
+  ({ onSearch, onEvents, onReplays, onNotifications, unreadCount }) => {
     const { t } = useTranslation();
     return (
       <View className="flex-row items-center justify-between px-xxl py-lg">
@@ -317,6 +318,11 @@ const Header: React.FC<HeaderProps> = memo(
         <View className="flex-row items-center gap-sm">
           <HeaderIcon name="search" label={t('feed.exploreA11y', 'Explore')} onPress={onSearch} />
           <HeaderIcon name="event" label={t('feed.eventsA11y', 'Events')} onPress={onEvents} />
+          <HeaderIcon
+            name="play-circle-outline"
+            label={t('replays.title', 'Replays')}
+            onPress={onReplays}
+          />
           <HeaderIcon
             name="notifications"
             label={t('feed.notificationsA11y', 'Notifications')}
@@ -359,6 +365,7 @@ export const RoomFeedScreen: React.FC = () => {
   const handleStartRoom = useCallback(() => navigation.navigate('CreateRoom'), [navigation]);
   const handleSearch = useCallback(() => navigation.navigate('Explore'), [navigation]);
   const handleEvents = useCallback(() => navigation.navigate('Events'), [navigation]);
+  const handleReplays = useCallback(() => navigation.navigate('Replays'), [navigation]);
   const handleNotifications = useCallback(() => navigation.navigate('Notifications'), [navigation]);
 
   const renderItem = useCallback(
@@ -373,6 +380,7 @@ export const RoomFeedScreen: React.FC = () => {
       <Header
         onSearch={handleSearch}
         onEvents={handleEvents}
+        onReplays={handleReplays}
         onNotifications={handleNotifications}
         unreadCount={unreadCount}
       />

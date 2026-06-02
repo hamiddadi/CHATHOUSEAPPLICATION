@@ -30,6 +30,8 @@ import { exploreRouter } from './modules/explore/explore.router';
 import { pushRouter } from './modules/push/push.router';
 import { adminRouter } from './modules/admin/admin.router';
 import { uploadRouter } from './modules/upload/upload.router';
+import { recordingsRouter } from './modules/recordings/recordings.router';
+import { livekitWebhookRouter } from './modules/recordings/recordings.webhook';
 import { UPLOADS_DIR } from './modules/upload/upload.service';
 import { createSocketServer } from './socket/socket.server';
 import { mountExtensions } from './extensions/mount';
@@ -46,6 +48,12 @@ export const createApp = (): express.Express => {
   const app = express();
 
   app.set('trust proxy', 1);
+
+  // LiveKit egress webhook — mounted BEFORE the JSON parser because signature
+  // verification needs the raw request body (the router installs its own
+  // express.raw parser). Unauthenticated by design; the signed Authorization
+  // header is the auth. No-op unless egress is configured.
+  app.use('/webhooks', livekitWebhookRouter);
 
   // Body parsers — cap at 1 MB; avatar uploads go through /upload (phase 2)
   app.use(expressJson({ limit: '1mb' }));
@@ -103,6 +111,7 @@ export const createApp = (): express.Express => {
   app.use('/api/follow', followRouter);
   // Phase 3 feature routers
   app.use('/api/rooms', roomsRouter);
+  app.use('/api/recordings', recordingsRouter);
   app.use('/api/chat', chatRouter);
   app.use('/api/groups', groupsRouter);
   app.use('/api/maps', mapsRouter);

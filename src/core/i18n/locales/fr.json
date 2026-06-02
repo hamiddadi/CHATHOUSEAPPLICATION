@@ -60,6 +60,13 @@
     "micNeededTitle": "Micro nécessaire",
     "micNeededBody": "Autorisez l'accès au micro dans les Réglages pour enregistrer un message vocal."
   },
+  "replays": {
+    "title": "Replays",
+    "untitled": "Room sans titre",
+    "emptyTitle": "Aucun replay pour l'instant",
+    "emptyBody": "Les rooms enregistrées apparaîtront ici une fois terminées.",
+    "playA11y": "Lire le replay"
+  },
   "messages": {
     "title": "Messages",
     "newChatA11y": "Nouvelle conversation",
@@ -389,6 +396,8 @@
     "visibilityLabel": "Visibilité",
     "scheduleLabel": "Programmer plus tard",
     "scheduleHint": "Choisis une date et une heure pour annoncer ta room",
+    "recordLabel": "Enregistrer (Replay)",
+    "recordHint": "Sauvegarde l'audio pour le réécouter plus tard",
     "topicsLabel": "Tags",
     "topicsHint": "Jusqu'à 5 tags — ça aide les bonnes personnes à trouver ta room.",
     "coHostsLabel": "Co-hosts",

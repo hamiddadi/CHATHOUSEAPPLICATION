@@ -153,6 +153,18 @@ const openScheduledRoom = async (roomId: string): Promise<void> => {
     });
   }
   logger.info(`event-reminder: auto-opened room ${room.id}`);
+
+  // Start the Replay recording for scheduled rooms whose host opted in. Lazy
+  // import keeps this off the queue→realtime cycle; gated/no-op when egress
+  // isn't configured, and best-effort so it never blocks the go-live.
+  if (room.recordingEnabled) {
+    const { recordingsService } = await import('../modules/recordings/recordings.service');
+    void recordingsService
+      .startForRoom(room.id)
+      .catch(err =>
+        logger.warn('event-reminder: recording start failed', { err, roomId: room.id }),
+      );
+  }
 };
 
 /**

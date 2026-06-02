@@ -78,6 +78,25 @@ const envSchema = z.object({
   // are stable. 1h is a sensible default; raise for low-traffic setups.
   LIVEKIT_TOKEN_TTL_SECONDS: z.coerce.number().int().min(60).max(86400).default(3600),
 
+  // ─── Recording / Egress (room Replays) ──────────────────────────────
+  // Server-side room recording via LiveKit Egress → an S3-compatible bucket.
+  // Entirely optional: recording is "configured" only when EGRESS_ENABLED is
+  // true AND the bucket + keys below are set AND LiveKit itself is configured
+  // (see recordings.service.isConfigured). When unconfigured, rooms still work
+  // exactly as before — no Recording rows are ever created.
+  EGRESS_ENABLED: boolFromString(false),
+  RECORDING_S3_BUCKET: z.string().optional(),
+  RECORDING_S3_REGION: z.string().optional(),
+  RECORDING_S3_ACCESS_KEY: z.string().optional(),
+  RECORDING_S3_SECRET: z.string().optional(),
+  // Custom S3 endpoint for non-AWS providers (Cloudflare R2, MinIO, GCS S3
+  // interop). Leave unset for AWS S3.
+  RECORDING_S3_ENDPOINT: z.string().optional(),
+  // Public base URL the stored objects are served from (e.g. an R2 public
+  // bucket URL or a CloudFront distribution). The object key is appended to
+  // build the playback URL; falls back to the egress-reported location.
+  RECORDING_PUBLIC_BASE_URL: z.string().optional(),
+
   // mediasoup (phase 4). Disabled by default because the npm package compiles
   // C++ from source at install time — turn ON in docker-compose only.
   MEDIASOUP_ENABLED: boolFromString(false),

@@ -234,6 +234,7 @@ model Room {
   reactions        RoomReaction[]
   bans             RoomBan[]
   reports          Report[]          @relation("ReportRoomTarget")
+  recordings       Recording[]
   currentListeners User[]            @relation("UserCurrentRoom")
 
   @@index([isLive])
@@ -286,6 +287,37 @@ model RoomChatMessage {
   @@index([roomId, createdAt])
   @@index([userId])
   @@index([replyToId])
+}
+
+// ─── Recording (room Replays) ──────────────────────────
+// One row per LiveKit Egress session for a room. Created when recording
+// starts (host opted in via Room.recordingEnabled AND egress is configured),
+// finalized by the LiveKit egress webhook (or a reconcile sweep) with the
+// public playback URL + clip length. Gated entirely behind env — when egress
+// isn't configured no rows are ever created (see recordings.service).
+enum RecordingStatus {
+  STARTING
+  ACTIVE
+  COMPLETED
+  FAILED
+  ABORTED
+}
+
+model Recording {
+  id         String          @id @default(cuid())
+  roomId     String
+  egressId   String          @unique // LiveKit egress id — webhook/reconcile key
+  status     RecordingStatus @default(STARTING)
+  fileUrl    String?         @db.VarChar(2048) // public playback URL once COMPLETED
+  durationMs Int?
+  startedAt  DateTime        @default(now())
+  endedAt    DateTime?
+  createdAt  DateTime        @default(now())
+
+  room Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@index([roomId, createdAt])
+  @@index([status])
 }
 
 // ─── RoomReaction (ephemeral float-up emoji) ───────────

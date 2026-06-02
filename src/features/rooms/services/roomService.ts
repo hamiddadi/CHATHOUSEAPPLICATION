@@ -26,6 +26,9 @@ export interface CreateRoomInput {
   coHostIds?: readonly string[];
   isPrivate?: boolean;
   chatEnabled?: boolean;
+  // Host opt-in: record the room for later Replay (audio-only). Only takes
+  // effect when the backend has egress configured (otherwise a harmless no-op).
+  recordingEnabled?: boolean;
   maxSpeakers?: number;
 }
 
@@ -69,6 +72,7 @@ interface RawRoom {
   roomType?: 'OPEN' | 'SOCIAL' | 'CLOSED';
   chatEnabled?: boolean;
   chatVisibility?: 'ALL' | 'MODS_ONLY';
+  recordingEnabled?: boolean;
   topic: string | null;
   topics?: string[];
   scheduledFor: string | null;
@@ -167,7 +171,7 @@ const toRoom = (raw: RawRoom): Room => {
     listenersCount: listeners.length,
     participantCount: raw.participantCount ?? speakers.length + listeners.length,
     isLive: raw.isLive,
-    isRecording: false,
+    isRecording: raw.recordingEnabled ?? false,
     chatEnabled: raw.chatEnabled ?? true,
     chatVisibility: raw.chatVisibility ?? 'ALL',
     startedAt: raw.createdAt,
@@ -267,6 +271,7 @@ export const roomService = {
       isPrivate,
       roomType,
       chatEnabled: input.chatEnabled ?? true,
+      recordingEnabled: input.recordingEnabled ?? false,
       maxSpeakers: input.maxSpeakers,
       clubId: input.houseId ?? undefined,
       scheduledFor: input.scheduledFor ?? undefined,

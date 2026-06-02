@@ -60,6 +60,13 @@
     "micNeededTitle": "Microphone needed",
     "micNeededBody": "Allow microphone access in Settings to record a voice message."
   },
+  "replays": {
+    "title": "Replays",
+    "untitled": "Untitled room",
+    "emptyTitle": "No replays yet",
+    "emptyBody": "Recorded rooms show up here once they end.",
+    "playA11y": "Play replay"
+  },
   "messages": {
     "title": "Messages",
     "newChatA11y": "Start new conversation",
@@ -389,6 +396,8 @@
     "visibilityLabel": "Visibility",
     "scheduleLabel": "Schedule for later",
     "scheduleHint": "Pick a date and time to announce your room",
+    "recordLabel": "Record (Replay)",
+    "recordHint": "Save the audio so people can replay it later",
     "topicsLabel": "Topics",
     "topicsHint": "Pick up to 5 tags — they help the right people find your room.",
     "coHostsLabel": "Co-hosts",

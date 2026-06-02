@@ -61,6 +61,8 @@ export type RoomStackParamList = {
   Explore: undefined;
   Events: undefined;
   Notifications: undefined;
+  // Room Replays — recent recorded rooms (audio-only) you can play back.
+  Replays: undefined;
 
   // In-room: invite multiple followers/contacts to join the current room.
   InviteToRoom: { roomId: string };
