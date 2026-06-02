@@ -4,12 +4,13 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { useRoute, useNavigation, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useTranslation } from 'react-i18next';
 import { Avatar } from '../../../../shared/components/Avatar';
 import { Button } from '../../../../shared/components/Button';
 import { Input } from '../../../../shared/components/Input';
 import { EmptyState } from '../../../../shared/components/EmptyState';
 import { Loader } from '../../../../shared/components/Loader';
-import { colors, spacing } from '../../../../shared/constants/theme';
+import { colors, radii, spacing, withAlpha } from '../../../../shared/constants/theme';
 import { searchService } from '../../../search/services/searchService';
 import { useInviteToRoom } from '../../hooks/useRooms';
 import { errorMessage } from '../../../../shared/utils/errorMessage';
@@ -29,6 +30,7 @@ const SEARCH_DEBOUNCE_MS = 250;
 const MAX_INVITEES = 50;
 
 export const InviteToRoomScreen: React.FC = () => {
+  const { t } = useTranslation();
   const navigation = useNavigation<Nav>();
   const route = useRoute<Route>();
   const insets = useSafeAreaInsets();
@@ -89,13 +91,22 @@ export const InviteToRoomScreen: React.FC = () => {
       { roomId, userIds: selected.map(c => c.id) },
       {
         onSuccess: r => {
-          Alert.alert('Invitations envoyées', `${r.invitedCount} personne(s) notifiée(s).`);
+          Alert.alert(
+            t('rooms.invite.successTitle', 'Invitations envoyées'),
+            t('rooms.invite.successBody', '{{count}} personne(s) notifiée(s).', {
+              count: r.invitedCount,
+            }),
+          );
           navigation.goBack();
         },
-        onError: e => Alert.alert('Erreur', errorMessage(e, 'Échec')),
+        onError: e =>
+          Alert.alert(
+            t('rooms.invite.errorTitle', 'Erreur'),
+            errorMessage(e, t('rooms.invite.errorBody', 'Échec')),
+          ),
       },
     );
-  }, [invite, navigation, roomId, selected]);
+  }, [invite, navigation, roomId, selected, t]);
 
   const selectedIds = useMemo(() => new Set(selected.map(s => s.id)), [selected]);
 
@@ -131,18 +142,20 @@ export const InviteToRoomScreen: React.FC = () => {
     <View className="flex-1 bg-background" style={{ paddingTop: insets.top + spacing.lg }}>
       <View className="px-xxl gap-md">
         <View className="flex-row items-center justify-between">
-          <Text className="text-2xl font-display text-white">Inviter</Text>
+          <Text className="text-2xl font-display text-ink">
+            {t('rooms.invite.title', 'Inviter')}
+          </Text>
           <Pressable
             onPress={navigation.goBack}
             hitSlop={8}
             accessibilityRole="button"
-            accessibilityLabel="Fermer"
+            accessibilityLabel={t('rooms.invite.closeA11y', 'Fermer')}
           >
             <MaterialIcons name="close" size={22} color={colors.text} />
           </Pressable>
         </View>
         <Input
-          placeholder="Rechercher des utilisateurs"
+          placeholder={t('rooms.invite.searchPlaceholder', 'Rechercher des utilisateurs')}
           value={query}
           onChangeText={setQuery}
           autoCapitalize="none"
@@ -151,13 +164,16 @@ export const InviteToRoomScreen: React.FC = () => {
         />
         {selected.length > 0 ? (
           <Text style={styles.selectedCount}>
-            {selected.length} sélectionné·e·s · max {MAX_INVITEES}
+            {t('rooms.invite.selectedCount', '{{count}} sélectionné(s) · max {{max}}', {
+              count: selected.length,
+              max: MAX_INVITEES,
+            })}
           </Text>
         ) : null}
       </View>
 
       {searching && results.length === 0 ? (
-        <Loader fullscreen accessibilityLabel="Recherche…" />
+        <Loader fullscreen accessibilityLabel={t('rooms.invite.searchingA11y', 'Recherche…')} />
       ) : (
         <FlatList
           data={results}
@@ -172,11 +188,17 @@ export const InviteToRoomScreen: React.FC = () => {
           ListEmptyComponent={
             debounced.length === 0 ? (
               <EmptyState
-                title="Cherchez quelqu'un"
-                description="Tapez un nom ou pseudo pour inviter dans la room."
+                title={t('rooms.invite.emptyTitle', "Cherchez quelqu'un")}
+                description={t(
+                  'rooms.invite.emptyBody',
+                  'Tapez un nom ou pseudo pour inviter dans la room.',
+                )}
               />
             ) : (
-              <EmptyState title="Aucun résultat" description="" />
+              <EmptyState
+                title={t('rooms.invite.noResultsTitle', 'Aucun résultat')}
+                description=""
+              />
             )
           }
           showsVerticalScrollIndicator={false}
@@ -191,7 +213,9 @@ export const InviteToRoomScreen: React.FC = () => {
       >
         <Button
           label={
-            selected.length === 0 ? 'Sélectionnez des invités' : `Envoyer (${selected.length})`
+            selected.length === 0
+              ? t('rooms.invite.btnIdle', 'Sélectionnez des invités')
+              : t('rooms.invite.btnActive', 'Envoyer ({{count}})', { count: selected.length })
           }
           variant="primary"
           fullWidth
@@ -211,8 +235,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.md,
     padding: spacing.md,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderRadius: radii.md,
+    backgroundColor: colors.overlayWhite4,
   },
   displayName: { color: colors.text, fontSize: 14, fontWeight: '700' },
   username: { color: colors.textMuted, fontSize: 12, marginTop: 2 },
@@ -225,7 +249,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   checkboxOn: { backgroundColor: colors.primary, borderColor: colors.primary },
-  checkboxOff: { borderColor: 'rgba(255,255,255,0.2)' },
+  checkboxOff: { borderColor: colors.overlayWhite20 },
   selectedCount: { color: colors.primary, fontSize: 12 },
   cta: {
     position: 'absolute',
@@ -233,9 +257,9 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     paddingTop: spacing.md,
-    backgroundColor: 'rgba(7,11,40,0.95)',
+    backgroundColor: withAlpha(colors.background, 0.95),
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(255,255,255,0.1)',
+    borderTopColor: colors.borderSoft,
   },
   candidateInfo: { flex: 1 },
 });

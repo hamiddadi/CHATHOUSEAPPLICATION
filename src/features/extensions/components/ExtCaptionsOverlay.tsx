@@ -1,6 +1,7 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import type { CaptionLine } from '../hooks/useExtCaptions';
+import { colors } from '../../../shared/constants/theme';
 
 interface Props {
   lines: CaptionLine[];
@@ -53,7 +54,7 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   row: { flexDirection: 'row', gap: 6, flexWrap: 'wrap' },
-  speaker: { color: '#A0AEC0', fontSize: 12, fontWeight: '600' },
-  text: { color: '#FFFFFF', fontSize: 14, flexShrink: 1 },
+  speaker: { color: colors.textDim, fontSize: 12, fontWeight: '600' },
+  text: { color: colors.text, fontSize: 14, flexShrink: 1 },
   textInterim: { opacity: 0.65, fontStyle: 'italic' },
 });

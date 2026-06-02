@@ -9,6 +9,7 @@ import {
   View,
 } from 'react-native';
 import { clubsListApi, type ClubLite } from '../api/clubsListApi';
+import { colors } from '../../../shared/constants/theme';
 import { ExtBottomSheet } from './ExtBottomSheet';
 
 interface Props {
@@ -120,26 +121,26 @@ const styles = StyleSheet.create({
     maxHeight: '80%',
   },
   loader: { marginVertical: 24 },
-  title: { fontSize: 18, fontWeight: '700', marginTop: 12 },
-  subtitle: { color: '#64748B', marginTop: 2, marginBottom: 8 },
+  title: { fontSize: 18, fontWeight: '700', marginTop: 12, color: colors.text },
+  subtitle: { color: colors.textMuted, marginTop: 2, marginBottom: 8 },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 12,
     gap: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: '#F1F5F9',
+    borderColor: colors.glassStrong,
   },
-  rowActive: { backgroundColor: '#EFF6FF' },
+  rowActive: { backgroundColor: colors.overlayWhite10 },
   icon: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  iconFallback: { backgroundColor: '#1F2937' },
-  iconNone: { backgroundColor: '#E2E8F0' },
-  iconText: { color: '#FFFFFF', fontWeight: '700', fontSize: 16 },
+  iconFallback: { backgroundColor: colors.surfaceHigh },
+  iconNone: { backgroundColor: colors.surfaceHigh },
+  iconText: { color: colors.textMuted, fontWeight: '700', fontSize: 16 },
   body: { flex: 1 },
-  name: { fontSize: 15, fontWeight: '600' },
-  meta: { fontSize: 12, color: '#64748B', marginTop: 1 },
-  check: { fontSize: 18, color: '#2A8BF2', fontWeight: '700' },
-  empty: { textAlign: 'center', color: '#94A3B8', paddingVertical: 24 },
+  name: { fontSize: 15, fontWeight: '600', color: colors.text },
+  meta: { fontSize: 12, color: colors.textMuted, marginTop: 1 },
+  check: { fontSize: 18, color: colors.primary, fontWeight: '700' },
+  empty: { textAlign: 'center', color: colors.textDim, paddingVertical: 24 },
   cancel: { marginTop: 8, paddingVertical: 12, alignItems: 'center' },
-  cancelText: { fontSize: 15, color: '#475569' },
+  cancelText: { fontSize: 15, color: colors.textMuted },
 });

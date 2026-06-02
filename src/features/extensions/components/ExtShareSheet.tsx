@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Linking, Pressable, Share, StyleSheet, Text } from 'react-native';
 import { shareApi, type ShareLinks } from '../api/shareApi';
+import { colors } from '../../../shared/constants/theme';
 import { ExtBottomSheet } from './ExtBottomSheet';
 
 interface Props {
@@ -104,18 +105,25 @@ const styles = StyleSheet.create({
     paddingBottom: 32,
   },
   loader: { marginVertical: 20 },
-  title: { fontSize: 16, fontWeight: '600', marginTop: 12, marginBottom: 12, textAlign: 'center' },
-  error: { color: '#EF4444', textAlign: 'center', marginVertical: 16 },
+  title: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginTop: 12,
+    marginBottom: 12,
+    textAlign: 'center',
+    color: colors.text,
+  },
+  error: { color: colors.danger, textAlign: 'center', marginVertical: 16 },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 14,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderColor: '#F1F5F9',
+    borderColor: colors.glassStrong,
     gap: 12,
   },
   emoji: { fontSize: 20, width: 28, textAlign: 'center' },
-  label: { fontSize: 15 },
+  label: { fontSize: 15, color: colors.text },
   cancel: { marginTop: 12, paddingVertical: 14, alignItems: 'center' },
-  cancelText: { fontSize: 15, color: '#475569' },
+  cancelText: { fontSize: 15, color: colors.textMuted },
 });

@@ -7,7 +7,7 @@ import { useTranslation } from 'react-i18next';
 import { Button } from '../../../../shared/components/Button';
 import { EmptyState } from '../../../../shared/components/EmptyState';
 import { Loader } from '../../../../shared/components/Loader';
-import { colors, spacing } from '../../../../shared/constants/theme';
+import { colors, spacing, radii, fontSizes } from '../../../../shared/constants/theme';
 import { NOTIF_PREF_KEYS, type NotifPrefs } from '../../services/notifPrefsService';
 import { useNotifPrefs, useUpdateNotifPrefs } from '../../hooks/useNotifPrefs';
 
@@ -33,9 +33,9 @@ const PrefRow: React.FC<RowProps> = memo(({ prefKey, label, value, disabled, onT
         accessibilityRole="switch"
         accessibilityLabel={label}
         accessibilityState={{ checked: value, disabled }}
-        trackColor={{ false: 'rgba(255,255,255,0.15)', true: colors.primaryContainer }}
+        trackColor={{ false: colors.overlayWhite15, true: colors.primaryContainer }}
         thumbColor={colors.white}
-        ios_backgroundColor="rgba(255,255,255,0.15)"
+        ios_backgroundColor={colors.overlayWhite15}
       />
     </View>
   );
@@ -112,7 +112,7 @@ export const NotificationSettingsScreen: React.FC = () => {
 const styles = StyleSheet.create({
   subtitle: {
     color: colors.textMuted,
-    fontSize: 13,
+    fontSize: fontSizes.sm,
     lineHeight: 19,
     marginBottom: spacing.sm,
   },
@@ -123,15 +123,15 @@ const styles = StyleSheet.create({
     gap: spacing.md,
     paddingVertical: spacing.md,
     paddingHorizontal: spacing.lg,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderRadius: radii.md,
+    backgroundColor: colors.overlayWhite4,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
+    borderColor: colors.glassStrong,
   },
   rowLabel: {
     flex: 1,
     color: colors.text,
-    fontSize: 14,
+    fontSize: fontSizes.md,
     fontWeight: '600',
   },
 });

@@ -13,7 +13,7 @@ interface UseRoomAudioState {
   status: 'idle' | 'connecting' | 'live' | 'reconnecting' | 'error' | 'unsupported';
   error: string | null;
   /**
-   * Additive convenience flag for UI banners — `true` while the Agora SDK
+   * Additive convenience flag for UI banners — `true` while the LiveKit SDK
    * has lost the link and is auto-retrying (or we're driving a bounded
    * manual rejoin). Equivalent to `status === 'reconnecting'`; exposed as a
    * dedicated boolean so call sites can show a transient bandeau without
@@ -22,10 +22,11 @@ interface UseRoomAudioState {
    */
   reconnecting: boolean;
   /**
-   * Per-user "is currently speaking" flag, driven by Agora's VAD. Self
-   * is keyed under `__self__`. The map shape (instead of a Set) keeps
-   * the existing call sites — `audio.scores.get(userId) ?? 0` — working
-   * unchanged: 0 = silent, 1 = speaking.
+   * Per-user "is currently speaking" flag, driven by LiveKit's
+   * ActiveSpeakersChanged. Self is keyed under `__self__`. The map shape
+   * (instead of a Set) keeps the existing call sites —
+   * `audio.scores.get(userId) ?? 0` — working unchanged:
+   * 0 = silent, 1 = speaking.
    */
   scores: ReadonlyMap<string, number>;
   setMuted: (muted: boolean) => Promise<void>;
@@ -35,10 +36,11 @@ interface UseRoomAudioState {
 const SELF_KEY = '__self__';
 
 /**
- * Threshold against the `scores` map. With the Agora VAD-backed
- * implementation the values are effectively 0 or 1 (we feed the VAD
- * bit through), so any threshold in (0, 1] works. Kept exported for
- * call-site stability — RoomScreen reads it to compute `isSpeakingLive`.
+ * Threshold against the `scores` map. With the LiveKit
+ * ActiveSpeakersChanged-backed implementation the values are effectively
+ * 0 or 1 (we feed the isSpeaking bit through), so any threshold in
+ * (0, 1] works. Kept exported for call-site stability — RoomScreen
+ * reads it to compute `isSpeakingLive`.
  */
 export const SPEAKING_SCORE_THRESHOLD = 0.5;
 
@@ -93,8 +95,8 @@ export const useRoomAudio = ({
             });
           },
           onStatusChange: next => {
-            // Connection-health transitions from the Agora SDK. Only ever
-            // fires once the channel exists (never on the unsupported path),
+            // Connection-health transitions from the LiveKit SDK. Only ever
+            // fires once the room is connected (never on the unsupported path),
             // so it's safe to map straight onto the hook's status:
             //   connected           → 'live'  (audio flowing again)
             //   reconnecting/failed  → 'reconnecting'  (service auto-rejoins
@@ -122,8 +124,8 @@ export const useRoomAudio = ({
         const msg = errorMessage(err, 'unknown');
         // The "native module missing" sentinel — surfaces as
         // `unsupported` so the UI can show a "audio à venir — installer
-        // react-native-agora" banner instead of a hard error toast.
-        if (msg.includes('react-native-agora not installed')) {
+        // @livekit/react-native" banner instead of a hard error toast.
+        if (msg.includes('@livekit/react-native not installed')) {
           setStatus('unsupported');
         } else if (msg.includes('mic permission denied')) {
           setStatus('error');

@@ -1,6 +1,7 @@
 import React, { memo, useCallback, useMemo, useState } from 'react';
 import { FlatList, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
+import { useTranslation } from 'react-i18next';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -135,6 +136,7 @@ interface RoomCardProps {
 }
 
 const RoomCard: React.FC<RoomCardProps> = memo(({ room, onJoin }) => {
+  const { t } = useTranslation();
   const { animatedStyle, onPressIn, onPressOut } = useAnimatedPress({ scaleTo: 0.96 });
   const handleJoin = useCallback(() => onJoin(room.id), [onJoin, room.id]);
   const colorClass = CATEGORY_COLOR_CLASS[room.category] ?? 'text-primary';
@@ -151,7 +153,7 @@ const RoomCard: React.FC<RoomCardProps> = memo(({ room, onJoin }) => {
             </View>
             {room.houseName && (
               <Text className="text-xs font-body-medium text-ink-muted" numberOfLines={1}>
-                Inside {room.houseName}
+                {t('feed.insideHouse', 'Inside {{houseName}}', { houseName: room.houseName })}
               </Text>
             )}
           </View>
@@ -165,23 +167,23 @@ const RoomCard: React.FC<RoomCardProps> = memo(({ room, onJoin }) => {
             <View className="flex-row items-center gap-xs">
               <Text className="text-xs">🎙️</Text>
               <Text className="text-xs font-body-medium text-ink-dim">
-                {room.speakersCount} speakers
+                {t('feed.speakersCount', '{{count}} speakers', { count: room.speakersCount })}
               </Text>
             </View>
-            <Text className="text-xs text-ink-dim opacity-50">·</Text>
+            <Text className="text-xs text-ink-muted">·</Text>
             <View className="flex-row items-center gap-xs">
               <Text className="text-xs">👂</Text>
               <Text className="text-xs font-body text-ink-muted">
-                {room.listenersCount} listeners
+                {t('feed.listenersCount', '{{count}} listeners', { count: room.listenersCount })}
               </Text>
             </View>
             {typeof room.participantCount === 'number' && (
               <>
-                <Text className="text-xs text-ink-dim opacity-50">·</Text>
+                <Text className="text-xs text-ink-muted">·</Text>
                 <View className="flex-row items-center gap-xs">
                   <Text className="text-xs">👥</Text>
                   <Text className="text-xs font-body text-ink-muted">
-                    {room.participantCount} in room
+                    {t('feed.inRoom', '{{count}} in room', { count: room.participantCount })}
                   </Text>
                 </View>
               </>
@@ -197,7 +199,9 @@ const RoomCard: React.FC<RoomCardProps> = memo(({ room, onJoin }) => {
               accessibilityLabel={`Join room: ${room.title}`}
               className="bg-primary rounded-pill px-xxl py-sm items-center justify-center ml-md"
             >
-              <Text className="text-sm font-display text-primary-on-container">Join</Text>
+              <Text className="text-sm font-display text-primary-on-container">
+                {t('feed.join', 'Join')}
+              </Text>
             </Pressable>
           </Animated.View>
         </View>
@@ -248,6 +252,7 @@ interface UpcomingRowProps {
 
 const UpcomingRoomCard: React.FC<{ room: RoomSummary; onOpen: (roomId: string) => void }> = memo(
   ({ room, onOpen }) => {
+    const { t } = useTranslation();
     const handlePress = useCallback(() => onOpen(room.id), [onOpen, room.id]);
     return (
       <Pressable
@@ -268,7 +273,7 @@ const UpcomingRoomCard: React.FC<{ room: RoomSummary; onOpen: (roomId: string) =
         </Text>
         {room.houseName ? (
           <Text className="text-xxs font-body-medium text-ink-muted" numberOfLines={1}>
-            Inside {room.houseName}
+            {t('feed.insideHouse', 'Inside {{houseName}}', { houseName: room.houseName })}
           </Text>
         ) : null}
       </Pressable>
@@ -278,47 +283,55 @@ const UpcomingRoomCard: React.FC<{ room: RoomSummary; onOpen: (roomId: string) =
 UpcomingRoomCard.displayName = 'UpcomingRoomCard';
 
 const UpcomingRow: React.FC<UpcomingRowProps> = memo(({ rooms, onOpen }) => {
+  const { t } = useTranslation();
   if (rooms.length === 0) return null;
   return (
     <View className="gap-md">
-      <Text className="text-xl font-headline text-ink tracking-tight">Upcoming</Text>
-      <ScrollView
+      <Text className="text-xl font-headline text-ink tracking-tight">
+        {t('feed.upcoming', 'Upcoming')}
+      </Text>
+      <FlatList
         horizontal
         showsHorizontalScrollIndicator={false}
+        data={rooms}
+        keyExtractor={r => r.id}
+        renderItem={({ item }) => <UpcomingRoomCard room={item} onOpen={onOpen} />}
         contentContainerStyle={styles.upcomingRow}
-      >
-        {rooms.map(r => (
-          <UpcomingRoomCard key={r.id} room={r} onOpen={onOpen} />
-        ))}
-      </ScrollView>
+      />
     </View>
   );
 });
 UpcomingRow.displayName = 'UpcomingRow';
 
 const Header: React.FC<HeaderProps> = memo(
-  ({ onSearch, onEvents, onNotifications, unreadCount }) => (
-    <View className="flex-row items-center justify-between px-xxl py-lg">
-      <View className="flex-row items-center gap-sm">
-        <MaterialIcons name="graphic-eq" size={HEADER_ICON_SIZE} color={colors.primary} />
-        <Text className="text-xxl font-display text-primary tracking-tighter">Chathouse</Text>
+  ({ onSearch, onEvents, onNotifications, unreadCount }) => {
+    const { t } = useTranslation();
+    return (
+      <View className="flex-row items-center justify-between px-xxl py-lg">
+        <View className="flex-row items-center gap-sm">
+          <MaterialIcons name="graphic-eq" size={HEADER_ICON_SIZE} color={colors.primary} />
+          <Text className="text-xxl font-display text-primary tracking-tighter">
+            {t('common.appName', 'Chathouse')}
+          </Text>
+        </View>
+        <View className="flex-row items-center gap-sm">
+          <HeaderIcon name="search" label={t('feed.exploreA11y', 'Explore')} onPress={onSearch} />
+          <HeaderIcon name="event" label={t('feed.eventsA11y', 'Events')} onPress={onEvents} />
+          <HeaderIcon
+            name="notifications"
+            label={t('feed.notificationsA11y', 'Notifications')}
+            onPress={onNotifications}
+            badge={unreadCount}
+          />
+        </View>
       </View>
-      <View className="flex-row items-center gap-sm">
-        <HeaderIcon name="search" label="Explore" onPress={onSearch} />
-        <HeaderIcon name="event" label="Events" onPress={onEvents} />
-        <HeaderIcon
-          name="notifications"
-          label="Notifications"
-          onPress={onNotifications}
-          badge={unreadCount}
-        />
-      </View>
-    </View>
-  ),
+    );
+  },
 );
 Header.displayName = 'Header';
 
 export const RoomFeedScreen: React.FC = () => {
+  const { t } = useTranslation();
   const navigation = useNavigation<Nav>();
   const insets = useSafeAreaInsets();
   const [activeFilter, setActiveFilter] = useState<Filter>('All');
@@ -368,8 +381,8 @@ export const RoomFeedScreen: React.FC = () => {
         <RoomFeedSkeleton />
       ) : isError ? (
         <EmptyState
-          title="Couldn't load rooms"
-          description="Check your connection and try again."
+          title={t('feed.couldNotLoad', "Couldn't load rooms")}
+          description={t('feed.checkConnection', 'Check your connection and try again.')}
         />
       ) : (
         <FlatList
@@ -396,7 +409,9 @@ export const RoomFeedScreen: React.FC = () => {
                 ))}
               </View>
               <UpcomingRow rooms={upcoming} onOpen={handleJoin} />
-              <Text className="text-xl font-headline text-ink tracking-tight">Live Now</Text>
+              <Text className="text-xl font-headline text-ink tracking-tight">
+                {t('feed.liveNow', 'Live Now')}
+              </Text>
             </View>
           }
           showsVerticalScrollIndicator={false}
@@ -416,8 +431,8 @@ export const RoomFeedScreen: React.FC = () => {
           onPressIn={fab.onPressIn}
           onPressOut={fab.onPressOut}
           accessibilityRole="button"
-          accessibilityLabel="Start a new room"
-          accessibilityHint="Opens the room creation modal"
+          accessibilityLabel={t('feed.startNewA11y', 'Start a new room')}
+          accessibilityHint={t('feed.startNewHint', 'Opens the room creation modal')}
           className="w-16 h-16 rounded-pill bg-primary items-center justify-center shadow-glow-primary"
         >
           <MaterialIcons name="add" size={FAB_ICON_SIZE} color={colors.onPrimary} />
@@ -438,7 +453,7 @@ const styles = StyleSheet.create({
   participantsDivider: {
     width: StyleSheet.hairlineWidth,
     height: 20,
-    backgroundColor: 'rgba(255,255,255,0.15)',
+    backgroundColor: colors.overlayWhite15,
     marginHorizontal: spacing.sm,
     marginTop: (SPEAKER_AVATAR_SIZE - 20) / 2,
   },

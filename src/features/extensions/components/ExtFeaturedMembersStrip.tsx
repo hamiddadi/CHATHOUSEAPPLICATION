@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { FlatList, Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { clubMetaApi, type ClubMeta } from '../api/clubMetaApi';
+import { colors } from '../../../shared/constants/theme';
 
 interface Props {
   clubId: string;
@@ -71,12 +72,16 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     paddingHorizontal: 16,
     marginBottom: 8,
-    color: '#475569',
+    color: colors.textMuted,
   },
   row: { paddingHorizontal: 12, gap: 12 },
   card: { width: 72, alignItems: 'center' },
   avatar: { width: 56, height: 56, borderRadius: 28 },
-  avatarFallback: { backgroundColor: '#E2E8F0', alignItems: 'center', justifyContent: 'center' },
-  avatarText: { color: '#475569', fontWeight: '700', fontSize: 20 },
-  name: { fontSize: 11, marginTop: 6, color: '#0F172A', maxWidth: 70, textAlign: 'center' },
+  avatarFallback: {
+    backgroundColor: colors.surfaceHigh,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarText: { color: colors.textMuted, fontWeight: '700', fontSize: 20 },
+  name: { fontSize: 11, marginTop: 6, color: colors.text, maxWidth: 70, textAlign: 'center' },
 });

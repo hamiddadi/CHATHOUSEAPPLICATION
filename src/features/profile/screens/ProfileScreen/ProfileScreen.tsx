@@ -209,7 +209,6 @@ export const ProfileScreen: React.FC = () => {
 
   const bio = user.bio ?? '';
   const isBioLong = bio.length > BIO_TRUNCATE_LENGTH;
-  const displayBio = bioExpanded || !isBioLong ? bio : `${bio.slice(0, BIO_TRUNCATE_LENGTH)}...`;
 
   return (
     <View className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
@@ -241,7 +240,6 @@ export const ProfileScreen: React.FC = () => {
             invitedByUsername={user.invitedBy?.username}
             isOnline={user.isOnline}
             bio={bio}
-            displayBio={displayBio}
             isBioLong={isBioLong}
             bioExpanded={bioExpanded}
             twitter={user.twitter}

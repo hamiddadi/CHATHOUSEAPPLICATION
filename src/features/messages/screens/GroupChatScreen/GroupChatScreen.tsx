@@ -73,6 +73,10 @@ export const GroupChatScreen: React.FC = () => {
     return map;
   }, [group?.members]);
 
+  // Reversed for the `inverted` FlatList — newest at index 0 (visual bottom),
+  // so new messages pin to the bottom without an onContentSizeChange→scrollToEnd hack.
+  const data = useMemo(() => [...(messages ?? [])].reverse(), [messages]);
+
   const handleSend = useCallback(() => {
     const text = draft.trim();
     if (text.length === 0) return;
@@ -125,7 +129,7 @@ export const GroupChatScreen: React.FC = () => {
 
   return (
     <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       className="flex-1 bg-background"
       style={{ paddingTop: insets.top }}
     >
@@ -159,11 +163,11 @@ export const GroupChatScreen: React.FC = () => {
       ) : (
         <FlatList
           ref={listRef}
-          data={messages ?? []}
+          data={data}
           renderItem={renderItem}
           keyExtractor={item => item.id}
+          inverted
           contentContainerStyle={{ paddingVertical: spacing.md }}
-          onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
           showsVerticalScrollIndicator={false}
         />
       )}

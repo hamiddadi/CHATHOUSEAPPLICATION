@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { ActivityIndicator, Linking, Pressable, StyleSheet, Text } from 'react-native';
 import { calendarApi } from '../api/calendarApi';
+import { colors } from '../../../shared/constants/theme';
 
 interface Props {
   roomId: string;
@@ -35,7 +36,7 @@ export const ExtCalendarExportButton: React.FC<Props> = ({ roomId, label = 'Add 
       disabled={busy}
     >
       {busy ? (
-        <ActivityIndicator color="#FFFFFF" />
+        <ActivityIndicator color={colors.onPrimary} />
       ) : (
         <>
           <Text style={styles.emoji}>📅</Text>
@@ -53,9 +54,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 10,
     borderRadius: 22,
-    backgroundColor: '#1F2937',
+    backgroundColor: colors.primary,
     gap: 8,
   },
   emoji: { fontSize: 16 },
-  text: { color: '#FFFFFF', fontWeight: '600', fontSize: 13 },
+  text: { color: colors.onPrimary, fontWeight: '600', fontSize: 13 },
 });

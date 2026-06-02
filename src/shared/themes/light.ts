@@ -92,6 +92,7 @@ const lightColors = {
   overlayWhite7: 'rgba(15, 23, 42, 0.07)',
   overlayWhite10: 'rgba(15, 23, 42, 0.10)',
   overlayWhite12: 'rgba(15, 23, 42, 0.12)',
+  overlayWhite15: 'rgba(15, 23, 42, 0.15)',
   overlayWhite20: 'rgba(15, 23, 42, 0.20)',
   overlayWhite30: 'rgba(15, 23, 42, 0.30)',
   overlayWhite70: 'rgba(15, 23, 42, 0.70)',

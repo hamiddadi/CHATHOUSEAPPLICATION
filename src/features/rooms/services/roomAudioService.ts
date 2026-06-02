@@ -2,63 +2,59 @@
  * roomAudioService — WebRTC audio backend for Chathouse rooms.
  *
  * This file is the SINGLE seam between the audio engine and the rest of
- * the app. The engine of record is **Agora** (`react-native-agora`); the
- * mediasoup pipeline that lived here previously was retired in favour of
- * a managed SFU. The contract — `startRoomAudio({ socket, roomId })`
+ * the app. The engine of record is **LiveKit** (`@livekit/react-native`);
+ * the Agora pipeline that lived here previously was retired in favour of
+ * an open-source self-hosted SFU. The contract — `startRoomAudio({ socket, roomId })`
  * returning a `RoomAudioHandle` — is preserved verbatim, so `useRoomAudio`,
  * RoomScreen, HostActionsSheet, RoomChatSidebar, ReactionsBar, etc. keep
  * working without a single line changed.
  *
- * Why preserve the socket parameter when Agora handles its own signaling?
+ * Why preserve the socket parameter when LiveKit handles its own signaling?
  *   - The socket is still the source of truth for ROLE state (HOST /
  *     MODERATOR / SPEAKER / LISTENER). We listen for `room:role_changed`
- *     to flip the Agora client role without re-joining.
- *   - Agora UIDs are integers; our app users are CUIDs. We deterministically
- *     hash the CUID to a uint32 so every device picks the same UID for
- *     a given user — this lets us correlate Agora's `onUserJoined(uid)`
- *     with the userId we already track via `room:participants`.
+ *     to reconnect with a new token if the role changes (canPublish flip).
+ *   - LiveKit uses string identities — our userId maps directly as the
+ *     participant identity, no hashing needed.
  */
 
 import type { Socket } from 'socket.io-client';
-import { env } from '../../../config/env';
 import { useAuthStore } from '../../auth/store/authStore';
+import { useCurrentRoomStore } from '../store/currentRoomStore';
 import { requestAudioPermission } from '../../../shared/utils/permissions';
 import { roomService } from './roomService';
 import {
-  AGORA_UNAVAILABLE_SENTINEL,
-  initAgora,
-  joinAgoraChannel,
-  leaveAgoraChannel,
-  mapAgoraConnectionState,
-  registerAgoraHandlers,
-  releaseAgora,
-  renewAgoraToken,
-  setAgoraMuted,
-  setAgoraRole,
-  type AgoraEventHandlers,
-} from './agora/AgoraEngine';
+  LIVEKIT_UNAVAILABLE_SENTINEL,
+  createLiveKitRoom,
+  connectLiveKitRoom,
+  disconnectLiveKitRoom,
+  getLiveKitEvents,
+  mapLiveKitConnectionState,
+  setLiveKitMuted,
+  type LiveKitRoom,
+  type LiveKitParticipant,
+} from './livekit/LiveKitEngine';
 
 // Re-exported for `useRoomAudio` to detect the "missing native module" path.
-export const SKELETON_SENTINEL = AGORA_UNAVAILABLE_SENTINEL;
+export const SKELETON_SENTINEL = LIVEKIT_UNAVAILABLE_SENTINEL;
 
 export interface PeerInfo {
   userId: string;
-  /** Agora's volume metric: 0..255 (255 = loudest). */
+  /** Normalised volume: 0..1. */
   volume?: number;
   /** Voice-Activity-Detection: 1 when the speaker is actually speaking. */
   vad?: 0 | 1;
-  /** Internal — Agora UID, kept for debug. */
-  agoraUid?: number;
 }
 
 export interface RoomAudioHandle {
-  /** Stop producing + leave the Agora channel. */
+  /** Stop producing + leave the LiveKit room. */
   close: () => Promise<void>;
   /** Mute or unmute the local mic. */
   setMuted: (muted: boolean) => Promise<void>;
   /**
-   * Per-peer volume control. react-native-agora exposes
-   * `adjustUserPlaybackSignalVolume(uid, volume 0..100)` — we wrap that.
+   * Per-peer volume control. LiveKit doesn't expose a per-peer playback
+   * volume API at the SDK level — this is a no-op placeholder for API
+   * compatibility. Individual track volume can be controlled at the
+   * native player level if needed in the future.
    */
   setPeerVolume: (userId: string, volume: number) => void;
   /** Update the local client role mid-session (host promote/demote). */
@@ -69,17 +65,17 @@ export interface RoomAudioHandle {
 
 export interface AudioLevelEvent {
   userId: string;
-  /** Normalised 0..1 volume. We map Agora's 0..255 by dividing by 255. */
+  /** Normalised 0..1 volume. */
   volume: number;
-  /** True when Agora's VAD detected speech in the last window. */
+  /** True when the participant is actively speaking. */
   speaking: boolean;
 }
 
 /**
- * Live connection status of the underlying Agora channel, derived from the
- * SDK's `onConnectionStateChanged` callback. The hook maps this onto its
- * own `status` field so a UI banner can show a "reconnecting…" state:
- *   - `connected`     → channel is up, audio flowing
+ * Live connection status of the underlying LiveKit room, derived from the
+ * SDK's connection state. The hook maps this onto its own `status` field
+ * so a UI banner can show a "reconnecting…" state:
+ *   - `connected`     → room is up, audio flowing
  *   - `reconnecting`  → SDK lost the link and is auto-retrying (transient)
  *   - `failed`        → SDK gave up; we kick a bounded manual rejoin
  */
@@ -88,7 +84,7 @@ export type AudioConnectionStatus = 'connected' | 'reconnecting' | 'failed';
 interface StartOptions {
   socket: Socket;
   roomId: string;
-  /** Triggered when a remote user joins the channel. */
+  /** Triggered when a remote user joins the room. */
   onPeerJoined?: (info: PeerInfo) => void;
   /** Triggered when a remote user leaves. */
   onPeerGone?: (userId: string) => void;
@@ -97,54 +93,12 @@ interface StartOptions {
   /** Per-peer audio level — drives the "who's speaking" UI. */
   onPeerScore?: (event: AudioLevelEvent) => void;
   /**
-   * Connection-state transitions from the Agora SDK. Optional — when the
+   * Connection-state transitions from the LiveKit SDK. Optional — when the
    * native module is absent (Expo Go) this never fires, so the unsupported
    * path stays a no-op.
    */
   onStatusChange?: (status: AudioConnectionStatus) => void;
 }
-
-/**
- * Deterministic CUID → uint32 hash. FNV-1a over the cuid bytes; collisions
- * are theoretically possible but vanishingly unlikely at room scale (a
- * room with 1k speakers = ~1.2e-4 birthday collision probability). The
- * server can disambiguate via the `userId ↔ agoraUid` mapping it tracks
- * if we ever issue tokens server-side.
- */
-const cuidToAgoraUid = (cuid: string): number => {
-  let hash = 0x811c9dc5; // FNV-1a 32-bit offset basis
-  for (let i = 0; i < cuid.length; i++) {
-    hash ^= cuid.charCodeAt(i);
-    // 32-bit FNV prime multiply. MUST use Math.imul (32-bit integer multiply),
-    // NOT `*`: the float product of `hash * 0x01000193` exceeds 2^53 and loses
-    // low bits before `>>> 0`, diverging from the backend hash
-    // (agora.service.ts uses Math.imul). Any drift breaks the agoraUid ↔ userId
-    // correlation and kills the remote-speaker indicator.
-    hash = Math.imul(hash, 0x01000193) >>> 0;
-  }
-  // Agora's UID range is 1..2^32-1; 0 is reserved for "auto-assign".
-  return hash === 0 ? 1 : hash;
-};
-
-/**
- * Reverse map populated during the session — every time we discover an
- * Agora UID via onUserJoined we'll associate it back to a Chathouse
- * userId via the room:user-joined socket events. Until we see the
- * matching socket event, the peer is keyed by `agora-<uid>` (so the UI
- * still shows them as a generic listener).
- */
-const buildBindings = () => {
-  const uidToUserId = new Map<number, string>();
-  const userIdToUid = new Map<string, number>();
-  return {
-    bind: (uid: number, userId: string) => {
-      uidToUserId.set(uid, userId);
-      userIdToUid.set(userId, uid);
-    },
-    userIdFor: (uid: number) => uidToUserId.get(uid) ?? `agora-${uid}`,
-    uidFor: (userId: string) => userIdToUid.get(userId),
-  };
-};
 
 /**
  * Start participating in a room's audio. Returns a handle the
@@ -159,35 +113,38 @@ export const startRoomAudio = async ({
   onPeerScore,
   onStatusChange,
 }: StartOptions): Promise<RoomAudioHandle> => {
-  // Mic permission — Agora's joinChannel will fail silently on Android
-  // without RECORD_AUDIO. iOS prompts at first capture.
+  // Mic permission — LiveKit's connect will fail without RECORD_AUDIO
+  // on Android. iOS prompts at first capture.
   const granted = await requestAudioPermission();
   if (!granted) throw new Error('mic permission denied');
 
-  // Boot the engine (lazy). Throws SKELETON_SENTINEL when
-  // `react-native-agora` isn't installed (Expo Go) — useRoomAudio
+  // Create a new LiveKit Room instance. Throws SKELETON_SENTINEL when
+  // `@livekit/react-native` isn't installed (Expo Go) — useRoomAudio
   // catches that and surfaces `status: 'unsupported'`.
-  await initAgora();
+  let room: LiveKitRoom;
+  try {
+    room = createLiveKitRoom();
+  } catch (e) {
+    throw e;
+  }
 
-  // Resolve the local user. We need their CUID so we can hash to Agora UID.
+  const events = getLiveKitEvents();
+
+  // Resolve the local user. We need their userId for identity matching.
   const me = useAuthStore.getState().user;
   if (!me?.id) throw new Error('user not authenticated');
-  const myUid = cuidToAgoraUid(me.id);
 
   // Determine initial role from the participant list embedded in the
   // socket "room:participants" event we'll receive on join. Until that
   // arrives, default to audience — the server will broadcast role_changed
-  // if we're actually a speaker. This is safer than guessing host (which
-  // would let listeners broadcast for a few hundred ms).
+  // if we're actually a speaker.
   let currentRole: 'host' | 'audience' = 'audience';
 
   const peers = new Map<string, PeerInfo>();
-  const bindings = buildBindings();
-  bindings.bind(myUid, me.id);
 
-  const emitJoin = (userId: string, agoraUid: number): void => {
+  const emitJoin = (userId: string): void => {
     if (peers.has(userId)) return;
-    const info: PeerInfo = { userId, agoraUid };
+    const info: PeerInfo = { userId };
     peers.set(userId, info);
     onPeerJoined?.(info);
   };
@@ -198,109 +155,68 @@ export const startRoomAudio = async ({
   };
 
   // ─── Token policy ─────────────────────────────────────────────────
-  // Try the backend signing endpoint first (per-room, per-role token).
-  // Fall back to env.AGORA_TEMP_TOKEN ONLY when the backend isn't
-  // configured (503 AGORA_001). The backend path uses channel = roomId
-  // for full acoustic isolation; the env fallback is signed for the
-  // shared CHATHOUSE channel and forces the same channel here too —
-  // dev rooms then bleed into one Agora bus, but the surrounding UI
-  // keeps each Chathouse room separate via its own Participant model.
+  // Fetch a signed LiveKit token from the backend (room = roomId,
+  // identity = userId, canPublish based on role).
   const fetchToken = async (): Promise<{
-    token: string | null;
-    channel: string;
-    uid: number;
+    token: string;
+    url: string;
+    canPublish: boolean;
     expiresAtMs: number | null;
   }> => {
-    try {
-      const r = await roomService.getAgoraToken(roomId);
-      return {
-        token: r.token,
-        channel: r.channel,
-        uid: r.uid,
-        expiresAtMs: new Date(r.expiresAt).getTime(),
-      };
-    } catch {
-      // Dev fallback — signed temp token from .env. Channel must be the
-      // one the token was generated for, not roomId.
-      return {
-        token: env.AGORA_TEMP_TOKEN ?? null,
-        channel: env.AGORA_DEFAULT_CHANNEL,
-        uid: myUid,
-        expiresAtMs: null, // we don't know when the env token expires
-      };
-    }
+    const r = await roomService.getLivekitToken(roomId);
+    return {
+      token: r.token,
+      url: r.url,
+      canPublish: r.canPublish,
+      expiresAtMs: new Date(r.expiresAt).getTime(),
+    };
   };
 
-  // ─── Agora event handlers ─────────────────────────────────────────
-  let renewTimer: ReturnType<typeof setTimeout> | null = null;
-
   // ─── Auto-reconnect state ─────────────────────────────────────────
-  // The Agora SDK retries transient drops on its own (state RECONNECTING);
-  // we only step in when it reports FAILED (or a lingering DISCONNECTED),
-  // which means it has given up. The manual recovery is:
-  //   1) re-fetch a fresh Agora token (the old one may have expired or
-  //      been revoked, which is a common cause of a hard failure),
-  //   2) re-join the channel with the role we currently hold.
-  // Guards keep this from degenerating into a tight loop:
-  //   - `closed`        — set by close(); every async step bails on it so
-  //                       a rejoin scheduled just before teardown is inert.
-  //   - `rejoinInFlight`— idempotency latch: only one rejoin attempt runs
-  //                       at a time, so a burst of FAILED callbacks (the
-  //                       SDK can fire several) collapses into one attempt.
-  //   - `rejoinAttempts`— bounded retry budget; once exhausted we stop and
-  //                       leave the channel in `failed` so the UI shows the
-  //                       error banner rather than spinning forever.
-  //   - back-off timer  — spaces successive attempts (2s · 4s · 8s …) to
-  //                       avoid hammering the token endpoint / Agora edge.
+  // LiveKit handles most reconnection internally. We add a manual
+  // rejoin layer for hard failures (token expired, server restart).
   const MAX_REJOIN_ATTEMPTS = 5;
   let closed = false;
   let rejoinInFlight = false;
   let rejoinAttempts = 0;
   let rejoinTimer: ReturnType<typeof setTimeout> | null = null;
-
-  // Tracks the last semantic state we surfaced so we don't spam the
-  // callback (the SDK can report the same state repeatedly) and so a
-  // successful (re)connect resets the retry budget exactly once.
+  let renewTimer: ReturnType<typeof setTimeout> | null = null;
   let lastStatus: AudioConnectionStatus | null = null;
 
   const scheduleRenewal = (expiresAtMs: number | null): void => {
     if (renewTimer) clearTimeout(renewTimer);
-    if (!expiresAtMs) return; // env fallback — no scheduled renewal possible
-    // Renew 30s before expiry. If the token is shorter than 60s (test
-    // accidents), renew at the half-way mark to leave a margin.
+    if (!expiresAtMs) return;
     const msUntilExpiry = expiresAtMs - Date.now();
     const lead = msUntilExpiry > 60_000 ? 30_000 : Math.max(5_000, msUntilExpiry / 2);
     const delay = Math.max(0, msUntilExpiry - lead);
     renewTimer = setTimeout(() => {
       void (async () => {
         try {
+          if (closed) return;
+          // For LiveKit, token renewal requires a reconnect with the
+          // new token. We disconnect and reconnect.
           const next = await fetchToken();
-          if (next.token) {
-            await renewAgoraToken(next.token);
-            scheduleRenewal(next.expiresAtMs);
+          if (closed) return;
+          disconnectLiveKitRoom(room);
+          await connectLiveKitRoom(room, next.url, next.token);
+          scheduleRenewal(next.expiresAtMs);
+          if (next.canPublish) {
+            const isMuted = useCurrentRoomStore.getState().isMuted;
+            await setLiveKitMuted(room, isMuted);
           }
         } catch {
-          // Renewal failed — Agora will fire onTokenPrivilegeWillExpire
-          // again on its own as a safety net.
+          // Renewal failed — LiveKit will eventually disconnect and
+          // the reconnection handler will kick in.
         }
       })();
     }, delay);
   };
 
-  // Re-run the join pipeline (fresh token → joinAgoraChannel) after a hard
-  // failure. Idempotent and bounded — see the guard comments above. Safe
-  // on the unsupported path: it's only ever reached from the SDK callback,
-  // which never fires when the native module is absent.
   const attemptRejoin = (): void => {
     if (closed || rejoinInFlight) return;
-    if (rejoinAttempts >= MAX_REJOIN_ATTEMPTS) {
-      // Budget exhausted — leave the channel in `failed`; the hook keeps
-      // the error/reconnecting banner up and the next screen mount retries.
-      return;
-    }
+    if (rejoinAttempts >= MAX_REJOIN_ATTEMPTS) return;
     rejoinInFlight = true;
     rejoinAttempts += 1;
-    // Exponential back-off, capped at 30s: 2s, 4s, 8s, 16s, 30s.
     const backoff = Math.min(30_000, 2_000 * 2 ** (rejoinAttempts - 1));
     if (rejoinTimer) clearTimeout(rejoinTimer);
     rejoinTimer = setTimeout(() => {
@@ -309,20 +225,15 @@ export const startRoomAudio = async ({
           if (closed) return;
           const next = await fetchToken();
           if (closed) return;
-          await joinAgoraChannel({
-            channelName: next.channel,
-            uid: next.uid,
-            role: currentRole,
-            token: next.token,
-          });
-          // Reschedule token renewal against the freshly-fetched token.
+          await connectLiveKitRoom(room, next.url, next.token);
           scheduleRenewal(next.expiresAtMs);
-          // We don't flip to 'connected' here — the SDK will emit a
-          // CONNECTED state change once the rejoin actually lands, which
-          // resets the retry budget through the normal status path.
+          if (next.canPublish) {
+            const isMuted = useCurrentRoomStore.getState().isMuted;
+            await setLiveKitMuted(room, isMuted);
+          }
         } catch {
-          // This attempt failed; if the SDK fires FAILED again we'll get
-          // another shot until the budget runs out.
+          // This attempt failed; if the SDK fires Disconnected again
+          // we'll get another shot until the budget runs out.
         } finally {
           rejoinInFlight = false;
         }
@@ -330,107 +241,113 @@ export const startRoomAudio = async ({
     }, backoff);
   };
 
-  const handlers: AgoraEventHandlers = {
-    onJoinChannelSuccess: () => {
-      // No-op — the hook flips status to 'live' on its own when start()
-      // resolves; this handler is here for diagnostics only.
-    },
-    onConnectionStateChanged: (_conn, state) => {
-      // The single seam for connection health. We collapse Agora's 5-state
-      // enum onto our 3-state model, surface every distinct transition to
-      // the hook (for the UI banner), and on a hard `failed` kick the
-      // bounded manual rejoin. Inert on the unsupported path — never fires
-      // without the native module.
-      const status = mapAgoraConnectionState(state);
-      if (status !== lastStatus) {
-        lastStatus = status;
-        onStatusChange?.(status);
-      }
-      if (status === 'connected') {
-        // A good connection clears any pending rejoin and resets the budget
-        // so a *future*, unrelated drop gets its own full retry allowance.
-        if (rejoinTimer) {
-          clearTimeout(rejoinTimer);
-          rejoinTimer = null;
-        }
-        rejoinAttempts = 0;
-        return;
-      }
-      if (status === 'failed') {
-        attemptRejoin();
-      }
-      // 'reconnecting' → do nothing; the SDK is auto-retrying. The status
-      // callback above already let the UI raise a "reconnecting…" banner.
-    },
-    onUserJoined: (_conn, remoteUid) => {
-      const userId = bindings.userIdFor(remoteUid);
-      bindings.bind(remoteUid, userId);
-      emitJoin(userId, remoteUid);
-    },
-    onUserOffline: (_conn, remoteUid) => {
-      const userId = bindings.userIdFor(remoteUid);
-      emitLeave(userId);
-    },
-    onTokenPrivilegeWillExpire: () => {
-      // Server's safety-net: if our scheduled renewal timer was killed
-      // (app backgrounded, JS thread blocked), the SDK fires this 30s
-      // before the actual cutoff. We fetch + renew right here.
-      void (async () => {
-        try {
-          const next = await fetchToken();
-          if (next.token) {
-            await renewAgoraToken(next.token);
-            scheduleRenewal(next.expiresAtMs);
-          }
-        } catch {
-          /* no-op — channel will eventually drop and the hook will retry */
-        }
-      })();
-    },
-    onAudioVolumeIndication: (_conn, speakers) => {
-      // Agora reports volumes 0..255 + a VAD bit per speaker. We
-      // normalise and split: the local user is reported with uid=0,
-      // remote users with their actual uid.
-      for (const s of speakers) {
-        const isLocal = s.uid === 0 || s.uid === myUid;
-        const volumeNorm = s.volume / 255;
-        if (isLocal) {
-          onLocalScore?.(volumeNorm);
-          continue;
-        }
-        const userId = bindings.userIdFor(s.uid);
-        const peer = peers.get(userId);
-        if (peer) {
-          peer.volume = s.volume;
-          peer.vad = s.vad === 1 ? 1 : 0;
-        }
-        onPeerScore?.({
-          userId,
-          volume: volumeNorm,
-          speaking: s.vad === 1,
-        });
-      }
-    },
-    onError: () => {
-      // Surfaced via the engine instance state; the hook will time out
-      // its `connecting` state and retry next mount.
-    },
-  };
-  const unregister = registerAgoraHandlers(handlers);
+  // ─── LiveKit event handlers ───────────────────────────────────────
 
-  // ─── Socket bindings — keep userId↔agoraUid consistent ───────────
-  // When the server announces a user's join/role, we pre-populate the
-  // mapping so by the time Agora's onUserJoined fires we already know
-  // who they are. The channel name is the room id (no shared CHATHOUSE
-  // pool — that was a dev shortcut).
+  const handleParticipantConnected = (participant: LiveKitParticipant): void => {
+    emitJoin(participant.identity);
+  };
+
+  const handleParticipantDisconnected = (participant: LiveKitParticipant): void => {
+    emitLeave(participant.identity);
+  };
+
+  const handleActiveSpeakersChanged = (speakers: LiveKitParticipant[]): void => {
+    // LiveKit provides a list of currently active speakers with their
+    // audio levels. We process this similar to Agora's volume indication.
+    const speakerIdentities = new Set(speakers.map(s => s.identity));
+
+    for (const speaker of speakers) {
+      const isLocal = speaker.identity === me.id;
+      const volumeNorm = Math.min(1, speaker.audioLevel);
+
+      if (isLocal) {
+        onLocalScore?.(volumeNorm);
+        continue;
+      }
+
+      const peer = peers.get(speaker.identity);
+      if (peer) {
+        peer.volume = Math.round(volumeNorm * 255);
+        peer.vad = speaker.isSpeaking ? 1 : 0;
+      }
+
+      onPeerScore?.({
+        userId: speaker.identity,
+        volume: volumeNorm,
+        speaking: speaker.isSpeaking,
+      });
+    }
+
+    // Mark peers that stopped speaking (not in active speakers list)
+    for (const [userId, peer] of peers) {
+      if (!speakerIdentities.has(userId)) {
+        if (peer.vad === 1) {
+          peer.vad = 0;
+          peer.volume = 0;
+          onPeerScore?.({
+            userId,
+            volume: 0,
+            speaking: false,
+          });
+        }
+      }
+    }
+  };
+
+  const handleConnectionStateChanged = (state: string): void => {
+    const status = mapLiveKitConnectionState(state);
+    if (status !== lastStatus) {
+      lastStatus = status;
+      onStatusChange?.(status);
+    }
+    if (status === 'connected') {
+      if (rejoinTimer) {
+        clearTimeout(rejoinTimer);
+        rejoinTimer = null;
+      }
+      rejoinAttempts = 0;
+      return;
+    }
+    if (status === 'failed') {
+      attemptRejoin();
+    }
+  };
+
+  const handleDisconnected = (): void => {
+    if (!closed) {
+      handleConnectionStateChanged('disconnected');
+    }
+  };
+
+  const handleReconnecting = (): void => {
+    handleConnectionStateChanged('reconnecting');
+  };
+
+  const handleReconnected = (): void => {
+    handleConnectionStateChanged('connected');
+  };
+
+  // Register LiveKit event handlers
+  room.on(events.ParticipantConnected, handleParticipantConnected);
+  room.on(events.ParticipantDisconnected, handleParticipantDisconnected);
+  room.on(events.ActiveSpeakersChanged, handleActiveSpeakersChanged);
+  room.on(events.Disconnected, handleDisconnected);
+  room.on(events.Reconnecting, handleReconnecting);
+  room.on(events.Reconnected, handleReconnected);
+
+  // ─── Socket bindings — keep role consistent ───────────────────────
+  // When the server announces a user's join/role, we update our state.
+  // LiveKit identities = userIds, so no binding map needed.
   interface SocketJoinPayload {
     userId: string;
     roomId: string;
   }
   const handleSocketJoin = (payload: SocketJoinPayload | undefined): void => {
     if (!payload || payload.roomId !== roomId) return;
-    bindings.bind(cuidToAgoraUid(payload.userId), payload.userId);
+    // Pre-populate the peer if they haven't appeared via LiveKit yet
+    emitJoin(payload.userId);
   };
+
   interface SocketRolePayload {
     userId: string;
     role: string;
@@ -445,13 +362,24 @@ export const startRoomAudio = async ({
         : 'audience';
     if (next === currentRole) return;
     currentRole = next;
-    await setAgoraRole(next);
+    // Role change requires a new token with updated canPublish.
+    // Reconnect with a fresh token.
+    try {
+      const fresh = await fetchToken();
+      if (closed) return;
+      disconnectLiveKitRoom(room);
+      await connectLiveKitRoom(room, fresh.url, fresh.token);
+      scheduleRenewal(fresh.expiresAtMs);
+      if (fresh.canPublish) {
+        const isMuted = useCurrentRoomStore.getState().isMuted;
+        await setLiveKitMuted(room, isMuted);
+      }
+    } catch {
+      /* failed to reconnect with new role — will retry on next role change */
+    }
   };
-  // Host/mod force-mute → flip the local Agora producer too. Without
-  // this, Participant.isMuted = true in the DB but the target's mic keeps
-  // publishing to Agora because only the DB and the broadcast badge
-  // changed. We also bubble the mute back to the UI via a callback so
-  // the local mute button reflects reality.
+
+  // Host/mod force-mute → flip the local LiveKit mic too.
   interface SocketMutePayload {
     userId: string;
     isMuted: boolean;
@@ -460,7 +388,7 @@ export const startRoomAudio = async ({
   const handleSocketMuteChanged = async (payload: SocketMutePayload | undefined): Promise<void> => {
     if (!payload || (payload.roomId && payload.roomId !== roomId)) return;
     if (payload.userId !== me.id) return; // only act on self
-    await setAgoraMuted(payload.isMuted);
+    await setLiveKitMuted(room, payload.isMuted);
   };
 
   socket.on('room:user-joined', handleSocketJoin);
@@ -468,46 +396,23 @@ export const startRoomAudio = async ({
   socket.on('room:mute-changed', handleSocketMuteChanged);
 
   // ─── Initial join ────────────────────────────────────────────────
-  // Fetch a fresh per-room token from the backend (channel = roomId,
-  // uid = FNV-1a(userId), role bound to current Participant.role). On
-  // backend failure (no certificate configured) we fall back to the
-  // hard-coded env temp token, which forces channel = AGORA_DEFAULT_CHANNEL
-  // since the temp token was signed for that single name.
+  // Fetch a fresh per-room token from the backend (room = roomId,
+  // identity = userId, canPublish based on current Participant.role).
   const initial = await fetchToken();
-  await joinAgoraChannel({
-    channelName: initial.channel,
-    uid: initial.uid,
-    role: currentRole,
-    token: initial.token,
-  });
+  await connectLiveKitRoom(room, initial.url, initial.token);
   scheduleRenewal(initial.expiresAtMs);
+  if (initial.canPublish) {
+    const isMuted = useCurrentRoomStore.getState().isMuted;
+    await setLiveKitMuted(room, isMuted);
+  }
 
-  // ─── Per-peer playback volume (best-effort) ──────────────────────
-  // The newer SDK exposes `adjustUserPlaybackSignalVolume`; we feature-
-  // detect at call time so older SDKs don't crash.
-  const setPeerVolumeSafely = (userId: string, volume: number): void => {
-    const uid = bindings.uidFor(userId);
-    if (uid === undefined) return;
-    /* eslint-disable @typescript-eslint/no-explicit-any */
-    try {
-      // The engine instance lives behind initAgora — we re-fetch via
-      // the SDK loader to avoid leaking it across modules.
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const sdk = require('react-native-agora') as any;
-      const eng = sdk?.RtcEngine?.instance ?? sdk?.createAgoraRtcEngine?.();
-      eng?.adjustUserPlaybackSignalVolume?.(
-        uid,
-        Math.max(0, Math.min(100, Math.round(volume * 100))),
-      );
-    } catch {
-      /* noop */
-    }
-    /* eslint-enable @typescript-eslint/no-explicit-any */
-  };
+  // Register existing remote participants
+  for (const [, participant] of room.remoteParticipants) {
+    emitJoin(participant.identity);
+  }
 
   return {
     close: async () => {
-      // Latch first so any in-flight / scheduled rejoin becomes a no-op.
       closed = true;
       if (renewTimer) {
         clearTimeout(renewTimer);
@@ -520,22 +425,40 @@ export const startRoomAudio = async ({
       socket.off('room:user-joined', handleSocketJoin);
       socket.off('room:role_changed', handleSocketRoleChange);
       socket.off('room:mute-changed', handleSocketMuteChanged);
-      unregister();
-      await leaveAgoraChannel();
-      // Don't release the engine on every leave — it's a singleton and
-      // the next room would have to re-initialise. Release only on
-      // sign-out, which the auth flow already triggers. (Explicit
-      // releaseAgora() is exported from AgoraEngine for that path.)
-      void releaseAgora; // suppress unused-import warning
+      // Unregister LiveKit event handlers
+      room.off(events.ParticipantConnected, handleParticipantConnected);
+      room.off(events.ParticipantDisconnected, handleParticipantDisconnected);
+      room.off(events.ActiveSpeakersChanged, handleActiveSpeakersChanged);
+      room.off(events.Disconnected, handleDisconnected);
+      room.off(events.Reconnecting, handleReconnecting);
+      room.off(events.Reconnected, handleReconnected);
+      disconnectLiveKitRoom(room);
       peers.clear();
     },
     setMuted: async (muted: boolean) => {
-      await setAgoraMuted(muted);
+      await setLiveKitMuted(room, muted);
     },
-    setPeerVolume: setPeerVolumeSafely,
+    setPeerVolume: (_userId: string, _volume: number) => {
+      // LiveKit doesn't expose per-peer playback volume at the SDK level.
+      // Individual track volume can be controlled via native audio APIs
+      // if needed in the future. No-op for now.
+    },
     setRole: async role => {
       currentRole = role;
-      await setAgoraRole(role);
+      // Role changes require a new token — fetch and reconnect
+      try {
+        const fresh = await fetchToken();
+        if (closed) return;
+        disconnectLiveKitRoom(room);
+        await connectLiveKitRoom(room, fresh.url, fresh.token);
+        scheduleRenewal(fresh.expiresAtMs);
+        if (fresh.canPublish) {
+          const isMuted = useCurrentRoomStore.getState().isMuted;
+          await setLiveKitMuted(room, isMuted);
+        }
+      } catch {
+        /* failed to reconnect with new role */
+      }
     },
     getPeers: () => peers,
   };

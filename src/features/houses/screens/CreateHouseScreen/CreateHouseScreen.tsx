@@ -1,10 +1,21 @@
 import React, { memo, useCallback, useState } from 'react';
-import { Alert, Image, Pressable, ScrollView, Text, View } from 'react-native';
+import {
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  Text,
+  View,
+} from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import { Image } from 'expo-image';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import { Button } from '../../../../shared/components/Button';
 import { Input } from '../../../../shared/components/Input';
 import { colors, spacing } from '../../../../shared/constants/theme';
@@ -23,9 +34,19 @@ interface PrivacyOption {
   description: string;
 }
 
-const PRIVACY_OPTIONS: readonly PrivacyOption[] = [
-  { id: 'open', icon: 'public', label: 'Open', description: 'Anyone can join and start rooms' },
-  { id: 'private', icon: 'lock', label: 'Private', description: 'Invitation only' },
+const getPrivacyOptions = (t: TFunction): PrivacyOption[] => [
+  {
+    id: 'open',
+    icon: 'public',
+    label: t('houses.create.privacyOpen', 'Open'),
+    description: t('houses.create.privacyOpenDesc', 'Anyone can join and start rooms'),
+  },
+  {
+    id: 'private',
+    icon: 'lock',
+    label: t('houses.create.privacyPrivate', 'Private'),
+    description: t('houses.create.privacyPrivateDesc', 'Invitation only'),
+  },
 ];
 
 const NAME_MAX = 30;
@@ -84,6 +105,7 @@ const PrivacyRow: React.FC<PrivacyRowProps> = memo(({ option, selected, onPress 
 PrivacyRow.displayName = 'PrivacyRow';
 
 export const CreateHouseScreen: React.FC = () => {
+  const { t } = useTranslation();
   const navigation = useNavigation<Nav>();
   const insets = useSafeAreaInsets();
   const [name, setName] = useState('');
@@ -103,7 +125,13 @@ export const CreateHouseScreen: React.FC = () => {
     // text shown in the system dialog.
     const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (perm.status !== 'granted') {
-      Alert.alert('Accès refusé', "Autorisez l'accès à vos photos pour ajouter une icône.");
+      Alert.alert(
+        t('houses.create.errorAccessTitle', 'Accès refusé'),
+        t(
+          'houses.create.errorAccessBody',
+          "Autorisez l'accès à vos photos pour ajouter une icône.",
+        ),
+      );
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -120,7 +148,7 @@ export const CreateHouseScreen: React.FC = () => {
       setIconBase64(asset.base64 ?? null);
       setIconMime(asset.mimeType);
     }
-  }, []);
+  }, [t]);
 
   const handleCreate = useCallback(async () => {
     try {
@@ -140,26 +168,35 @@ export const CreateHouseScreen: React.FC = () => {
       });
       navigation.goBack();
     } catch (e) {
-      Alert.alert('Erreur', errorMessage(e, 'Échec de la création'));
+      Alert.alert(
+        t('houses.create.errorTitle', 'Erreur'),
+        errorMessage(e, t('houses.create.errorBody', 'Échec de la création')),
+      );
     } finally {
       setUploading(false);
     }
-  }, [createHouse, description, iconBase64, iconMime, name, navigation, privacy]);
+  }, [createHouse, description, iconBase64, iconMime, name, navigation, privacy, t]);
 
   const canCreate = name.trim().length >= 2 && !createHouse.isPending && !uploading;
 
   return (
-    <View className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      className="flex-1 bg-background"
+      style={{ paddingTop: insets.top }}
+    >
       <View className="flex-row items-center justify-between px-xxl py-lg">
         <Pressable
           onPress={handleClose}
           accessibilityRole="button"
-          accessibilityLabel="Close without creating"
+          accessibilityLabel={t('houses.create.closeA11y', 'Close without creating')}
           hitSlop={8}
         >
           <MaterialIcons name="close" size={24} color={colors.text} />
         </Pressable>
-        <Text className="text-lg font-headline text-ink">Create a House</Text>
+        <Text className="text-lg font-headline text-ink">
+          {t('houses.create.title', 'Create a House')}
+        </Text>
         <View className="w-[24px]" />
       </View>
 
@@ -176,7 +213,11 @@ export const CreateHouseScreen: React.FC = () => {
           <Pressable
             onPress={handlePickIcon}
             accessibilityRole="button"
-            accessibilityLabel={iconUri ? 'Replace house icon' : 'Upload house icon'}
+            accessibilityLabel={
+              iconUri
+                ? t('houses.create.replaceIconA11y', 'Replace house icon')
+                : t('houses.create.uploadIconA11y', 'Upload house icon')
+            }
             className="items-center justify-center bg-overlay-white-10 border-2 border-dashed border-overlay-white-30 rounded-xxl overflow-hidden"
             style={{ width: ICON_UPLOAD_SIZE, height: ICON_UPLOAD_SIZE }}
           >
@@ -184,20 +225,23 @@ export const CreateHouseScreen: React.FC = () => {
               <Image
                 source={{ uri: iconUri }}
                 style={{ width: ICON_UPLOAD_SIZE, height: ICON_UPLOAD_SIZE }}
-                resizeMode="cover"
+                contentFit="cover"
+                cachePolicy="memory-disk"
               />
             ) : (
               <MaterialIcons name="add-a-photo" size={28} color={colors.text} />
             )}
           </Pressable>
           <Text className="text-xs font-body text-ink-muted mt-sm">
-            {iconUri ? 'Tap to replace' : 'House icon (optional)'}
+            {iconUri
+              ? t('houses.create.replaceIcon', 'Tap to replace')
+              : t('houses.create.uploadIcon', 'House icon (optional)')}
           </Text>
         </View>
 
         <Input
-          label="House name"
-          placeholder="e.g. Indie Hackers"
+          label={t('houses.create.nameLabel', 'House name')}
+          placeholder={t('houses.create.namePlaceholder', 'e.g. Indie Hackers')}
           value={name}
           onChangeText={setName}
           maxLength={NAME_MAX}
@@ -205,8 +249,8 @@ export const CreateHouseScreen: React.FC = () => {
         />
 
         <Input
-          label="Description"
-          placeholder="What is this house about?"
+          label={t('houses.create.descLabel', 'Description')}
+          placeholder={t('houses.create.descPlaceholder', 'What is this house about?')}
           value={description}
           onChangeText={setDescription}
           multiline
@@ -216,16 +260,18 @@ export const CreateHouseScreen: React.FC = () => {
         />
 
         <View className="gap-sm">
-          <Text className="text-xs font-body-medium text-ink-muted ml-xs">Privacy</Text>
+          <Text className="text-xs font-body-medium text-ink-muted ml-xs">
+            {t('houses.create.privacyLabel', 'Privacy')}
+          </Text>
           <View className="gap-sm">
-            {PRIVACY_OPTIONS.map(o => (
+            {getPrivacyOptions(t).map(o => (
               <PrivacyRow key={o.id} option={o} selected={privacy === o.id} onPress={setPrivacy} />
             ))}
           </View>
         </View>
 
         <Button
-          label="Create House"
+          label={t('houses.create.submitBtn', 'Create House')}
           variant="primary"
           size="lg"
           fullWidth
@@ -234,6 +280,6 @@ export const CreateHouseScreen: React.FC = () => {
           onPress={handleCreate}
         />
       </ScrollView>
-    </View>
+    </KeyboardAvoidingView>
   );
 };

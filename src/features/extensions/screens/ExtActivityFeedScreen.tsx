@@ -9,15 +9,18 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import { activityApi, type ActivityItem } from '../api/activityApi';
 import { useExtSocketAliases } from '../hooks/useExtSocketAliases';
+import { colors } from '../../../shared/constants/theme';
 
 type Filter = 'all' | 'rooms' | 'social' | 'clubs';
-const FILTERS: { value: Filter; label: string }[] = [
-  { value: 'all', label: 'All' },
-  { value: 'rooms', label: 'Rooms' },
-  { value: 'social', label: 'Social' },
-  { value: 'clubs', label: 'Clubs' },
+const getFilters = (t: TFunction): { value: Filter; label: string }[] => [
+  { value: 'all', label: t('extensions.activity.filters.all', 'All') },
+  { value: 'rooms', label: t('extensions.activity.filters.rooms', 'Rooms') },
+  { value: 'social', label: t('extensions.activity.filters.social', 'Social') },
+  { value: 'clubs', label: t('extensions.activity.filters.clubs', 'Clubs') },
 ];
 
 // Cap the in-memory feed so a long-lived session with a busy realtime stream
@@ -81,6 +84,7 @@ ActivityRow.displayName = 'ActivityRow';
 export const ExtActivityFeedScreen: React.FC<{ onTapItem?: (item: ActivityItem) => void }> = ({
   onTapItem,
 }) => {
+  const { t } = useTranslation();
   const [filter, setFilter] = useState<Filter>('all');
   const [items, setItems] = useState<ActivityItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -200,25 +204,28 @@ export const ExtActivityFeedScreen: React.FC<{ onTapItem?: (item: ActivityItem) 
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>Activity</Text>
+        <Text style={styles.title}>{t('extensions.activity.title', 'Activity')}</Text>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="Mark all as read"
+          accessibilityLabel={t(
+            'extensions.activity.markAllA11y',
+            'Mark all notifications as read',
+          )}
           onPress={() => {
             setItems(prev => prev.map(i => ({ ...i, isRead: true })));
             void activityApi.markAllRead().catch(() => undefined);
           }}
         >
-          <Text style={styles.markAll}>Mark all read</Text>
+          <Text style={styles.markAll}>{t('extensions.activity.markAll', 'Mark all read')}</Text>
         </Pressable>
       </View>
       <View style={styles.tabs}>
-        {FILTERS.map(f => (
+        {getFilters(t).map(f => (
           <Pressable
             key={f.value}
             accessibilityRole="tab"
             accessibilityState={{ selected: filter === f.value }}
-            accessibilityLabel={`Filter: ${f.label}`}
+            accessibilityLabel={`${t('extensions.activity.filterA11y', 'Filter')}: ${f.label}`}
             onPress={() => setFilter(f.value)}
             style={[styles.tab, filter === f.value && styles.tabActive]}
           >
@@ -240,7 +247,9 @@ export const ExtActivityFeedScreen: React.FC<{ onTapItem?: (item: ActivityItem) 
           renderItem={renderItem}
           ListEmptyComponent={
             <View style={styles.empty}>
-              <Text style={styles.emptyText}>No activity yet.</Text>
+              <Text style={styles.emptyText}>
+                {t('extensions.activity.empty', 'No activity yet.')}
+              </Text>
             </View>
           }
         />
@@ -261,7 +270,7 @@ const formatRelative = (iso: string): string => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FFFFFF' },
+  container: { flex: 1, backgroundColor: colors.background },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -269,18 +278,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 8,
   },
-  title: { fontSize: 22, fontWeight: '700' },
-  markAll: { color: '#2A8BF2', fontSize: 13, fontWeight: '600' },
+  title: { fontSize: 22, fontWeight: '700', color: colors.text },
+  markAll: { color: colors.primary, fontSize: 13, fontWeight: '600' },
   tabs: { flexDirection: 'row', paddingHorizontal: 16, paddingVertical: 12, gap: 8 },
   tab: {
     paddingVertical: 6,
     paddingHorizontal: 12,
     borderRadius: 16,
-    backgroundColor: '#F1F5F9',
+    backgroundColor: colors.surfaceHigh,
   },
-  tabActive: { backgroundColor: '#0F172A' },
-  tabText: { fontSize: 12, color: '#475569', fontWeight: '600' },
-  tabTextActive: { color: '#FFFFFF' },
+  tabActive: { backgroundColor: colors.primary },
+  tabText: { fontSize: 12, color: colors.textMuted, fontWeight: '600' },
+  tabTextActive: { color: colors.onPrimary },
   loader: { marginTop: 24 },
   list: { paddingHorizontal: 16, paddingBottom: 32 },
   row: {
@@ -289,17 +298,21 @@ const styles = StyleSheet.create({
     gap: 12,
     alignItems: 'center',
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: '#F1F5F9',
+    borderColor: colors.glassStrong,
   },
-  rowUnread: { backgroundColor: '#F8FAFC' },
+  rowUnread: { backgroundColor: colors.overlayWhite5 },
   avatar: { width: 44, height: 44, borderRadius: 22 },
-  avatarFallback: { backgroundColor: '#CBD5E1', alignItems: 'center', justifyContent: 'center' },
-  avatarText: { color: '#475569', fontWeight: '700' },
+  avatarFallback: {
+    backgroundColor: colors.surfaceHigh,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarText: { color: colors.textMuted, fontWeight: '700' },
   body: { flex: 1, minWidth: 0 },
-  itemTitle: { fontSize: 14, fontWeight: '600' },
-  itemBody: { fontSize: 13, color: '#475569', marginTop: 1 },
-  when: { fontSize: 11, color: '#94A3B8', marginTop: 4 },
-  dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#2A8BF2' },
+  itemTitle: { fontSize: 14, fontWeight: '600', color: colors.text },
+  itemBody: { fontSize: 13, color: colors.textMuted, marginTop: 1 },
+  when: { fontSize: 11, color: colors.textDim, marginTop: 4 },
+  dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.primary },
   empty: { marginTop: 60, alignItems: 'center' },
-  emptyText: { color: '#94A3B8' },
+  emptyText: { color: colors.textDim },
 });

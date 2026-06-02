@@ -2,6 +2,7 @@ import React from 'react';
 import { FlatList, Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useExtUpcoming } from '../hooks/useUpcoming';
 import type { UpcomingEvent } from '../api/upcomingApi';
+import { colors } from '../../../shared/constants/theme';
 
 interface Props {
   onSelect?: (event: UpcomingEvent) => void;
@@ -79,23 +80,29 @@ const formatWhen = (iso: string | null): string => {
 
 const styles = StyleSheet.create({
   container: { paddingVertical: 8 },
-  heading: { fontSize: 14, fontWeight: '600', paddingHorizontal: 16, marginBottom: 8 },
+  heading: {
+    fontSize: 14,
+    fontWeight: '600',
+    paddingHorizontal: 16,
+    marginBottom: 8,
+    color: colors.text,
+  },
   row: { paddingHorizontal: 12, gap: 10 },
   card: {
     width: 220,
     padding: 12,
-    backgroundColor: '#F8FAFC',
+    backgroundColor: colors.surfaceAlt,
     borderRadius: 14,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: '#E2E8F0',
+    borderColor: colors.glassStrong,
   },
-  when: { fontSize: 11, color: '#2A8BF2', fontWeight: '600', marginBottom: 6 },
-  title: { fontSize: 14, fontWeight: '600', color: '#0F172A' },
+  when: { fontSize: 11, color: colors.primary, fontWeight: '600', marginBottom: 6 },
+  title: { fontSize: 14, fontWeight: '600', color: colors.text },
   hostRow: { flexDirection: 'row', alignItems: 'center', marginTop: 10, gap: 6 },
   avatar: { width: 22, height: 22, borderRadius: 11 },
-  avatarFallback: { backgroundColor: '#CBD5E1' },
-  host: { fontSize: 12, color: '#475569', flexShrink: 1 },
-  rsvp: { fontSize: 11, color: '#64748B', marginTop: 6 },
+  avatarFallback: { backgroundColor: colors.surfaceHigh },
+  host: { fontSize: 12, color: colors.textMuted, flexShrink: 1 },
+  rsvp: { fontSize: 11, color: colors.textMuted, marginTop: 6 },
   empty: { padding: 16 },
-  emptyText: { color: '#94A3B8', fontSize: 13 },
+  emptyText: { color: colors.textDim, fontSize: 13 },
 });

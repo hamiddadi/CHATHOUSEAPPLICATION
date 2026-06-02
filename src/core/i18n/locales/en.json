@@ -17,7 +17,10 @@
     "loading": "Loading…",
     "back": "Back",
     "error": "Something went wrong",
-    "permissionDenied": "Permission required"
+    "actionFailed": "Action failed. Please try again.",
+    "permissionDenied": "Permission required",
+    "appName": "Chathouse",
+    "ok": "OK"
   },
   "errorBoundary": {
     "title": "Something went wrong",
@@ -94,7 +97,34 @@
     "viewAll": "View all",
     "account": "Account",
     "signOut": "Sign out",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "yourProfile": "Your profile",
+    "username": "username",
+    "seeLess": "See less",
+    "seeMore": "See more",
+    "followers": "Followers",
+    "following": "Following",
+    "clubs": "Clubs",
+    "godmode": "Godmode",
+    "adminAccess": "Moderation access · {{role}}",
+    "privacySection": "Privacy",
+    "anonymousErrorReporting": "Anonymous error reports",
+    "anonymousErrorReportingDesc": "Helps fix crashes. Disabled by default.",
+    "privacyPolicy": "Privacy Policy",
+    "termsOfService": "Terms of Service",
+    "exportData": "Export my data",
+    "gdprArticle20": "Article 20 of the GDPR",
+    "accountSection": "Account",
+    "deleteAccount": "Delete my account",
+    "waveAlertTitle": "Wave 👋",
+    "waveAlertBody": "To wave at a friend, open their profile from your followers list or from a room.",
+    "waveAlertButton": "My followers",
+    "sendWaveA11y": "Send a wave",
+    "collapseBioA11y": "Collapse bio",
+    "expandBioA11y": "Expand bio",
+    "createHouseA11y": "Create a new house",
+    "openGodmodeA11y": "Open Godmode",
+    "anonymousErrorReportingA11y": "Allow anonymous crash reporting"
   },
   "room": {
     "stage": "STAGE",
@@ -115,7 +145,27 @@
     "waveA11y": "Send a wave",
     "unavailable": "Room unavailable",
     "mayHaveEnded": "This room may have ended.",
-    "audioBanner": "Audio coming soon — chat, hand-raise & reactions are live."
+    "audioBanner": "Audio coming soon — chat, hand-raise & reactions are live.",
+    "audioConnecting": "🔊 Connecting audio…",
+    "audioUnsupported": "⚠️ Audio requires an EAS dev-client (@livekit/react-native is unavailable in Expo Go).",
+    "audioError": "Audio error",
+    "upcoming": "Upcoming",
+    "participants": "{{speakers}} speakers · {{listeners}} listeners",
+    "closeRoom": "End Room",
+    "alert": {
+      "removedTitle": "You have been removed",
+      "removedBody": "A moderator has expelled you from this room. You cannot rejoin for 30 minutes.",
+      "endedTitle": "Room ended",
+      "endedBody": "This room has been closed by the host.",
+      "stageTitle": "On stage 🎙️",
+      "roleHost": "You are now the host of the room.",
+      "roleMod": "You are now a moderator.",
+      "roleSpeaker": "You can speak — tap Mute to toggle your microphone.",
+      "confirmEndTitle": "End Room",
+      "confirmEndBody": "\"{{title}}\" will be closed for all participants. Continue?",
+      "reportTitle": "Report this room",
+      "reportReason": "What is the reason?"
+    }
   },
   "feed": {
     "liveNow": "Live Now",
@@ -126,7 +176,15 @@
     "startNewA11y": "Start a new room",
     "startNewHint": "Opens the room creation modal",
     "couldNotLoad": "Couldn't load rooms",
-    "checkConnection": "Check your connection and try again."
+    "checkConnection": "Check your connection and try again.",
+    "insideHouse": "Inside {{houseName}}",
+    "speakersCount": "{{count}} speakers",
+    "listenersCount": "{{count}} listeners",
+    "inRoom": "{{count}} in room",
+    "upcoming": "Upcoming",
+    "exploreA11y": "Explore",
+    "eventsA11y": "Events",
+    "notificationsA11y": "Notifications"
   },
   "errorMessages": {
     "network": "We couldn't reach the server. Check your connection.",
@@ -173,7 +231,13 @@
       "errors": {
         "required": "Phone number is required.",
         "invalid": "Invalid number. Expected format: +14155551234."
-      }
+      },
+      "ageVerification": "I confirm I am at least 16 years old",
+      "terms": "By entering your number, you’re agreeing to our ",
+      "termsLinkA11y": "Terms of Service",
+      "termsAnd": " and ",
+      "privacyLinkA11y": "Privacy Policy",
+      "termsEnd": ". Thanks!"
     },
     "otp": {
       "title": "Enter the code you received",
@@ -230,7 +294,7 @@
       "upcoming": "Upcoming",
       "mine": "Mine"
     },
-    "empty": "No upcoming events.",
+    "empty": "No upcoming events",
     "emptyMine": "You haven't RSVP'd to anything yet.",
     "rsvp": "Going",
     "notRsvp": "RSVP",
@@ -238,7 +302,8 @@
     "scheduledIn": "Starts in {{label}}",
     "startsNow": "Starting now",
     "attendeeCount_one": "{{count}} attendee",
-    "attendeeCount": "{{count}} attendees"
+    "attendeeCount": "{{count}} attendees",
+    "create": "Create Event"
   },
   "profile": {
     "myHouses": "My Houses",
@@ -274,7 +339,34 @@
     "reportDetailsPlaceholder": "Add details (optional)",
     "reportSubmit": "Submit report",
     "reportThanks": "Thanks — our team will review it.",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "connections": "Connections",
+    "follow": "Follow",
+    "followers": "Followers",
+    "following": "Following",
+    "loadingConnections": "Loading connections",
+    "couldNotLoadConnections": "Couldn't load list",
+    "pleaseTryAgain": "Please try again.",
+    "actionFailed": "Action failed. Please try again.",
+    "noFollowers": "No followers yet",
+    "noFollowing": "Not following anyone yet",
+    "emptyConnectionsHint": "When there are people here, they show up in this list.",
+    "edit": {
+      "title": "Edit profile",
+      "save": "Save",
+      "tapToChangePhoto": "Tap to change photo",
+      "firstName": "First name",
+      "lastName": "Last name",
+      "displayName": "Display name",
+      "username": "Username",
+      "bio": "Bio",
+      "saveChanges": "Save changes",
+      "failedToUpdate": "Failed to update profile. Please try again.",
+      "loading": "Loading profile",
+      "cancelA11y": "Cancel",
+      "saveA11y": "Save profile",
+      "changePhotoA11y": "Change profile photo"
+    }
   },
   "createRoom": {
     "title": "Start a Room",
@@ -394,5 +486,429 @@
     "newMessage": "New messages",
     "handAccepted": "You're invited to speak",
     "mention": "Mentions"
+  },
+  "admin": {
+    "home": {
+      "title": "Administration",
+      "rooms": "Active Rooms",
+      "reports": "Reports",
+      "auditLog": "Audit Log",
+      "users": "User Management",
+      "subtitle": "Connected as {{role}}",
+      "stats": {
+        "users": "Users",
+        "online": "{{count}} online",
+        "live": "Live",
+        "roomsTotal": "{{count}} rooms total",
+        "reports": "Reports",
+        "reportsHistory": "{{count}} history",
+        "suspended": "Suspended",
+        "new24h": "New 24h",
+        "new7d": "+{{count}} over 7d",
+        "messages24h": "Messages 24h"
+      },
+      "actions": "Actions",
+      "hints": {
+        "users": "Search, roles, suspensions",
+        "reports": "Moderation queue",
+        "rooms": "Force end a room",
+        "auditLog": "All privileged actions"
+      },
+      "csvExports": "CSV Exports",
+      "csvHint": "Content is copied to clipboard then opens the native share sheet.",
+      "csvUsersLabel": "Users",
+      "csvAuditLabel": "Audit log",
+      "csvReportsLabel": "Reports",
+      "csvA11yUsers": "Export users as CSV",
+      "csvA11yAudit": "Export audit log as CSV",
+      "csvA11yReports": "Export reports as CSV",
+      "loading": "Loading admin stats",
+      "errorStats": "Unable to load stats.",
+      "exportError": "Export failed"
+    },
+    "rooms": {
+      "title": "Active Rooms",
+      "empty": "No active rooms",
+      "ended": "Ended",
+      "closeRoom": "Close room",
+      "confirmClose": "Are you sure you want to close this room?",
+      "hostBy": "by @{{username}} · {{count}} participants",
+      "liveRooms": "Live Rooms",
+      "forceEndNotice": "Forcing termination notifies all participants and closes the audio channel.",
+      "errorLoadingRooms": "Unable to load rooms.",
+      "failedEnd": "Failed to close the room.",
+      "liveBadge": "LIVE"
+    },
+    "reports": {
+      "title": "Reports",
+      "empty": "No reports",
+      "resolve": "Resolve",
+      "dismiss": "Dismiss",
+      "resolveA11y": "Resolve this report",
+      "dismissA11y": "Dismiss this report",
+      "tabs": {
+        "open": "Open",
+        "resolved": "Resolved",
+        "all": "All"
+      },
+      "resolvedBadge": "Resolved",
+      "target": "Target",
+      "room": "Room",
+      "roomLive": "Live",
+      "roomEnded": "Ended",
+      "reportedBy": "Reported by",
+      "errorTitle": "Couldn't load reports",
+      "errorBody": "Check your connection and try again.",
+      "emptyTitle": "Nothing here",
+      "emptyOpen": "No open reports — the queue is clear.",
+      "emptyAll": "No reports yet.",
+      "confirmResolveTitle": "Resolve report?",
+      "confirmResolveBody": "This marks the report as handled and removes it from the open queue.",
+      "confirmDismissTitle": "Dismiss report?",
+      "confirmDismissBody": "This dismisses the report without taking action.",
+      "actionFailed": "Action failed. Please try again."
+    },
+    "audit": {
+      "title": "Audit Log",
+      "empty": "No audit logs",
+      "subtitle": "All privileged actions",
+      "reason": "Reason",
+      "until": "until",
+      "errorTitle": "Couldn't load the audit log",
+      "errorBody": "Check your connection and try again.",
+      "emptyTitle": "No entries",
+      "emptyBody": "Privileged actions will appear here.",
+      "roles": {
+        "changed": "Role changed",
+        "suspended": "User suspended",
+        "unsuspended": "User unsuspended",
+        "deleted": "User deleted",
+        "roomEnded": "Room force-ended",
+        "reportResolved": "Report resolved",
+        "reportDismissed": "Report dismissed",
+        "godmode": "God mode access",
+        "impersonationStarted": "Impersonation started",
+        "impersonationEnded": "Impersonation ended"
+      }
+    },
+    "users": {
+      "title": "User Management",
+      "searchPlaceholder": "Search by name or @username",
+      "badgeSuspended": "Suspended",
+      "badgeDeleted": "Deleted",
+      "errorTitle": "Couldn't load users",
+      "errorBody": "Check your connection and try again.",
+      "emptyTitle": "No users found",
+      "emptyBody": "Try a different search or filter.",
+      "roles": {
+        "all": "All",
+        "user": "User",
+        "mod": "Mod",
+        "admin": "Admin",
+        "super": "Super"
+      }
+    },
+    "userDetail": {
+      "user": "User",
+      "notFound": "User not found",
+      "infoTitle": "Information",
+      "email": "Email",
+      "phone": "Phone",
+      "joined": "Joined",
+      "lastSeen": "Last seen",
+      "followers": "Followers / Following",
+      "reason": "Reason",
+      "suspendedUntil": "Suspended until",
+      "noActionPerm": "You don't have permission to act on this user.",
+      "suspendSection": "Suspension",
+      "roleSection": "Role",
+      "investigationSection": "Investigation",
+      "dangerSection": "Danger zone",
+      "suspend1h": "1 hour",
+      "suspend24h": "24 hours",
+      "suspend7d": "7 days",
+      "suspendPerm": "Permanent",
+      "suspendTitle": "Suspend user",
+      "suspendReason": "Reason for the suspension",
+      "suspendBtn": "Suspend",
+      "unsuspendBtn": "Lift suspension",
+      "unsuspendTitle": "Lift suspension",
+      "unsuspendDesc": "Lift the suspension for",
+      "roleTitle": "Change role",
+      "roleDesc": "Set the role of",
+      "impersonateTitle": "Impersonate user",
+      "impersonateDesc": "Start an impersonation session for",
+      "impersonateWarn": "All actions will be performed as this user. This is logged.",
+      "impersonateBtn": "Impersonate",
+      "impersonateInfo": "Opens a session as this user. Every action is recorded in the audit log.",
+      "deleteTitle": "Delete user",
+      "deleteDesc": "⚠️ Near-irreversible. The account will be marked for deletion and permanently banned. Permanently delete",
+      "deleteBtn": "Delete account",
+      "cancel": "Cancel",
+      "confirm": "Confirm"
+    }
+  },
+  "houses": {
+    "create": {
+      "title": "Create House",
+      "namePlaceholder": "House Name",
+      "descPlaceholder": "Description",
+      "submit": "Create"
+    },
+    "invite": {
+      "title": "Invite Member",
+      "search": "Search members...",
+      "send": "Send Invite"
+    },
+    "invitation": {
+      "title": "Invitation",
+      "accept": "Accept",
+      "decline": "Decline",
+      "defaultName": "this house",
+      "membersCount": "{{countStr}} members",
+      "subtitle": "You've been invited to join this house.",
+      "code": "Invite code: {{code}}…",
+      "acceptBtn": "Accept invitation",
+      "declineBtn": "Decline",
+      "backA11y": "Back",
+      "loading": "Loading invitation",
+      "errorTitle": "Error",
+      "errorBody": "Couldn't accept the invitation.",
+      "errorLoadTitle": "Invitation unavailable",
+      "errorLoadBody": "This house may no longer exist or the invite has expired."
+    }
+  },
+  "rooms": {
+    "invite": {
+      "title": "Invite to Room",
+      "search": "Search friends...",
+      "send": "Send"
+    }
+  },
+  "extensions": {
+    "activity": {
+      "title": "Activity",
+      "markAll": "Mark all read",
+      "markAllA11y": "Mark all notifications as read",
+      "filterA11y": "Filter",
+      "empty": "No activity yet.",
+      "filters": {
+        "all": "All",
+        "rooms": "Rooms",
+        "social": "Social",
+        "clubs": "Clubs"
+      }
+    },
+    "playground": {
+      "title": "Extensions Playground",
+      "fontScale": "Font scale",
+      "themeToggleTitle": "V2 — Theme toggle",
+      "linkifiedTitle": "V1 — Linkified text (chat URL parser)",
+      "linkifiedBody": "Visit https://clubhouse.com or check chathouse.app/r/demo for more details.",
+      "socialDeepLinksTitle": "V1 — Social deep-links",
+      "openTwitter": "Open @clubhouse on Twitter",
+      "openInstagram": "Open @instagram",
+      "availablePeopleTitle": "V1 — People available to chat",
+      "waveStatus": "Wave status",
+      "waving": "sending…",
+      "idle": "idle",
+      "upcomingTitle": "V3 — Upcoming for you",
+      "upcomingEmpty": "No upcoming events for your account yet.",
+      "networkQualityTitle": "V4 — Network quality bars",
+      "calendarExportTitle": "V8 — Calendar .ics export",
+      "roomId": "Room ID",
+      "shareSheetTitle": "V8 — Share sheet",
+      "openShareSheet": "Open share sheet",
+      "reactionPickerTitle": "V10 — Reaction picker (long-press emulation)",
+      "openReactionPicker": "Open reaction picker",
+      "lastPicked": "Last picked",
+      "captionsTitle": "V10 — Captions overlay (fake lines)",
+      "interestsTitle": "V2 — Interests validator",
+      "interestsPlaceholder": "tech, music, startups, …",
+      "interestsValid": "✓ valid",
+      "interestsNeed": "need",
+      "interestsMore": "more",
+      "backToRoomTitle": "V10 — Back-to-room banner",
+      "demoRoomTitle": "Late night tech talk",
+      "demoHostName": "Alice",
+      "chatReactionsTitle": "V13 — Chat reactions bar (mocked counts)",
+      "chatReactionsHint": "Tap a chip to toggle (would call backend).",
+      "badgesTitle": "V13 — Badges row (live fetch)",
+      "badgesHint": "Uses userId={{pickedRoomId}} — typically the viewer's own id."
+    },
+    "settings": {
+      "title": "Extension Settings",
+      "appearance": "Appearance",
+      "audioQuality": "Audio quality",
+      "audioStandard": "Standard",
+      "audioStandardHint": "~20 MB/h — voice, low bandwidth",
+      "audioHigh": "High",
+      "audioHighHint": "~70 MB/h — richer voice",
+      "audioMusic": "Music",
+      "audioMusicHint": "~100 MB/h — full-range stereo",
+      "audioEngine": "Audio engine",
+      "spatialAudio": "Spatial audio (3D)",
+      "noiseSuppression": "Noise suppression (AEC)",
+      "dropInMode": "Drop-in mode (silent join)",
+      "privacyTitle": "Privacy",
+      "privateProfile": "Private profile",
+      "allowWaves": "Allow waves & pings",
+      "showOnMap": "Show me on the map",
+      "saveError": "Could not save. Please try again."
+    },
+    "suggested": {
+      "title": "People you may know",
+      "subtitle": "Based on your interests and people you follow.",
+      "empty": "No suggestions yet. Come back later.",
+      "follow": "Follow",
+      "following": "Following",
+      "followUserA11y": "Follow {{name}}",
+      "viewProfile": "View profile of {{name}}",
+      "sharedInterests": "{{count}} shared interest(s)",
+      "friendsOfFriends": "Followed by people you follow",
+      "followersCount": "{{count}} followers"
+    },
+    "topics": {
+      "title": "Explore topics",
+      "searchPlaceholder": "Search topics…",
+      "searchA11y": "Search topics",
+      "selectTopicA11y": "Select topic {{label}}",
+      "selectSubTopicA11y": "Select sub-topic {{label}}",
+      "empty": "Pick a category on the left."
+    }
+  },
+  "maps": {
+    "title": "Map",
+    "enableLocation": "Enable location services"
+  },
+  "privacy": {
+    "export": {
+      "title": "Export my data",
+      "description1": "Under Article 20 of the GDPR (right to data portability), you can download a full copy of all your personal data in a structured JSON file.",
+      "description2": "The archive contains: your profile, your hosted rooms, your participations, your follow graph, your direct messages, your room messages, your RSVPs, your device list (platform and dates, without the secret token) and your notification preferences.",
+      "note": "Note: the audit log (moderation actions) and reports issued against your account are not included, in accordance with Article 23 of the GDPR (legitimate interest of moderation).",
+      "buttonPrepare": "Preparing…",
+      "buttonExport": "Generate and share my export",
+      "success": "✓ Export generated ({{size}} KB) — share it via the share menu.",
+      "warning": "The clipboard is readable by other apps. Only copy the archive if necessary, then clear the clipboard.",
+      "buttonCopy": "Copy to clipboard",
+      "buttonClear": "Clear clipboard",
+      "errorExportTitle": "Error",
+      "errorExportBody": "Export failed",
+      "errorCopyBody": "Copy failed"
+    },
+    "delete": {
+      "title": "Delete my account",
+      "description": "Deleting your account is permanent and irreversible. We will immediately delete your profile, messages, houses, and rooms.",
+      "grace": "A 30-day grace period is enforced on our backup servers before your data is completely purged.",
+      "confirmInputLabel": "To confirm, type: ",
+      "buttonDelete": "Delete my account permanently",
+      "buttonCancel": "Cancel",
+      "alertTitle": "Account deleted",
+      "alertBody": "Your account has been deleted. We're sorry to see you go.",
+      "errorTitle": "Error",
+      "errorBody": "Deletion failed",
+      "warningTitle": "⚠️ Near-irreversible action",
+      "beforeDelete": "Before deleting",
+      "stepExport": "• You can export your data from Settings → Privacy → Export my data.",
+      "stepRooms": "• Rooms you hosted will be closed if they are active.",
+      "stepMessages": "• Direct messages you sent to other users will remain visible to the recipient (cannot be retracted after sending).",
+      "a11yInput": "Deletion confirmation input",
+      "confirmPhrase": "DELETE"
+    },
+    "policy": {
+      "title": "Privacy Policy",
+      "lastUpdated": "Last updated: April 25, 2026",
+      "s1": {
+        "title": "1. What data we collect",
+        "p1": "• Account data: phone number, username, profile picture, bio, social links (optional).",
+        "p2": "• Content: hosted rooms, participations, direct messages, room messages, reactions, hand raises.",
+        "p3": "• Metadata: creation date, last login, followers list, interests, platform role.",
+        "p4": "• Geolocation (optional, after consent): used only for the map feature. Stored at the lowest compatible precision.",
+        "p5": "• Technical data: IP address, user agent, device tokens for push notifications."
+      },
+      "s2": {
+        "title": "2. Why we collect them",
+        "p1": "• Provide the service: create an account, join rooms, exchange messages.",
+        "p2": "• Moderation: reports, suspensions and bans (legitimate interest — community safety).",
+        "p3": "• Notifications: inform about invitations, starting rooms, received messages (you can disable them in settings).",
+        "p4": "• Anonymous statistics (optional): crash reports, telemetry. Disabled by default."
+      },
+      "s3": {
+        "title": "3. Who we share them with",
+        "p1": "• No sale. No third-party advertising.",
+        "p2": "• Technical subcontractors only, under GDPR compliant contract: hosting (server), sending authentication SMS, push notifications.",
+        "p3": "• In case of legal obligation, judicial requisition or protection of a person in danger."
+      },
+      "s4": {
+        "title": "4. How long",
+        "p1": "• Profile and content: as long as your account is active.",
+        "p2": "• Account deletion: 30 days grace period, then definitive purge.",
+        "p3": "• Technical logs: 90 days.",
+        "p4": "• Moderation log (reports, suspensions): kept for 1 year for compliance."
+      },
+      "s5": {
+        "title": "5. Your rights (GDPR)",
+        "p1": "• Access and portability: export all your data via Settings → Privacy → Export my data.",
+        "p2": "• Rectification: modify your profile at any time.",
+        "p3": "• Erasure: delete your account (Settings → Privacy → Delete my account).",
+        "p4": "• Opposition: disable notifications, location sharing, or crash reporting from settings.",
+        "p5": "• Complaint: you can seize the competent supervisory authority (CNIL in France)."
+      },
+      "s6": {
+        "title": "6. Security",
+        "p1": "• Passwords and OTP codes stored in hashed form (bcrypt).",
+        "p2": "• Authentication tokens stored in the secure keychain of the phone.",
+        "p3": "• All network exchanges are encrypted in HTTPS/TLS. Audio streams are encrypted in DTLS-SRTP."
+      },
+      "s7": {
+        "title": "7. Contact",
+        "p1": "For any questions regarding your data: "
+      }
+    },
+    "terms": {
+      "title": "Terms of Service",
+      "lastUpdated": "Last updated: April 25, 2026",
+      "s1": {
+        "title": "1. Acceptance",
+        "p1": "By creating an account or using the Chathouse app, you agree to these terms. If you do not agree, do not use the service."
+      },
+      "s2": {
+        "title": "2. Eligibility",
+        "p1": "You must be at least 16 years old to use Chathouse. Under this age, explicit consent from a legal guardian is required.",
+        "p2": "• Do not share illegal, explicit, or copyright-infringing content.",
+        "p3": "• Do not record rooms without the consent of all speakers."
+      },
+      "s3": {
+        "title": "3. Prohibited Conduct",
+        "p1": "• Harassment, discrimination, hate speech, non-consensual explicit content.",
+        "p2": "• Identity theft, fake accounts, unauthorized automation (bots).",
+        "p3": "• Broadcast of copyrighted works without rights, illegal content.",
+        "p4": "• Spam, phishing, social engineering, vulnerability exploitation.",
+        "p5": "• Recording a room without explicit consent from all participants."
+      },
+      "s4": {
+        "title": "4. Moderation",
+        "p1": "We reserve the right to suspend or delete any violating account, without notice. All moderation actions are logged and auditable.",
+        "p2": "You can report a user or a room directly in the interface."
+      },
+      "s5": {
+        "title": "5. User Content",
+        "p1": "You retain full rights to the content you publish. You grant us a non-exclusive license for storage and broadcast strictly necessary for service operation.",
+        "p2": "Account termination ends this license (except content already received by others via direct messages)."
+      },
+      "s6": {
+        "title": "6. Limitation of Liability",
+        "p1": "The service is provided 'as is'. We do not guarantee uninterrupted availability, nor that all user-published content is lawful."
+      },
+      "s7": {
+        "title": "7. Modifications",
+        "p1": "These terms may evolve. Material changes will be notified in-app at least 30 days before taking effect."
+      },
+      "s8": {
+        "title": "8. Governing Law",
+        "p1": "These terms are governed by French law. Any dispute falls under the jurisdiction of French courts."
+      }
+    }
   }
 }

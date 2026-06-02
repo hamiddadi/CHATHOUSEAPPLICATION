@@ -7,7 +7,7 @@ import {
   closeProducersForUserInRoom,
 } from '../../webrtc/mediasoup.manager';
 import { authedUserId as requireUserId } from '../../utils/authedUserId';
-import { agoraService, type AgoraParticipantRole } from './agora.service';
+import { livekitService, type LivekitParticipantRole } from './livekit.service';
 import {
   createRoomSchema,
   inviteToRoomSchema,
@@ -227,13 +227,13 @@ export const roomsController = {
   },
 
   /**
-   * Issue an Agora token for the caller's current role in the room. The
-   * token is bound to (channel = roomId, uid = FNV-1a(userId), role).
-   * Caller MUST be an active participant — listeners get a SUBSCRIBER
-   * token, host/mod/speaker get a PUBLISHER token. The client refetches
-   * this on `onTokenPrivilegeWillExpire` to renew without rejoining.
+   * Issue a LiveKit token for the caller's current role in the room. The
+   * token is bound to (room = roomId, identity = userId, canPublish).
+   * Caller MUST be an active participant — listeners get canPublish=false,
+   * host/mod/speaker get canPublish=true. The client refetches this to
+   * renew before the token expires.
    */
-  async agoraToken(req: Request, res: Response) {
+  async livekitToken(req: Request, res: Response) {
     const userId = requireUserId(req);
     const roomId = paramId(req, 'id');
 
@@ -243,10 +243,10 @@ export const roomsController = {
     });
     if (!participant || participant.leftAt) throw new AppError('ROOM_005');
 
-    const result = agoraService.issueRoomToken({
+    const result = await livekitService.issueRoomToken({
       roomId,
       userId,
-      role: participant.role as AgoraParticipantRole,
+      role: participant.role as LivekitParticipantRole,
     });
     sendOk(res, result);
   },

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Linking, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { profileLinksApi, type ProfileLink } from '../api/profileLinksApi';
 import { apiErrorMessage } from '../utils/extUi';
+import { colors } from '../../../shared/constants/theme';
 
 interface Props {
   userId: string;
@@ -102,6 +103,7 @@ export const ExtProfileLinks: React.FC<Props> = ({ userId, editable = false }) =
         <View style={styles.form}>
           <TextInput
             placeholder="Label (e.g. Newsletter)"
+            placeholderTextColor={colors.textDim}
             value={label}
             onChangeText={setLabel}
             style={styles.input}
@@ -110,6 +112,7 @@ export const ExtProfileLinks: React.FC<Props> = ({ userId, editable = false }) =
           />
           <TextInput
             placeholder="https://…"
+            placeholderTextColor={colors.textDim}
             value={url}
             onChangeText={setUrl}
             style={styles.input}
@@ -139,7 +142,7 @@ const styles = StyleSheet.create({
   chip: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#F1F5F9',
+    backgroundColor: colors.overlayWhite5,
     borderRadius: 999,
     paddingLeft: 12,
     paddingRight: 4,
@@ -147,33 +150,34 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   chipTap: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  icon: { fontSize: 13 },
-  label: { fontSize: 13, color: '#0F172A', fontWeight: '500' },
+  icon: { fontSize: 13, color: colors.text },
+  label: { fontSize: 13, color: colors.text, fontWeight: '500' },
   remove: {
     width: 22,
     height: 22,
     borderRadius: 11,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#E2E8F0',
+    backgroundColor: colors.surfaceHigh,
   },
-  removeText: { color: '#475569', fontSize: 14, lineHeight: 14 },
+  removeText: { color: colors.textMuted, fontSize: 14, lineHeight: 14 },
   form: { gap: 8 },
   input: {
-    backgroundColor: '#F1F5F9',
+    backgroundColor: colors.overlayWhite5,
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 10,
     fontSize: 13,
+    color: colors.text,
   },
-  error: { color: '#EF4444', fontSize: 12 },
+  error: { color: colors.danger, fontSize: 12 },
   add: {
     alignSelf: 'flex-start',
     paddingHorizontal: 16,
     paddingVertical: 10,
-    backgroundColor: '#0F172A',
+    backgroundColor: colors.primary,
     borderRadius: 10,
   },
   addBusy: { opacity: 0.5 },
-  addText: { color: '#FFFFFF', fontWeight: '600', fontSize: 13 },
+  addText: { color: colors.onPrimary, fontWeight: '600', fontSize: 13 },
 });

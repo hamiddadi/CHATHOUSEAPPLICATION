@@ -1,6 +1,7 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useExtThemeMode, type ExtThemeMode } from '../providers/ExtThemeProvider';
+import { colors } from '../../../shared/constants/theme';
 
 const OPTIONS: { value: ExtThemeMode; label: string; emoji: string }[] = [
   { value: 'auto', label: 'Auto', emoji: '🌓' },
@@ -39,7 +40,7 @@ export const ExtThemeToggle: React.FC = () => {
 const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
-    backgroundColor: '#F1F5F9',
+    backgroundColor: colors.overlayWhite5,
     borderRadius: 12,
     padding: 4,
     gap: 4,
@@ -51,14 +52,14 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   segmentActive: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.overlayWhite10,
     shadowColor: '#000000',
     shadowOpacity: 0.06,
     shadowRadius: 4,
     shadowOffset: { width: 0, height: 1 },
     elevation: 1,
   },
-  emoji: { fontSize: 18 },
-  label: { fontSize: 12, marginTop: 2, color: '#64748B' },
-  labelActive: { color: '#0F172A', fontWeight: '600' },
+  emoji: { fontSize: 18, color: colors.text },
+  label: { fontSize: 12, marginTop: 2, color: colors.textMuted },
+  labelActive: { color: colors.text, fontWeight: '600' },
 });

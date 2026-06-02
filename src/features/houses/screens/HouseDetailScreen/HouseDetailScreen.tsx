@@ -1,9 +1,10 @@
 import React, { useCallback, useMemo } from 'react';
-import { Alert, Pressable, ScrollView, Share, Text, View } from 'react-native';
+import { Alert, FlatList, Pressable, Share, Text, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useTranslation } from 'react-i18next';
 import { Avatar } from '../../../../shared/components/Avatar';
 import { Button } from '../../../../shared/components/Button';
 import { Loader } from '../../../../shared/components/Loader';
@@ -29,6 +30,7 @@ export const HouseDetailScreen: React.FC = () => {
   const navigation = useNavigation<Nav>();
   const route = useRoute<Route>();
   const insets = useSafeAreaInsets();
+  const { t } = useTranslation();
   const houseId = route.params.houseId;
   const { data: house, isLoading, isError } = useHouse(houseId);
   const { data: liveRooms } = useHouseRooms(houseId, 'live');
@@ -110,16 +112,59 @@ export const HouseDetailScreen: React.FC = () => {
     [applyRole],
   );
 
+  // Admins can manage every member except themselves and the owner — the
+  // backend rejects any role change targeting the owner, so offering it would
+  // always fail. `house?.ownerId` distinguishes the owner from other admins.
+  // Declared as hooks BEFORE the early returns below so the Rules of Hooks
+  // hold (these previously lived after the loading/error guards — a violation).
+  const isManageable = useCallback(
+    (member: HouseMember): boolean =>
+      canManageRoles && member.id !== viewerId && member.id !== house?.ownerId,
+    [canManageRoles, viewerId, house?.ownerId],
+  );
+
+  const memberKeyExtractor = useCallback((item: HouseMember) => item.id, []);
+  const renderMemberItem = useCallback(
+    ({ item: m }: { item: HouseMember }) => {
+      const manageable = isManageable(m);
+      const row = (
+        <>
+          <Avatar uri={m.avatarUrl ?? undefined} name={m.displayName} size="md" />
+          <View className="flex-1">
+            <Text className="text-md font-body-bold text-ink">{m.displayName}</Text>
+            <Text className="text-xs font-body text-ink-muted capitalize">{m.role}</Text>
+          </View>
+          {m.role !== 'member' && (
+            <View className="bg-accent-container px-sm py-xxs rounded-xs">
+              <Text className="text-xxs font-body-bold text-accent uppercase">{m.role}</Text>
+            </View>
+          )}
+          {manageable && <MaterialIcons name="more-horiz" size={20} color={colors.textMuted} />}
+        </>
+      );
+      return manageable ? (
+        <Pressable
+          onPress={() => handleManageMember(m)}
+          disabled={setMemberRole.isPending}
+          accessibilityRole="button"
+          accessibilityLabel={`Manage role for ${m.displayName}`}
+          className="flex-row items-center gap-md p-md rounded-md bg-overlay-white-5"
+        >
+          {row}
+        </Pressable>
+      ) : (
+        <View className="flex-row items-center gap-md p-md rounded-md bg-overlay-white-5">
+          {row}
+        </View>
+      );
+    },
+    [handleManageMember, isManageable, setMemberRole.isPending],
+  );
+
   if (isLoading) return <Loader fullscreen accessibilityLabel="Loading house" />;
   if (isError || !house) {
     return <EmptyState title="House unavailable" description="This house may have been deleted." />;
   }
-
-  // Admins can manage every member except themselves and the owner — the
-  // backend rejects any role change targeting the owner, so offering it would
-  // always fail. `house.ownerId` lets us distinguish the owner from other admins.
-  const isManageable = (member: HouseMember): boolean =>
-    canManageRoles && member.id !== viewerId && member.id !== house.ownerId;
 
   const renderRoomSection = (title: string, rooms: HouseRoom[] | undefined, live: boolean) => {
     if (!rooms || rooms.length === 0) return null;
@@ -177,105 +222,81 @@ export const HouseDetailScreen: React.FC = () => {
         </Pressable>
       </View>
 
-      <ScrollView
+      <FlatList
         className="flex-1"
+        data={house.members}
+        keyExtractor={memberKeyExtractor}
+        renderItem={renderMemberItem}
         contentContainerStyle={{
           paddingHorizontal: spacing.xxl,
           paddingBottom: insets.bottom + spacing.giant,
-          gap: spacing.xl,
+          gap: spacing.md,
         }}
         showsVerticalScrollIndicator={false}
-      >
-        <View className="items-center gap-md">
-          <Avatar
-            uri={house.iconUrl ?? undefined}
-            name={house.name}
-            sizeValue={96}
-            shape="squircle"
-          />
-          <Text className="text-display font-display text-ink tracking-tight">{house.name}</Text>
-          <Text className="text-sm font-body text-ink-muted text-center">{house.description}</Text>
-          <View className="flex-row items-center gap-xxl">
-            <View className="items-center">
-              <Text className="text-xl font-display text-ink">
-                {house.membersCount.toLocaleString()}
+        ItemSeparatorComponent={() => <View style={{ height: spacing.sm }} />}
+        ListHeaderComponent={
+          <View style={{ gap: spacing.xl }}>
+            <View className="items-center gap-md">
+              <Avatar
+                uri={house.iconUrl ?? undefined}
+                name={house.name}
+                sizeValue={96}
+                shape="squircle"
+              />
+              <Text className="text-display font-display text-ink tracking-tight">
+                {house.name}
               </Text>
-              <Text className="text-xs font-body text-ink-muted">members</Text>
-            </View>
-            <View className="items-center">
-              <Text className="text-xl font-display text-ink">{house.liveRoomsCount}</Text>
-              <Text className="text-xs font-body text-ink-muted">rooms live</Text>
-            </View>
-          </View>
-          {house.isJoinedByMe ? (
-            <Button
-              label="Invite members"
-              variant="primaryContainer"
-              size="md"
-              onPress={handleInvite}
-            />
-          ) : house.privacy === 'private' ? (
-            <Text className="text-xs font-body text-ink-muted">Sur invitation uniquement</Text>
-          ) : (
-            <Button
-              label="Rejoindre"
-              variant="primary"
-              size="md"
-              loading={joinHouse.isPending}
-              disabled={joinHouse.isPending}
-              onPress={handleJoin}
-            />
-          )}
-        </View>
-
-        {renderRoomSection('En direct', liveRooms, true)}
-        {renderRoomSection('Planifiées', upcomingRooms, false)}
-
-        <View className="gap-md mt-lg">
-          <Text className="text-xxs font-body-bold text-ink-muted tracking-widest uppercase">
-            Members
-          </Text>
-          {house.members.map(m => {
-            const manageable = isManageable(m);
-            const row = (
-              <>
-                <Avatar uri={m.avatarUrl ?? undefined} name={m.displayName} size="md" />
-                <View className="flex-1">
-                  <Text className="text-md font-body-bold text-ink">{m.displayName}</Text>
-                  <Text className="text-xs font-body text-ink-muted capitalize">{m.role}</Text>
+              <Text className="text-sm font-body text-ink-muted text-center">
+                {house.description}
+              </Text>
+              <View className="flex-row items-center gap-xxl">
+                <View className="items-center">
+                  <Text className="text-xl font-display text-ink">
+                    {house.membersCount.toLocaleString()}
+                  </Text>
+                  <Text className="text-xs font-body text-ink-muted">
+                    {t('house.members', 'members')}
+                  </Text>
                 </View>
-                {m.role !== 'member' && (
-                  <View className="bg-accent-container px-sm py-xxs rounded-xs">
-                    <Text className="text-xxs font-body-bold text-accent uppercase">{m.role}</Text>
-                  </View>
-                )}
-                {manageable && (
-                  <MaterialIcons name="more-horiz" size={20} color={colors.textMuted} />
-                )}
-              </>
-            );
-            return manageable ? (
-              <Pressable
-                key={m.id}
-                onPress={() => handleManageMember(m)}
-                disabled={setMemberRole.isPending}
-                accessibilityRole="button"
-                accessibilityLabel={`Manage role for ${m.displayName}`}
-                className="flex-row items-center gap-md p-md rounded-md bg-overlay-white-5"
-              >
-                {row}
-              </Pressable>
-            ) : (
-              <View
-                key={m.id}
-                className="flex-row items-center gap-md p-md rounded-md bg-overlay-white-5"
-              >
-                {row}
+                <View className="items-center">
+                  <Text className="text-xl font-display text-ink">{house.liveRoomsCount}</Text>
+                  <Text className="text-xs font-body text-ink-muted">
+                    {t('house.roomsLive', 'rooms live')}
+                  </Text>
+                </View>
               </View>
-            );
-          })}
-        </View>
-      </ScrollView>
+              {house.isJoinedByMe ? (
+                <Button
+                  label={t('house.inviteMembers', 'Invite members')}
+                  variant="primaryContainer"
+                  size="md"
+                  onPress={handleInvite}
+                />
+              ) : house.privacy === 'private' ? (
+                <Text className="text-xs font-body text-ink-muted">
+                  {t('house.inviteOnly', 'Sur invitation uniquement')}
+                </Text>
+              ) : (
+                <Button
+                  label={t('house.join', 'Rejoindre')}
+                  variant="primary"
+                  size="md"
+                  loading={joinHouse.isPending}
+                  disabled={joinHouse.isPending}
+                  onPress={handleJoin}
+                />
+              )}
+            </View>
+
+            {renderRoomSection(t('house.liveRooms', 'En direct'), liveRooms, true)}
+            {renderRoomSection(t('house.upcomingRooms', 'Planifiées'), upcomingRooms, false)}
+
+            <Text className="text-xxs font-body-bold text-ink-muted tracking-widest uppercase mt-lg">
+              {t('house.membersList', 'Members')}
+            </Text>
+          </View>
+        }
+      />
     </View>
   );
 };

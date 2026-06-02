@@ -468,33 +468,32 @@ export const roomService = {
   },
 
   /**
-   * Fetch a freshly-signed Agora token bound to the caller's CURRENT
-   * role in the room. Use the result immediately for `joinChannel` and
+   * Fetch a freshly-signed LiveKit token bound to the caller's CURRENT
+   * role in the room. Use the result immediately for `room.connect()` and
    * remember to refetch ~30s before `expiresAt` so the SDK can renew
-   * without dropping the call. Backend returns 503 (AGORA_001) when the
-   * server-side certificate isn't configured — caller should fall back
-   * to env.AGORA_TEMP_TOKEN if present.
+   * without dropping the call. Backend returns 503 (LIVEKIT_001) when the
+   * server-side credentials aren't configured.
    */
-  async getAgoraToken(roomId: string): Promise<{
+  async getLivekitToken(roomId: string): Promise<{
     token: string;
-    appId: string;
-    channel: string;
-    uid: number;
-    role: 'publisher' | 'subscriber';
+    url: string;
+    room: string;
+    identity: string;
+    canPublish: boolean;
     expiresAt: string;
     expiresInSec: number;
   }> {
     const res = await apiClient.get<
       Envelope<{
         token: string;
-        appId: string;
-        channel: string;
-        uid: number;
-        role: 'publisher' | 'subscriber';
+        url: string;
+        room: string;
+        identity: string;
+        canPublish: boolean;
         expiresAt: string;
         expiresInSec: number;
       }>
-    >(`/rooms/${roomId}/agora-token`);
+    >(`/rooms/${roomId}/livekit-token`);
     return res.data.data;
   },
 

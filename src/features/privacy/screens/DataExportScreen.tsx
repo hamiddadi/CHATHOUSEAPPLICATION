@@ -2,12 +2,14 @@ import React, { useCallback, useRef, useState } from 'react';
 import { Alert, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useTranslation } from 'react-i18next';
 import { Button } from '../../../shared/components/Button';
-import { colors, spacing } from '../../../shared/constants/theme';
+import { colors, radii, spacing } from '../../../shared/constants/theme';
 import { errorMessage } from '../../../shared/utils/errorMessage';
 import { privacyService } from '../services/privacyService';
 
 export const DataExportScreen: React.FC = () => {
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const [busy, setBusy] = useState(false);
   const [lastBytes, setLastBytes] = useState<number | null>(null);
@@ -31,13 +33,16 @@ export const DataExportScreen: React.FC = () => {
       archiveRef.current = json;
       setLastBytes(json.length);
       // Share sheet carries the full archive (not truncated) — no clipboard.
-      await Share.share({ message: json, title: 'Mon export Chathouse (RGPD)' });
+      await Share.share({ message: json, title: t('privacy.export.title') });
     } catch (e) {
-      Alert.alert('Erreur', errorMessage(e, 'Échec de l’export'));
+      Alert.alert(
+        t('privacy.export.errorExportTitle'),
+        errorMessage(e, t('privacy.export.errorExportBody')),
+      );
     } finally {
       setBusy(false);
     }
-  }, []);
+  }, [t]);
 
   // Explicit opt-in copy. Users who really want the clipboard can choose it,
   // and we surface a one-tap way to wipe it again afterwards.
@@ -47,9 +52,12 @@ export const DataExportScreen: React.FC = () => {
       await Clipboard.setStringAsync(archiveRef.current);
       setCopied(true);
     } catch (e) {
-      Alert.alert('Erreur', errorMessage(e, 'Échec de la copie'));
+      Alert.alert(
+        t('privacy.export.errorExportTitle'),
+        errorMessage(e, t('privacy.export.errorCopyBody')),
+      );
     }
-  }, []);
+  }, [t]);
 
   const handleClearClipboard = useCallback(async () => {
     try {
@@ -70,55 +78,40 @@ export const DataExportScreen: React.FC = () => {
         gap: spacing.lg,
       }}
     >
-      <Text style={styles.h1}>Exporter mes données</Text>
+      <Text style={styles.h1}>{t('privacy.export.title')}</Text>
       <View style={styles.card}>
-        <Text style={styles.body}>
-          Conformément à l&apos;article 20 du RGPD (droit à la portabilité), vous pouvez télécharger
-          une copie complète de l&apos;ensemble de vos données personnelles dans un fichier JSON
-          structuré.
-        </Text>
-        <Text style={styles.body}>
-          L&apos;archive contient : votre profil, vos rooms hébergées, vos participations, votre
-          graphe d&apos;abonnements, vos messages directs, vos messages de room, vos RSVP, la liste
-          de vos appareils (plateforme et dates, sans le jeton secret) et vos préférences de
-          notification.
-        </Text>
-        <Text style={styles.muted}>
-          Note : le journal d&apos;audit (actions de modération) et les signalements émis contre
-          votre compte ne sont pas inclus, conformément à l&apos;article 23 du RGPD (intérêt
-          légitime de modération).
-        </Text>
+        <Text style={styles.body}>{t('privacy.export.description1')}</Text>
+        <Text style={styles.body}>{t('privacy.export.description2')}</Text>
+        <Text style={styles.muted}>{t('privacy.export.note')}</Text>
       </View>
 
       <Button
-        label={busy ? 'Préparation…' : 'Générer et partager mon export'}
+        label={busy ? t('privacy.export.buttonPrepare') : t('privacy.export.buttonExport')}
         variant="primary"
         size="lg"
         fullWidth
         loading={busy}
         onPress={handleExport}
+        accessibilityHint={t('privacy.export.description1')}
       />
 
       {lastBytes !== null ? (
         <>
-          <Text style={styles.feedback}>
-            ✓ Export généré ({(lastBytes / 1024).toFixed(1)} Ko) — partagez-le via le menu de
-            partage.
+          <Text style={styles.feedback} accessibilityLiveRegion="polite">
+            {t('privacy.export.success', { size: (lastBytes / 1024).toFixed(1) })}
           </Text>
-          <Text style={styles.muted}>
-            Le presse-papier est lisible par d&apos;autres applications. Ne copiez l&apos;archive
-            que si nécessaire, puis effacez le presse-papier.
-          </Text>
+          <Text style={styles.muted}>{t('privacy.export.warning')}</Text>
           <Button
-            label="Copier dans le presse-papier"
+            label={t('privacy.export.buttonCopy')}
             variant="ghost"
             size="md"
             fullWidth
             onPress={handleCopy}
+            accessibilityHint={t('privacy.export.warning')}
           />
           {copied ? (
             <Button
-              label="Effacer le presse-papier"
+              label={t('privacy.export.buttonClear')}
               variant="outline"
               size="md"
               fullWidth
@@ -134,11 +127,11 @@ export const DataExportScreen: React.FC = () => {
 const styles = StyleSheet.create({
   h1: { color: colors.text, fontSize: 24, fontWeight: '700' },
   card: {
-    backgroundColor: 'rgba(255,255,255,0.04)',
-    borderRadius: 12,
+    backgroundColor: colors.overlayWhite4,
+    borderRadius: radii.md,
     padding: spacing.lg,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
+    borderColor: colors.glassStrong,
     gap: spacing.sm,
   },
   body: { color: colors.text, fontSize: 13, lineHeight: 19 },

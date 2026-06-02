@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useTranslation } from 'react-i18next';
 import { ExtAvailablePeopleStrip } from '../components/ExtAvailablePeopleStrip';
 import { ExtBackToRoomBanner } from '../components/ExtBackToRoomBanner';
 import { ExtCalendarExportButton } from '../components/ExtCalendarExportButton';
@@ -18,6 +19,7 @@ import { validateInterests } from '../utils/interestsValidator';
 // V13-V15 additions
 import { ExtBadgesRow } from '../components/ExtBadgesRow';
 import { ExtChatReactionsBar } from '../components/ExtChatReactionsBar';
+import { colors } from '../../../shared/constants/theme';
 
 /**
  * Developer playground — renders every extension component in isolation so
@@ -34,6 +36,7 @@ export const ExtPlaygroundScreen: React.FC = () => {
   const [interestsInput, setInterestsInput] = useState('tech, music, startups');
   const fontScale = useExtFontScale();
   const { wave, pending: waving, lastResult } = useExtWave();
+  const { t } = useTranslation();
 
   const interestsList = interestsInput
     .split(/[,\s]+/)
@@ -44,41 +47,63 @@ export const ExtPlaygroundScreen: React.FC = () => {
   return (
     <SafeAreaView style={styles.safe}>
       <ScrollView contentContainerStyle={styles.scroll}>
-        <Text style={styles.h1}>Extensions Playground</Text>
-        <Text style={styles.muted}>Font scale × {fontScale.toFixed(2)}</Text>
+        <Text style={styles.h1}>{t('extensions.playground.title', 'Extensions Playground')}</Text>
+        <Text style={styles.muted}>
+          {t('extensions.playground.fontScale', 'Font scale')} × {fontScale.toFixed(2)}
+        </Text>
 
-        <Section title="V2 — Theme toggle">
+        <Section title={t('extensions.playground.themeToggleTitle', 'V2 — Theme toggle')}>
           <ExtThemeToggle />
         </Section>
 
-        <Section title="V1 — Linkified text (chat URL parser)">
+        <Section
+          title={t('extensions.playground.linkifiedTitle', 'V1 — Linkified text (chat URL parser)')}
+        >
           <ExtLinkifiedText style={styles.body}>
-            Visit https://clubhouse.com or check chathouse.app/r/demo for more details.
+            {t(
+              'extensions.playground.linkifiedBody',
+              'Visit https://clubhouse.com or check chathouse.app/r/demo for more details.',
+            )}
           </ExtLinkifiedText>
         </Section>
 
-        <Section title="V1 — Social deep-links">
+        <Section title={t('extensions.playground.socialDeepLinksTitle', 'V1 — Social deep-links')}>
           <Row>
             <Btn
-              label="Open @clubhouse on Twitter"
+              label={t('extensions.playground.openTwitter', 'Open @clubhouse on Twitter')}
               onPress={() => void openTwitterHandle('@clubhouse')}
             />
-            <Btn label="Open @instagram" onPress={() => void openInstagramHandle('instagram')} />
+            <Btn
+              label={t('extensions.playground.openInstagram', 'Open @instagram')}
+              onPress={() => void openInstagramHandle('instagram')}
+            />
           </Row>
         </Section>
 
-        <Section title="V1 — People available to chat">
+        <Section
+          title={t('extensions.playground.availablePeopleTitle', 'V1 — People available to chat')}
+        >
           <ExtAvailablePeopleStrip onWaveUser={u => void wave(u.id)} />
           <Text style={styles.muted}>
-            Wave status: {waving ? 'sending…' : (lastResult ?? 'idle')}
+            {t('extensions.playground.waveStatus', 'Wave status')}:{' '}
+            {waving
+              ? t('extensions.playground.waving', 'sending…')
+              : (lastResult ?? t('extensions.playground.idle', 'idle'))}
           </Text>
         </Section>
 
-        <Section title="V3 — Upcoming for you">
-          <ExtUpcomingForYouStrip emptyHint="No upcoming events for your account yet." />
+        <Section title={t('extensions.playground.upcomingTitle', 'V3 — Upcoming for you')}>
+          <ExtUpcomingForYouStrip
+            emptyHint={t(
+              'extensions.playground.upcomingEmpty',
+              'No upcoming events for your account yet.',
+            )}
+          />
         </Section>
 
-        <Section title="V4 — Network quality bars">
+        <Section
+          title={t('extensions.playground.networkQualityTitle', 'V4 — Network quality bars')}
+        >
           <Row>
             <ExtNetworkQualityBars
               report={{ rttMs: 80, jitterMs: 10, packetLossPct: 0, bars: 3, warning: null }}
@@ -93,8 +118,10 @@ export const ExtPlaygroundScreen: React.FC = () => {
           </Row>
         </Section>
 
-        <Section title="V8 — Calendar .ics export">
-          <Text style={styles.muted}>Room ID:</Text>
+        <Section
+          title={t('extensions.playground.calendarExportTitle', 'V8 — Calendar .ics export')}
+        >
+          <Text style={styles.muted}>{t('extensions.playground.roomId', 'Room ID')}:</Text>
           <TextInput
             style={styles.input}
             value={pickedRoomId}
@@ -104,8 +131,11 @@ export const ExtPlaygroundScreen: React.FC = () => {
           <ExtCalendarExportButton roomId={pickedRoomId} />
         </Section>
 
-        <Section title="V8 — Share sheet">
-          <Btn label="Open share sheet" onPress={() => setShareOpen(true)} />
+        <Section title={t('extensions.playground.shareSheetTitle', 'V8 — Share sheet')}>
+          <Btn
+            label={t('extensions.playground.openShareSheet', 'Open share sheet')}
+            onPress={() => setShareOpen(true)}
+          />
           <ExtShareSheet
             roomId={pickedRoomId}
             visible={shareOpen}
@@ -113,9 +143,21 @@ export const ExtPlaygroundScreen: React.FC = () => {
           />
         </Section>
 
-        <Section title="V10 — Reaction picker (long-press emulation)">
-          <Btn label="Open reaction picker" onPress={() => setReactionOpen(true)} />
-          {lastReaction ? <Text style={styles.muted}>Last picked: {lastReaction}</Text> : null}
+        <Section
+          title={t(
+            'extensions.playground.reactionPickerTitle',
+            'V10 — Reaction picker (long-press emulation)',
+          )}
+        >
+          <Btn
+            label={t('extensions.playground.openReactionPicker', 'Open reaction picker')}
+            onPress={() => setReactionOpen(true)}
+          />
+          {lastReaction ? (
+            <Text style={styles.muted}>
+              {t('extensions.playground.lastPicked', 'Last picked')}: {lastReaction}
+            </Text>
+          ) : null}
           <ExtReactionPicker
             visible={reactionOpen}
             onPick={em => setLastReaction(em)}
@@ -123,7 +165,9 @@ export const ExtPlaygroundScreen: React.FC = () => {
           />
         </Section>
 
-        <Section title="V10 — Captions overlay (fake lines)">
+        <Section
+          title={t('extensions.playground.captionsTitle', 'V10 — Captions overlay (fake lines)')}
+        >
           <View style={styles.captionsCanvas}>
             <ExtCaptionsOverlay
               lines={[
@@ -156,28 +200,33 @@ export const ExtPlaygroundScreen: React.FC = () => {
           </View>
         </Section>
 
-        <Section title="V2 — Interests validator">
+        <Section title={t('extensions.playground.interestsTitle', 'V2 — Interests validator')}>
           <TextInput
             style={styles.input}
             value={interestsInput}
             onChangeText={setInterestsInput}
-            placeholder="tech, music, startups, …"
+            placeholder={t(
+              'extensions.playground.interestsPlaceholder',
+              'tech, music, startups, …',
+            )}
             autoCapitalize="none"
           />
           <Text style={[styles.muted, !interestValidation.ok && styles.bad]}>
             {interestValidation.ok
-              ? '✓ valid'
+              ? t('extensions.playground.interestsValid', '✓ valid')
               : `✗ ${interestValidation.reason}${
-                  interestValidation.missing ? ` (need ${interestValidation.missing} more)` : ''
+                  interestValidation.missing
+                    ? ` (${t('extensions.playground.interestsNeed', 'need')} ${interestValidation.missing} ${t('extensions.playground.interestsMore', 'more')})`
+                    : ''
                 }`}
           </Text>
         </Section>
 
-        <Section title="V10 — Back-to-room banner">
+        <Section title={t('extensions.playground.backToRoomTitle', 'V10 — Back-to-room banner')}>
           <ExtBackToRoomBanner
             visible
-            roomTitle="Late night tech talk"
-            hostName="Alice"
+            roomTitle={t('extensions.playground.demoRoomTitle', 'Late night tech talk')}
+            hostName={t('extensions.playground.demoHostName', 'Alice')}
             isMuted={false}
             onTapBack={() => undefined}
             onToggleMute={() => undefined}
@@ -185,7 +234,12 @@ export const ExtPlaygroundScreen: React.FC = () => {
           />
         </Section>
 
-        <Section title="V13 — Chat reactions bar (mocked counts)">
+        <Section
+          title={t(
+            'extensions.playground.chatReactionsTitle',
+            'V13 — Chat reactions bar (mocked counts)',
+          )}
+        >
           <ExtChatReactionsBar
             messageId="demo-message-1"
             initial={{
@@ -194,13 +248,22 @@ export const ExtPlaygroundScreen: React.FC = () => {
               '😂': { count: 1, byMe: false },
             }}
           />
-          <Text style={styles.muted}>Tap a chip to toggle (would call backend).</Text>
+          <Text style={styles.muted}>
+            {t(
+              'extensions.playground.chatReactionsHint',
+              'Tap a chip to toggle (would call backend).',
+            )}
+          </Text>
         </Section>
 
-        <Section title="V13 — Badges row (live fetch)">
+        <Section title={t('extensions.playground.badgesTitle', 'V13 — Badges row (live fetch)')}>
           <ExtBadgesRow userId={pickedRoomId} />
           <Text style={styles.muted}>
-            Uses userId={pickedRoomId} — typically the viewer's own id.
+            {t(
+              'extensions.playground.badgesHint',
+              "Uses userId={{pickedRoomId}} — typically the viewer's own id.",
+              { pickedRoomId },
+            )}
           </Text>
         </Section>
 
@@ -233,39 +296,40 @@ const Btn: React.FC<{ label: string; onPress: () => void }> = ({ label, onPress 
 );
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: '#FFFFFF' },
+  safe: { flex: 1, backgroundColor: colors.background },
   scroll: { padding: 16, gap: 16 },
-  h1: { fontSize: 22, fontWeight: '700' },
-  h2: { fontSize: 14, fontWeight: '700', color: '#475569', textTransform: 'uppercase' },
-  muted: { color: '#64748B', fontSize: 12 },
-  bad: { color: '#EF4444' },
-  body: { fontSize: 14, color: '#0F172A' },
+  h1: { fontSize: 22, fontWeight: '700', color: colors.text },
+  h2: { fontSize: 14, fontWeight: '700', color: colors.textMuted, textTransform: 'uppercase' },
+  muted: { color: colors.textMuted, fontSize: 12 },
+  bad: { color: colors.danger },
+  body: { fontSize: 14, color: colors.text },
   section: {
     paddingVertical: 12,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderColor: '#E2E8F0',
+    borderColor: colors.glassStrong,
     gap: 8,
   },
   row: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignItems: 'flex-end' },
   input: {
-    backgroundColor: '#F1F5F9',
+    backgroundColor: colors.surfaceHigh,
     paddingHorizontal: 10,
     paddingVertical: 8,
     borderRadius: 8,
     fontSize: 13,
+    color: colors.text,
   },
   btn: {
-    backgroundColor: '#0F172A',
+    backgroundColor: colors.primary,
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderRadius: 10,
     alignSelf: 'flex-start',
   },
-  btnText: { color: '#FFFFFF', fontSize: 13, fontWeight: '600' },
+  btnText: { color: colors.onPrimary, fontSize: 13, fontWeight: '600' },
   captionsCanvas: {
     height: 180,
     borderRadius: 12,
-    backgroundColor: '#1F2937',
+    backgroundColor: colors.surfaceLowest,
     position: 'relative',
     overflow: 'hidden',
   },

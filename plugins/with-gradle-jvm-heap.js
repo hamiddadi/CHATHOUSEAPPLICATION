@@ -11,35 +11,33 @@ const { withGradleProperties } = require('@expo/config-plugins');
  *     Unable to connect to the child process 'Gradle Worker Daemon 1'.
  *     The connection attempt hit a timeout after 120,0 seconds.
  *
- * The defaults Expo ships with give Gradle ~512 MB heap which is well
- * under what's needed when 3+ native libs compile their AARs in parallel.
+ * Tuned for a RAM-CONSTRAINED machine (≈8 GB total, ~1 GB free with an IDE +
+ * browsers open). The Expo default (-Xmx4g + 4 parallel workers + a 2 GB Kotlin
+ * daemon) over-commits ~8 GB and OOM-killed the worker daemon mid-compile.
+ * Serial compilation with bounded heaps is what made the build complete here.
+ * (Agora was removed from the deps, so there's also less native code to build.)
  *
  * Settings rationale:
- *  - -Xmx4096m   : 4 GB heap. Required for cleanly compiling Agora +
- *                  Reanimated + Maps + Screens in the same JVM.
- *  - MaxMetaspaceSize=1g : caps the class metadata segment. Prevents the
- *                  Kotlin compiler from blowing the JVM's metaspace on
- *                  monorepos with many compilation units.
- *  - parallel=true / workers.max=4 : run independent Gradle tasks in
- *                  parallel. 4 workers is sane on 4-8 core dev machines.
- *  - caching=true: enables the build cache; subsequent builds reuse
- *                  outputs of unchanged tasks. Cuts iteration time ~5x.
- *  - kotlin.daemon.jvmargs=-Xmx2g : the Kotlin daemon is separate from
- *                  the main Gradle JVM; it also crashed on default heap.
+ *  - -Xmx2048m / MaxMetaspaceSize=512m : enough for the app/DEX phase without
+ *                  starving the rest of the machine.
+ *  - parallel=false / workers.max=1 : compile modules one at a time so peak
+ *                  RAM stays ~one worker JVM, not four. Slower but reliable.
+ *  - kotlin.daemon.jvmargs=-Xmx1280m : the Kotlin daemon is a separate JVM.
+ *  - caching=true: build cache reuses unchanged task outputs across builds.
  *
- * If you keep hitting OOM despite this, bump -Xmx (8g if you have 16+ GB
- * of RAM) and reduce workers.max to 2.
+ * On a machine with 16+ GB free you can raise -Xmx to 4g, flip parallel back to
+ * true and workers.max to 3-4 for a much faster build.
  */
 const PROPERTIES = [
   {
     key: 'org.gradle.jvmargs',
-    value: '-Xmx4096m -XX:MaxMetaspaceSize=1g -XX:+HeapDumpOnOutOfMemoryError -Dfile.encoding=UTF-8',
+    value: '-Xmx2048m -XX:MaxMetaspaceSize=512m -Dfile.encoding=UTF-8',
   },
-  { key: 'org.gradle.parallel', value: 'true' },
+  { key: 'org.gradle.parallel', value: 'false' },
   { key: 'org.gradle.caching', value: 'true' },
   { key: 'org.gradle.daemon', value: 'true' },
-  { key: 'org.gradle.workers.max', value: '4' },
-  { key: 'kotlin.daemon.jvmargs', value: '-Xmx2048m' },
+  { key: 'org.gradle.workers.max', value: '1' },
+  { key: 'kotlin.daemon.jvmargs', value: '-Xmx1280m' },
 ];
 
 const withGradleJvmHeap = config =>

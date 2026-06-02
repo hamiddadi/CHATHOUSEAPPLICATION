@@ -62,7 +62,7 @@ roomsRouter.post('/:id/ping/:userId', asyncHandler(roomsController.ping));
 // Report a room — moderation queue, rate-limited 1 per (reporter, room) per 24h.
 roomsRouter.post('/:id/report', asyncHandler(socialController.reportRoom));
 
-// Agora token — fresh signed token bound to the caller's current role.
+// LiveKit token — fresh signed token bound to the caller's current role.
 // Active-participant gate is enforced inside the controller. Returns
-// 503 (AGORA_001) when AGORA_PRIMARY_CERTIFICATE isn't configured.
-roomsRouter.get('/:id/agora-token', asyncHandler(roomsController.agoraToken));
+// 503 (LIVEKIT_001) when LIVEKIT_API_SECRET isn't configured.
+roomsRouter.get('/:id/livekit-token', asyncHandler(roomsController.livekitToken));

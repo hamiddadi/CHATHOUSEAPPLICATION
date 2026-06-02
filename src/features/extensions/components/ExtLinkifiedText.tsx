@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { Linking, StyleSheet, Text, type TextProps, type TextStyle } from 'react-native';
+import { colors } from '../../../shared/constants/theme';
 
 interface ExtLinkifiedTextProps extends TextProps {
   children: string;
@@ -62,7 +63,7 @@ export const ExtLinkifiedText: React.FC<ExtLinkifiedTextProps> = ({
 };
 
 const styles = StyleSheet.create({
-  link: { color: '#2A8BF2', textDecorationLine: 'underline' },
+  link: { color: colors.primary, textDecorationLine: 'underline' },
 });
 
 type Segment = { type: 'text' | 'url'; value: string };

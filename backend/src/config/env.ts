@@ -65,18 +65,18 @@ const envSchema = z.object({
   // extension features are actually reachable in production.
   EXTENSIONS_ENABLED: boolFromString(true),
 
-  // ─── Agora (audio engine) ──────────────────────────────────────────
-  // APP_ID is shipped to clients (it's public). PRIMARY_CERTIFICATE is a
-  // SECRET used to sign per-room tokens — must NEVER leak to the bundle.
-  // SECONDARY_CERTIFICATE is the rolling key for zero-downtime rotation.
-  // When unset, /rooms/:id/agora-token returns 503 and the client falls
-  // back to its env-baked temp token (dev-only path).
-  AGORA_APP_ID: z.string().min(1).optional(),
-  AGORA_PRIMARY_CERTIFICATE: z.string().min(1).optional(),
-  AGORA_SECONDARY_CERTIFICATE: z.string().min(1).optional(),
+  // ─── LiveKit (audio engine) ─────────────────────────────────────────
+  // LIVEKIT_URL is the WebSocket endpoint of the LiveKit server. Shipped
+  // to clients via the token response (never hardcoded in the bundle).
+  // API_KEY and API_SECRET are used to sign per-room JWT tokens — the
+  // secret must NEVER leak to the bundle.
+  // When unset, /rooms/:id/livekit-token returns 503.
+  LIVEKIT_URL: z.string().min(1).optional(),
+  LIVEKIT_API_KEY: z.string().min(1).optional(),
+  LIVEKIT_API_SECRET: z.string().min(1).optional(),
   // Token TTL — clients renew ~30s before expiry so even short windows
   // are stable. 1h is a sensible default; raise for low-traffic setups.
-  AGORA_TOKEN_TTL_SECONDS: z.coerce.number().int().min(60).max(86400).default(3600),
+  LIVEKIT_TOKEN_TTL_SECONDS: z.coerce.number().int().min(60).max(86400).default(3600),
 
   // mediasoup (phase 4). Disabled by default because the npm package compiles
   // C++ from source at install time — turn ON in docker-compose only.

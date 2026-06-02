@@ -40,15 +40,6 @@ const FEATURE_ICON_BOX = 44;
 const FEATURE_ICON_SIZE = 22;
 const FEATURE_ICON_RADIUS = 12;
 
-const CIRCLE_SIZE_LG = 200;
-const CIRCLE_SIZE_MD = 150;
-const CIRCLE_SIZE_SM = 100;
-
-const CIRCLE_TOP_OFFSET_NEG = -40;
-const CIRCLE_RIGHT_OFFSET_NEG = -60;
-const CIRCLE_LEFT_OFFSET_NEG = -50;
-const CIRCLE_BOTTOM_OFFSET = 120;
-const CIRCLE_RIGHT_OFFSET_SMALL_NEG = -20;
 const CIRCLE_MID_HEIGHT_FACTOR = 0.35;
 
 const AVATAR_OVERLAP = -12;
@@ -71,58 +62,28 @@ const FEATURES_DATA: readonly FeatureItemData[] = [
   { id: 'chat', icon: 'chatbubbles' },
 ];
 
-interface CircleConfig {
-  id: string;
-  size: number;
-  top?: number;
-  bottom?: number;
-  left?: number;
-  right?: number;
-  heightFactor?: number;
-  tintClass: string;
-}
-
-const CIRCLE_CONFIGS: readonly CircleConfig[] = [
-  {
-    id: 'c1',
-    size: CIRCLE_SIZE_LG,
-    top: CIRCLE_TOP_OFFSET_NEG,
-    right: CIRCLE_RIGHT_OFFSET_NEG,
-    tintClass: 'bg-overlay-white-5',
-  },
-  {
-    id: 'c2',
-    size: CIRCLE_SIZE_MD,
-    left: CIRCLE_LEFT_OFFSET_NEG,
-    heightFactor: CIRCLE_MID_HEIGHT_FACTOR,
-    tintClass: 'bg-overlay-white-4',
-  },
-  {
-    id: 'c3',
-    size: CIRCLE_SIZE_SM,
-    bottom: CIRCLE_BOTTOM_OFFSET,
-    right: CIRCLE_RIGHT_OFFSET_SMALL_NEG,
-    tintClass: 'bg-overlay-white-6',
-  },
-];
-
 /* ============================================================
  * Sub-components (local to this screen, not exported)
  * ========================================================== */
 
-const LandingLogo: React.FC<{ tagline: string }> = memo(({ tagline }) => (
-  <View className="items-center" accessibilityRole="header">
-    <View
-      className="items-center justify-center bg-overlay-white-20"
-      style={styles.logoContainer}
-      importantForAccessibility="no"
-    >
-      <Ionicons name="mic" size={LOGO_ICON_SIZE} color={colors.white} />
+const LandingLogo: React.FC<{ tagline: string }> = memo(({ tagline }) => {
+  const { t } = useTranslation();
+  return (
+    <View className="items-center" accessibilityRole="header">
+      <View
+        className="items-center justify-center bg-overlay-white-20"
+        style={styles.logoContainer}
+        importantForAccessibility="no"
+      >
+        <Ionicons name="mic" size={LOGO_ICON_SIZE} color={colors.white} />
+      </View>
+      <Text className="text-hero font-display text-white tracking-tighter">
+        {t('common.appName', 'Chathouse')}
+      </Text>
+      <Text className="text-md font-body text-overlay-white-75 mt-xs">{tagline}</Text>
     </View>
-    <Text className="text-hero font-display text-white tracking-tighter">Chathouse</Text>
-    <Text className="text-md font-body text-overlay-white-75 mt-xs">{tagline}</Text>
-  </View>
-));
+  );
+});
 LandingLogo.displayName = 'LandingLogo';
 
 interface FeatureItemProps {
@@ -252,8 +213,35 @@ LandingCTA.displayName = 'LandingCTA';
 export const LandingScreen: React.FC = () => {
   const navigation = useNavigation<LandingNavProp>();
   const insets = useSafeAreaInsets();
-  const { height } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
   const { t } = useTranslation();
+
+  const circles = useMemo(
+    () => [
+      {
+        id: 'c1',
+        size: width * 0.55,
+        top: width * -0.1,
+        right: width * -0.15,
+        tintClass: 'bg-overlay-white-5',
+      },
+      {
+        id: 'c2',
+        size: width * 0.4,
+        left: width * -0.12,
+        top: height * CIRCLE_MID_HEIGHT_FACTOR,
+        tintClass: 'bg-overlay-white-4',
+      },
+      {
+        id: 'c3',
+        size: width * 0.25,
+        bottom: height * 0.15,
+        right: width * -0.05,
+        tintClass: 'bg-overlay-white-6',
+      },
+    ],
+    [width, height],
+  );
 
   const handleGetStarted = useCallback(() => navigation.navigate('Phone'), [navigation]);
   const handleLogin = useCallback(() => navigation.navigate('Phone'), [navigation]);
@@ -333,7 +321,7 @@ export const LandingScreen: React.FC = () => {
       end={{ x: 1, y: 1 }}
       style={[styles.container, containerPadding]}
     >
-      {CIRCLE_CONFIGS.map(cfg => (
+      {circles.map(cfg => (
         <View
           key={cfg.id}
           importantForAccessibility="no"
@@ -342,7 +330,7 @@ export const LandingScreen: React.FC = () => {
             width: cfg.size,
             height: cfg.size,
             borderRadius: cfg.size / 2,
-            top: cfg.top ?? (cfg.heightFactor ? height * cfg.heightFactor : undefined),
+            top: cfg.top,
             bottom: cfg.bottom,
             left: cfg.left,
             right: cfg.right,

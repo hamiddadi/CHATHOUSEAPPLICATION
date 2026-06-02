@@ -152,17 +152,17 @@ export const useAuthStore = create<AuthState>((set, _get) => ({
     // Drop the push token BEFORE invalidating the session so the
     // /push/unregister call still carries a valid Authorization header.
     await pushService.unregisterCurrentDevice();
-    // Tear down the Agora engine — the singleton holds a native session,
-    // a worker thread and an in-flight RTC channel join. Without an
+    // Tear down the LiveKit engine — release any active room connections,
+    // native resources, and in-flight reconnection timers. Without an
     // explicit release, those leak across logouts and the next login
     // would inherit a stale audio bus. The require is dynamic to keep
-    // this file booting in test envs without `react-native-agora`.
+    // this file booting in test envs without `@livekit/react-native`.
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const { releaseAgora } = require('../../rooms/services/agora/AgoraEngine') as {
-        releaseAgora: () => void;
+      const { releaseLiveKit } = require('../../rooms/services/livekit/LiveKitEngine') as {
+        releaseLiveKit: () => void;
       };
-      releaseAgora();
+      releaseLiveKit();
     } catch {
       /* engine wasn't loaded (Expo Go / unit test) — nothing to release */
     }

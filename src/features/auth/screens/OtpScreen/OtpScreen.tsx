@@ -179,21 +179,23 @@ export const OtpScreen: React.FC = () => {
 
         {/* Remaining attempts warning */}
         {attempts > 0 && remainingAttempts > 0 && (
-          <Text className="text-xs text-danger text-center">
+          <Text className="text-xs text-danger text-center" accessibilityLiveRegion="assertive">
             {t('auth.otp.attemptsRemaining', { count: remainingAttempts })}
           </Text>
         )}
 
         {/* Locked: too many attempts — invite a resend */}
         {locked && (
-          <Text className="text-xs text-danger text-center">
+          <Text className="text-xs text-danger text-center" accessibilityLiveRegion="polite">
             {t('auth.otp.errors.tooManyAttempts', 'Too many attempts. Resend a new code.')}
           </Text>
         )}
 
         {/* Loading indicator during submit */}
         {isSubmitting && (
-          <Text className="text-xs text-ink-muted text-center">{t('auth.otp.verifying')}</Text>
+          <Text className="text-xs text-ink-muted text-center" accessibilityLiveRegion="polite">
+            {t('auth.otp.verifying')}
+          </Text>
         )}
 
         {/* Resend with countdown */}

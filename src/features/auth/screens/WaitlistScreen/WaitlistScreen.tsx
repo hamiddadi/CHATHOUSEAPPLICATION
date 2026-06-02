@@ -3,6 +3,7 @@ import { Share, Text, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useTranslation } from 'react-i18next';
 import { Button } from '../../../../shared/components/Button';
 import { colors, spacing } from '../../../../shared/constants/theme';
 
@@ -11,20 +12,23 @@ const HOURGLASS_SIZE = 72;
 export const WaitlistScreen: React.FC = () => {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
+  const { t } = useTranslation();
 
   const handleBack = useCallback(() => navigation.goBack(), [navigation]);
 
   const handleInvite = useCallback(async () => {
     try {
       await Share.share({
-        message:
+        message: t(
+          'auth.waitlist.shareMessage',
           "J'attends mon accès à Chathouse — rejoins la waitlist pour m'aider à passer devant : https://app.chathouse.com",
+        ),
         url: 'https://app.chathouse.com',
       });
     } catch {
       /* user cancelled — no-op */
     }
-  }, []);
+  }, [t]);
 
   return (
     <View
@@ -39,23 +43,31 @@ export const WaitlistScreen: React.FC = () => {
           <MaterialIcons name="hourglass-empty" size={HOURGLASS_SIZE} color={colors.primary} />
         </View>
         <Text className="text-display font-display text-ink tracking-tight text-center">
-          You&apos;re on the waitlist
+          {t('auth.waitlist.title', "You're on the waitlist")}
         </Text>
         <Text className="text-sm font-body text-ink-muted text-center max-w-[300px]">
-          We&apos;ll let you know the moment a spot opens up. In the meantime, invite a friend to
-          move up the queue.
+          {t(
+            'auth.waitlist.subtitle',
+            "We'll let you know the moment a spot opens up. In the meantime, invite a friend to move up the queue.",
+          )}
         </Text>
       </View>
 
       <View className="w-full gap-sm">
         <Button
-          label="Invite a friend"
+          label={t('auth.waitlist.invite', 'Invite a friend')}
           variant="primary"
           size="lg"
           fullWidth
           onPress={handleInvite}
         />
-        <Button label="Back" variant="ghost" size="md" fullWidth onPress={handleBack} />
+        <Button
+          label={t('common.back', 'Back')}
+          variant="ghost"
+          size="md"
+          fullWidth
+          onPress={handleBack}
+        />
       </View>
     </View>
   );

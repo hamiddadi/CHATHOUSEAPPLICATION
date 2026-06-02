@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { chatReactionsApi, type ReactionsByEmoji } from '../api/chatReactionsApi';
+import { colors } from '../../../shared/constants/theme';
 
 interface Props {
   messageId: string;
@@ -114,11 +115,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 999,
-    backgroundColor: '#F1F5F9',
+    backgroundColor: colors.overlayWhite5,
     gap: 4,
   },
-  chipMine: { backgroundColor: '#DBEAFE' },
-  emoji: { fontSize: 13 },
-  count: { fontSize: 11, color: '#475569', fontWeight: '600' },
-  countMine: { color: '#1D4ED8' },
+  chipMine: { backgroundColor: colors.overlayWhite10 },
+  emoji: { fontSize: 13, color: colors.text },
+  count: { fontSize: 11, color: colors.textMuted, fontWeight: '600' },
+  countMine: { color: colors.primary },
 });

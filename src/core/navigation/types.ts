@@ -18,6 +18,8 @@ export type AuthStackParamList = {
   Name: { phoneNumber: string };
   Username: { phoneNumber: string };
   Waitlist: undefined;
+  PrivacyPolicy: undefined;
+  Terms: undefined;
 };
 export type AuthStackScreenProps<T extends keyof AuthStackParamList> = NativeStackScreenProps<
   AuthStackParamList,

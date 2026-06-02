@@ -1,6 +1,7 @@
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
 import type { NetQualityReport } from '../api/netqualityApi';
+import { colors } from '../../../shared/constants/theme';
 
 interface Props {
   report: NetQualityReport | null;
@@ -13,7 +14,14 @@ interface Props {
  */
 export const ExtNetworkQualityBars: React.FC<Props> = ({ report, size = 'md' }) => {
   const bars = report?.bars ?? 0;
-  const tone = bars === 3 ? '#22C55E' : bars === 2 ? '#F59E0B' : bars === 1 ? '#EF4444' : '#94A3B8';
+  const tone =
+    bars === 3
+      ? colors.accent
+      : bars === 2
+        ? colors.warning
+        : bars === 1
+          ? colors.danger
+          : colors.textDim;
   const dims =
     size === 'sm'
       ? { width: 3, gap: 2, heights: [6, 9, 12] }
@@ -32,7 +40,7 @@ export const ExtNetworkQualityBars: React.FC<Props> = ({ report, size = 'md' }) 
     >
       {[0, 1, 2].map(i => {
         const height = dims.heights[i] ?? dims.heights[dims.heights.length - 1] ?? 0;
-        const backgroundColor = i < bars ? tone : '#E2E8F0';
+        const backgroundColor = i < bars ? tone : colors.overlayWhite10;
         return (
           <View
             key={i}

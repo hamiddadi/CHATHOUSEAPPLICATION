@@ -4,7 +4,6 @@ import { env } from '../../../config/env';
 import { roomService, type CreateRoomInput } from '../services/roomService';
 import type { Room, RoomSummary } from '../../../shared/types/domain';
 import { useCurrentRoomStore } from '../store/currentRoomStore';
-import { setAgoraMuted } from '../services/agora/AgoraEngine';
 
 export const roomKeys = {
   all: ['rooms'] as const,
@@ -256,16 +255,15 @@ export const useCurrentRoom = () => {
   const leaveRoom = useLeaveRoom();
   const setMute = useSetMute();
 
-  // Real mute toggle: flip local state optimistically, mute the local Agora
-  // stream (best-effort — a no-op outside a live audio session / Expo Go), and
-  // persist to the server so other participants see it; roll back on failure.
-  // Previously this only flipped a store boolean, so the mini-bar's mute button
-  // had no effect on the actual mic or the server.
+  // Real mute toggle: flip local state optimistically, persist to the server
+  // so other participants see it, and roll back on failure. The server
+  // broadcasts `room:mute-changed` which the `roomAudioService` listens for
+  // and calls `setLiveKitMuted` on the active room — so the SDK-level mute
+  // happens automatically via the socket event flow.
   const toggleMute = useCallback(() => {
     if (!room) return;
     const next = !useCurrentRoomStore.getState().isMuted;
     storeToggleMute();
-    void setAgoraMuted(next).catch(() => undefined);
     setMute.mutate({ roomId: room.id, isMuted: next }, { onError: () => storeToggleMute() });
   }, [room, setMute, storeToggleMute]);
 

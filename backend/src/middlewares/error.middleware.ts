@@ -25,7 +25,7 @@ export const ERROR_CODES = {
   // kill-switch and misleads clients/proxies into caching the failure.
   ADMIN_003: { status: 403, message: 'Godmode is disabled' },
 
-  AGORA_001: { status: 503, message: 'Agora is not configured on this server' },
+  LIVEKIT_001: { status: 503, message: 'LiveKit is not configured on this server' },
 
   ROOM_001: { status: 404, message: 'Room not found' },
   ROOM_002: { status: 403, message: 'Room is full' },

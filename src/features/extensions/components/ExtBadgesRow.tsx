@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { badgesApi, BADGE_META, type Badge } from '../api/badgesApi';
+import { colors } from '../../../shared/constants/theme';
 
 interface Props {
   userId: string;
@@ -67,6 +68,6 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     gap: 4,
   },
-  emoji: { fontSize: 12, color: '#FFFFFF' },
-  label: { fontSize: 11, color: '#FFFFFF', fontWeight: '600' },
+  emoji: { fontSize: 12, color: colors.white },
+  label: { fontSize: 11, color: colors.white, fontWeight: '600' },
 });

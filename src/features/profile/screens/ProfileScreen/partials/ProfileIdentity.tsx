@@ -23,8 +23,6 @@ interface ProfileIdentityProps {
   isOnline: boolean;
   /** Full bio text (empty string when none). */
   bio: string;
-  /** Pre-truncated bio honouring the expanded state. */
-  displayBio: string;
   isBioLong: boolean;
   bioExpanded: boolean;
   /** Twitter / X handle (helpers sanitise the leading '@'). */
@@ -46,7 +44,6 @@ const ProfileIdentity: React.FC<ProfileIdentityProps> = memo(
     invitedByUsername,
     isOnline,
     bio,
-    displayBio,
     isBioLong,
     bioExpanded,
     twitter,
@@ -104,8 +101,11 @@ const ProfileIdentity: React.FC<ProfileIdentityProps> = memo(
 
         {bio.length > 0 && (
           <View className="items-center gap-xs">
-            <Text className="text-sm font-body text-ink text-center leading-normal">
-              {displayBio}
+            <Text
+              className="text-sm font-body text-ink text-center leading-normal"
+              numberOfLines={bioExpanded ? undefined : 3}
+            >
+              {bio}
             </Text>
             {isBioLong && (
               <Pressable onPress={onToggleBio}>

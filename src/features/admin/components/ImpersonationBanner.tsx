@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { colors, radii } from '../../../shared/constants/theme';
 import { useImpersonationStore } from '../store/impersonationStore';
 
 const formatRemaining = (msLeft: number): string => {
@@ -72,6 +73,11 @@ export const ImpersonationBanner: React.FC = () => {
 
 const styles = StyleSheet.create({
   banner: {
+    // Intentionally a saturated alarm-red literal, NOT colors.danger.
+    // colors.danger (palette.error #ffb4ab) is the Material-3 error *foreground*
+    // role (pale salmon); using it as a fill behind the white title/icon/label
+    // drops contrast to ~1.5:1. This persistent security banner must stay vivid
+    // red with legible white text (#dc2626 → white ≈ 5.9:1, passes AA).
     backgroundColor: '#dc2626',
     flexDirection: 'row',
     alignItems: 'center',
@@ -81,12 +87,15 @@ const styles = StyleSheet.create({
     zIndex: 100,
   },
   title: { color: '#fff', fontSize: 12, fontWeight: '700' },
-  subtitle: { color: 'rgba(255,255,255,0.85)', fontSize: 11, marginTop: 1 },
+  subtitle: { color: colors.overlayWhite80, fontSize: 11, marginTop: 1 },
   stopBtn: {
     backgroundColor: 'rgba(0,0,0,0.25)',
     paddingHorizontal: 12,
     paddingVertical: 6,
-    borderRadius: 999,
+    borderRadius: radii.pill,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   stopLabel: { color: '#fff', fontSize: 12, fontWeight: '700' },
   textWrap: { flex: 1 },

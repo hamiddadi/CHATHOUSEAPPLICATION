@@ -1,7 +1,7 @@
 import React from 'react';
 import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { colors, spacing } from '../../../shared/constants/theme';
+import { colors, radii, spacing } from '../../../shared/constants/theme';
 
 /**
  * Shared building blocks for static in-app legal documents (privacy policy,
@@ -22,7 +22,9 @@ interface LegalSectionProps {
 /** A titled card grouping one or more {@link LegalParagraph}s. */
 export const LegalSection: React.FC<LegalSectionProps> = ({ title, children }) => (
   <View style={styles.section}>
-    <Text style={styles.sectionTitle}>{title}</Text>
+    <Text accessibilityRole="header" style={styles.sectionTitle}>
+      {title}
+    </Text>
     <View style={styles.sectionBody}>{children}</View>
   </View>
 );
@@ -64,7 +66,9 @@ export const LegalDoc: React.FC<LegalDocProps> = ({ title, lastUpdated, children
       }}
     >
       <View>
-        <Text style={styles.h1}>{title}</Text>
+        <Text accessibilityRole="header" style={styles.h1}>
+          {title}
+        </Text>
         <Text style={styles.lastUpdated}>{lastUpdated}</Text>
       </View>
       {children}
@@ -76,11 +80,11 @@ const styles = StyleSheet.create({
   h1: { color: colors.text, fontSize: 24, fontWeight: '700', marginBottom: 4 },
   lastUpdated: { color: colors.textMuted, fontSize: 11 },
   section: {
-    backgroundColor: 'rgba(255,255,255,0.04)',
-    borderRadius: 12,
+    backgroundColor: colors.overlayWhite4,
+    borderRadius: radii.md,
     padding: spacing.lg,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
+    borderColor: colors.glassStrong,
     gap: 8,
   },
   sectionTitle: {

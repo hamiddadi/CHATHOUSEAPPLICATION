@@ -54,6 +54,8 @@ export const PhoneScreen: React.FC = () => {
   const handleApiError = useFormApiErrors(setError);
 
   const handleBack = useCallback(() => navigation.goBack(), [navigation]);
+  const handleTerms = useCallback(() => navigation.navigate('Terms'), [navigation]);
+  const handlePrivacy = useCallback(() => navigation.navigate('PrivacyPolicy'), [navigation]);
 
   const onSubmit = useCallback(
     async ({ phoneNumber }: PhoneFormValues) => {
@@ -192,10 +194,24 @@ export const PhoneScreen: React.FC = () => {
 
         <Text className="text-center text-xs text-ink-muted leading-5 mt-md">
           {t('auth.phone.terms', 'By entering your number, you’re agreeing to our ')}
-          <Text className="text-primary font-body-medium">Terms of Service</Text>
+          <Text
+            onPress={handleTerms}
+            accessibilityRole="link"
+            accessibilityLabel={t('auth.phone.termsLinkA11y', 'Terms of Service')}
+            className="text-primary font-body-medium"
+          >
+            {t('auth.phone.termsLinkA11y', 'Terms of Service')}
+          </Text>
           {t('auth.phone.termsAnd', ' and ')}
-          <Text className="text-primary font-body-medium">Privacy Policy</Text>.
-          {t('auth.phone.termsEnd', ' Thanks!')}
+          <Text
+            onPress={handlePrivacy}
+            accessibilityRole="link"
+            accessibilityLabel={t('auth.phone.privacyLinkA11y', 'Privacy Policy')}
+            className="text-primary font-body-medium"
+          >
+            {t('auth.phone.privacyLinkA11y', 'Privacy Policy')}
+          </Text>
+          .{t('auth.phone.termsEnd', ' Thanks!')}
         </Text>
       </View>
 

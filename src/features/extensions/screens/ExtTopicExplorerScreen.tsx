@@ -9,7 +9,9 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useTranslation } from 'react-i18next';
 import { useExtTopicsTree, useExtTopicsFlat, type Topic } from '../hooks/useTopics';
+import { colors } from '../../../shared/constants/theme';
 
 interface Props {
   onSelectTopic?: (slug: string) => void;
@@ -21,6 +23,7 @@ interface Props {
  * fuzz-matches across the flat list.
  */
 export const ExtTopicExplorerScreen: React.FC<Props> = ({ onSelectTopic }) => {
+  const { t } = useTranslation();
   const [query, setQuery] = useState('');
   const [activeParent, setActiveParent] = useState<string | null>(null);
 
@@ -38,16 +41,16 @@ export const ExtTopicExplorerScreen: React.FC<Props> = ({ onSelectTopic }) => {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>Explore topics</Text>
+        <Text style={styles.title}>{t('extensions.topics.title', 'Explore topics')}</Text>
         <TextInput
           style={styles.search}
-          placeholder="Search topics…"
-          placeholderTextColor="#94A3B8"
+          placeholder={t('extensions.topics.searchPlaceholder', 'Search topics…')}
+          placeholderTextColor={colors.textDim}
           value={query}
           onChangeText={setQuery}
           autoCorrect={false}
           autoCapitalize="none"
-          accessibilityLabel="Search topics"
+          accessibilityLabel={t('extensions.topics.searchA11y', 'Search topics')}
         />
       </View>
 
@@ -62,7 +65,9 @@ export const ExtTopicExplorerScreen: React.FC<Props> = ({ onSelectTopic }) => {
               style={styles.flatRow}
               onPress={() => onSelectTopic?.(item.slug)}
               accessibilityRole="button"
-              accessibilityLabel={`Select topic ${item.label}`}
+              accessibilityLabel={t('extensions.topics.selectTopicA11y', 'Select topic {{label}}', {
+                label: item.label,
+              })}
             >
               <Text style={styles.emoji}>{item.emoji}</Text>
               <Text style={styles.flatLabel}>{item.label}</Text>
@@ -101,7 +106,11 @@ export const ExtTopicExplorerScreen: React.FC<Props> = ({ onSelectTopic }) => {
                 style={styles.childRow}
                 onPress={() => onSelectTopic?.(item.slug)}
                 accessibilityRole="button"
-                accessibilityLabel={`Select sub-topic ${item.label}`}
+                accessibilityLabel={t(
+                  'extensions.topics.selectSubTopicA11y',
+                  'Select sub-topic {{label}}',
+                  { label: item.label },
+                )}
               >
                 <Text style={styles.emoji}>{item.emoji}</Text>
                 <Text style={styles.childLabel}>{item.label}</Text>
@@ -109,7 +118,9 @@ export const ExtTopicExplorerScreen: React.FC<Props> = ({ onSelectTopic }) => {
             )}
             ListEmptyComponent={
               <View style={styles.empty}>
-                <Text style={styles.emptyText}>Pick a category on the left.</Text>
+                <Text style={styles.emptyText}>
+                  {t('extensions.topics.empty', 'Pick a category on the left.')}
+                </Text>
               </View>
             }
           />
@@ -120,19 +131,23 @@ export const ExtTopicExplorerScreen: React.FC<Props> = ({ onSelectTopic }) => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FFFFFF' },
+  container: { flex: 1, backgroundColor: colors.background },
   header: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 8 },
-  title: { fontSize: 22, fontWeight: '700' },
+  title: { fontSize: 22, fontWeight: '700', color: colors.text },
   search: {
     marginTop: 8,
-    backgroundColor: '#F1F5F9',
+    backgroundColor: colors.surfaceHigh,
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderRadius: 12,
-    color: '#0F172A',
+    color: colors.text,
   },
   twoPane: { flex: 1, flexDirection: 'row' },
-  leftPane: { flexBasis: 140, borderRightWidth: StyleSheet.hairlineWidth, borderColor: '#E2E8F0' },
+  leftPane: {
+    flexBasis: 140,
+    borderRightWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.glassStrong,
+  },
   rightPane: { flex: 1 },
   parentRow: {
     flexDirection: 'row',
@@ -141,9 +156,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     gap: 8,
   },
-  parentRowActive: { backgroundColor: '#F8FAFC' },
-  parentLabel: { fontSize: 13, color: '#475569' },
-  parentLabelActive: { color: '#0F172A', fontWeight: '600' },
+  parentRowActive: { backgroundColor: colors.overlayWhite5 },
+  parentLabel: { fontSize: 13, color: colors.textMuted },
+  parentLabelActive: { color: colors.text, fontWeight: '600' },
   childRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -151,9 +166,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     gap: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: '#F1F5F9',
+    borderColor: colors.glassStrong,
   },
-  childLabel: { fontSize: 15, color: '#0F172A' },
+  childLabel: { fontSize: 15, color: colors.text },
   flatRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -161,11 +176,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     gap: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: '#F1F5F9',
+    borderColor: colors.glassStrong,
   },
-  flatLabel: { fontSize: 15, color: '#0F172A' },
+  flatLabel: { fontSize: 15, color: colors.text },
   emoji: { fontSize: 18 },
   empty: { padding: 24 },
-  emptyText: { color: '#94A3B8' },
+  emptyText: { color: colors.textDim },
   loader: { marginTop: 32 },
 });

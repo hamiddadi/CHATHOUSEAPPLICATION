@@ -101,8 +101,10 @@ export const ChatDetailScreen: React.FC = () => {
   // unauthenticated render) so the participant resolution stays stable.
   const myId = useAuthStore(s => s.user?.id) ?? CURRENT_USER.id;
 
-  const scrollToEnd = useCallback(() => {
-    requestAnimationFrame(() => listRef.current?.scrollToEnd({ animated: true }));
+  // Inverted list: the latest message lives at offset 0 (the visual bottom),
+  // so "scroll to bottom" is a scroll-to-offset-0, not scrollToEnd.
+  const scrollToBottom = useCallback(() => {
+    requestAnimationFrame(() => listRef.current?.scrollToOffset({ offset: 0, animated: true }));
   }, []);
 
   useEffect(() => {
@@ -158,11 +160,11 @@ export const ChatDetailScreen: React.FC = () => {
         text: draft,
       });
       setDraft('');
-      scrollToEnd();
+      scrollToBottom();
     } catch (err) {
       reportApiError(err);
     }
-  }, [draft, reportApiError, route.params.conversationId, scrollToEnd, sendMessage]);
+  }, [draft, reportApiError, route.params.conversationId, scrollToBottom, sendMessage]);
 
   // Features below are not yet implemented end-to-end (no voice infra,
   // no attachment upload pipeline). Rather than no-op handlers — which
@@ -190,7 +192,10 @@ export const ChatDetailScreen: React.FC = () => {
     conversation?.participants.find(p => p.id !== myId) ?? conversation?.participants[0];
   const otherAvatar = other?.avatarUrl ?? null;
 
-  const items = useMemo(() => buildChatItems(messages ?? []), [messages]);
+  // Chronological items, then reversed for the `inverted` FlatList: index 0 is
+  // the newest (rendered at the visual bottom), which keeps the thread pinned
+  // to the latest message with no onContentSizeChange→scrollToEnd hack.
+  const items = useMemo(() => buildChatItems(messages ?? []).reverse(), [messages]);
 
   const todayLabel = t('chat.dateToday');
   const yesterdayLabel = t('chat.dateYesterday');
@@ -255,12 +260,12 @@ export const ChatDetailScreen: React.FC = () => {
           data={items}
           renderItem={renderItem}
           keyExtractor={keyExtractor}
+          inverted
           style={styles.flex1}
           contentContainerStyle={styles.list}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
           showsVerticalScrollIndicator={false}
-          onContentSizeChange={scrollToEnd}
         />
       )}
 
@@ -274,7 +279,7 @@ export const ChatDetailScreen: React.FC = () => {
         onEmoji={handleEmoji}
         onAttach={handleAttach}
         onMic={handleMicInput}
-        onInputFocus={scrollToEnd}
+        onInputFocus={scrollToBottom}
       />
     </KeyboardAvoidingView>
   );
@@ -285,8 +290,10 @@ const styles = StyleSheet.create({
   flex1: { flex: 1 },
   list: {
     paddingHorizontal: spacing.xxl,
-    paddingTop: spacing.xxl,
-    paddingBottom: spacing.md,
+    // Inverted list: paddingTop maps to the visual bottom (near the input bar)
+    // and paddingBottom to the visual top (under the header).
+    paddingTop: spacing.md,
+    paddingBottom: spacing.xxl,
     gap: spacing.xl,
   },
 });

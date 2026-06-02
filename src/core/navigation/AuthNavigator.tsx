@@ -10,6 +10,8 @@ import { UsernameScreen } from '../../features/auth/screens/UsernameScreen';
 import { WaitlistScreen } from '../../features/auth/screens/WaitlistScreen';
 import { WelcomeSlidesScreen } from '../../features/onboarding/screens/WelcomeSlidesScreen';
 import { welcomeStorage } from '../../features/onboarding/services/welcomeStorage';
+import { PrivacyPolicyScreen } from '../../features/privacy/screens/PrivacyPolicyScreen';
+import { TermsScreen } from '../../features/privacy/screens/TermsScreen';
 import type { AuthStackParamList } from './types';
 
 const Stack = createNativeStackNavigator<AuthStackParamList>();
@@ -51,6 +53,8 @@ export const AuthNavigator: React.FC = () => {
       <Stack.Screen name="Name" component={NameScreen} />
       <Stack.Screen name="Username" component={UsernameScreen} />
       <Stack.Screen name="Waitlist" component={WaitlistScreen} />
+      <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicyScreen} />
+      <Stack.Screen name="Terms" component={TermsScreen} />
     </Stack.Navigator>
   );
 };

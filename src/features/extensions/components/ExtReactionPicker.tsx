@@ -1,6 +1,7 @@
 import React from 'react';
 import { Modal, Pressable, StyleSheet, Text } from 'react-native';
 import * as Haptics from 'expo-haptics';
+import { colors } from '../../../shared/constants/theme';
 
 interface Props {
   visible: boolean;
@@ -49,7 +50,7 @@ const styles = StyleSheet.create({
   },
   pill: {
     flexDirection: 'row',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.surfaceAlt,
     borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 6,
@@ -61,5 +62,5 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   btn: { padding: 8 },
-  emoji: { fontSize: 26 },
+  emoji: { fontSize: 26, color: colors.text },
 });

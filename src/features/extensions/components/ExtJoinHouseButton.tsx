@@ -1,6 +1,7 @@
 import React, { useCallback } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text } from 'react-native';
 import { useExtJoinHouse } from '../hooks/useExtJoinHouse';
+import { colors } from '../../../shared/constants/theme';
 
 /**
  * Drop-in "Rejoindre" CTA that honours club privacy via the clubreq flow.
@@ -74,7 +75,7 @@ export const ExtJoinHouseButton: React.FC<ExtJoinHouseButtonProps> = ({
       testID={testID}
     >
       {isSubmitting ? (
-        <ActivityIndicator size="small" color="#FFFFFF" />
+        <ActivityIndicator size="small" color={colors.onPrimary} />
       ) : (
         <Text style={[styles.label, isPending && styles.labelPending]}>{label}</Text>
       )}
@@ -87,26 +88,26 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 24,
     borderRadius: 999,
-    backgroundColor: '#6366F1',
+    backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
     minWidth: 140,
     minHeight: 44,
   },
   buttonDisabled: {
-    backgroundColor: '#E2E8F0',
+    backgroundColor: colors.overlayWhite10,
   },
   label: {
     fontSize: 15,
     fontWeight: '600',
-    color: '#FFFFFF',
+    color: colors.onPrimary,
   },
   labelPending: {
-    color: '#64748B',
+    color: colors.textMuted,
   },
   memberLabel: {
     fontSize: 13,
     fontWeight: '600',
-    color: '#16A34A',
+    color: colors.accent,
   },
 });

@@ -1,5 +1,6 @@
 import React from 'react';
 import { Modal, Pressable, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
+import { colors } from '../../../shared/constants/theme';
 
 interface Props {
   visible: boolean;
@@ -14,7 +15,7 @@ interface Props {
 
 /**
  * Shared bottom-sheet scaffolding for the extension sheets: a slide-up
- * transparent `Modal`, a dimmed backdrop that closes on tap, the rounded white
+ * transparent `Modal`, a dimmed backdrop that closes on tap, the rounded dark
  * container (taps inside are swallowed so they don't dismiss), and the grab
  * handle. Sheets supply their own content via `children` and tweak the
  * container with `sheetStyle`.
@@ -33,7 +34,7 @@ export const ExtBottomSheet: React.FC<Props> = ({ visible, onClose, sheetStyle, 
 const styles = StyleSheet.create({
   backdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.4)' },
   sheet: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.surfaceAlt,
     borderTopLeftRadius: 18,
     borderTopRightRadius: 18,
   },
@@ -42,6 +43,6 @@ const styles = StyleSheet.create({
     width: 36,
     height: 4,
     borderRadius: 2,
-    backgroundColor: '#CBD5E1',
+    backgroundColor: colors.surfaceHigh,
   },
 });

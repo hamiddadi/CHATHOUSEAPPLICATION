@@ -17,16 +17,9 @@ module.exports = ({ config: _config }) => {
   const realtimeEnabled = process.env.REALTIME_ENABLED === 'true';
   const sentryDsn = process.env.SENTRY_DSN;
 
-  // Agora — App ID is public, temp token is short-lived (24h max). The
-  // PRIMARY/SECONDARY certificates are SECRETS and must live ONLY in the
-  // backend's .env (used to sign per-room tokens). Never expose them via
-  // expoConfig.extra.
-  const agoraAppId = process.env.AGORA_APP_ID;
-  const agoraChannel = process.env.AGORA_CHANNEL_NAME ?? 'CHATHOUSE';
-  // The temp token is a dev-only convenience. NEVER ship it in a production
-  // bundle — prod must mint per-room tokens via the backend /agora-token
-  // endpoint. Drop it from `extra` when building for production.
-  const agoraTempToken = envTag === 'production' ? undefined : process.env.AGORA_TEMP_TOKEN;
+  // LiveKit — URL is the WebSocket endpoint of the LiveKit server.
+  // No client-side secrets needed — the backend signs JWT tokens.
+  const livekitUrl = process.env.LIVEKIT_URL ?? 'ws://localhost:7880';
 
   // Pins for Module 13 / SEC-019 — comma-separated list per domain,
   // env-driven so we can rotate without rebuilding the JS bundle.
@@ -45,6 +38,20 @@ module.exports = ({ config: _config }) => {
     // names; relative file paths only work via app.config.js.
     plugins: [
       ...(base.expo.plugins ?? []),
+      // LiveKit live audio: the expo plugin wires the LiveKit native config
+      // (audio session, Android foreground-service type), and the webrtc plugin
+      // registers the @livekit/react-native-webrtc native module + mic
+      // permission. Without these, prebuild produces a build with no WebRTC
+      // native module and live audio silently falls back to 'unsupported'.
+      '@livekit/react-native-expo-plugin',
+      [
+        '@config-plugins/react-native-webrtc',
+        {
+          cameraPermission: false,
+          microphonePermission:
+            'Chathouse uses your microphone so you can speak in audio rooms.',
+        },
+      ],
       './plugins/with-gradle-jvm-heap',
       './plugins/with-audio-background',
       ['./plugins/with-cert-pinning', { domains: pinningDomains, includeSubdomains: true }],
@@ -56,9 +63,7 @@ module.exports = ({ config: _config }) => {
       REALTIME_ENABLED: realtimeEnabled,
       ENV: envTag,
       SENTRY_DSN: sentryDsn,
-      AGORA_APP_ID: agoraAppId,
-      AGORA_DEFAULT_CHANNEL: agoraChannel,
-      AGORA_TEMP_TOKEN: agoraTempToken,
+      LIVEKIT_URL: livekitUrl,
     },
   };
 };

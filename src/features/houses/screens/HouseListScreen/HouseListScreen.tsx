@@ -5,6 +5,7 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated from 'react-native-reanimated';
+import { useTranslation } from 'react-i18next';
 import { Avatar } from '../../../../shared/components/Avatar';
 import { Loader } from '../../../../shared/components/Loader';
 import { EmptyState } from '../../../../shared/components/EmptyState';
@@ -71,6 +72,7 @@ interface TabToggleProps {
 }
 
 const TabToggle: React.FC<TabToggleProps> = memo(({ value, onChange }) => {
+  const { t } = useTranslation();
   const setMine = useCallback(() => onChange('mine'), [onChange]);
   const setDiscover = useCallback(() => onChange('discover'), [onChange]);
   return (
@@ -92,7 +94,7 @@ const TabToggle: React.FC<TabToggleProps> = memo(({ value, onChange }) => {
               : 'text-sm font-body-bold text-ink-muted'
           }
         >
-          My Houses
+          {t('houses.tabs.mine', 'My Houses')}
         </Text>
       </Pressable>
       <Pressable
@@ -112,7 +114,7 @@ const TabToggle: React.FC<TabToggleProps> = memo(({ value, onChange }) => {
               : 'text-sm font-body-bold text-ink-muted'
           }
         >
-          Discover
+          {t('houses.tabs.discover', 'Discover')}
         </Text>
       </Pressable>
     </View>
@@ -123,6 +125,7 @@ TabToggle.displayName = 'TabToggle';
 export const HouseListScreen: React.FC = () => {
   const navigation = useNavigation<Nav>();
   const insets = useSafeAreaInsets();
+  const { t } = useTranslation();
   const [tab, setTab] = useState<Tab>('mine');
   const fab = useAnimatedPress({ scaleTo: 0.9 });
   const { data: houses, isLoading, isError, isFetching, refetch } = useHouses(tab);
@@ -152,10 +155,11 @@ export const HouseListScreen: React.FC = () => {
         >
           <MaterialIcons name="arrow-back" size={24} color={colors.text} />
         </Pressable>
-        <Text className="text-lg font-headline text-ink">Houses</Text>
-        <Pressable accessibilityRole="button" accessibilityLabel="Search houses" hitSlop={8}>
-          <MaterialIcons name="search" size={24} color={colors.text} />
-        </Pressable>
+        <Text className="text-lg font-headline text-ink">{t('houses.title', 'Houses')}</Text>
+        {/* Right-side spacer keeps the title centered. House search is not yet
+            implemented — a dead search affordance was removed rather than
+            shipping a button that does nothing. */}
+        <View className="w-6" />
       </View>
 
       <View className="px-xxl mb-lg">
@@ -163,9 +167,12 @@ export const HouseListScreen: React.FC = () => {
       </View>
 
       {isLoading ? (
-        <Loader fullscreen accessibilityLabel="Loading houses" />
+        <Loader fullscreen accessibilityLabel={t('houses.loading', 'Loading houses')} />
       ) : isError ? (
-        <EmptyState title="Couldn't load houses" description="Check your connection." />
+        <EmptyState
+          title={t('houses.errorTitle', "Couldn't load houses")}
+          description={t('houses.errorBody', 'Check your connection.')}
+        />
       ) : (
         <FlatList
           data={houses ?? []}

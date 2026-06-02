@@ -4,6 +4,7 @@ import { useNavigation } from '@react-navigation/native';
 import type { NavigationProp } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import MapView, { Marker, UrlTile } from 'react-native-maps'; // OSM Migration — replace PROVIDER_DEFAULT import with UrlTile
+import { useTranslation } from 'react-i18next';
 import { Loader } from '../../../../shared/components/Loader';
 import { EmptyState } from '../../../../shared/components/EmptyState';
 import { layout, spacing } from '../../../../shared/constants/theme';
@@ -54,6 +55,7 @@ const matches = (follower: FollowerOnMap, query: string): boolean => {
 };
 
 export const MapsScreen: React.FC = () => {
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<NavigationProp<RootStackParamList>>();
   const { permission, coords, requestAgain, ready } = useCurrentLocation();
@@ -140,14 +142,22 @@ export const MapsScreen: React.FC = () => {
 
   if (permission === 'denied') {
     return (
-      <EmptyState title="Location permission needed" description="">
+      <EmptyState
+        title={t('explorer.maps.permissionTitle', 'Location permission needed')}
+        description=""
+      >
         <Pressable
           onPress={requestAgain}
           accessibilityRole="button"
-          accessibilityLabel="Try requesting location again"
+          accessibilityLabel={t(
+            'explorer.maps.permissionRetryA11y',
+            'Try requesting location again',
+          )}
           className="bg-primary rounded-pill px-xxl py-md mt-md"
         >
-          <Text className="text-sm font-display text-primary-on-container">Grant access</Text>
+          <Text className="text-sm font-display text-primary-on-container">
+            {t('explorer.maps.permissionBtn', 'Grant access')}
+          </Text>
         </Pressable>
       </EmptyState>
     );
@@ -156,8 +166,11 @@ export const MapsScreen: React.FC = () => {
   if (permission === 'disabled') {
     return (
       <EmptyState
-        title="Turn on location services"
-        description="Enable GPS in your device settings to see friends on the map."
+        title={t('explorer.maps.locationDisabledTitle', 'Turn on location services')}
+        description={t(
+          'explorer.maps.locationDisabledBody',
+          'Enable GPS in your device settings to see friends on the map.',
+        )}
       />
     );
   }
@@ -168,7 +181,9 @@ export const MapsScreen: React.FC = () => {
   // fall back to DEFAULT_MAP_CENTER, so a device without a GPS fix is never stuck
   // on the loader indefinitely.
   if (!coords && !ready) {
-    return <Loader fullscreen accessibilityLabel="Locating you" />;
+    return (
+      <Loader fullscreen accessibilityLabel={t('explorer.maps.locatingA11y', 'Locating you')} />
+    );
   }
 
   return (
@@ -199,7 +214,7 @@ export const MapsScreen: React.FC = () => {
             coordinate={{ latitude: coords.latitude, longitude: coords.longitude }}
             anchor={{ x: 0.5, y: 0.5 }}
             tracksViewChanges={tracksMarkers}
-            accessibilityLabel="Your location"
+            accessibilityLabel={t('explorer.maps.yourLocationA11y', 'Your location')}
           >
             <UserLocationPulse />
           </Marker>

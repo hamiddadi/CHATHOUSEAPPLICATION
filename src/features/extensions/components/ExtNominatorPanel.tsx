@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { nominatorApi, type InvitationRecord } from '../api/nominatorApi';
 import { apiErrorMessage } from '../utils/extUi';
+import { colors } from '../../../shared/constants/theme';
 
 /**
  * Nominator panel — displays the user's remaining invitations + history,
@@ -84,6 +85,7 @@ export const ExtNominatorPanel: React.FC = () => {
             value={name}
             onChangeText={setName}
             placeholder="Friend's name"
+            placeholderTextColor={colors.textDim}
             style={styles.input}
             maxLength={80}
           />
@@ -91,6 +93,7 @@ export const ExtNominatorPanel: React.FC = () => {
             value={phone}
             onChangeText={setPhone}
             placeholder="+1 555 123 4567"
+            placeholderTextColor={colors.textDim}
             style={styles.input}
             keyboardType="phone-pad"
             autoCorrect={false}
@@ -141,51 +144,57 @@ export const ExtNominatorPanel: React.FC = () => {
 };
 
 const styles = StyleSheet.create({
-  container: { padding: 16, gap: 16, backgroundColor: '#FFFFFF', flex: 1 },
+  container: { padding: 16, gap: 16, backgroundColor: colors.background, flex: 1 },
   center: { padding: 32, alignItems: 'center' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  title: { fontSize: 18, fontWeight: '700' },
+  title: { fontSize: 18, fontWeight: '700', color: colors.text },
   badge: {
-    backgroundColor: '#0F172A',
+    backgroundColor: colors.primary,
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 999,
   },
-  badgeText: { color: '#FFFFFF', fontSize: 12, fontWeight: '600' },
+  badgeText: { color: colors.onPrimary, fontSize: 12, fontWeight: '600' },
   form: { gap: 10 },
   input: {
-    backgroundColor: '#F1F5F9',
+    backgroundColor: colors.overlayWhite5,
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 10,
     fontSize: 13,
+    color: colors.text,
   },
-  error: { color: '#EF4444', fontSize: 12 },
-  btn: { backgroundColor: '#2A8BF2', paddingVertical: 12, borderRadius: 10, alignItems: 'center' },
+  error: { color: colors.danger, fontSize: 12 },
+  btn: {
+    backgroundColor: colors.primary,
+    paddingVertical: 12,
+    borderRadius: 10,
+    alignItems: 'center',
+  },
   btnBusy: { opacity: 0.5 },
-  btnText: { color: '#FFFFFF', fontWeight: '600', fontSize: 14 },
-  exhausted: { color: '#64748B', fontSize: 13, paddingVertical: 8 },
+  btnText: { color: colors.onPrimary, fontWeight: '600', fontSize: 14 },
+  exhausted: { color: colors.textMuted, fontSize: 13, paddingVertical: 8 },
   historyHeader: { marginTop: 8 },
-  historyTitle: { fontSize: 14, fontWeight: '700', color: '#475569' },
-  empty: { color: '#94A3B8', paddingVertical: 12 },
+  historyTitle: { fontSize: 14, fontWeight: '700', color: colors.textMuted },
+  empty: { color: colors.textDim, paddingVertical: 12 },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 10,
     gap: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: '#F1F5F9',
+    borderColor: colors.glassStrong,
   },
   dot: {
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: '#0F172A',
+    backgroundColor: colors.surfaceHigh,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  dotText: { color: '#FFFFFF', fontWeight: '700' },
+  dotText: { color: colors.textMuted, fontWeight: '700' },
   itemBody: { flex: 1 },
-  itemName: { fontSize: 14, fontWeight: '600' },
-  itemMeta: { fontSize: 12, color: '#64748B', marginTop: 1 },
+  itemName: { fontSize: 14, fontWeight: '600', color: colors.text },
+  itemMeta: { fontSize: 12, color: colors.textMuted, marginTop: 1 },
 });

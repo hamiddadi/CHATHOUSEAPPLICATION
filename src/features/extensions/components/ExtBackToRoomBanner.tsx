@@ -1,6 +1,7 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { colors, withAlpha } from '../../../shared/constants/theme';
 
 interface Props {
   visible: boolean;
@@ -87,7 +88,7 @@ const styles = StyleSheet.create({
     margin: 12,
     paddingVertical: 10,
     paddingHorizontal: 14,
-    backgroundColor: '#0F172A',
+    backgroundColor: colors.surfaceHigh,
     borderRadius: 14,
     gap: 10,
     shadowColor: '#000000',
@@ -106,20 +107,20 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#22C55E',
+    backgroundColor: colors.accent,
   },
   copy: { flex: 1, minWidth: 0 },
-  title: { color: '#FFFFFF', fontSize: 14, fontWeight: '600' },
-  subtitle: { color: '#94A3B8', fontSize: 12, marginTop: 1 },
+  title: { color: colors.text, fontSize: 14, fontWeight: '600' },
+  subtitle: { color: colors.textDim, fontSize: 12, marginTop: 1 },
   action: {
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: colors.glassStrong,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  actionMuted: { backgroundColor: 'rgba(239,68,68,0.15)' },
-  actionLeave: { backgroundColor: 'rgba(239,68,68,0.18)' },
-  actionText: { color: '#FFFFFF', fontSize: 16 },
+  actionMuted: { backgroundColor: withAlpha(colors.danger, 0.15) },
+  actionLeave: { backgroundColor: withAlpha(colors.danger, 0.18) },
+  actionText: { color: colors.text, fontSize: 16 },
 });
