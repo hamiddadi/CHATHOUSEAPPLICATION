@@ -67,6 +67,24 @@
     "emptyBody": "Les rooms enregistrées apparaîtront ici une fois terminées.",
     "playA11y": "Lire le replay"
   },
+  "tip": {
+    "title": "Pourboire à {{name}}",
+    "subtitle": "Choisis un montant — tu seras redirigé vers un paiement sécurisé.",
+    "errorTitle": "Pourboire",
+    "openError": "Impossible d'ouvrir la page de paiement.",
+    "genericError": "Impossible de démarrer le pourboire. Réessaie."
+  },
+  "premium": {
+    "subscribe": "Passer Premium",
+    "manage": "Gérer l'abonnement",
+    "upsellTitle": "ChatHouse Premium",
+    "upsellHint": "Débloque plus de liens de profil et soutiens l'app.",
+    "activeTitle": "ChatHouse Premium · actif",
+    "manageHint": "Modifie ou annule ton abonnement.",
+    "errorTitle": "Premium",
+    "openError": "Impossible d'ouvrir la page.",
+    "genericError": "Une erreur est survenue. Réessaie."
+  },
   "messages": {
     "title": "Messages",
     "newChatA11y": "Nouvelle conversation",

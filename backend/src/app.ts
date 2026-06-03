@@ -32,6 +32,7 @@ import { adminRouter } from './modules/admin/admin.router';
 import { uploadRouter } from './modules/upload/upload.router';
 import { recordingsRouter } from './modules/recordings/recordings.router';
 import { livekitWebhookRouter } from './modules/recordings/recordings.webhook';
+import { stripeWebhookRouter } from './extensions/modules/payments/payments.webhook';
 import { UPLOADS_DIR } from './modules/upload/upload.service';
 import { createSocketServer } from './socket/socket.server';
 import { mountExtensions } from './extensions/mount';
@@ -54,6 +55,10 @@ export const createApp = (): express.Express => {
   // express.raw parser). Unauthenticated by design; the signed Authorization
   // header is the auth. No-op unless egress is configured.
   app.use('/webhooks', livekitWebhookRouter);
+  // Stripe webhook (POST /webhooks/stripe) — same raw-body-before-JSON-parser
+  // requirement; verified with STRIPE_WEBHOOK_SECRET. No-op/503 unless Stripe is
+  // configured. Syncs the tip ledger + premium entitlements (the only writer).
+  app.use('/webhooks', stripeWebhookRouter);
 
   // Body parsers — cap at 1 MB; avatar uploads go through /upload (phase 2)
   app.use(expressJson({ limit: '1mb' }));

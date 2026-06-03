@@ -20,6 +20,7 @@ import { netqualityRouter } from './modules/netquality/netquality.router';
 import { clubReqRouter } from './modules/clubreq/clubreq.router';
 // Vague 7
 import { paymentsRouter } from './modules/payments/payments.router';
+import { premiumRouter } from './modules/premium/premium.router';
 import { captionsRouter } from './modules/captions/captions.router';
 import { twitterRouter } from './modules/twitter/twitter.router';
 // Vague 8
@@ -116,6 +117,7 @@ const mountAll = (app: Express): void => {
   app.use('/api/ext/clubreq', clubReqRouter);
   // Vague 7 (feature-flagged via env)
   app.use('/api/ext/payments', paymentsRouter);
+  app.use('/api/ext/premium', premiumRouter);
   app.use('/api/ext/captions', captionsRouter);
   app.use('/api/ext/twitter', twitterRouter);
   // Vague 8 (socket alias layer + calendar export + share + speak-invite)

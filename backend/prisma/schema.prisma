@@ -130,6 +130,13 @@ model User {
   // Denormalized counts — updated via service on follow/unfollow.
   followerCount  Int       @default(0)
   followingCount Int       @default(0)
+  // ─── Premium / billing (monetization) ───
+  // stripeCustomerId is set on first premium checkout. isPremium + premiumUntil
+  // are the SERVER-SIDE entitlement source of truth, synced only by the Stripe
+  // webhook (never trusted from the client).
+  stripeCustomerId String?  @unique
+  isPremium        Boolean  @default(false)
+  premiumUntil     DateTime?
   // ─── Onboarding ─────────────────────────
   interests              String[]  @default([])
   hasCompletedOnboarding Boolean   @default(false)
@@ -182,6 +189,9 @@ model User {
   notifPreferences    NotificationPreference?
   auditLogsAuthored   AuditLog[]            @relation("AuditActor")
   auditLogsTargeted   AuditLog[]            @relation("AuditTargetUser")
+  tipsSent            Tip[]                @relation("TipsSent")
+  tipsReceived        Tip[]                @relation("TipsReceived")
+  subscription        Subscription?
   // Referral self-relation: the user who invited me, and everyone I invited.
   invitedBy           User?                @relation("UserInvites", fields: [invitedById], references: [id], onDelete: SetNull)
   invitedUsers        User[]               @relation("UserInvites")
@@ -195,6 +205,56 @@ model User {
   @@index([invitedById])
   // Covers getOnlineLocations (map): visible + online + recently-seen.
   @@index([isVisible, isOnline, lastSeenAt])
+}
+
+// ─── Monetization: Tip ledger ───────────────────────────
+// One row per tip PaymentIntent. Created PENDING when the Checkout/intent is
+// opened; flipped to SUCCEEDED/FAILED only by the verified Stripe webhook (the
+// server never trusts the client to confirm a payment). Unique on
+// paymentIntentId so a retried/duplicated webhook is idempotent.
+enum TipStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  REFUNDED
+}
+
+model Tip {
+  id              String    @id @default(cuid())
+  fromUserId      String
+  toUserId        String
+  paymentIntentId String    @unique
+  amount          Int // minor units (e.g. cents)
+  currency        String    @db.VarChar(3)
+  status          TipStatus @default(PENDING)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  fromUser User @relation("TipsSent", fields: [fromUserId], references: [id], onDelete: Cascade)
+  toUser   User @relation("TipsReceived", fields: [toUserId], references: [id], onDelete: Cascade)
+
+  @@index([toUserId, createdAt])
+  @@index([fromUserId, createdAt])
+}
+
+// ─── Monetization: Premium subscription ─────────────────
+// Mirrors the Stripe subscription for a user (1:1). `status` holds Stripe's
+// subscription status verbatim; User.isPremium/premiumUntil are derived from it
+// by the webhook. Both this row and the User flags are written ONLY by the
+// webhook handler.
+model Subscription {
+  id                   String    @id @default(cuid())
+  userId               String    @unique
+  stripeSubscriptionId String    @unique
+  stripeCustomerId     String
+  status               String    @db.VarChar(32) // active | trialing | past_due | canceled | ...
+  currentPeriodEnd     DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([stripeCustomerId])
 }
 
 // ─── Room ───────────────────────────────────────────────

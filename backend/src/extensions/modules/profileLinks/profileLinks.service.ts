@@ -1,6 +1,8 @@
 import { redis } from '../../../config/redis';
 import { AppError } from '../../../middlewares/error.middleware';
 import { readJson, writeJson } from '../../utils/redisJson';
+import { extError } from '../../utils/ExtAppError';
+import { premiumService } from '../premium/premium.service';
 
 /**
  * Custom links on a user profile (Module 2.2 / PROFIL-008).
@@ -12,7 +14,10 @@ import { readJson, writeJson } from '../../utils/redisJson';
  * Layout : `ext:profile:links:<userId>` = JSON array
  */
 
-const MAX_LINKS = 5;
+// Premium gating: free accounts get a small allowance; premium unlocks the
+// full set. The cap is enforced server-side (the client only hints the upsell).
+const FREE_MAX_LINKS = 2;
+const PREMIUM_MAX_LINKS = 5;
 const TTL_S = 365 * 24 * 3600;
 const key = (userId: string) => `ext:profile:links:${userId}`;
 
@@ -103,8 +108,18 @@ export const profileLinksService = {
     const label = input.label.trim().slice(0, 40);
     if (label.length < 1) throw new AppError('VALIDATION_001', 'Label required');
     const current = await read(userId);
-    if (current.length >= MAX_LINKS) {
-      throw new AppError('VALIDATION_001', `Limit of ${MAX_LINKS} links reached`);
+    const premium = await premiumService.isPremium(userId);
+    const cap = premium ? PREMIUM_MAX_LINKS : FREE_MAX_LINKS;
+    if (current.length >= cap) {
+      // Free user hitting the free cap → PREMIUM_REQUIRED so the client can show
+      // the upsell; a premium user at the hard cap gets a plain validation error.
+      if (!premium) {
+        throw extError(
+          'PREMIUM_REQUIRED',
+          `Free accounts can add up to ${FREE_MAX_LINKS} links — upgrade to Premium for ${PREMIUM_MAX_LINKS}.`,
+        );
+      }
+      throw new AppError('VALIDATION_001', `Limit of ${PREMIUM_MAX_LINKS} links reached`);
     }
     const next: ProfileLink[] = [
       ...current,

@@ -67,6 +67,24 @@
     "emptyBody": "Recorded rooms show up here once they end.",
     "playA11y": "Play replay"
   },
+  "tip": {
+    "title": "Tip {{name}}",
+    "subtitle": "Choose an amount — you'll be taken to a secure checkout.",
+    "errorTitle": "Tip",
+    "openError": "Couldn't open the payment page.",
+    "genericError": "Couldn't start the tip. Try again."
+  },
+  "premium": {
+    "subscribe": "Go Premium",
+    "manage": "Manage subscription",
+    "upsellTitle": "ChatHouse Premium",
+    "upsellHint": "Unlock more profile links and support the app.",
+    "activeTitle": "ChatHouse Premium · active",
+    "manageHint": "Update or cancel your subscription.",
+    "errorTitle": "Premium",
+    "openError": "Couldn't open the page.",
+    "genericError": "Something went wrong. Try again."
+  },
   "messages": {
     "title": "Messages",
     "newChatA11y": "Start new conversation",

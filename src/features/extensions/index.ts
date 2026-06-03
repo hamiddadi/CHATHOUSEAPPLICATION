@@ -63,7 +63,18 @@ export { useExtFontScale, useExtScaledFont } from './hooks/useExtFontScale';
 
 // ─── Vague 7 ───
 export { paymentsApi } from './api/paymentsApi';
-export type { PaymentStatus, PaymentAccount, TipResult } from './api/paymentsApi';
+export type { PaymentStatus, PaymentAccount, TipResult, TipHistoryItem } from './api/paymentsApi';
+export { premiumApi } from './api/premiumApi';
+export type { PremiumStatus } from './api/premiumApi';
+export { useTip, type TipVars } from './hooks/useTip';
+export {
+  usePremiumStatus,
+  useStartPremiumCheckout,
+  useOpenBillingPortal,
+  premiumKeys,
+} from './hooks/usePremium';
+export { ExtTipSheet } from './components/ExtTipSheet';
+export { ExtPremiumRow } from './components/ExtPremiumRow';
 
 // ─── Vague 9 ───
 export { calendarApi } from './api/calendarApi';

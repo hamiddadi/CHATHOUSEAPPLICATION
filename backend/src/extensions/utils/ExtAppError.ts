@@ -23,6 +23,12 @@ export const EXT_ERROR = {
   PAY_INVALID: { status: 400, message: 'Invalid payment request' },
   PAY_RECIPIENT_NOT_CONFIGURED: { status: 412, message: 'Recipient has not configured payouts' },
   PAY_KYC_INCOMPLETE: { status: 412, message: 'Recipient KYC is not complete' },
+  PAY_CURRENCY_UNSUPPORTED: { status: 400, message: 'Currency not supported' },
+  PAY_RETURN_URL_MISSING: { status: 503, message: 'Payment return URLs are not configured' },
+  PAY_WEBHOOK_INVALID: { status: 400, message: 'Invalid webhook signature' },
+  PREMIUM_NOT_CONFIGURED: { status: 503, message: 'Premium is not configured' },
+  PREMIUM_REQUIRED: { status: 402, message: 'This feature requires ChatHouse Premium' },
+  PREMIUM_NO_SUBSCRIPTION: { status: 404, message: 'No active subscription found' },
   CLUB_REQ_DUPLICATE: { status: 409, message: 'Already a member or pending' },
   CLUB_REQ_NOT_FOUND: { status: 404, message: 'Join request not found' },
 } as const;

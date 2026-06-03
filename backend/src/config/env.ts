@@ -97,6 +97,65 @@ const envSchema = z.object({
   // build the playback URL; falls back to the egress-reported location.
   RECORDING_PUBLIC_BASE_URL: z.string().optional(),
 
+  // ─── Monetization (Stripe tips + premium) ───────────────────────────
+  // All optional: payments + premium are feature-flagged and no-op when unset
+  // (mirrors the LiveKit/recording gating). The `stripe` npm package itself is
+  // an optional dynamic import — install it in backend/ to actually charge.
+  STRIPE_SECRET_KEY: z.string().optional(),
+  // Verifies incoming webhook signatures. Without it the webhook endpoint
+  // rejects every event (fail closed) rather than trusting forged ones.
+  STRIPE_WEBHOOK_SECRET: z.string().optional(),
+  // Hosted-page return URLs (Connect onboarding + Checkout success/cancel +
+  // billing portal). No placeholder fallback — flows fail closed when unset.
+  STRIPE_RETURN_URL: z.string().url().optional(),
+  STRIPE_REFRESH_URL: z.string().url().optional(),
+  // Premium plan: monthly price in minor units + the product label shown on
+  // the Stripe-hosted Checkout page.
+  PREMIUM_PRICE_CENTS: z.coerce.number().int().positive().default(499),
+  PREMIUM_PRODUCT_NAME: z.string().default('ChatHouse Premium'),
+  // Supported payment currencies (lower-case ISO-4217), comma-separated; the
+  // first is the default. Restricted to 2-decimal currencies since amounts are
+  // minor units — add zero-decimal handling before enabling JPY/KRW/etc.
+  PAYMENT_CURRENCIES: z
+    .string()
+    .default('usd,eur,gbp,cad,aud')
+    .transform((s, ctx) => {
+      const list = s
+        .split(',')
+        .map(c => c.trim().toLowerCase())
+        .filter(Boolean);
+      // Amounts are treated as 2-decimal minor units (× 100). Zero-decimal
+      // currencies (JPY, KRW, …) would be mis-scaled 100×, so reject them at
+      // boot rather than silently overcharge — honour the comment above.
+      const ZERO_DECIMAL = [
+        'bif',
+        'clp',
+        'djf',
+        'gnf',
+        'jpy',
+        'kmf',
+        'krw',
+        'mga',
+        'pyg',
+        'rwf',
+        'ugx',
+        'vnd',
+        'vuv',
+        'xaf',
+        'xof',
+        'xpf',
+      ];
+      const bad = list.filter(c => ZERO_DECIMAL.includes(c));
+      if (bad.length > 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `PAYMENT_CURRENCIES contains unsupported zero-decimal currencies (add minor-unit handling first): ${bad.join(', ')}`,
+        });
+        return z.NEVER;
+      }
+      return list;
+    }),
+
   // mediasoup (phase 4). Disabled by default because the npm package compiles
   // C++ from source at install time — turn ON in docker-compose only.
   MEDIASOUP_ENABLED: boolFromString(false),

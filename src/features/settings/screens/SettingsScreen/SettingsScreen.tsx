@@ -9,6 +9,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { useQuery } from '@tanstack/react-query';
 import { invitesApi } from '../../../extensions/api/invitesApi';
+import { ExtPremiumRow } from '../../../extensions/components/ExtPremiumRow';
 import { useAuthStore } from '../../../auth/store/authStore';
 import { useMe } from '../../../profile/hooks/useProfile';
 import { useHouses } from '../../../houses/hooks/useHouses';
@@ -393,6 +394,11 @@ export const SettingsScreen: React.FC = () => {
               <HouseTile key={h.id} house={h} onPress={handleOpenHouse} />
             ))}
           </View>
+        </View>
+
+        {/* Premium — hidden unless Stripe/premium is configured server-side. */}
+        <View className="px-xxl mt-xxl">
+          <ExtPremiumRow />
         </View>
 
         {showAdminEntry ? (

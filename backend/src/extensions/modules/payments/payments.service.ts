@@ -1,21 +1,27 @@
+import { prisma } from '../../../config/database';
 import { redis } from '../../../config/redis';
 import { extError } from '../../utils/ExtAppError';
-import { logger } from '../../../config/logger';
+import {
+  assertCurrency,
+  defaultCurrency,
+  requireReturnUrls,
+  requireStripe,
+  stripeConfigured,
+  type StripeAccountObject,
+  type StripePaymentIntentObject,
+} from './stripe.client';
 
 /**
- * Stripe Connect payments scaffolding (Module 14 / PAY-001..015).
+ * Stripe Connect tips (creator payouts).
  *
- * Wraps the Stripe SDK behind a feature-flag environment variable
- * (`STRIPE_SECRET_KEY`). When the key is absent, every endpoint returns a
- * structured `PAY_NOT_CONFIGURED` error so the mobile client can hide the
- * tip button gracefully. No DB schema change — Stripe IDs (account/intent)
- * are mapped to userId via Redis until a proper migration is added.
+ * Tips go through Stripe-hosted Checkout (mode=payment, destination charge to
+ * the creator's connected account) so no card data ever touches the app and no
+ * client-side Stripe SDK is needed — the client just opens the returned URL.
+ * The Tip ledger is written ONLY by the verified webhook (payment_intent
+ * .succeeded), never by the client. Feature-flagged via STRIPE_SECRET_KEY.
  *
- * Required env vars (to be provided by the deployer):
- *   - STRIPE_SECRET_KEY            sk_test_xxx or sk_live_xxx
- *   - STRIPE_CONNECT_CLIENT_ID     ca_xxx (for Express accounts)
- *   - STRIPE_RETURN_URL            https://app.chathouse.com/payments/return
- *   - STRIPE_REFRESH_URL           https://app.chathouse.com/payments/refresh
+ * Stripe account IDs are still mapped userId→account in Redis (legacy); the
+ * webhook keeps the cached KYC flag fresh via account.updated.
  */
 
 interface StripeAccountMapping {
@@ -26,66 +32,18 @@ interface StripeAccountMapping {
 
 const accountKey = (userId: string) => `ext:stripe:account:${userId}`;
 
-/** Fallback onboarding URLs when STRIPE_RETURN_URL / STRIPE_REFRESH_URL are unset. */
-const RETURN_URL_FALLBACK = 'https://example.com/return';
-const REFRESH_URL_FALLBACK = 'https://example.com/refresh';
-/** Window over which identical tip retries collapse onto the same intent (1 min). */
+/** Window over which identical tip retries collapse onto the same session (1 min). */
 const TIP_IDEMPOTENCY_WINDOW_MS = 60_000;
 
-const isConfigured = (): boolean => Boolean(process.env.STRIPE_SECRET_KEY);
-
-const loadStripe = async (): Promise<unknown | null> => {
-  const secretKey = process.env.STRIPE_SECRET_KEY;
-  if (!secretKey) return null;
-  try {
-    // Dynamic import — keeps the dependency optional. To enable Stripe
-    // payments, install `stripe` via `pnpm add stripe` in backend/.
-    const stripe = (await import(/* webpackIgnore: true */ 'stripe' as string)) as unknown as {
-      default: new (key: string, opts?: unknown) => unknown;
-    };
-    const Stripe = stripe.default;
-    return new Stripe(secretKey, {
-      apiVersion: '2024-06-20',
-    });
-  } catch (err) {
-    logger.warn('ext.payments: stripe SDK not installed', { err });
-    return null;
-  }
-};
-
-const requireStripe = async () => {
-  const s = await loadStripe();
-  if (!s) {
-    throw extError(
-      'PAY_NOT_CONFIGURED',
-      'Stripe is not configured — install `stripe` and set STRIPE_SECRET_KEY',
-    );
-  }
-  return s as {
-    accounts: {
-      create: (params: unknown, options?: { idempotencyKey?: string }) => Promise<{ id: string }>;
-      retrieve: (id: string) => Promise<{ payouts_enabled?: boolean; charges_enabled?: boolean }>;
-    };
-    accountLinks: {
-      create: (params: unknown) => Promise<{ url: string }>;
-    };
-    paymentIntents: {
-      create: (
-        params: unknown,
-        options?: { idempotencyKey?: string },
-      ) => Promise<{ id: string; client_secret: string | null }>;
-    };
-  };
-};
-
 export const paymentsService = {
-  configured: isConfigured,
+  configured: stripeConfigured,
 
   /**
-   * Onboard a creator on Stripe Connect Express. Returns the AccountLink
-   * URL the mobile app should open in a webview for KYC.
+   * Onboard a creator on Stripe Connect Express. Returns the AccountLink URL
+   * the mobile app opens for KYC. Return/refresh URLs fail closed when unset.
    */
   async onboardCreator(userId: string): Promise<{ url: string; accountId: string }> {
+    const { returnUrl, refreshUrl } = requireReturnUrls();
     const stripe = await requireStripe();
     const existing = await redis.get(accountKey(userId));
     let accountId: string;
@@ -93,10 +51,9 @@ export const paymentsService = {
       const parsed = JSON.parse(existing) as StripeAccountMapping;
       accountId = parsed.stripeAccountId;
     } else {
-      // Guard against two concurrent onboard requests (double tap) both
-      // seeing `existing === null` and each creating a Stripe account —
-      // one of which would be orphaned by the last write. A short Redis
-      // NX lock serialises the create; the loser re-reads the mapping.
+      // Guard against two concurrent onboard requests (double tap) both seeing
+      // `existing === null` and each creating a Stripe account — one of which
+      // would be orphaned. A short Redis NX lock serialises the create.
       const lockKey = `${accountKey(userId)}:lock`;
       const gotLock = await redis.set(lockKey, '1', { NX: true, EX: 30 });
       if (!gotLock) {
@@ -106,8 +63,8 @@ export const paymentsService = {
           accountId = parsed.stripeAccountId;
           const link = await stripe.accountLinks.create({
             account: accountId,
-            return_url: process.env.STRIPE_RETURN_URL ?? RETURN_URL_FALLBACK,
-            refresh_url: process.env.STRIPE_REFRESH_URL ?? REFRESH_URL_FALLBACK,
+            return_url: returnUrl,
+            refresh_url: refreshUrl,
             type: 'account_onboarding',
           });
           return { url: link.url, accountId };
@@ -117,9 +74,7 @@ export const paymentsService = {
         const account = await stripe.accounts.create(
           {
             type: 'express',
-            capabilities: {
-              transfers: { requested: true },
-            },
+            capabilities: { transfers: { requested: true } },
             metadata: { chathouseUserId: userId },
           },
           // Deterministic key so a retried create never duplicates the account.
@@ -131,7 +86,6 @@ export const paymentsService = {
           kycComplete: false,
           createdAt: new Date().toISOString(),
         };
-        // NX so we never clobber a mapping a concurrent winner already wrote.
         await redis.set(accountKey(userId), JSON.stringify(mapping), { NX: true });
       } finally {
         if (gotLock) await redis.del(lockKey);
@@ -139,8 +93,8 @@ export const paymentsService = {
     }
     const link = await stripe.accountLinks.create({
       account: accountId,
-      return_url: process.env.STRIPE_RETURN_URL ?? RETURN_URL_FALLBACK,
-      refresh_url: process.env.STRIPE_REFRESH_URL ?? REFRESH_URL_FALLBACK,
+      return_url: returnUrl,
+      refresh_url: refreshUrl,
       type: 'account_onboarding',
     });
     return { url: link.url, accountId };
@@ -171,40 +125,115 @@ export const paymentsService = {
   },
 
   /**
-   * Create a PaymentIntent for a tip to a creator. The amount is in
-   * cents; presets are validated client-side ($2/$5/$10/$20) but any
-   * value > 0 is accepted by the API.
+   * Create a Stripe Checkout session for a tip to a creator (destination charge,
+   * 100% to the creator — no platform fee). Returns the hosted-page URL; the
+   * client opens it. The Tip row is created later by the webhook on
+   * payment_intent.succeeded. `amountCents` is in the currency's minor units.
    */
   async tip(
     fromUserId: string,
     toUserId: string,
     amountCents: number,
-  ): Promise<{ clientSecret: string | null; paymentIntentId: string }> {
+    currencyInput: string,
+  ): Promise<{ url: string }> {
     if (amountCents <= 0) throw extError('PAY_INVALID', 'Amount must be positive');
     if (fromUserId === toUserId) throw extError('PAY_INVALID', 'Cannot tip yourself');
+    const currency = assertCurrency(currencyInput);
 
     const recipient = await redis.get(accountKey(toUserId));
     if (!recipient) throw extError('PAY_RECIPIENT_NOT_CONFIGURED');
     const mapping = JSON.parse(recipient) as StripeAccountMapping;
     if (!mapping.kycComplete) throw extError('PAY_KYC_INCOMPLETE');
 
+    const { returnUrl, refreshUrl } = requireReturnUrls();
     const stripe = await requireStripe();
-    // Idempotency: a retried/double-submitted tip (network retry, double
-    // tap) must not create a second PaymentIntent and double-charge. The
-    // key is deterministic over (from, to, amount) within a 1-minute
-    // window, so identical retries collapse onto the same intent while a
-    // genuinely new tip a minute later still goes through.
-    const idemKey = `tip:${fromUserId}:${toUserId}:${amountCents}:${Math.floor(Date.now() / TIP_IDEMPOTENCY_WINDOW_MS)}`;
-    const intent = await stripe.paymentIntents.create(
+    // Idempotency: a double-submitted tip (network retry, double tap) within the
+    // window collapses onto the same Checkout session rather than charging twice.
+    const idemKey = `tipco:${fromUserId}:${toUserId}:${amountCents}:${currency}:${Math.floor(
+      Date.now() / TIP_IDEMPOTENCY_WINDOW_MS,
+    )}`;
+    const session = await stripe.checkout.sessions.create(
       {
-        amount: amountCents,
-        currency: 'usd',
-        automatic_payment_methods: { enabled: true },
-        transfer_data: { destination: mapping.stripeAccountId },
+        mode: 'payment',
+        line_items: [
+          {
+            quantity: 1,
+            price_data: {
+              currency,
+              unit_amount: amountCents,
+              product_data: { name: 'Tip' },
+            },
+          },
+        ],
+        payment_intent_data: {
+          transfer_data: { destination: mapping.stripeAccountId },
+          // Carried onto the PaymentIntent so the webhook can record the Tip.
+          metadata: { fromUserId, toUserId, kind: 'tip' },
+        },
         metadata: { fromUserId, toUserId, kind: 'tip' },
+        success_url: returnUrl,
+        cancel_url: refreshUrl,
       },
       { idempotencyKey: idemKey },
     );
-    return { clientSecret: intent.client_secret, paymentIntentId: intent.id };
+    if (!session.url) throw extError('PAY_INVALID', 'Checkout session has no URL');
+    return { url: session.url };
+  },
+
+  /**
+   * Webhook helper — record a confirmed tip (idempotent on paymentIntentId).
+   * Called from payment_intent.succeeded. Ignores non-tip intents and tips
+   * whose users no longer exist (FK errors are swallowed by the caller).
+   */
+  async recordTip(intent: StripePaymentIntentObject): Promise<void> {
+    const md = intent.metadata ?? {};
+    if (md['kind'] !== 'tip') return;
+    const fromUserId = md['fromUserId'];
+    const toUserId = md['toUserId'];
+    if (!fromUserId || !toUserId) return;
+    await prisma.tip.upsert({
+      where: { paymentIntentId: intent.id },
+      create: {
+        paymentIntentId: intent.id,
+        fromUserId,
+        toUserId,
+        amount: intent.amount ?? 0,
+        currency: intent.currency ?? defaultCurrency(),
+        status: 'SUCCEEDED',
+      },
+      update: { status: 'SUCCEEDED' },
+    });
+  },
+
+  /** Webhook helper — sync the cached KYC flag when Stripe reports an account change. */
+  async syncAccount(account: StripeAccountObject): Promise<void> {
+    const userId = account.metadata?.['chathouseUserId'];
+    if (!userId) return;
+    const raw = await redis.get(accountKey(userId));
+    if (!raw) return;
+    const mapping = JSON.parse(raw) as StripeAccountMapping;
+    const kycComplete = Boolean(account.payouts_enabled && account.charges_enabled);
+    if (kycComplete !== mapping.kycComplete) {
+      mapping.kycComplete = kycComplete;
+      await redis.set(accountKey(userId), JSON.stringify(mapping));
+    }
+  },
+
+  /** Tip history for a user (sent + received), newest first. Confirmed tips only. */
+  async listTips(userId: string) {
+    const rows = await prisma.tip.findMany({
+      where: { status: 'SUCCEEDED', OR: [{ fromUserId: userId }, { toUserId: userId }] },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    });
+    return rows.map(t => ({
+      id: t.id,
+      direction: t.fromUserId === userId ? ('sent' as const) : ('received' as const),
+      fromUserId: t.fromUserId,
+      toUserId: t.toUserId,
+      amount: t.amount,
+      currency: t.currency,
+      createdAt: t.createdAt,
+    }));
   },
 };
