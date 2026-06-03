@@ -357,11 +357,18 @@ export const roomsService = {
 
     // Track current room + bump denormalized count
     if (!wasAlreadyActive) {
-      await prisma.$transaction([
+      // Broadcast the COMMITTED count (read back from the atomic increment),
+      // not `room.participantCount + 1` — the latter is a pre-mutation snapshot
+      // that drifts under concurrent joins/leaves.
+      const [, updatedRoom] = await prisma.$transaction([
         prisma.user.update({ where: { id: userId }, data: { currentRoomId: roomId } }),
-        prisma.room.update({ where: { id: roomId }, data: { participantCount: { increment: 1 } } }),
+        prisma.room.update({
+          where: { id: roomId },
+          data: { participantCount: { increment: 1 } },
+          select: { participantCount: true },
+        }),
       ]);
-      emitHallwayRoomUpdated(roomId, { participantCount: room.participantCount + 1 });
+      emitHallwayRoomUpdated(roomId, { participantCount: updatedRoom.participantCount });
 
       // Ephemeral "someone you follow just joined a room" realtime ping to
       // the joiner's followers. Best-effort and fire-and-forget: it must
@@ -507,18 +514,35 @@ export const roomsService = {
       throw new AppError('ROOM_003');
     }
 
+    // SPEAKER promotion: the capacity check + the role write must be atomic,
+    // otherwise two concurrent promotions can both read activeSpeakers < max and
+    // both succeed, overshooting maxSpeakers (TOCTOU). Serializable isolation
+    // makes the DB abort one racer (rare; the client just retries). Other roles
+    // have no cap, so they take the plain single-statement path.
+    let updatedCount: number;
     if (input.role === 'SPEAKER') {
-      const activeSpeakers = await prisma.participant.count({
-        where: { roomId, leftAt: null, role: 'SPEAKER' },
+      updatedCount = await prisma.$transaction(
+        async tx => {
+          const activeSpeakers = await tx.participant.count({
+            where: { roomId, leftAt: null, role: 'SPEAKER' },
+          });
+          if (activeSpeakers >= room.maxSpeakers) throw new AppError('ROOM_002');
+          const res = await tx.participant.updateMany({
+            where: { roomId, userId: input.userId, leftAt: null },
+            data: { role: input.role },
+          });
+          return res.count;
+        },
+        { isolationLevel: 'Serializable' },
+      );
+    } else {
+      const res = await prisma.participant.updateMany({
+        where: { roomId, userId: input.userId, leftAt: null },
+        data: { role: input.role },
       });
-      if (activeSpeakers >= room.maxSpeakers) throw new AppError('ROOM_002');
+      updatedCount = res.count;
     }
-
-    const updated = await prisma.participant.updateMany({
-      where: { roomId, userId: input.userId, leftAt: null },
-      data: { role: input.role },
-    });
-    if (updated.count === 0) throw new AppError('USER_001');
+    if (updatedCount === 0) throw new AppError('USER_001');
 
     // Transferring HOST must also flip Room.hostId and demote the previous
     // host to SPEAKER, otherwise requireHost() keeps protecting the old user

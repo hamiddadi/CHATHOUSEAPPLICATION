@@ -31,7 +31,9 @@ declare module 'express-serve-static-core' {
 // replayable bearer token verbatim in Redis.
 // TODO(audit): add a `jti` claim to signAccessToken (jwt.ts/auth.service.ts)
 // and blacklist by jti to drop the per-request hashing entirely.
-const blacklistKey = (token: string): string =>
+// Exported so the socket auth layer keys the blacklist identically — otherwise
+// a token revoked on HTTP logout would still be accepted over the socket.
+export const blacklistKey = (token: string): string =>
   `blacklist:${createHash('sha256').update(token).digest('hex')}`;
 
 // Lockout-propagation window for the suspension cache: how long a cached

@@ -2,6 +2,7 @@ import type { Socket } from 'socket.io';
 import { redis } from '../config/redis';
 import { prisma } from '../config/database';
 import { verifyAccessToken } from '../utils/jwt';
+import { blacklistKey } from '../middlewares/auth.middleware';
 
 export interface AuthedSocketData {
   userId: string;
@@ -35,7 +36,9 @@ export const socketAuth = async (socket: Socket, next: (err?: Error) => void): P
     const token = extractToken(socket);
     if (!token) return next(new Error('UNAUTHORIZED'));
 
-    const revoked = await redis.get(`blacklist:${token}`);
+    // Use the SAME hashed key the HTTP layer writes on logout — keying by the
+    // raw token here never matched, so socket revocation was a no-op.
+    const revoked = await redis.get(blacklistKey(token));
     if (revoked) return next(new Error('TOKEN_REVOKED'));
 
     const claims = verifyAccessToken(token);
