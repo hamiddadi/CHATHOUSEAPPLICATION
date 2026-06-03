@@ -1,6 +1,7 @@
 import React, { memo, useCallback } from 'react';
 import { Alert, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
+import { useTranslation } from 'react-i18next';
 import { colors, spacing } from '../../../../shared/constants/theme';
 import { errorMessage } from '../../../../shared/utils/errorMessage';
 import { useMuteAllInRoom, useToggleRoomChat } from '../../hooks/useRooms';
@@ -22,59 +23,67 @@ interface RoomControlsSheetProps {
  */
 export const RoomControlsSheet: React.FC<RoomControlsSheetProps> = memo(
   ({ visible, roomId, chatEnabled, chatVisibility, onClose, onEditTitle, onInvite }) => {
+    const { t } = useTranslation();
     const muteAll = useMuteAllInRoom();
     const toggleChat = useToggleRoomChat();
 
     const handleMuteAll = useCallback(() => {
-      Alert.alert(
-        'Mute tous les speakers',
-        'Tous les speakers (hors host) seront mutés. Ils pourront se réactiver eux-mêmes.',
-        [
-          { text: 'Annuler', style: 'cancel' },
-          {
-            text: 'Confirmer',
-            style: 'destructive',
-            onPress: () =>
-              muteAll.mutate(
-                { roomId, includeHost: false },
-                {
-                  onSuccess: r => Alert.alert('Fait', `${r.mutedCount} speaker(s) muté(s).`),
-                  onError: e => Alert.alert('Erreur', errorMessage(e, 'Échec')),
-                },
-              ),
-          },
-        ],
-      );
-    }, [muteAll, roomId]);
+      Alert.alert(t('roomControls.muteAll'), t('roomControls.muteAllBody'), [
+        { text: t('roomControls.cancel'), style: 'cancel' },
+        {
+          text: t('roomControls.confirm'),
+          style: 'destructive',
+          onPress: () =>
+            muteAll.mutate(
+              { roomId, includeHost: false },
+              {
+                onSuccess: r =>
+                  Alert.alert(
+                    t('roomControls.done'),
+                    t('roomControls.muteAllDone', { count: r.mutedCount }),
+                  ),
+                onError: e =>
+                  Alert.alert(t('roomControls.error'), errorMessage(e, t('roomControls.failed'))),
+              },
+            ),
+        },
+      ]);
+    }, [muteAll, roomId, t]);
 
     const handleToggleChatEnabled = useCallback(() => {
       toggleChat.mutate(
         { roomId, chatEnabled: !chatEnabled },
         {
-          onError: e => Alert.alert('Erreur', errorMessage(e, 'Échec')),
+          onError: e =>
+            Alert.alert(t('roomControls.error'), errorMessage(e, t('roomControls.failed'))),
         },
       );
-    }, [chatEnabled, roomId, toggleChat]);
+    }, [chatEnabled, roomId, toggleChat, t]);
 
     const handleToggleChatVisibility = useCallback(() => {
       toggleChat.mutate(
         { roomId, chatVisibility: chatVisibility === 'MODS_ONLY' ? 'all' : 'mods' },
         {
-          onError: e => Alert.alert('Erreur', errorMessage(e, 'Échec')),
+          onError: e =>
+            Alert.alert(t('roomControls.error'), errorMessage(e, t('roomControls.failed'))),
         },
       );
-    }, [chatVisibility, roomId, toggleChat]);
+    }, [chatVisibility, roomId, toggleChat, t]);
 
     return (
       <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-        <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="Fermer">
+        <Pressable
+          style={styles.backdrop}
+          onPress={onClose}
+          accessibilityLabel={t('roomControls.close')}
+        >
           <Pressable style={styles.sheet} onPress={() => undefined}>
             <View style={styles.handle} />
-            <Text style={styles.title}>Contrôles de la room</Text>
+            <Text style={styles.title}>{t('roomControls.title')}</Text>
 
             <Row
               icon="title"
-              label="Modifier le titre"
+              label={t('roomControls.editTitle')}
               onPress={() => {
                 onClose();
                 onEditTitle();
@@ -82,7 +91,7 @@ export const RoomControlsSheet: React.FC<RoomControlsSheetProps> = memo(
             />
             <Row
               icon="person-add"
-              label="Inviter des followers"
+              label={t('roomControls.invite')}
               onPress={() => {
                 onClose();
                 onInvite();
@@ -90,21 +99,21 @@ export const RoomControlsSheet: React.FC<RoomControlsSheetProps> = memo(
             />
             <Row
               icon="volume-off"
-              label="Mute tous les speakers"
+              label={t('roomControls.muteAll')}
               onPress={handleMuteAll}
               destructive
             />
             <Row
               icon={chatEnabled ? 'chat' : 'chat-bubble-outline'}
-              label={chatEnabled ? 'Désactiver le chat' : 'Activer le chat'}
+              label={chatEnabled ? t('roomControls.disableChat') : t('roomControls.enableChat')}
               onPress={handleToggleChatEnabled}
             />
             <Row
               icon={chatVisibility === 'MODS_ONLY' ? 'visibility' : 'visibility-off'}
               label={
                 chatVisibility === 'MODS_ONLY'
-                  ? 'Rendre le chat visible à tous'
-                  : 'Limiter le chat aux modérateurs'
+                  ? t('roomControls.chatVisibleAll')
+                  : t('roomControls.chatModsOnly')
               }
               onPress={handleToggleChatVisibility}
             />
@@ -113,9 +122,9 @@ export const RoomControlsSheet: React.FC<RoomControlsSheetProps> = memo(
               onPress={onClose}
               style={styles.cancel}
               accessibilityRole="button"
-              accessibilityLabel="Fermer"
+              accessibilityLabel={t('roomControls.close')}
             >
-              <Text style={styles.cancelLabel}>Fermer</Text>
+              <Text style={styles.cancelLabel}>{t('roomControls.close')}</Text>
             </Pressable>
           </Pressable>
         </Pressable>

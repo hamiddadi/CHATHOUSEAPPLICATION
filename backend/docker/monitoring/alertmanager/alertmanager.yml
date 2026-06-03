@@ -1,0 +1,78 @@
+# Alertmanager configuration for the Chathouse monitoring stack.
+#
+# Secrets / endpoints are injected via environment-variable-style placeholders
+# of the form ${VAR}. Alertmanager itself does NOT expand env vars in this
+# file, so choose one of:
+#   1. Render this file at deploy time (envsubst < alertmanager.tmpl.yml ...).
+#   2. Replace the placeholders below with real values before mounting.
+#   3. (Slack) set `slack_api_url` from a file via the global `slack_api_url_file`.
+# Recommended env vars to provide:
+#   SLACK_WEBHOOK_URL   - Slack incoming-webhook URL for #alerts
+#   SMTP_SMARTHOST      - e.g. smtp.example.com:587
+#   SMTP_FROM           - alerts@chathouse.example
+#   SMTP_USERNAME / SMTP_PASSWORD
+#   ALERT_EMAIL_TO      - on-call distribution list
+
+global:
+  resolve_timeout: 5m
+  # Slack webhook (also settable per-receiver). Placeholder — inject real URL.
+  slack_api_url: '${SLACK_WEBHOOK_URL}'
+  # SMTP defaults for the email receiver.
+  smtp_smarthost: '${SMTP_SMARTHOST}'
+  smtp_from: '${SMTP_FROM}'
+  smtp_auth_username: '${SMTP_USERNAME}'
+  smtp_auth_password: '${SMTP_PASSWORD}'
+  smtp_require_tls: true
+
+route:
+  receiver: slack-default
+  group_by: ['alertname', 'service', 'severity']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    # Critical alerts page both Slack and email immediately.
+    - matchers:
+        - severity = "critical"
+      receiver: critical-all
+      group_wait: 10s
+      continue: false
+
+receivers:
+  - name: slack-default
+    slack_configs:
+      - api_url: '${SLACK_WEBHOOK_URL}'
+        channel: '#alerts'
+        send_resolved: true
+        title: '[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }} ({{ .CommonLabels.service }})'
+        text: >-
+          {{ range .Alerts }}*{{ .Annotations.summary }}*
+          {{ .Annotations.description }}
+          {{ end }}
+
+  - name: critical-all
+    slack_configs:
+      - api_url: '${SLACK_WEBHOOK_URL}'
+        channel: '#alerts-critical'
+        send_resolved: true
+        title: '[CRITICAL] {{ .CommonLabels.alertname }} ({{ .CommonLabels.service }})'
+        text: >-
+          {{ range .Alerts }}*{{ .Annotations.summary }}*
+          {{ .Annotations.description }}
+          {{ end }}
+    email_configs:
+      - to: '${ALERT_EMAIL_TO}'
+        send_resolved: true
+        headers:
+          Subject: '[CRITICAL] {{ .CommonLabels.alertname }} — {{ .CommonLabels.service }}'
+
+inhibit_rules:
+  # When the API is fully down (APIDown / critical), suppress the noisy
+  # downstream alerts for the same service (latency, error rate, etc.) so
+  # responders see the root cause, not a storm of symptoms.
+  - source_matchers:
+      - alertname = "APIDown"
+      - severity = "critical"
+    target_matchers:
+      - severity =~ "warning|critical"
+    equal: ['service']

@@ -4,6 +4,7 @@ import { TokenExpiredError, JsonWebTokenError } from 'jsonwebtoken';
 import { logger } from '../config/logger';
 import { env } from '../config/env';
 import { sendError } from '../utils/response';
+import { Sentry } from '../monitoring/sentry';
 
 /**
  * Standardised error codes. Format: DOMAIN_NNN so clients can branch on a
@@ -121,6 +122,13 @@ export const errorMiddleware: ErrorRequestHandler = (err, req: Request, res, _ne
     stack: err instanceof Error && env.NODE_ENV !== 'production' ? err.stack : undefined,
     details,
   });
+
+  // Report unexpected server-side failures (5xx) to Sentry. 4xx are client
+  // errors (validation, auth, not-found) and are intentionally not captured to
+  // keep the issue stream signal-rich. No-op when SENTRY_DSN is unset.
+  if (status >= 500) {
+    Sentry.captureException(err);
+  }
 
   sendError(res, code, message, status, env.NODE_ENV === 'production' ? undefined : details);
 };

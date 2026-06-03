@@ -48,13 +48,23 @@ export const fanoutOne = async (roomId: string): Promise<number> => {
     // Don't fan out private rooms.
     if (room.isPrivate || room.roomType === 'CLOSED') return 0;
 
-    // Pull followers of the host (cap to avoid runaway scans on viral hosts;
-    // real-world fan-out would batch via a queue).
-    const followers = await prisma.follow.findMany({
-      where: { followingId: room.hostId },
-      select: { followerId: true },
-      take: 5000,
-    });
+    // Pull followers of the host + (if clubbed) the club members concurrently —
+    // the club query depends only on room.clubId, not on the followers result.
+    // Both are capped to avoid runaway scans on viral hosts/clubs.
+    const [followers, clubMembers] = await Promise.all([
+      prisma.follow.findMany({
+        where: { followingId: room.hostId },
+        select: { followerId: true },
+        take: 5000,
+      }),
+      room.clubId
+        ? prisma.clubMember.findMany({
+            where: { clubId: room.clubId },
+            select: { userId: true },
+            take: CLUB_MEMBER_CAP,
+          })
+        : Promise.resolve<{ userId: string }[]>([]),
+    ]);
 
     const title = room.host.displayName ?? room.host.username ?? 'Someone you follow';
     const body = `started a room: "${room.title}"`;
@@ -74,22 +84,13 @@ export const fanoutOne = async (roomId: string): Promise<number> => {
       }
     }
 
-    // If the room is attached to a club, every club member should also learn the
-    // room went live — even when they don't follow the host. Reuse the same
-    // ROOM_STARTED type/data shape; the only differing attribution is the
-    // dispatch source tag. Bounded by CLUB_MEMBER_CAP for the same runaway-scan
-    // protection as the follower pull.
-    if (room.clubId) {
-      const members = await prisma.clubMember.findMany({
-        where: { clubId: room.clubId },
-        select: { userId: true },
-        take: CLUB_MEMBER_CAP,
-      });
-      for (const m of members) {
-        if (!notified.has(m.userId)) {
-          notified.add(m.userId);
-          recipients.push(m.userId);
-        }
+    // Club members (already fetched above) also learn the room went live — even
+    // when they don't follow the host. Reuse the same ROOM_STARTED type/data
+    // shape; only the dispatch source tag differs. De-duped via `notified`.
+    for (const m of clubMembers) {
+      if (!notified.has(m.userId)) {
+        notified.add(m.userId);
+        recipients.push(m.userId);
       }
     }
 

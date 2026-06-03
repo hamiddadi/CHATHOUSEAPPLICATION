@@ -21,6 +21,7 @@ import {
   emitRoomReaction,
   emitRoomRoleChanged,
   emitRoomUserKicked,
+  forceLeaveRoom,
 } from '../../socket/realtime';
 import type {
   CreateRoomInput,
@@ -1017,6 +1018,10 @@ export const roomsService = {
     });
 
     emitRoomUserKicked(roomId, { userId: targetUserId, kickedBy: callerUserId });
+    // Authoritatively evict the kicked user's socket(s) from the room channel —
+    // the broadcast above only notifies; this enforces it server-side so a
+    // client that ignores the event can't keep receiving room broadcasts.
+    forceLeaveRoom(roomId, targetUserId, callerUserId);
     emitHallwayRoomUpdated(roomId, { participantCount: Math.max(0, room.participantCount - 1) });
     return { kicked: true as const };
   },

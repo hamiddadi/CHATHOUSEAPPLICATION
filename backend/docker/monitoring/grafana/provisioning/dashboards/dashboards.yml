@@ -1,0 +1,18 @@
+# Grafana dashboard provider — auto-loads JSON dashboards from this folder.
+apiVersion: 1
+
+providers:
+  - name: chathouse
+    orgId: 1
+    folder: Chathouse
+    type: file
+    disableDeletion: false
+    editable: true
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      # Grafana watches this in-container path for *.json dashboards. The
+      # compose file mounts ./grafana/provisioning -> /etc/grafana/provisioning,
+      # so this folder (containing chathouse.json) is read on startup.
+      path: /etc/grafana/provisioning/dashboards
+      foldersFromFilesStructure: false

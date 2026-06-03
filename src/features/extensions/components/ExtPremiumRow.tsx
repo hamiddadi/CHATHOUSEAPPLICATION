@@ -1,9 +1,10 @@
 import React, { useCallback } from 'react';
-import { ActivityIndicator, Alert, Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import { colors, radii, spacing, withAlpha } from '../../../shared/constants/theme';
 import { errorMessage } from '../../../shared/utils/errorMessage';
+import { STRIPE_HOSTS, openExternalUrl } from '../../../shared/utils/openExternalUrl';
 import {
   useOpenBillingPortal,
   usePremiumStatus,
@@ -23,8 +24,8 @@ export const ExtPremiumRow: React.FC = () => {
 
   const open = useCallback(
     (url: string) => {
-      Linking.openURL(url).catch(() => {
-        Alert.alert(t('premium.errorTitle'), t('premium.openError'));
+      void openExternalUrl(url, STRIPE_HOSTS).then(ok => {
+        if (!ok) Alert.alert(t('premium.errorTitle'), t('premium.openError'));
       });
     },
     [t],

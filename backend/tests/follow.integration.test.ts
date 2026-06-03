@@ -68,13 +68,15 @@ describe('Follow integration', () => {
       .get('/api/follow/followers')
       .set('Authorization', `Bearer ${bob.token}`);
     expect(bobFollowers.status).toBe(200);
-    expect(bobFollowers.body.data.map((u: { id: string }) => u.id)).toContain(alice.id);
+    // listFollowers returns a cursor page: { data: [...], nextCursor }, wrapped
+    // by sendOk into body.data — so the users array is body.data.data.
+    expect(bobFollowers.body.data.data.map((u: { id: string }) => u.id)).toContain(alice.id);
 
     // Alice sees Bob in her following list
     const aliceFollowing = await request(app)
       .get('/api/follow/following')
       .set('Authorization', `Bearer ${alice.token}`);
-    expect(aliceFollowing.body.data.map((u: { id: string }) => u.id)).toContain(bob.id);
+    expect(aliceFollowing.body.data.data.map((u: { id: string }) => u.id)).toContain(bob.id);
 
     // Alice cannot follow herself
     const selfFollow = await request(app)

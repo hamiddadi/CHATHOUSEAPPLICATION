@@ -1,0 +1,202 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# CD — Deploy to Production
+#
+# Trigger: push of a semver tag matching v*.*.* (e.g. v1.4.2).
+# Flow:   build & push image (tagged with the semver + `latest`)  →
+#          deploy job gated behind the `production` GitHub Environment
+#          (manual approval / required reviewers)  →  SSH-deploy  →
+#          smoke tests  →  auto-rollback on failure  →  Slack notify.
+#
+# The `production` environment MUST be configured in repo
+#   Settings → Environments → production
+# with required reviewers (see .github/environments/staging.yml for the
+# documented pattern; create a `production` env the same way with stricter
+# reviewers). The `environment: production` key below makes this job WAIT for
+# manual approval before it runs.
+#
+# Required secrets: GITHUB_TOKEN (auto), PROD_HOST, PROD_USER, PROD_SSH_KEY,
+#                   SLACK_WEBHOOK_URL.
+# ─────────────────────────────────────────────────────────────────────────────
+name: CD — Deploy to Production
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+concurrency:
+  group: cd-production
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}/api
+
+jobs:
+  # ───────────────────────── Build & push image to GHCR ──────────────────────
+  build-and-push:
+    name: Build & push image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      image_version: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }}
+      image_latest: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Derive version from tag
+        id: meta
+        run: |
+          # github.ref_name is the tag, e.g. "v1.4.2" → strip the leading "v".
+          VERSION="${GITHUB_REF_NAME#v}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Building production version ${VERSION}"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build & push
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          labels: |
+            org.opencontainers.image.version=${{ steps.meta.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+
+  # ───────────────────────── Deploy to production (gated) ─────────────────────
+  deploy-production:
+    name: Deploy to production
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    # `environment: production` enforces the manual-approval / required-reviewers
+    # protection rule configured in repo Settings → Environments → production.
+    environment:
+      name: production
+      url: https://api.chathouse.app
+    steps:
+      - name: SSH deploy + smoke tests + auto-rollback
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          NEW_IMAGE: ${{ needs.build-and-push.outputs.image_version }}
+          REGISTRY: ${{ env.REGISTRY }}
+          REGISTRY_USER: ${{ github.actor }}
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          host: ${{ secrets.PROD_HOST }}
+          username: ${{ secrets.PROD_USER }}
+          key: ${{ secrets.PROD_SSH_KEY }}
+          envs: NEW_IMAGE,REGISTRY,REGISTRY_USER,REGISTRY_TOKEN
+          script_stop: true
+          command_timeout: 15m
+          script: |
+            set -euo pipefail
+            log() { printf '%s [deploy] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
+
+            DEPLOY_DIR="${DEPLOY_DIR:-/opt/chathouse/backend}"
+            cd "$DEPLOY_DIR"
+
+            log "Logging in to ${REGISTRY}"
+            echo "$REGISTRY_TOKEN" | docker login "$REGISTRY" -u "$REGISTRY_USER" --password-stdin
+
+            PREV_IMAGE="$(docker inspect --format '{{.Config.Image}}' chathouse-api 2>/dev/null || echo '')"
+            log "Previous image: ${PREV_IMAGE:-<none>}"
+            log "New image:      ${NEW_IMAGE}"
+
+            log "Pulling ${NEW_IMAGE}"
+            docker pull "$NEW_IMAGE"
+
+            export CHATHOUSE_API_IMAGE="$NEW_IMAGE"
+            log "Recreating api service"
+            docker compose up -d --no-deps --pull always api || \
+              docker compose up -d --no-deps api
+
+            BASE_URL="${BASE_URL:-http://localhost:4000}"
+
+            # ── Smoke tests (retry up to 10× / 5s) ──
+            smoke() {
+              # /health → 200 with db + redis true
+              code="$(curl -fsS -o /tmp/health.json -w '%{http_code}' "${BASE_URL}/health" || echo 000)"
+              [ "$code" = "200" ] || { log "smoke: /health http=${code}"; return 1; }
+              grep -q '"database":true' /tmp/health.json || { log "smoke: database not healthy"; return 1; }
+              grep -q '"redis":true'    /tmp/health.json || { log "smoke: redis not healthy"; return 1; }
+              # /health/live → 200
+              code="$(curl -fsS -o /dev/null -w '%{http_code}' "${BASE_URL}/health/live" || echo 000)"
+              [ "$code" = "200" ] || { log "smoke: /health/live http=${code}"; return 1; }
+              # /api/users/me without a token → 401
+              code="$(curl -fsS -o /dev/null -w '%{http_code}' "${BASE_URL}/api/users/me" || echo 000)"
+              [ "$code" = "401" ] || { log "smoke: /api/users/me expected 401 got ${code}"; return 1; }
+              return 0
+            }
+
+            ok=0
+            for i in $(seq 1 10); do
+              if smoke; then log "Smoke tests OK on attempt ${i}"; ok=1; break; fi
+              log "Smoke attempt ${i}/10 failed; retrying in 5s"
+              sleep 5
+            done
+
+            if [ "$ok" -ne 1 ]; then
+              log "Smoke tests FAILED — rolling back"
+              if [ -n "$PREV_IMAGE" ]; then
+                export CHATHOUSE_API_IMAGE="$PREV_IMAGE"
+                docker pull "$PREV_IMAGE" || true
+                docker compose up -d --no-deps api
+                log "Rolled back to ${PREV_IMAGE}"
+              else
+                log "No previous image recorded — cannot auto-rollback"
+              fi
+              exit 1
+            fi
+
+            log "Production deploy succeeded: ${NEW_IMAGE}"
+            docker image prune -f >/dev/null 2>&1 || true
+
+  # ───────────────────────── Slack notification ──────────────────────────────
+  notify:
+    name: Notify Slack
+    needs: [build-and-push, deploy-production]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Compose message
+        id: msg
+        run: |
+          if [ "${{ needs.deploy-production.result }}" = "success" ]; then
+            echo "emoji=:rocket:" >> "$GITHUB_OUTPUT"
+            echo "text=PRODUCTION deploy SUCCEEDED — v${{ needs.build-and-push.outputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "emoji=:rotating_light:" >> "$GITHUB_OUTPUT"
+            echo "text=PRODUCTION deploy FAILED — v${{ needs.build-and-push.outputs.version }} (result=${{ needs.deploy-production.result }})" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Post to Slack
+        if: ${{ env.SLACK_WEBHOOK_URL != '' }}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          payload=$(cat <<JSON
+          {
+            "text": "${{ steps.msg.outputs.emoji }} *${{ steps.msg.outputs.text }}*\n• repo: ${{ github.repository }}\n• tag: ${{ github.ref_name }}\n• sha: \`${{ github.sha }}\`\n• actor: ${{ github.actor }}\n• run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          }
+          JSON
+          )
+          curl -fsS -X POST -H 'Content-Type: application/json' -d "$payload" "$SLACK_WEBHOOK_URL"

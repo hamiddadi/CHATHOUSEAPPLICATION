@@ -17,6 +17,8 @@ const { createSocketServer } =
 const { prisma } = require('../src/config/database') as typeof import('../src/config/database');
 const { connectRedis, disconnectRedis } =
   require('../src/config/redis') as typeof import('../src/config/redis');
+const { roomChannel } =
+  require('../src/socket/channels') as typeof import('../src/socket/channels');
 /* eslint-enable @typescript-eslint/no-require-imports */
 
 const rand = () => Math.random().toString(36).slice(2, 10);
@@ -154,7 +156,9 @@ describe('Socket.IO — room broadcasts + chat presence events', () => {
     );
     await emitWithAck(hostSock, 'room:mute', { roomId, isMuted: true });
     const msg = await muteChangedOnPeer;
-    expect(msg).toEqual({ userId: host.id, isMuted: true });
+    // The event also carries roomId now; assert the required fields are present
+    // rather than an exact shape so adding context fields isn't a breaking test.
+    expect(msg).toMatchObject({ userId: host.id, isMuted: true });
 
     hostSock.disconnect();
     peerSock.disconnect();
@@ -193,6 +197,80 @@ describe('Socket.IO — room broadcasts + chat presence events', () => {
 
     hostSock.disconnect();
     askrSock.disconnect();
+  }, 30_000);
+
+  // 4.10 — moderator kick forcibly evicts the target's socket from the room
+  // channel (server-enforced, not client-cooperative).
+  it('kick forcibly removes the target socket from the room channel', async () => {
+    const host = await register(app);
+    const target = await register(app);
+    createdUserIds.push(host.id, target.id);
+
+    const created = await request(app)
+      .post('/api/rooms')
+      .set('Authorization', `Bearer ${host.token}`)
+      .send({ title: 'kick room' });
+    const roomId = created.body.data.id as string;
+    createdRoomIds.push(roomId);
+
+    await request(app)
+      .post(`/api/rooms/${roomId}/join`)
+      .set('Authorization', `Bearer ${target.token}`);
+
+    const hostSock = await connect(host.token);
+    const targetSock = await connect(target.token);
+    await emitWithAck(hostSock, 'room:join', { roomId });
+    await emitWithAck(targetSock, 'room:join', { roomId });
+
+    // Server-side socket ids (=== the connected client ids). Narrow away the
+    // `string | undefined` the client type carries pre-connect.
+    const hostSid = hostSock.id;
+    const targetSid = targetSock.id;
+    if (!hostSid || !targetSid) throw new Error('expected both sockets to be connected');
+
+    // Membership is read from the live (local) adapter room map by socket id —
+    // synchronous and authoritative, vs. fetchSockets() which does a Redis
+    // round-trip that can read a stale snapshot.
+    const roomMembers = (): Set<string> =>
+      io.sockets.adapter.rooms.get(roomChannel(roomId)) ?? new Set<string>();
+    const waitUntil = (cond: () => boolean, timeoutMs = 2_000): Promise<void> =>
+      new Promise((resolve, reject) => {
+        const start = Date.now();
+        const tick = (): void => {
+          if (cond()) return resolve();
+          if (Date.now() - start >= timeoutMs) return reject(new Error('waitUntil timeout'));
+          setTimeout(tick, 25);
+        };
+        tick();
+      });
+
+    // Both sockets are members of the room channel before the kick.
+    expect(roomMembers().has(hostSid)).toBe(true);
+    expect(roomMembers().has(targetSid)).toBe(true);
+
+    // Host kicks target via REST. The target must get a direct personal signal
+    // on its user channel AND be evicted from the room channel server-side.
+    const kicked = waitForEvent<{ roomId: string; kickedBy: string }>(
+      targetSock,
+      'room:you_were_kicked',
+    );
+    await request(app)
+      .post(`/api/rooms/${roomId}/kick`)
+      .set('Authorization', `Bearer ${host.token}`)
+      .send({ userId: target.id });
+
+    expect(await kicked).toMatchObject({ roomId, kickedBy: host.id });
+
+    // socketsLeave propagates through the adapter; poll until the target is
+    // evicted (bounded, so a genuine no-op still fails fast).
+    await waitUntil(() => !roomMembers().has(targetSid));
+
+    // Eviction is targeted: the host (and the channel) survive.
+    expect(roomMembers().has(targetSid)).toBe(false);
+    expect(roomMembers().has(hostSid)).toBe(true);
+
+    hostSock.disconnect();
+    targetSock.disconnect();
   }, 30_000);
 
   // 5.8 — chat:typing relayed to the receiver only

@@ -40,7 +40,10 @@ import { setRealtimeAliasServer } from './extensions/realtime/aliases';
 import { initMediasoup, shutdownMediasoup } from './webrtc/mediasoup.manager';
 import { startReminderWorker, shutdownReminders } from './queues/eventReminders';
 import { startLocationPurgeWorker, shutdownLocationPurge } from './queues/locationPurge';
+import { registerGdprPurgeWorker, shutdownGdprPurge } from './workers/gdpr-purge.worker';
 import { ensureSearchIndexes } from './config/searchIndexes';
+import { initSentry } from './monitoring/sentry';
+import { httpMetricsMiddleware, metricsHandler } from './monitoring/metrics';
 
 // Grace period before a hung server.close() is hard-killed during shutdown.
 const SHUTDOWN_GRACE_MS = 10_000;
@@ -87,6 +90,24 @@ export const createApp = (): express.Express => {
       stream: { write: (line: string) => logger.info(line.trim()) },
     }),
   );
+
+  // Record per-request Prometheus timings. Mounted early so the histogram
+  // covers downstream middleware/routers; uses the matched route pattern as
+  // the label to avoid high-cardinality raw paths.
+  app.use(httpMetricsMiddleware);
+
+  // Prometheus scrape endpoint — unauthenticated by default for local/dev. In
+  // production it requires `Authorization: Bearer <METRICS_TOKEN>` when that env
+  // var is set, so the metric surface isn't publicly enumerable. Mounted BEFORE
+  // the /api globalLimiter so scrapes don't burn the API budget.
+  app.get('/metrics', (req, res, next) => {
+    const token = process.env.METRICS_TOKEN;
+    if (token && req.get('authorization') !== `Bearer ${token}`) {
+      res.status(403).end();
+      return;
+    }
+    void metricsHandler(req, res, next);
+  });
 
   // Health is unauthenticated and unratelimited (Kubernetes/ECS probes).
   app.use(healthRouter);
@@ -140,6 +161,10 @@ export const createApp = (): express.Express => {
 };
 
 const startServer = async (): Promise<void> => {
+  // Initialise error tracking FIRST — as early as possible so the HTTP
+  // instrumentation can patch the layer before any service connects. No-op
+  // when SENTRY_DSN is unset (the normal local/dev/CI state).
+  initSentry();
   await connectRedis();
   await ensureSearchIndexes();
   // mediasoup boots best-effort: if the native build is unavailable the rest
@@ -151,6 +176,10 @@ const startServer = async (): Promise<void> => {
   // scheduled-room volume warrants it.
   startReminderWorker();
   await startLocationPurgeWorker();
+  // GDPR retention sweep (daily cron). Applies the policy in
+  // docs/rgpd/data-retention-policy.md: hard-deletes soft-deleted accounts past
+  // the grace window and purges expired tokens/OTPs/audit logs.
+  await registerGdprPurgeWorker();
   const app = createApp();
   // Mount the `/api/ext/*` extension contract on the SAME entry point that
   // production uses (`dist/app.js`), gated by env. Previously these routers
@@ -184,6 +213,7 @@ const startServer = async (): Promise<void> => {
         await shutdownMediasoup();
         await shutdownReminders();
         await shutdownLocationPurge();
+        await shutdownGdprPurge();
         await disconnectDatabase();
         await disconnectRedis();
         logger.info('server stopped cleanly');

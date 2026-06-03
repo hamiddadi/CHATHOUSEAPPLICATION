@@ -11,7 +11,7 @@ const { createApp } = require('../src/app') as typeof import('../src/app');
 const { prisma } = require('../src/config/database') as typeof import('../src/config/database');
 const { connectRedis, disconnectRedis } =
   require('../src/config/redis') as typeof import('../src/config/redis');
-const { logger } = require('../src/config/logger') as typeof import('../src/config/logger');
+const mailer = require('../src/config/mailer') as typeof import('../src/config/mailer');
 /* eslint-enable @typescript-eslint/no-require-imports */
 
 const rand = () => Math.random().toString(36).slice(2, 10);
@@ -33,22 +33,16 @@ describe('Password reset flow', () => {
     await disconnectRedis();
   });
 
-  // Helper: spy on logger to pick up the raw token the dev-mode log emits.
+  // Helper: capture the raw reset token from the outbound email. The service
+  // intentionally NEVER logs the raw token (security hardening) — it is
+  // delivered solely via email — so we spy on the mailer and pull the 64-char
+  // hex token out of the message body.
   const captureToken = async (fn: () => Promise<void>): Promise<string> => {
     let captured = '';
-    const originalInfo = logger.info.bind(logger);
-    const spy = jest.spyOn(logger, 'info').mockImplementation(((msg: string, meta?: unknown) => {
-      if (
-        typeof msg === 'string' &&
-        msg.startsWith('[reset]') &&
-        meta &&
-        typeof meta === 'object' &&
-        'raw' in meta
-      ) {
-        captured = (meta as { raw: string }).raw;
-      }
-      return originalInfo(msg, meta);
-    }) as typeof logger.info);
+    const spy = jest.spyOn(mailer, 'sendMail').mockImplementation(async mail => {
+      const m = mail.text.match(/[a-f0-9]{64}/);
+      if (m) captured = m[0];
+    });
     try {
       await fn();
     } finally {

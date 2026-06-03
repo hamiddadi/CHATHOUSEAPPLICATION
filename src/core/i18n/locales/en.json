@@ -85,6 +85,24 @@
     "openError": "Couldn't open the page.",
     "genericError": "Something went wrong. Try again."
   },
+  "roomControls": {
+    "title": "Room controls",
+    "editTitle": "Edit title",
+    "invite": "Invite followers",
+    "muteAll": "Mute all speakers",
+    "muteAllBody": "All speakers (except the host) will be muted. They can unmute themselves.",
+    "muteAllDone": "{{count}} speaker(s) muted.",
+    "enableChat": "Enable chat",
+    "disableChat": "Disable chat",
+    "chatVisibleAll": "Make chat visible to everyone",
+    "chatModsOnly": "Limit chat to moderators",
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "done": "Done",
+    "error": "Error",
+    "failed": "Failed",
+    "close": "Close"
+  },
   "messages": {
     "title": "Messages",
     "newChatA11y": "Start new conversation",

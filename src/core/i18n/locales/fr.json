@@ -85,6 +85,24 @@
     "openError": "Impossible d'ouvrir la page.",
     "genericError": "Une erreur est survenue. Réessaie."
   },
+  "roomControls": {
+    "title": "Contrôles de la room",
+    "editTitle": "Modifier le titre",
+    "invite": "Inviter des followers",
+    "muteAll": "Mute tous les speakers",
+    "muteAllBody": "Tous les speakers (hors host) seront mutés. Ils pourront se réactiver eux-mêmes.",
+    "muteAllDone": "{{count}} speaker(s) muté(s).",
+    "enableChat": "Activer le chat",
+    "disableChat": "Désactiver le chat",
+    "chatVisibleAll": "Rendre le chat visible à tous",
+    "chatModsOnly": "Limiter le chat aux modérateurs",
+    "cancel": "Annuler",
+    "confirm": "Confirmer",
+    "done": "Fait",
+    "error": "Erreur",
+    "failed": "Échec",
+    "close": "Fermer"
+  },
   "messages": {
     "title": "Messages",
     "newChatA11y": "Nouvelle conversation",

@@ -7,6 +7,12 @@
     "orientation": "portrait",
     "scheme": "chathouse",
     "userInterfaceStyle": "dark",
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0c112e"
+    },
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.chathouse.app",
@@ -21,6 +27,7 @@
     },
     "android": {
       "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0c112e"
       },
       "package": "com.chathouse.app",
@@ -38,7 +45,8 @@
       ]
     },
     "web": {
-      "bundler": "metro"
+      "bundler": "metro",
+      "favicon": "./assets/favicon.png"
     },
     "plugins": [
       "expo-font",

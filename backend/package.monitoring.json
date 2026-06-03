@@ -1,0 +1,7 @@
+{
+  "_note": "Dependencies for the monitoring + error-tracking stack (CRITIQUE-2). Install into backend with: npm install prom-client@^15 @sentry/node@^8 . The original brief mentioned @sentry/tracing — that package is OBSOLETE in Sentry v8: tracing is now merged into @sentry/node, so do NOT install it (it pulls in v7 APIs that break the v8 build). prom-client v15 is the current major; @sentry/node v8 uses Sentry.httpIntegration() instead of the removed v7 Integrations.Http class.",
+  "dependencies": {
+    "prom-client": "^15",
+    "@sentry/node": "^8"
+  }
+}

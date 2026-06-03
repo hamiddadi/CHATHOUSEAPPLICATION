@@ -1,17 +1,9 @@
 import React, { useCallback, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  Linking,
-  Modal,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Alert, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { colors, spacing } from '../../../shared/constants/theme';
 import { errorMessage } from '../../../shared/utils/errorMessage';
+import { STRIPE_HOSTS, openExternalUrl } from '../../../shared/utils/openExternalUrl';
 import type { UserSummary } from '../../../shared/types/domain';
 import { useTip } from '../hooks/useTip';
 
@@ -47,8 +39,8 @@ export const ExtTipSheet: React.FC<ExtTipSheetProps> = ({ target, onClose, onSen
         { toUserId: target.id, amountCents: amountMajor * 100, currency },
         {
           onSuccess: ({ url }) => {
-            Linking.openURL(url).catch(() => {
-              Alert.alert(t('tip.errorTitle'), t('tip.openError'));
+            void openExternalUrl(url, STRIPE_HOSTS).then(ok => {
+              if (!ok) Alert.alert(t('tip.errorTitle'), t('tip.openError'));
             });
             onSent?.();
           },

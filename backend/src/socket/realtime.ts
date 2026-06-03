@@ -119,6 +119,24 @@ export const emitRoomUserKicked = (
   ioRef?.to(roomChannel(roomId)).emit('room:user_kicked', { roomId, ...payload });
 };
 
+/**
+ * Server-side half of a kick: forcibly evict a user's socket(s) from the
+ * `room:<id>` channel. `emitRoomUserKicked` only *notifies* the room — a
+ * client that ignores the event would otherwise stay subscribed and keep
+ * receiving every room broadcast (chat, reactions, role/meta changes). This
+ * removes them authoritatively via `socketsLeave`, which works cluster-wide
+ * through the Redis adapter (it reaches the target's sockets on any node, not
+ * just this one). A dedicated `room:you_were_kicked` is pushed to the user's
+ * personal channel first so their client still gets a direct signal even
+ * though it's about to leave the room channel. No-op before socket boot.
+ */
+export const forceLeaveRoom = (roomId: string, userId: string, kickedBy: string): void => {
+  // Personal channel is independent of the room channel, so this lands
+  // regardless of the eviction below.
+  ioRef?.to(userChannel(userId)).emit('room:you_were_kicked', { roomId, kickedBy });
+  ioRef?.in(userChannel(userId)).socketsLeave(roomChannel(roomId));
+};
+
 export const emitRoomMuteChanged = (
   roomId: string,
   payload: { userId: string; isMuted: boolean },
