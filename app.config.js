@@ -21,6 +21,14 @@ module.exports = ({ config: _config }) => {
   // No client-side secrets needed — the backend signs JWT tokens.
   const livekitUrl = process.env.LIVEKIT_URL ?? 'ws://localhost:7880';
 
+  // Google Maps Android API key — required by react-native-maps to initialise
+  // the native MapView on Android (even though the Map screen overlays OSM
+  // tiles; the SDK must be authorised or the tab crashes / renders blank).
+  // Env-driven (never committed) — set GOOGLE_MAPS_API_KEY in .env locally and
+  // as an EAS secret for builds. Restrict the key by package + signing SHA-1
+  // in Google Cloud Console.
+  const googleMapsApiKey = process.env.GOOGLE_MAPS_API_KEY;
+
   // Pins for Module 13 / SEC-019 — comma-separated list per domain,
   // env-driven so we can rotate without rebuilding the JS bundle.
   //   PIN_DOMAIN_API=api.chathouse.com
@@ -58,7 +66,21 @@ module.exports = ({ config: _config }) => {
       './plugins/with-gradle-jvm-heap',
       './plugins/with-audio-background',
       ['./plugins/with-cert-pinning', { domains: pinningDomains, includeSubdomains: true }],
+      // Permit cleartext (HTTP) ONLY for local dev hosts (localhost / emulator)
+      // so a release build can talk to a local HTTP backend over `adb reverse`.
+      // Production domains still require HTTPS. Without this, Android blocks
+      // cleartext in release and the app can't reach a local backend.
+      './plugins/with-cleartext-localhost',
     ],
+    // Merge Android-specific config. `config.googleMaps.apiKey` injects the
+    // <meta-data com.google.android.geo.API_KEY> the Maps SDK needs.
+    android: {
+      ...base.expo.android,
+      config: {
+        ...(base.expo.android?.config ?? {}),
+        googleMaps: { apiKey: googleMapsApiKey },
+      },
+    },
     // Override a few fields that should vary per env. Keep name/slug stable.
     extra: {
       API_BASE_URL: apiBaseUrl,

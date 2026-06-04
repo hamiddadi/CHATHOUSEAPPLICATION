@@ -15,16 +15,26 @@ export const redis: RedisClientType = createClient({ url: env.REDIS_URL });
 redis.on('error', err => logger.error('redis error', { err }));
 redis.on('reconnecting', () => logger.warn('redis reconnecting'));
 
-let connected = false;
+// Initiate the connection EAGERLY at import time. Some modules construct a
+// Redis-backed store at import (e.g. rate-limit-redis' RedisStore preloads a
+// Lua script in its constructor via sendCommand). If `connect()` hasn't been
+// called yet, node-redis throws `ClientClosedError: The client is closed`,
+// crashing boot before app.ts can call connectRedis(). Calling connect() here
+// flips the socket to "open/connecting" synchronously, so those early commands
+// queue and flush on ready instead of throwing. connectRedis() awaits this
+// same promise (no double connect()).
+const connectPromise: Promise<void> = redis
+  .connect()
+  .then(() => undefined)
+  .catch(err => {
+    logger.error('redis initial connect failed', { err });
+  });
 
 export const connectRedis = async (): Promise<void> => {
-  if (connected) return;
-  await redis.connect();
-  connected = true;
+  await connectPromise;
 };
 
 export const disconnectRedis = async (): Promise<void> => {
-  if (!connected) return;
+  if (!redis.isOpen) return;
   await redis.quit();
-  connected = false;
 };

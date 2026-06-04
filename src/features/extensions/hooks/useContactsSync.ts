@@ -43,13 +43,19 @@ export const useExtContactsSync = () => {
     setStatus('syncing');
     setError(null);
     try {
-      // Dynamic import — keeps the module loadable on web/tests.
-      // Typed loosely because expo-contacts may not be installed yet in
-      // every env; the runtime guard handles its absence.
-      const Contacts = (await import(/* webpackIgnore: true */ 'expo-contacts' as string).catch(
-        () => null,
-      )) as ContactsModule | null;
-      if (!Contacts) {
+      // Optional native module. We use a synchronous `require` (NOT dynamic
+      // `import()`, which hermesc rejects in release builds — "Invalid
+      // expression encountered"). When `expo-contacts` isn't installed,
+      // metro.config resolves it to an empty stub, so the guard below treats
+      // it as unavailable. Keeps the module loadable on web/tests too.
+      let Contacts: ContactsModule | null = null;
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports, global-require
+        Contacts = require('expo-contacts') as ContactsModule;
+      } catch {
+        Contacts = null;
+      }
+      if (!Contacts?.requestPermissionsAsync) {
         setStatus('error');
         setError('expo-contacts unavailable');
         return;

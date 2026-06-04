@@ -52,10 +52,18 @@ export const useExtPushToken = (enabled = true) => {
     void (async () => {
       try {
         setStatus('asking');
-        const Notifications = (await import(
-          /* webpackIgnore: true */ 'expo-notifications' as string
-        ).catch(() => null)) as NotificationsModule | null;
-        if (!Notifications) {
+        // Synchronous `require` (NOT dynamic `import()`, which hermesc rejects
+        // in release builds — "Invalid expression encountered"). expo-notifications
+        // is installed, so this resolves normally; the guard keeps it safe on
+        // web/tests where the native module is absent.
+        let Notifications: NotificationsModule | null = null;
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-require-imports, global-require
+          Notifications = require('expo-notifications') as NotificationsModule;
+        } catch {
+          Notifications = null;
+        }
+        if (!Notifications?.getPermissionsAsync) {
           if (!cancelled) setStatus('error');
           return;
         }
