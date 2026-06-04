@@ -24,9 +24,15 @@ const { withGradleProperties } = require('@expo/config-plugins');
  *                  RAM stays ~one worker JVM, not four. Slower but reliable.
  *  - kotlin.daemon.jvmargs=-Xmx1280m : the Kotlin daemon is a separate JVM.
  *  - caching=true: build cache reuses unchanged task outputs across builds.
+ *  - reactNativeArchitectures=arm64-v8a : build ONE ABI, not four. The native
+ *                  C++ compile (Fabric/TurboModules/WebRTC) is the dominant RAM
+ *                  consumer; four ABIs over-commit RAM+swap and OOM-killed the
+ *                  JVM (hs_err: AvailPageFile 40M of 29.5G). arm64-v8a targets
+ *                  physical devices. For an emulator on an x86_64 PC, override
+ *                  per-build: `expo run:android -- -PreactNativeArchitectures=x86_64`.
  *
  * On a machine with 16+ GB free you can raise -Xmx to 4g, flip parallel back to
- * true and workers.max to 3-4 for a much faster build.
+ * true and workers.max to 3-4, and restore the full ABI list for a fat APK.
  */
 const PROPERTIES = [
   {
@@ -38,6 +44,7 @@ const PROPERTIES = [
   { key: 'org.gradle.daemon', value: 'true' },
   { key: 'org.gradle.workers.max', value: '1' },
   { key: 'kotlin.daemon.jvmargs', value: '-Xmx1280m' },
+  { key: 'reactNativeArchitectures', value: 'arm64-v8a' },
 ];
 
 const withGradleJvmHeap = config =>

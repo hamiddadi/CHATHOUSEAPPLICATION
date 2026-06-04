@@ -100,6 +100,23 @@ export const getSocket = async (): Promise<Socket | null> => {
   }
 };
 
+/**
+ * Measure socket round-trip time in milliseconds via the server's `rtt:ping`
+ * ack. Returns `null` when realtime is disabled or the ack times out (so a
+ * latency badge can render "—" rather than a misleading number). Uses
+ * socket.io's `.timeout()` so a dropped connection rejects instead of hanging.
+ */
+export const measureRtt = async (timeoutMs = 5_000): Promise<number | null> => {
+  const s = await getSocket();
+  if (!s) return null;
+  const start = Date.now();
+  return new Promise<number | null>(resolve => {
+    s.timeout(timeoutMs).emit('rtt:ping', { t: start }, (err: Error | null) => {
+      resolve(err ? null : Date.now() - start);
+    });
+  });
+};
+
 export const disconnectSocket = (): void => {
   if (socket) {
     // Remove the lifecycle listeners wired in wireLifecycle (both on the
