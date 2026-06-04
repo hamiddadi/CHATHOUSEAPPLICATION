@@ -1,11 +1,8 @@
 import type { AppNotification } from '../types/domain';
-import { MOCK_USER_SUMMARIES } from './users.mock';
+import { pickUser as basePickUser } from './_helpers';
 
-const actor = (idx: number): (typeof MOCK_USER_SUMMARIES)[number] => {
-  const u = MOCK_USER_SUMMARIES[idx] ?? MOCK_USER_SUMMARIES[0];
-  if (!u) throw new Error('MOCK_USER_SUMMARIES is empty — cannot build mock notifications.');
-  return u;
-};
+const actor = (idx: number): ReturnType<typeof basePickUser> =>
+  basePickUser(idx, 'MOCK_USER_SUMMARIES is empty — cannot build mock notifications.');
 
 export const MOCK_NOTIFICATIONS: readonly AppNotification[] = [
   {

@@ -1,0 +1,1 @@
+export { NotificationsPermissionScreen } from './NotificationsPermissionScreen';

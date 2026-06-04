@@ -24,14 +24,16 @@ const register = async (app: Express) => {
 };
 
 // Bring a user to the "online + visible + located + recent" state that
-// getOnlineLocations requires. The list excludes users with isOnline=false,
-// so we flip that flag directly (no auto-hook wires it today).
+// getOnlineLocations requires. The list excludes users with isOnline=false or
+// isVisible=false. isVisible now defaults to false at the schema level
+// (privacy-first), so we flip both flags directly here (no auto-hook wires
+// isOnline today); the Ghost Mode test sets isVisible=false afterwards.
 const makeLiveOnMap = async (
   token: string,
   id: string,
   coords: { latitude: number; longitude: number },
 ) => {
-  await prisma.user.update({ where: { id }, data: { isOnline: true } });
+  await prisma.user.update({ where: { id }, data: { isOnline: true, isVisible: true } });
   const res = await request(app0()!)
     .patch('/api/users/me/location')
     .set('Authorization', `Bearer ${token}`)

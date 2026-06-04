@@ -30,6 +30,9 @@ type NetInfoLib = {
 let loaded = false;
 let netInfo: NetInfoLib | null = null;
 let unsubscribe: (() => void) | null = null;
+// Flips to false in stopNetworkListener so an in-flight initial fetch can't
+// write to the store after teardown (setState after teardown guard).
+let active = false;
 
 const loadNetInfo = (): NetInfoLib | null => {
   try {
@@ -44,10 +47,12 @@ const loadNetInfo = (): NetInfoLib | null => {
 export const startNetworkListener = (): void => {
   if (loaded) return;
   loaded = true;
+  active = true;
   netInfo = loadNetInfo();
   if (!netInfo) return;
 
   void netInfo.fetch().then(s => {
+    if (!active) return; // listener was stopped while the fetch was in flight
     const isOnline = Boolean(s.isConnected) && s.isInternetReachable !== false;
     useNetworkStore.setState({ isOnline, lastTransitionAt: Date.now() });
   });
@@ -62,8 +67,10 @@ export const startNetworkListener = (): void => {
 };
 
 export const stopNetworkListener = (): void => {
+  active = false;
   unsubscribe?.();
   unsubscribe = null;
+  netInfo = null;
   loaded = false;
 };
 /* eslint-enable @typescript-eslint/no-explicit-any */

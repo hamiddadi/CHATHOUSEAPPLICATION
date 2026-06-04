@@ -1,4 +1,4 @@
-import { randomInt, randomUUID } from 'node:crypto';
+import { randomInt } from 'node:crypto';
 import { hash, compare } from 'bcrypt';
 import { prisma } from '../../config/database';
 import { redis } from '../../config/redis';
@@ -6,10 +6,9 @@ import { env } from '../../config/env';
 import { logger } from '../../config/logger';
 import { sendSms } from '../../config/smsSender';
 import { AppError } from '../../middlewares/error.middleware';
-import { signAccessToken, signRefreshToken } from '../../utils/jwt';
+import { issueTokenPair } from '../../utils/issueTokenPair';
 import type { SendOtpInput, VerifyOtpInput } from './otp.schema';
 
-const REFRESH_TTL_DAYS = 7;
 const SALT_ROUNDS = 10; // 10 is fine for a 6-digit space; 12 takes ~300ms
 
 const rateKey = (phone: string): string => `otp:rate:${phone}`;
@@ -23,15 +22,6 @@ const checkAndBumpRateLimit = async (phoneNumber: string): Promise<boolean> => {
   const count = await redis.incr(rateKey(phoneNumber));
   if (count === 1) await redis.expire(rateKey(phoneNumber), 3600);
   return count <= env.OTP_RATE_LIMIT_PER_HOUR;
-};
-
-const issueTokenPair = async (userId: string) => {
-  const jti = randomUUID();
-  const accessToken = signAccessToken(userId);
-  const refreshToken = signRefreshToken(userId, jti);
-  const expiresAt = new Date(Date.now() + REFRESH_TTL_DAYS * 24 * 60 * 60 * 1000);
-  await prisma.refreshToken.create({ data: { token: jti, userId, expiresAt } });
-  return { accessToken, refreshToken };
 };
 
 export const otpService = {
@@ -82,7 +72,9 @@ export const otpService = {
 
     if (record.attempts >= env.OTP_MAX_ATTEMPTS) {
       await prisma.otpCode.update({ where: { id: record.id }, data: { isUsed: true } });
-      throw new AppError('AUTH_001', 'Too many attempts — request a new code.');
+      // 429 (RATE_LIMIT_001) so the client can distinguish exhausted attempts
+      // from an invalid code (AUTH_001/401) and prompt for a new code.
+      throw new AppError('RATE_LIMIT_001', 'Too many attempts — request a new code.');
     }
 
     const ok = await compare(input.code, record.codeHash);

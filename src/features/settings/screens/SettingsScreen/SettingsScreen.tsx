@@ -1,18 +1,22 @@
 import React, { memo, useCallback, useMemo, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import { Image } from 'expo-image';
+import Animated, { useAnimatedStyle, withTiming } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
+import { useQuery } from '@tanstack/react-query';
+import { invitesApi } from '../../../extensions/api/invitesApi';
+import { ExtPremiumRow } from '../../../extensions/components/ExtPremiumRow';
 import { useAuthStore } from '../../../auth/store/authStore';
 import { useMe } from '../../../profile/hooks/useProfile';
 import { useHouses } from '../../../houses/hooks/useHouses';
 import { isAtLeast, useAdminWhoami } from '../../../admin';
 import { useAnalyticsConsentStore } from '../../../privacy';
 import { DEFAULTS } from '../../../../shared/constants/images';
-import { colors, layout, radii, spacing } from '../../../../shared/constants/theme';
+import { colors, layout, radii, spacing, withAlpha } from '../../../../shared/constants/theme';
 import type { SettingsStackScreenProps } from '../../../../core/navigation/types';
 import type { HouseSummary } from '../../../../shared/types/domain';
 
@@ -48,7 +52,7 @@ const Stat: React.FC<StatProps> = memo(({ label, value, onPress }) => (
     className="items-center"
   >
     <Text className="text-sm font-body-bold text-white">{value}</Text>
-    <Text className="text-[10px] font-body-medium text-ink-muted uppercase tracking-wider mt-xxs">
+    <Text className="text-xxs font-body-medium text-ink-muted uppercase tracking-wider mt-xxs">
       {label}
     </Text>
   </Pressable>
@@ -110,6 +114,11 @@ export const SettingsScreen: React.FC = () => {
   const handleToggleAnalytics = useCallback(() => {
     void setAnalyticsEnabled(!analyticsEnabled);
   }, [analyticsEnabled, setAnalyticsEnabled]);
+
+  const thumbStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: withTiming(analyticsEnabled ? 18 : 0, { duration: 200 }) }],
+  }));
+
   const goPrivacyPolicy = useCallback(() => navigation.navigate('PrivacyPolicy'), [navigation]);
   const goTerms = useCallback(() => navigation.navigate('Terms'), [navigation]);
   const goDataExport = useCallback(() => navigation.navigate('DataExport'), [navigation]);
@@ -122,21 +131,53 @@ export const SettingsScreen: React.FC = () => {
   // that flow with a short Alert hint instead of a no-op.
   const handleWave = useCallback(() => {
     if (!user) return;
-    Alert.alert(
-      'Wave 👋',
-      'Pour faire un wave à un ami, ouvre son profil depuis la liste de tes followers ou depuis une room.',
-      [
-        {
-          text: 'Mes followers',
-          onPress: () =>
-            navigation.navigate('Followers', { userId: user.id, initialTab: 'followers' }),
-        },
-        { text: 'OK', style: 'cancel' },
-      ],
-    );
-  }, [navigation, user]);
+    Alert.alert(t('settings.waveAlertTitle'), t('settings.waveAlertBody'), [
+      {
+        text: t('settings.waveAlertButton'),
+        onPress: () =>
+          navigation.navigate('Followers', { userId: user.id, initialTab: 'followers' }),
+      },
+      { text: 'OK', style: 'cancel' },
+    ]);
+  }, [navigation, user, t]);
 
   const handleEditProfile = useCallback(() => navigation.navigate('EditProfile'), [navigation]);
+
+  const goNotificationSettings = useCallback(
+    () => navigation.navigate('NotificationSettings'),
+    [navigation],
+  );
+
+  // Personal signed invite link + remaining quota. Cached so re-entering
+  // Settings doesn't re-fetch; failure leaves `invite` undefined (the row
+  // shows a neutral hint and the share handler surfaces an error).
+  const { data: invite } = useQuery({
+    queryKey: ['ext', 'invite', 'link'],
+    queryFn: () => invitesApi.getLink(),
+    staleTime: 60_000,
+  });
+
+  const handleInviteFriends = useCallback(async () => {
+    try {
+      const link = invite ?? (await invitesApi.getLink());
+      if (link.remaining <= 0) {
+        Alert.alert(
+          t('invite.noneLeftTitle', "Plus d'invitations"),
+          t('invite.noneLeftBody', "Tu as utilisé toutes tes invitations pour l'instant."),
+        );
+        return;
+      }
+      await Share.share({
+        message: t('invite.shareMessage', {
+          url: link.url,
+          defaultValue: `Rejoins-moi sur Chathouse 👋 ${link.url}`,
+        }),
+        url: link.url,
+      });
+    } catch {
+      Alert.alert(t('common.error', 'Une erreur est survenue'));
+    }
+  }, [invite, t]);
 
   const handleToggleBio = useCallback(() => setBioExpanded(v => !v), []);
 
@@ -186,15 +227,17 @@ export const SettingsScreen: React.FC = () => {
       >
         <View className="flex-row items-center gap-sm">
           <MaterialIcons name="graphic-eq" size={22} color={colors.primary} />
-          <Text className="text-lg font-display text-primary tracking-tighter">Chathouse</Text>
+          <Text className="text-lg font-display text-primary tracking-tighter">
+            {t('common.appName', 'Chathouse')}
+          </Text>
         </View>
         <Pressable
           onPress={handleWave}
           accessibilityRole="button"
-          accessibilityLabel="Send a wave"
+          accessibilityLabel={t('settings.sendWaveA11y', 'Send a wave')}
           className="bg-primary/10 px-lg py-xs rounded-pill"
         >
-          <Text className="text-sm font-body-bold text-primary">Wave 👋</Text>
+          <Text className="text-sm font-body-bold text-primary">{t('feed.wave', 'Wave 👋')}</Text>
         </Pressable>
       </View>
 
@@ -228,10 +271,10 @@ export const SettingsScreen: React.FC = () => {
 
         <View className="mt-[56px] items-center px-xxl">
           <Text className="text-xl font-display-bold text-white">
-            {user?.displayName ?? 'Your profile'}
+            {user?.displayName ?? t('settings.yourProfile')}
           </Text>
           <Text className="text-sm font-body-medium text-ink-muted mt-xxs">
-            @{user?.username ?? 'username'}
+            @{user?.username ?? t('settings.username')}
           </Text>
 
           {user?.bio && (
@@ -245,12 +288,16 @@ export const SettingsScreen: React.FC = () => {
               <Pressable
                 onPress={handleToggleBio}
                 accessibilityRole="button"
-                accessibilityLabel={bioExpanded ? 'Collapse bio' : 'Expand bio'}
+                accessibilityLabel={
+                  bioExpanded
+                    ? t('settings.collapseBioA11y', 'Collapse bio')
+                    : t('settings.expandBioA11y', 'Expand bio')
+                }
                 hitSlop={8}
                 className="mt-xxs"
               >
                 <Text className="text-xs font-body-bold text-primary">
-                  {bioExpanded ? 'See less' : 'See more'}
+                  {bioExpanded ? t('settings.seeLess') : t('settings.seeMore')}
                 </Text>
               </Pressable>
             </View>
@@ -258,18 +305,18 @@ export const SettingsScreen: React.FC = () => {
 
           <View className="flex-row items-center gap-lg mt-lg">
             <Stat
-              label="Followers"
+              label={t('settings.followers')}
               value={formatCount(user?.followersCount ?? 0)}
               onPress={handleFollowersTap}
             />
             <View style={styles.statDivider} />
             <Stat
-              label="Following"
+              label={t('settings.following')}
               value={formatCount(user?.followingCount ?? 0)}
               onPress={handleFollowingTap}
             />
             <View style={styles.statDivider} />
-            <Stat label="Clubs" value={String(clubsCount)} />
+            <Stat label={t('settings.clubs')} value={String(clubsCount)} />
           </View>
 
           <View className="flex-row items-center gap-sm mt-xl">
@@ -313,7 +360,7 @@ export const SettingsScreen: React.FC = () => {
           <Pressable
             onPress={handleCreateHouse}
             accessibilityRole="button"
-            accessibilityLabel="Create a new house"
+            accessibilityLabel={t('settings.createHouseA11y', 'Create a new house')}
             className="rounded-pill overflow-hidden active:opacity-90"
           >
             <LinearGradient
@@ -322,7 +369,7 @@ export const SettingsScreen: React.FC = () => {
               end={{ x: 1, y: 0 }}
               style={styles.createHouseBtn}
             >
-              <MaterialIcons name="home-work" size={20} color="#FFFFFF" />
+              <MaterialIcons name="home-work" size={20} color={colors.white} />
               <Text className="text-sm font-body-bold text-white ml-sm">
                 {t('settings.createHouse')}
               </Text>
@@ -349,21 +396,26 @@ export const SettingsScreen: React.FC = () => {
           </View>
         </View>
 
+        {/* Premium — hidden unless Stripe/premium is configured server-side. */}
+        <View className="px-xxl mt-xxl">
+          <ExtPremiumRow />
+        </View>
+
         {showAdminEntry ? (
           <View className="px-xxl mt-xxl">
             <Pressable
               onPress={handleOpenAdmin}
               accessibilityRole="button"
-              accessibilityLabel="Ouvrir Godmode"
+              accessibilityLabel={t('settings.openGodmodeA11y', 'Open Godmode')}
               style={styles.adminEntry}
             >
               <View style={styles.adminIcon}>
                 <MaterialIcons name="security" size={20} color={colors.primary} />
               </View>
               <View style={styles.flex1}>
-                <Text className="text-md font-body-bold text-white">Godmode</Text>
+                <Text className="text-md font-body-bold text-white">{t('settings.godmode')}</Text>
                 <Text className="text-xs text-ink-muted mt-xxs">
-                  Accès modération · {adminMe?.appRole}
+                  {t('settings.adminAccess', { role: adminMe?.appRole })}
                 </Text>
               </View>
               <MaterialIcons name="chevron-right" size={22} color={colors.textMuted} />
@@ -374,12 +426,15 @@ export const SettingsScreen: React.FC = () => {
         {/* Privacy / GDPR — visible for every signed-in user. */}
         <View className="px-xxl mt-xxl gap-md">
           <Text className="text-xs font-body-bold uppercase tracking-widest text-ink-muted">
-            Confidentialité
+            {t('settings.privacySection')}
           </Text>
           <Pressable
             onPress={handleToggleAnalytics}
             accessibilityRole="switch"
-            accessibilityLabel="Autoriser le crash reporting anonyme"
+            accessibilityLabel={t(
+              'settings.anonymousErrorReportingA11y',
+              'Allow anonymous crash reporting',
+            )}
             accessibilityState={{ checked: analyticsEnabled }}
             style={styles.privacyRow}
           >
@@ -388,10 +443,10 @@ export const SettingsScreen: React.FC = () => {
             </View>
             <View style={styles.flex1}>
               <Text className="text-sm font-body-bold text-white">
-                Rapports d&apos;erreur anonymes
+                {t('settings.anonymousErrorReporting')}
               </Text>
               <Text className="text-xs text-ink-muted mt-xxs">
-                Aide à corriger les crashs. Désactivé par défaut.
+                {t('settings.anonymousErrorReportingDesc')}
               </Text>
             </View>
             <View
@@ -400,25 +455,20 @@ export const SettingsScreen: React.FC = () => {
                 analyticsEnabled ? styles.toggleTrackOn : styles.toggleTrackOff,
               ]}
             >
-              <View
-                style={[
-                  styles.toggleThumb,
-                  analyticsEnabled ? styles.toggleThumbOn : styles.toggleThumbOff,
-                ]}
-              />
+              <Animated.View style={[styles.toggleThumb, thumbStyle]} />
             </View>
           </Pressable>
 
           <SettingsRow
             icon="policy"
-            label="Politique de confidentialité"
+            label={t('settings.privacyPolicy')}
             onPress={goPrivacyPolicy}
           />
-          <SettingsRow icon="description" label="Conditions d'utilisation" onPress={goTerms} />
+          <SettingsRow icon="description" label={t('settings.termsOfService')} onPress={goTerms} />
           <SettingsRow
             icon="download"
-            label="Exporter mes données"
-            hint="Article 20 du RGPD"
+            label={t('settings.exportData')}
+            hint={t('settings.gdprArticle20')}
             onPress={goDataExport}
           />
         </View>
@@ -427,11 +477,29 @@ export const SettingsScreen: React.FC = () => {
             highlights the irreversible action. */}
         <View className="px-xxl mt-xxl gap-md">
           <Text className="text-xs font-body-bold uppercase tracking-widest text-ink-muted">
-            Compte
+            {t('settings.accountSection')}
           </Text>
           <SettingsRow
+            icon="person-add"
+            label={t('invite.inviteFriends', 'Inviter des amis')}
+            hint={
+              invite
+                ? t('invite.remaining', {
+                    count: invite.remaining,
+                    defaultValue: `${invite.remaining} invitation(s) restante(s)`,
+                  })
+                : t('invite.shareHint', 'Partage ton lien personnel')
+            }
+            onPress={handleInviteFriends}
+          />
+          <SettingsRow
+            icon="notifications"
+            label={t('settings.notifications')}
+            onPress={goNotificationSettings}
+          />
+          <SettingsRow
             icon="delete-forever"
-            label="Supprimer mon compte"
+            label={t('settings.deleteAccount')}
             danger
             onPress={goDeleteAccount}
           />
@@ -479,7 +547,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: spacing.xxl,
     paddingBottom: spacing.sm,
-    backgroundColor: 'rgba(7,11,40,0.35)',
+    backgroundColor: withAlpha(colors.surfaceLowest, 0.35),
   },
   hero: {
     width: '100%',
@@ -507,7 +575,7 @@ const styles = StyleSheet.create({
   statDivider: {
     width: StyleSheet.hairlineWidth,
     height: 28,
-    backgroundColor: 'rgba(255,255,255,0.15)',
+    backgroundColor: colors.overlayWhite15,
   },
   primaryBtn: {
     paddingHorizontal: spacing.xxxl,
@@ -535,16 +603,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.md,
     padding: spacing.lg,
-    borderRadius: 12,
-    backgroundColor: 'rgba(0,228,117,0.08)',
+    borderRadius: radii.md,
+    backgroundColor: withAlpha(colors.accent, 0.08),
     borderWidth: 1,
-    borderColor: 'rgba(0,228,117,0.3)',
+    borderColor: withAlpha(colors.accent, 0.3),
   },
   adminIcon: {
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: 'rgba(0,228,117,0.15)',
+    backgroundColor: withAlpha(colors.accent, 0.15),
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -553,30 +621,32 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
     padding: 14,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderRadius: radii.md,
+    backgroundColor: colors.overlayWhite4,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
+    borderColor: colors.glassStrong,
   },
+  // Saturated-red literals (NOT withAlpha(colors.danger,…)). colors.danger is
+  // the pale error *foreground* role (#ffb4ab) — fine for the icon glyph/text,
+  // but as a container tint it reads as soft pink and loses the destructive-
+  // action affordance. The fill/border tints stay vivid red (#ef4444).
   privacyRowDanger: {
-    backgroundColor: 'rgba(239,68,68,0.08)',
-    borderColor: 'rgba(239,68,68,0.3)',
+    backgroundColor: 'rgba(239, 68, 68, 0.08)',
+    borderColor: 'rgba(239, 68, 68, 0.3)',
   },
   privacyIcon: {
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: 'rgba(0,228,117,0.12)',
+    backgroundColor: withAlpha(colors.accent, 0.12),
     alignItems: 'center',
     justifyContent: 'center',
   },
-  privacyIconDanger: { backgroundColor: 'rgba(239,68,68,0.15)' },
-  toggleTrack: { width: 44, height: 26, borderRadius: 999, padding: 2 },
+  privacyIconDanger: { backgroundColor: 'rgba(239, 68, 68, 0.15)' },
+  toggleTrack: { width: 44, height: 26, borderRadius: radii.pill, padding: 2 },
   toggleTrackOn: { backgroundColor: colors.primary },
-  toggleTrackOff: { backgroundColor: 'rgba(255,255,255,0.15)' },
-  toggleThumb: { width: 22, height: 22, borderRadius: 11, backgroundColor: '#fff' },
-  toggleThumbOn: { transform: [{ translateX: 18 }] },
-  toggleThumbOff: { transform: [{ translateX: 0 }] },
+  toggleTrackOff: { backgroundColor: colors.overlayWhite15 },
+  toggleThumb: { width: 22, height: 22, borderRadius: 11, backgroundColor: colors.white },
   houseIcon: {
     width: '100%',
     height: '100%',

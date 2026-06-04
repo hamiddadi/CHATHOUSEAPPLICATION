@@ -1,5 +1,6 @@
 import { prisma } from './database';
 import { logger } from './logger';
+import { env } from './env';
 
 /**
  * Idempotent search-index bootstrap. Ensures the pg_trgm extension is
@@ -34,5 +35,9 @@ export const ensureSearchIndexes = async (): Promise<void> => {
     logger.error('ensureSearchIndexes failed', {
       err: err instanceof Error ? err.message : err,
     });
+    // In production a missing pg_trgm extension / index means /search and
+    // /explore silently degrade to full seq-scans (or fail outright). Fail the
+    // boot so the degradation is visible rather than shipping a broken search.
+    if (env.NODE_ENV === 'production') throw err;
   }
 };

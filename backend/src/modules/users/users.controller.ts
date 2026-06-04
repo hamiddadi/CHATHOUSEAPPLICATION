@@ -1,10 +1,12 @@
 import type { Request, Response } from 'express';
 import { sendOk } from '../../utils/response';
 import { AppError } from '../../middlewares/error.middleware';
+import { authedUserId as requireUserId } from '../../utils/authedUserId';
 import {
   completeOnboardingSchema,
   interestsSchema,
   locationSchema,
+  notifPrefsSchema,
   searchQuerySchema,
   setUsernameSchema,
   updateMeSchema,
@@ -12,11 +14,6 @@ import {
   visibilitySchema,
 } from './users.schema';
 import { usersService } from './users.service';
-
-const requireUserId = (req: Request): string => {
-  if (!req.userId) throw new AppError('AUTH_003');
-  return req.userId;
-};
 
 export const usersController = {
   async getMe(req: Request, res: Response) {
@@ -51,13 +48,13 @@ export const usersController = {
     const raw = req.params['id'];
     const id = Array.isArray(raw) ? raw[0] : raw;
     if (!id) throw new AppError('USER_001');
-    const user = await usersService.getById(id);
+    const user = await usersService.getById(id, req.userId);
     sendOk(res, user);
   },
 
   async search(req: Request, res: Response) {
     const input = searchQuerySchema.parse(req.query);
-    const rows = await usersService.search(input);
+    const rows = await usersService.search(input, req.userId);
     sendOk(res, rows);
   },
 
@@ -108,7 +105,8 @@ export const usersController = {
   },
 
   async updateNotifPrefs(req: Request, res: Response) {
-    const result = await usersService.updateNotificationPreferences(requireUserId(req), req.body);
+    const input = notifPrefsSchema.parse(req.body);
+    const result = await usersService.updateNotificationPreferences(requireUserId(req), input);
     sendOk(res, result);
   },
 

@@ -18,7 +18,7 @@ import { PermissionsAndroid, Platform } from 'react-native';
 export const requestAudioPermission = async (): Promise<boolean> => {
   if (Platform.OS === 'ios') {
     // iOS will prompt automatically when the audio engine actually starts
-    // (Agora.enableAudio + first joinChannel). Returning true here means
+    // (LiveKit room.connect + microphone publish). Returning true here means
     // "we believe the user will be prompted"; if they decline we'll see
     // it surface as an error from the engine.
     return true;

@@ -37,6 +37,17 @@ export const useFollow = () => {
     mutationFn: (userId: string) => profileService.follow(userId),
     onSuccess: (_data, userId) => {
       void qc.invalidateQueries({ queryKey: profileKeys.detail(userId) });
+      // Refreshing the whole `profile` tree also covers the viewer's `me`
+      // (followingCount) and the followers/following lists shown on
+      // FollowersScreen — these depend on the action but aren't keyed by
+      // the target id, so detail(userId) alone would leave them stale.
+      void qc.invalidateQueries({ queryKey: profileKeys.all });
+    },
+    onError: (_err, userId) => {
+      // On failure, re-sync against the server so any optimistic UI reverts
+      // instead of staying stuck in the new state. Callers surface their
+      // own user-facing feedback (e.g. Alert).
+      void qc.invalidateQueries({ queryKey: profileKeys.detail(userId) });
     },
   });
 };
@@ -46,6 +57,10 @@ export const useUnfollow = () => {
   return useMutation({
     mutationFn: (userId: string) => profileService.unfollow(userId),
     onSuccess: (_data, userId) => {
+      void qc.invalidateQueries({ queryKey: profileKeys.detail(userId) });
+      void qc.invalidateQueries({ queryKey: profileKeys.all });
+    },
+    onError: (_err, userId) => {
       void qc.invalidateQueries({ queryKey: profileKeys.detail(userId) });
     },
   });
@@ -69,5 +84,8 @@ export const useSearchUsers = (query: string) =>
   useQuery<User[]>({
     queryKey: profileKeys.search(query),
     queryFn: () => profileService.search(query),
+    // Don't fire on an empty query — there are no results to show and the
+    // backend rejects empty q. Callers render `data ?? []` → empty list.
+    enabled: query.trim().length > 0,
     staleTime: 1000 * 10,
   });

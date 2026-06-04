@@ -3,6 +3,7 @@ import { logger } from '../../config/logger';
 import * as sfu from '../../webrtc/mediasoup.manager';
 import { canPublishInRoom, isActiveRoomParticipant } from '../../webrtc/roomAuthz';
 import { env } from '../../config/env';
+import { getUserId } from '../socket.middleware';
 
 interface RoomScoped {
   roomId: string;
@@ -35,7 +36,7 @@ type Ack<T = unknown> = (res: { ok: true; data: T } | { ok: false; error: string
  * gracefully without blocking.
  */
 export const registerRtcHandlers = (socket: Socket): void => {
-  const me = (): string => socket.data.userId as string;
+  const me = (): string => getUserId(socket);
 
   const requireMember = async (roomId: string): Promise<void> => {
     const ok = await isActiveRoomParticipant(roomId, me());
@@ -86,6 +87,15 @@ export const registerRtcHandlers = (socket: Socket): void => {
   socket.on(
     'rtc:connect-transport',
     guard<ConnectPayload, { connected: true }>('rtc:connect-transport', async p => {
+      // Defence in depth: every other rtc:* event verifies room membership.
+      // Resolve the transport's room and require the caller is a member before
+      // attaching DTLS parameters, so a client guessing a transportId can't
+      // sabotage a transport in a room it never joined.
+      // TODO(audit): tag each transport with its ownerUserId in
+      // createWebRtcTransport and re-check ownership here for full isolation.
+      const roomId = sfu.getTransportRoomId(p.transportId);
+      if (!roomId) throw new Error('TRANSPORT_NOT_FOUND');
+      await requireMember(roomId);
       await sfu.connectTransport(p.transportId, p.dtlsParameters);
       return { connected: true };
     }),

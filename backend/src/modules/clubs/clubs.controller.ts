@@ -1,13 +1,15 @@
 import type { Request, Response } from 'express';
 import { sendOk } from '../../utils/response';
 import { AppError } from '../../middlewares/error.middleware';
-import { createClubSchema, inviteSchema, listClubsSchema, updateClubSchema } from './clubs.schema';
+import { authedUserId as requireUserId } from '../../utils/authedUserId';
+import {
+  createClubSchema,
+  inviteSchema,
+  listClubsSchema,
+  setMemberRoleSchema,
+  updateClubSchema,
+} from './clubs.schema';
 import { clubsService } from './clubs.service';
-
-const requireUserId = (req: Request): string => {
-  if (!req.userId) throw new AppError('AUTH_003');
-  return req.userId;
-};
 
 const paramId = (req: Request, key: string): string => {
   const raw = req.params[key];
@@ -52,6 +54,17 @@ export const clubsController = {
 
   async accept(req: Request, res: Response) {
     const result = await clubsService.acceptInvitation(requireUserId(req), paramId(req, 'id'));
+    sendOk(res, result);
+  },
+
+  async setMemberRole(req: Request, res: Response) {
+    const input = setMemberRoleSchema.parse(req.body);
+    const result = await clubsService.setMemberRole(
+      requireUserId(req),
+      paramId(req, 'id'),
+      paramId(req, 'userId'),
+      input.role,
+    );
     sendOk(res, result);
   },
 

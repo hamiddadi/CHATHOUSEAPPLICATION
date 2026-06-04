@@ -13,8 +13,13 @@ export type AuthStackParamList = {
   Landing: undefined;
   Phone: undefined;
   Otp: { phoneNumber: string };
+  // Real name (Clubhouse asks name BEFORE username). Collected into the
+  // onboarding store and flushed at completeOnboarding.
+  Name: { phoneNumber: string };
   Username: { phoneNumber: string };
   Waitlist: undefined;
+  PrivacyPolicy: undefined;
+  Terms: undefined;
 };
 export type AuthStackScreenProps<T extends keyof AuthStackParamList> = NativeStackScreenProps<
   AuthStackParamList,
@@ -30,6 +35,8 @@ export type LandingNavProp = NativeStackNavigationProp<AuthStackParamList, 'Land
 export type OnboardingStackParamList = {
   Onboarding: undefined;
   InterestSelection: undefined;
+  NotificationsPermission: undefined;
+  SuggestedFollows: undefined;
 };
 export type OnboardingStackScreenProps<T extends keyof OnboardingStackParamList> =
   NativeStackScreenProps<OnboardingStackParamList, T>;
@@ -54,6 +61,8 @@ export type RoomStackParamList = {
   Explore: undefined;
   Events: undefined;
   Notifications: undefined;
+  // Room Replays — recent recorded rooms (audio-only) you can play back.
+  Replays: undefined;
 
   // In-room: invite multiple followers/contacts to join the current room.
   InviteToRoom: { roomId: string };
@@ -61,7 +70,11 @@ export type RoomStackParamList = {
 
 export type MessageStackParamList = {
   MessagesList: undefined;
+  NewMessage: undefined;
   ChatDetail: { conversationId: string };
+  GroupChat: { conversationId: string };
+  GroupInfo: { conversationId: string };
+  AddGroupMembers: { conversationId: string };
 };
 
 export type MapStackParamList = {
@@ -72,6 +85,7 @@ export type SettingsStackParamList = {
   Settings: undefined;
   Profile: { userId?: string } | undefined;
   EditProfile: undefined;
+  NotificationSettings: undefined;
   Followers: { userId: string; initialTab?: 'followers' | 'following' };
 
   // Godmode — gated by appRole >= MODERATOR. The entry point in Settings

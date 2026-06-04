@@ -93,14 +93,16 @@ describe('Onboarding integration — interests + completion flag', () => {
         displayName: 'Casey Echo',
         bio: 'Building things at night.',
         avatarUrl: 'https://example.com/avatars/casey.png',
-        interests: ['Tech', 'music'],
+        // completeOnboardingSchema requires at least 3 interests (matches the
+        // frontend InterestSelection minimum).
+        interests: ['Tech', 'music', 'Art'],
       });
     expect(res.status).toBe(200);
     expect(res.body.data.hasCompletedOnboarding).toBe(true);
     expect(res.body.data.displayName).toBe('Casey Echo');
     expect(res.body.data.bio).toBe('Building things at night.');
     expect(res.body.data.avatarUrl).toBe('https://example.com/avatars/casey.png');
-    expect(res.body.data.interests).toEqual(['tech', 'music']);
+    expect(res.body.data.interests).toEqual(['tech', 'music', 'art']);
 
     // Survives a subsequent /me read (persisted, not just echoed).
     const me = await request(app).get('/api/users/me').set('Authorization', `Bearer ${u.token}`);

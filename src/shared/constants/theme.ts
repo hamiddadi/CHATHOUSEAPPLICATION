@@ -136,6 +136,7 @@ export const colors = {
   overlayWhite7: 'rgba(255, 255, 255, 0.07)',
   overlayWhite10: 'rgba(255, 255, 255, 0.10)',
   overlayWhite12: 'rgba(255, 255, 255, 0.12)',
+  overlayWhite15: 'rgba(255, 255, 255, 0.15)',
   overlayWhite20: 'rgba(255, 255, 255, 0.20)',
   overlayWhite30: 'rgba(255, 255, 255, 0.30)',
   overlayWhite70: 'rgba(255, 255, 255, 0.70)',
@@ -162,6 +163,26 @@ export const colors = {
   white: palette.white,
   transparent: palette.transparent,
 } as const;
+
+/**
+ * Apply an alpha channel to a hex color token, e.g. `withAlpha(colors.accent, 0.1)`.
+ * Lets StyleSheet tints derive from palette tokens instead of hardcoding rgba().
+ * Accepts #rgb or #rrggbb.
+ */
+export const withAlpha = (hex: string, alpha: number): string => {
+  const h = hex.replace('#', '');
+  const full =
+    h.length === 3
+      ? h
+          .split('')
+          .map(c => c + c)
+          .join('')
+      : h;
+  const r = parseInt(full.slice(0, 2), 16);
+  const g = parseInt(full.slice(2, 4), 16);
+  const b = parseInt(full.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+};
 
 /* ============================================================
  * Spacing (4pt grid)

@@ -2,11 +2,14 @@ import React, { useCallback } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import { Avatar } from '../../../shared/components/Avatar';
 import { Button } from '../../../shared/components/Button';
 import { EmptyState } from '../../../shared/components/EmptyState';
 import { Loader } from '../../../shared/components/Loader';
-import { colors, spacing } from '../../../shared/constants/theme';
+import { colors, radii, spacing, withAlpha } from '../../../shared/constants/theme';
+import { errorMessage } from '../../../shared/utils/errorMessage';
 import { AdminHeader } from '../components/AdminHeader';
 import {
   useAdminUser,
@@ -16,6 +19,7 @@ import {
   useSuspendUser,
   useUnsuspendUser,
 } from '../hooks/useAdmin';
+import { promptForReason } from '../promptForReason';
 import { useImpersonationStore } from '../store/impersonationStore';
 import { isAtLeast, ROLE_RANK, type AppRole } from '../types/admin.types';
 import { formatDate, formatDateTime } from '../../../shared/utils/intl';
@@ -23,17 +27,18 @@ import type { SettingsStackScreenProps } from '../../../core/navigation/types';
 
 const ASSIGNABLE_ROLES: AppRole[] = ['USER', 'MODERATOR', 'ADMIN', 'SUPER_ADMIN'];
 
-const SUSPEND_PRESETS: readonly { id: string; label: string; minutes?: number }[] = [
-  { id: '1h', label: '1 heure', minutes: 60 },
-  { id: '24h', label: '24 heures', minutes: 60 * 24 },
-  { id: '7d', label: '7 jours', minutes: 60 * 24 * 7 },
-  { id: 'perm', label: 'Permanent' }, // minutes undefined → permanent
+const getSuspendPresets = (t: TFunction): { id: string; label: string; minutes?: number }[] => [
+  { id: '1h', label: t('admin.userDetail.suspend1h'), minutes: 60 },
+  { id: '24h', label: t('admin.userDetail.suspend24h'), minutes: 60 * 24 },
+  { id: '7d', label: t('admin.userDetail.suspend7d'), minutes: 60 * 24 * 7 },
+  { id: 'perm', label: t('admin.userDetail.suspendPerm') },
 ];
 
 export const AdminUserDetailScreen: React.FC<SettingsStackScreenProps<'AdminUserDetail'>> = ({
   route,
   navigation,
 }) => {
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const { userId } = route.params;
   const { data: me } = useAdminWhoami();
@@ -58,25 +63,29 @@ export const AdminUserDetailScreen: React.FC<SettingsStackScreenProps<'AdminUser
     (role: AppRole) => {
       if (!user) return;
       Alert.alert(
-        'Changer de rôle',
-        `Promouvoir/rétrograder @${user.username ?? user.id} → ${role} ?`,
+        t('admin.userDetail.roleTitle'),
+        `${t('admin.userDetail.roleDesc')} @${user.username ?? user.id} → ${role} ?`,
         [
-          { text: 'Annuler', style: 'cancel' },
+          { text: t('admin.userDetail.cancel'), style: 'cancel' },
           {
-            text: 'Confirmer',
+            text: t('admin.userDetail.confirm'),
             style: 'destructive',
             onPress: () =>
               setRole.mutate(
                 { userId: user.id, role },
                 {
-                  onError: e => Alert.alert('Erreur', e instanceof Error ? e.message : 'Échec'),
+                  onError: e =>
+                    Alert.alert(
+                      t('common.error', 'Error'),
+                      errorMessage(e, t('common.actionFailed', 'Failed')),
+                    ),
                 },
               ),
           },
         ],
       );
     },
-    [setRole, user],
+    [setRole, user, t],
   );
 
   const handleSuspend = useCallback(
@@ -86,111 +95,108 @@ export const AdminUserDetailScreen: React.FC<SettingsStackScreenProps<'AdminUser
         suspend.mutate(
           { userId: user.id, reason: motif, durationMinutes: minutes },
           {
-            onError: e => Alert.alert('Erreur', e instanceof Error ? e.message : 'Échec'),
+            onError: e =>
+              Alert.alert(
+                t('common.error', 'Error'),
+                errorMessage(e, t('common.actionFailed', 'Failed')),
+              ),
           },
         );
       };
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const prompt = (Alert as any).prompt as
-        | undefined
-        | ((
-            title: string,
-            message?: string,
-            buttons?: {
-              text?: string;
-              style?: 'default' | 'cancel' | 'destructive';
-              onPress?: (text: string | undefined) => void;
-            }[],
-            type?: 'default' | 'plain-text' | 'secure-text' | 'login-password',
-          ) => void);
-      if (prompt) {
-        prompt(
-          'Suspendre',
-          'Motif (visible dans le journal d’audit)',
-          [
-            { text: 'Annuler', style: 'cancel' },
-            {
-              text: 'Suspendre',
-              style: 'destructive',
-              onPress: (text: string | undefined) =>
-                fire((text ?? '').trim() || 'Sanction modération'),
-            },
-          ],
-          'plain-text',
-        );
-      } else {
-        fire('Sanction modération');
-      }
+      promptForReason(
+        {
+          title: t('admin.userDetail.suspendTitle'),
+          message: t('admin.userDetail.suspendReason'),
+          confirmLabel: t('admin.userDetail.suspendBtn'),
+          defaultReason: 'Moderation',
+        },
+        fire,
+      );
     },
-    [suspend, user],
+    [suspend, user, t],
   );
 
   const handleUnsuspend = useCallback(() => {
     if (!user) return;
-    Alert.alert('Lever la suspension', `Réactiver @${user.username ?? user.id} ?`, [
-      { text: 'Annuler', style: 'cancel' },
-      {
-        text: 'Confirmer',
-        onPress: () =>
-          unsuspend.mutate(user.id, {
-            onError: e => Alert.alert('Erreur', e instanceof Error ? e.message : 'Échec'),
-          }),
-      },
-    ]);
-  }, [unsuspend, user]);
+    Alert.alert(
+      t('admin.userDetail.unsuspendTitle'),
+      `${t('admin.userDetail.unsuspendDesc')} @${user.username ?? user.id} ?`,
+      [
+        { text: t('admin.userDetail.cancel'), style: 'cancel' },
+        {
+          text: t('admin.userDetail.confirm'),
+          onPress: () =>
+            unsuspend.mutate(user.id, {
+              onError: e =>
+                Alert.alert(
+                  t('common.error', 'Error'),
+                  errorMessage(e, t('common.actionFailed', 'Failed')),
+                ),
+            }),
+        },
+      ],
+    );
+  }, [unsuspend, user, t]);
 
   const handleImpersonate = useCallback(() => {
     if (!user) return;
     Alert.alert(
-      'Impersonation',
-      `Démarrer une session de 15 min en tant que @${user.username ?? user.id} ?\n\nCette action est tracée dans le journal d'audit.`,
+      t('admin.userDetail.impersonateTitle'),
+      `${t('admin.userDetail.impersonateDesc')} @${user.username ?? user.id} ?\n\n${t('admin.userDetail.impersonateWarn')}`,
       [
-        { text: 'Annuler', style: 'cancel' },
+        { text: t('admin.userDetail.cancel'), style: 'cancel' },
         {
-          text: 'Démarrer',
+          text: t('admin.userDetail.impersonateBtn'),
           style: 'destructive',
           onPress: async () => {
             try {
               await startImpersonation(user.id);
               navigation.popToTop();
             } catch (e) {
-              Alert.alert('Erreur', e instanceof Error ? e.message : 'Échec');
+              Alert.alert(
+                t('common.error', 'Error'),
+                errorMessage(e, t('common.actionFailed', 'Failed')),
+              );
             }
           },
         },
       ],
     );
-  }, [navigation, startImpersonation, user]);
+  }, [navigation, startImpersonation, user, t]);
 
   const handleDelete = useCallback(() => {
     if (!user) return;
     Alert.alert(
-      'Supprimer le compte',
-      `⚠️ Action quasi-irréversible. Le compte @${user.username ?? user.id} sera marqué pour suppression et définitivement banni. Continuer ?`,
+      t('admin.userDetail.deleteTitle'),
+      `${t('admin.userDetail.deleteDesc')} @${user.username ?? user.id} ?`,
       [
-        { text: 'Annuler', style: 'cancel' },
+        { text: t('admin.userDetail.cancel'), style: 'cancel' },
         {
-          text: 'Supprimer',
+          text: t('admin.userDetail.deleteBtn'),
           style: 'destructive',
           onPress: () =>
             del.mutate(user.id, {
               onSuccess: () => navigation.goBack(),
-              onError: e => Alert.alert('Erreur', e instanceof Error ? e.message : 'Échec'),
+              onError: e =>
+                Alert.alert(
+                  t('common.error', 'Error'),
+                  errorMessage(e, t('common.actionFailed', 'Failed')),
+                ),
             }),
         },
       ],
     );
-  }, [del, navigation, user]);
+  }, [del, navigation, user, t]);
 
-  if (isLoading) return <Loader fullscreen accessibilityLabel="Chargement…" />;
+  if (isLoading) return <Loader fullscreen accessibilityLabel={t('common.loading', 'Loading…')} />;
   if (isError || !user) {
-    return <EmptyState title="Utilisateur introuvable" description="" />;
+    return <EmptyState title={t('admin.userDetail.notFound')} description="" />;
   }
 
   return (
     <View className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
       <AdminHeader
-        title={user.displayName ?? user.username ?? 'Utilisateur'}
+        title={user.displayName ?? user.username ?? t('admin.userDetail.user')}
         subtitle={`@${user.username ?? user.id} · ${user.appRole}`}
       />
       <ScrollView
@@ -221,42 +227,40 @@ export const AdminUserDetailScreen: React.FC<SettingsStackScreenProps<'AdminUser
             <View style={styles.suspendedHero}>
               <MaterialIcons name="lock" size={14} color={colors.danger} />
               <Text className="text-xs font-body-bold text-danger">
-                Suspendu jusqu&apos;au {formatDateTime(user.suspendedUntil)}
+                {t('admin.userDetail.suspendedUntil')} {formatDateTime(user.suspendedUntil)}
               </Text>
             </View>
           ) : null}
           {user.suspensionReason ? (
             <Text className="text-xs text-ink-dim text-center">
-              Motif : {user.suspensionReason}
+              {t('admin.userDetail.reason')} : {user.suspensionReason}
             </Text>
           ) : null}
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Informations</Text>
-          <Field label="Email" value={user.email ?? '—'} />
-          <Field label="Téléphone" value={user.phoneNumber ?? '—'} />
-          <Field label="Inscrit le" value={formatDate(user.createdAt)} />
-          <Field label="Dernière activité" value={formatDateTime(user.lastSeenAt)} />
+          <Text style={styles.sectionTitle}>{t('admin.userDetail.infoTitle')}</Text>
+          <Field label={t('admin.userDetail.email')} value={user.email ?? '—'} />
+          <Field label={t('admin.userDetail.phone')} value={user.phoneNumber ?? '—'} />
+          <Field label={t('admin.userDetail.joined')} value={formatDate(user.createdAt)} />
+          <Field label={t('admin.userDetail.lastSeen')} value={formatDateTime(user.lastSeenAt)} />
           <Field
-            label="Followers / following"
+            label={t('admin.userDetail.followers')}
             value={`${user.followerCount} / ${user.followingCount}`}
           />
         </View>
 
         {!canActOnTarget ? (
           <View style={styles.note}>
-            <Text className="text-xs text-ink-dim">
-              Vous ne pouvez pas modifier un compte de rang équivalent ou supérieur au vôtre.
-            </Text>
+            <Text className="text-xs text-ink-dim">{t('admin.userDetail.noActionPerm')}</Text>
           </View>
         ) : (
           <>
             <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Suspension</Text>
+              <Text style={styles.sectionTitle}>{t('admin.userDetail.suspendSection')}</Text>
               {isSuspended ? (
                 <Button
-                  label="Lever la suspension"
+                  label={t('admin.userDetail.unsuspendBtn')}
                   variant="primaryContainer"
                   fullWidth
                   loading={unsuspend.isPending}
@@ -264,7 +268,7 @@ export const AdminUserDetailScreen: React.FC<SettingsStackScreenProps<'AdminUser
                 />
               ) : (
                 <View style={styles.presetGrid}>
-                  {SUSPEND_PRESETS.map(p => (
+                  {getSuspendPresets(t).map(p => (
                     <Pressable
                       key={p.id}
                       onPress={() => handleSuspend(p.minutes)}
@@ -281,7 +285,7 @@ export const AdminUserDetailScreen: React.FC<SettingsStackScreenProps<'AdminUser
 
             {isSuper ? (
               <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Rôle plateforme</Text>
+                <Text style={styles.sectionTitle}>{t('admin.userDetail.roleSection')}</Text>
                 <View style={styles.presetGrid}>
                   {ASSIGNABLE_ROLES.map(r => {
                     const selected = user.appRole === r;
@@ -293,7 +297,7 @@ export const AdminUserDetailScreen: React.FC<SettingsStackScreenProps<'AdminUser
                         style={[styles.presetBtn, selected ? styles.presetBtnSelected : null]}
                         accessibilityRole="button"
                         accessibilityLabel={`Définir le rôle ${r}`}
-                        accessibilityState={{ selected }}
+                        accessibilityState={{ selected, disabled: selected }}
                       >
                         <Text
                           className={
@@ -314,23 +318,23 @@ export const AdminUserDetailScreen: React.FC<SettingsStackScreenProps<'AdminUser
             {isSuper && !user.deletedAt ? (
               <>
                 <View style={styles.section}>
-                  <Text style={styles.sectionTitle}>Investigation</Text>
+                  <Text style={styles.sectionTitle}>
+                    {t('admin.userDetail.investigationSection')}
+                  </Text>
                   <Button
-                    label="Voir comme cet utilisateur"
+                    label={t('admin.userDetail.impersonateBtn')}
                     variant="primaryContainer"
                     fullWidth
                     onPress={handleImpersonate}
                   />
                   <Text className="text-xs text-ink-dim">
-                    Session 15 min, tracée. Toutes les actions effectuées seront attribuées à cet
-                    utilisateur dans la base, mais le journal d&apos;audit conservera votre identité
-                    d&apos;administrateur.
+                    {t('admin.userDetail.impersonateInfo')}
                   </Text>
                 </View>
                 <View style={styles.section}>
-                  <Text style={styles.sectionTitle}>Zone dangereuse</Text>
+                  <Text style={styles.sectionTitle}>{t('admin.userDetail.dangerSection')}</Text>
                   <Button
-                    label="Supprimer le compte"
+                    label={t('admin.userDetail.deleteBtn')}
                     variant="danger"
                     fullWidth
                     loading={del.isPending}
@@ -359,10 +363,10 @@ const styles = StyleSheet.create({
   roleHero: {
     paddingHorizontal: spacing.md,
     paddingVertical: 4,
-    borderRadius: 999,
-    backgroundColor: 'rgba(0,228,117,0.12)',
+    borderRadius: radii.pill,
+    backgroundColor: withAlpha(colors.accent, 0.12),
     borderWidth: 1,
-    borderColor: 'rgba(0,228,117,0.4)',
+    borderColor: withAlpha(colors.accent, 0.4),
   },
   suspendedHero: {
     flexDirection: 'row',
@@ -370,15 +374,15 @@ const styles = StyleSheet.create({
     gap: 6,
     paddingHorizontal: spacing.md,
     paddingVertical: 4,
-    borderRadius: 999,
-    backgroundColor: 'rgba(239,68,68,0.12)',
+    borderRadius: radii.pill,
+    backgroundColor: withAlpha(colors.danger, 0.12),
   },
   section: {
-    backgroundColor: 'rgba(255,255,255,0.04)',
-    borderRadius: 12,
+    backgroundColor: colors.overlayWhite4,
+    borderRadius: radii.md,
     padding: spacing.lg,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
+    borderColor: colors.glassStrong,
     gap: spacing.sm,
   },
   sectionTitle: {
@@ -389,11 +393,11 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   note: {
-    backgroundColor: 'rgba(255,179,0,0.1)',
-    borderRadius: 12,
+    backgroundColor: withAlpha(colors.warning, 0.1),
+    borderRadius: radii.md,
     padding: spacing.lg,
     borderWidth: 1,
-    borderColor: 'rgba(255,179,0,0.3)',
+    borderColor: withAlpha(colors.warning, 0.3),
   },
   presetGrid: {
     flexDirection: 'row',
@@ -403,13 +407,15 @@ const styles = StyleSheet.create({
   presetBtn: {
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs,
-    borderRadius: 999,
+    minHeight: 44,
+    justifyContent: 'center',
+    borderRadius: radii.pill,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.15)',
-    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderColor: colors.overlayWhite15,
+    backgroundColor: colors.glass,
   },
   presetBtnSelected: {
     borderColor: colors.primary,
-    backgroundColor: 'rgba(0,228,117,0.1)',
+    backgroundColor: withAlpha(colors.accent, 0.1),
   },
 });

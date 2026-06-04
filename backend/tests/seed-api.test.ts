@@ -14,6 +14,7 @@
 import request from 'supertest';
 import { createApp } from '../src/app';
 import { prisma } from '../src/config/database';
+import { connectRedis, disconnectRedis } from '../src/config/redis';
 import { signAccessToken } from '../src/utils/jwt';
 
 const app = createApp();
@@ -29,6 +30,10 @@ let adminId: string;
 let sampleRoomId: string;
 
 beforeAll(async () => {
+  // The app's auth middleware, health check and several endpoints use the
+  // shared Redis client — connect it or every redis-backed call 500s with
+  // "The client is closed".
+  await connectRedis();
   // Resolve IDs for our seeded test accounts
   const admin = await prisma.user.findUnique({ where: { email: 'admin@chathouse.dev' } });
   const user1 = await prisma.user.findUnique({ where: { email: 'test1@chathouse.dev' } });
@@ -51,6 +56,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await prisma.$disconnect();
+  await disconnectRedis();
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -102,7 +108,7 @@ describe('AUTH — /api/auth', () => {
     it('✅ should login with valid credentials', async () => {
       const res = await request(app)
         .post('/api/auth/login')
-        .send({ email: 'admin@chathouse.dev', password: 'Admin1234!' });
+        .send({ identifier: 'admin@chathouse.dev', password: 'Admin1234!' });
 
       expect(res.status).toBe(200);
       expect(res.body.data).toHaveProperty('accessToken');
@@ -111,7 +117,7 @@ describe('AUTH — /api/auth', () => {
     it('❌ should reject wrong password', async () => {
       const res = await request(app)
         .post('/api/auth/login')
-        .send({ email: 'admin@chathouse.dev', password: 'WrongPassword!' });
+        .send({ identifier: 'admin@chathouse.dev', password: 'WrongPassword!' });
 
       expect(res.status).toBeGreaterThanOrEqual(400);
     });
@@ -119,7 +125,7 @@ describe('AUTH — /api/auth', () => {
     it('❌ should reject non-existent user', async () => {
       const res = await request(app)
         .post('/api/auth/login')
-        .send({ email: 'nobody@chathouse.dev', password: 'Pass1234!' });
+        .send({ identifier: 'nobody@chathouse.dev', password: 'Pass1234!' });
 
       expect(res.status).toBeGreaterThanOrEqual(400);
     });
@@ -130,7 +136,7 @@ describe('AUTH — /api/auth', () => {
       // First login to get a fresh token
       const loginRes = await request(app)
         .post('/api/auth/login')
-        .send({ email: 'test1@chathouse.dev', password: 'Test1234!' });
+        .send({ identifier: 'test1@chathouse.dev', password: 'Test1234!' });
 
       const token = loginRes.body.data?.accessToken;
       if (!token) return; // Skip if login flow differs

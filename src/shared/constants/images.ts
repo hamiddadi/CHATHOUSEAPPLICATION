@@ -116,12 +116,3 @@ export const resolveHouseIcon = (houseId: string): string =>
 
 export const resolveRoomCover = (category: string): string =>
   ROOM_COVER_BY_CATEGORY[category] ?? DEFAULTS.cover;
-
-export const IMAGES = {
-  defaults: DEFAULTS,
-  avatars10: AVATARS_10,
-  userAvatarById: USER_AVATAR_BY_ID,
-  houseIconById: HOUSE_ICON_BY_ID,
-  roomCoverByCategory: ROOM_COVER_BY_CATEGORY,
-  backgrounds: BACKGROUNDS,
-} as const;

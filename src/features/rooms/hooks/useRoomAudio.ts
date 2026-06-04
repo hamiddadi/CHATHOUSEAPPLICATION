@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { env } from '../../../config/env';
 import { getSocket } from '../../../shared/services/realtime/socketClient';
+import { errorMessage } from '../../../shared/utils/errorMessage';
 import { startRoomAudio, type RoomAudioHandle } from '../services/roomAudioService';
 
 interface UseRoomAudioOptions {
@@ -9,13 +10,23 @@ interface UseRoomAudioOptions {
 }
 
 interface UseRoomAudioState {
-  status: 'idle' | 'connecting' | 'live' | 'error' | 'unsupported';
+  status: 'idle' | 'connecting' | 'live' | 'reconnecting' | 'error' | 'unsupported';
   error: string | null;
   /**
-   * Per-user "is currently speaking" flag, driven by Agora's VAD. Self
-   * is keyed under `__self__`. The map shape (instead of a Set) keeps
-   * the existing call sites — `audio.scores.get(userId) ?? 0` — working
-   * unchanged: 0 = silent, 1 = speaking.
+   * Additive convenience flag for UI banners — `true` while the LiveKit SDK
+   * has lost the link and is auto-retrying (or we're driving a bounded
+   * manual rejoin). Equivalent to `status === 'reconnecting'`; exposed as a
+   * dedicated boolean so call sites can show a transient bandeau without
+   * widening their `status` checks. Always `false` on the unsupported
+   * (Expo Go) path, where connection-state callbacks never fire.
+   */
+  reconnecting: boolean;
+  /**
+   * Per-user "is currently speaking" flag, driven by LiveKit's
+   * ActiveSpeakersChanged. Self is keyed under `__self__`. The map shape
+   * (instead of a Set) keeps the existing call sites —
+   * `audio.scores.get(userId) ?? 0` — working unchanged:
+   * 0 = silent, 1 = speaking.
    */
   scores: ReadonlyMap<string, number>;
   setMuted: (muted: boolean) => Promise<void>;
@@ -25,10 +36,11 @@ interface UseRoomAudioState {
 const SELF_KEY = '__self__';
 
 /**
- * Threshold against the `scores` map. With the Agora VAD-backed
- * implementation the values are effectively 0 or 1 (we feed the VAD
- * bit through), so any threshold in (0, 1] works. Kept exported for
- * call-site stability — RoomScreen reads it to compute `isSpeakingLive`.
+ * Threshold against the `scores` map. With the LiveKit
+ * ActiveSpeakersChanged-backed implementation the values are effectively
+ * 0 or 1 (we feed the isSpeaking bit through), so any threshold in
+ * (0, 1] works. Kept exported for call-site stability — RoomScreen
+ * reads it to compute `isSpeakingLive`.
  */
 export const SPEAKING_SCORE_THRESHOLD = 0.5;
 
@@ -82,6 +94,24 @@ export const useRoomAudio = ({
               return next;
             });
           },
+          onStatusChange: next => {
+            // Connection-health transitions from the LiveKit SDK. Only ever
+            // fires once the room is connected (never on the unsupported path),
+            // so it's safe to map straight onto the hook's status:
+            //   connected           → 'live'  (audio flowing again)
+            //   reconnecting/failed  → 'reconnecting'  (service auto-rejoins
+            //                          on failed; the banner stays up while
+            //                          the bounded retry runs)
+            // We never override a terminal 'error'/'unsupported' that the
+            // start() catch block set, nor flip back before start() resolves.
+            if (cancelled) return;
+            setStatus(prev => {
+              if (prev === 'error' || prev === 'unsupported' || prev === 'idle') {
+                return prev;
+              }
+              return next === 'connected' ? 'live' : 'reconnecting';
+            });
+          },
         });
         if (cancelled) {
           await handle.close();
@@ -91,11 +121,11 @@ export const useRoomAudio = ({
         setStatus('live');
       } catch (err) {
         if (cancelled) return;
-        const msg = err instanceof Error ? err.message : 'unknown';
+        const msg = errorMessage(err, 'unknown');
         // The "native module missing" sentinel — surfaces as
         // `unsupported` so the UI can show a "audio à venir — installer
-        // react-native-agora" banner instead of a hard error toast.
-        if (msg.includes('react-native-agora not installed')) {
+        // @livekit/react-native" banner instead of a hard error toast.
+        if (msg.includes('@livekit/react-native not installed')) {
           setStatus('unsupported');
         } else if (msg.includes('mic permission denied')) {
           setStatus('error');
@@ -115,19 +145,26 @@ export const useRoomAudio = ({
     };
   }, [roomId, enabled]);
 
+  // Keep the controls stable: scores changes ~5x/s (200ms VAD ticks), so
+  // binding these into the same memo would re-invalidate every consumer
+  // that depends on them. They only ever read handleRef.current.
+  const setMuted = useCallback(async (muted: boolean) => {
+    await handleRef.current?.setMuted(muted);
+  }, []);
+  const setPeerVolume = useCallback((userId: string, volume: number) => {
+    handleRef.current?.setPeerVolume(userId, volume);
+  }, []);
+
   return useMemo(
     () => ({
       status,
+      reconnecting: status === 'reconnecting',
       error,
       scores,
-      setMuted: async (muted: boolean) => {
-        await handleRef.current?.setMuted(muted);
-      },
-      setPeerVolume: (userId: string, volume: number) => {
-        handleRef.current?.setPeerVolume(userId, volume);
-      },
+      setMuted,
+      setPeerVolume,
     }),
-    [error, scores, status],
+    [error, scores, status, setMuted, setPeerVolume],
   );
 };
 

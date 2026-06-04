@@ -1,5 +1,6 @@
 import { apiClient } from '../../../shared/services/api/apiClient';
 import { useAuthStore } from '../../auth/store/authStore';
+import type { Envelope } from '../../../shared/types/api';
 import type { Conversation, Message, UserSummary } from '../../../shared/types/domain';
 
 /**
@@ -21,11 +22,6 @@ import type { Conversation, Message, UserSummary } from '../../../shared/types/d
  * surfaces that error verbatim to the UI.
  */
 
-interface Envelope<T> {
-  success: true;
-  data: T;
-}
-
 interface RawUser {
   id: string;
   username: string | null;
@@ -37,7 +33,11 @@ interface RawMessage {
   id: string;
   senderId: string;
   receiverId: string | null;
-  content: string;
+  // Nullable now that a message can be a voice note (kind === 'VOICE').
+  content: string | null;
+  kind?: 'TEXT' | 'VOICE';
+  audioUrl?: string | null;
+  audioDurationMs?: number | null;
   isRead: boolean;
   createdAt: string;
   sender?: RawUser;
@@ -62,7 +62,10 @@ const toMessage = (raw: RawMessage, viewerId: string, peerId: string): Message =
   id: raw.id,
   conversationId: peerId,
   authorId: raw.senderId,
-  text: raw.content,
+  text: raw.content ?? '',
+  kind: raw.kind === 'VOICE' ? 'voice' : 'text',
+  audioUrl: raw.audioUrl ?? null,
+  durationMs: raw.audioDurationMs ?? null,
   sentAt: raw.createdAt,
   isMine: raw.senderId === viewerId,
 });
@@ -85,25 +88,29 @@ export const messageService = {
     return res.data.data.map(c => toConversation(c, me));
   },
 
-  async conversation(peerId: string): Promise<Conversation> {
-    // No dedicated endpoint; synthesise by filtering the conversations
-    // list. Cheap (server returns at most 500 rows) and keeps the API
-    // surface narrow. If we ever need deep metadata we can add a GET
-    // /chat/conversations/:peerId on the backend.
-    const list = await this.conversations();
-    const hit = list.find(c => c.id === peerId);
-    if (hit) return hit;
+  async conversation(
+    peerId: string,
+    // Optional accessor onto an already-fetched conversations list (e.g. the
+    // React Query cache). When it yields a hit we skip the network call
+    // entirely. Optional to keep the call-shape backward compatible.
+    getCachedConversations?: () => readonly Conversation[] | undefined,
+  ): Promise<Conversation> {
+    const cached = getCachedConversations?.()?.find(c => c.id === peerId);
+    if (cached) return cached;
 
-    // No history yet — fetch the peer user directly and return an empty
-    // conversation skeleton so the thread header renders in one RT.
-    const peerRes = await apiClient.get<Envelope<RawUser>>(`/users/${peerId}`);
-    const peer = toSummary(peerRes.data.data);
+    // Dedicated single-conversation endpoint: one round-trip, no O(all
+    // conversations) list scan. `lastMessage` is null when there's no history.
+    const res = await apiClient.get<
+      Envelope<{ peer: RawUser; lastMessage: RawMessage | null; unreadCount: number }>
+    >(`/chat/conversations/${peerId}`);
+    const me = currentUserId();
+    const { peer, lastMessage, unreadCount } = res.data.data;
     return {
-      id: peerId,
-      participants: [peer],
-      lastMessage: null,
-      unreadCount: 0,
-      updatedAt: new Date().toISOString(),
+      id: peer.id,
+      participants: [toSummary(peer)],
+      lastMessage: lastMessage ? toMessage(lastMessage, me, peer.id) : null,
+      unreadCount,
+      updatedAt: lastMessage ? lastMessage.createdAt : new Date().toISOString(),
     };
   },
 
@@ -118,6 +125,19 @@ export const messageService = {
     if (trimmed.length === 0) throw new Error('Message cannot be empty');
     const res = await apiClient.post<Envelope<RawMessage>>(`/chat/${peerId}`, {
       content: trimmed,
+    });
+    return toMessage(res.data.data, currentUserId(), peerId);
+  },
+
+  /**
+   * Send a voice note. The clip must already be uploaded (see voiceService);
+   * we post the stored URL + clip length. DM is still gated on mutual follow
+   * server-side (403 CHAT_004), surfaced to the caller verbatim.
+   */
+  async sendVoice(peerId: string, audioUrl: string, durationMs: number): Promise<Message> {
+    const res = await apiClient.post<Envelope<RawMessage>>(`/chat/${peerId}/voice`, {
+      audioUrl,
+      durationMs,
     });
     return toMessage(res.data.data, currentUserId(), peerId);
   },

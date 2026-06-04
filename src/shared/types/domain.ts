@@ -11,13 +11,22 @@ export interface User {
   id: string;
   username: string;
   displayName: string;
+  // Real name (Clubhouse-style identity), optional and distinct from the
+  // public displayName. Backend returns them on the me/public selects.
+  firstName?: string | null;
+  lastName?: string | null;
   bio: string | null;
   avatarUrl: string | null;
+  twitter?: string | null;
+  instagram?: string | null;
   followersCount: number;
   followingCount: number;
   isFollowedByMe: boolean;
   isOnline: boolean;
   createdAt: string;
+  // Who invited this user (Clubhouse "Nominated by"). Only present on the
+  // profile-detail payload; null when the account joined without a referral.
+  invitedBy?: { username: string | null; displayName: string | null } | null;
 }
 
 export type UserSummary = Pick<User, 'id' | 'username' | 'displayName' | 'avatarUrl'>;
@@ -45,11 +54,13 @@ export interface Room {
   visibility: RoomVisibility;
   houseId: string | null;
   houseName: string | null;
+  houseIcon?: string | null;
   hostId: string;
   speakers: RoomParticipant[];
   listeners: UserSummary[];
   speakersCount: number;
   listenersCount: number;
+  participantCount?: number;
   isLive: boolean;
   isRecording: boolean;
   chatEnabled: boolean;
@@ -64,6 +75,11 @@ export type RoomSummary = Pick<
 > & {
   topSpeakers: UserSummary[];
   topListeners: UserSummary[];
+  // Optional enrichments (populated by the feed mapper; absent in legacy mocks).
+  houseIcon?: string | null;
+  participantCount?: number;
+  scheduledFor?: string | null;
+  isLive?: boolean;
 };
 
 /* ============================================================
@@ -84,6 +100,8 @@ export interface House {
   categoryEmoji: string;
   iconUrl: string | null;
   privacy: HousePrivacy;
+  /** Owner's userId — used to keep the owner's role immutable in the UI. */
+  ownerId: string;
   membersCount: number;
   liveRoomsCount: number;
   isJoinedByMe: boolean;
@@ -99,11 +117,20 @@ export type HouseSummary = Pick<
 /* ============================================================
  * Messages / Conversations
  * ========================================================== */
+// A text message vs. an async voice note (Clubhouse-style "Chats").
+export type MessageKind = 'text' | 'voice';
+
 export interface Message {
   id: string;
   conversationId: string;
   authorId: string;
+  // Text body. Empty string for voice notes (use audioUrl + durationMs).
   text: string;
+  // 'voice' messages carry a playable audioUrl + clip length; 'text' leaves
+  // both null. Defaults to 'text' so legacy mocks/payloads stay valid.
+  kind: MessageKind;
+  audioUrl: string | null;
+  durationMs: number | null;
   sentAt: string;
   isMine: boolean;
 }

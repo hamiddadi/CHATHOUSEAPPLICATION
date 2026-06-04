@@ -3,13 +3,15 @@ import { Alert, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'rea
 import { MaterialIcons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useTranslation } from 'react-i18next';
 import { Loader } from '../../../shared/components/Loader';
 import { EmptyState } from '../../../shared/components/EmptyState';
-import { colors, spacing } from '../../../shared/constants/theme';
+import { colors, spacing, radii, withAlpha } from '../../../shared/constants/theme';
 import { AdminHeader } from '../components/AdminHeader';
 import { useAdminStats, useAdminWhoami } from '../hooks/useAdmin';
 import { adminService } from '../services/adminService';
 import { isAtLeast } from '../types/admin.types';
+import { errorMessage } from '../../../shared/utils/errorMessage';
 import type { SettingsStackScreenProps } from '../../../core/navigation/types';
 
 type Nav = SettingsStackScreenProps<'AdminHome'>['navigation'];
@@ -32,11 +34,11 @@ const KpiCard: React.FC<KpiCardProps> = ({ label, value, hint, tone = 'default' 
           : 'border-overlay-white-10 bg-overlay-white-5';
   return (
     <View className={`flex-1 rounded-md border ${toneClass} p-md gap-xs min-w-[140px]`}>
-      <Text className="text-[10px] font-body-bold uppercase tracking-widest text-ink-muted">
+      <Text className="text-xxs font-body-bold uppercase tracking-widest text-ink-muted">
         {label}
       </Text>
       <Text className="text-3xl font-display text-white">{value}</Text>
-      {hint ? <Text className="text-[10px] font-body text-ink-dim">{hint}</Text> : null}
+      {hint ? <Text className="text-xxs font-body text-ink-dim">{hint}</Text> : null}
     </View>
   );
 };
@@ -77,6 +79,7 @@ export const AdminHomeScreen: React.FC<SettingsStackScreenProps<'AdminHome'>> = 
 }: {
   navigation: Nav;
 }) => {
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const { data: me } = useAdminWhoami();
   const { data: stats, isLoading, isError } = useAdminStats();
@@ -87,32 +90,46 @@ export const AdminHomeScreen: React.FC<SettingsStackScreenProps<'AdminHome'>> = 
   const goAuditLog = useCallback(() => navigation.navigate('AdminAuditLog'), [navigation]);
 
   const [exporting, setExporting] = useState<null | 'users' | 'audit-log' | 'reports'>(null);
-  const handleExport = useCallback(async (kind: 'users' | 'audit-log' | 'reports') => {
-    setExporting(kind);
-    try {
-      const csv = await adminService.exportCsv(kind);
-      // Two-step UX: copy to clipboard immediately, offer Share for
-      // operators who want to forward the dump out of the device. For a
-      // future iteration: write via expo-file-system + expo-sharing for
-      // an actual file attachment.
-      await Clipboard.setStringAsync(csv);
-      await Share.share({
-        message:
-          csv.length > 50_000
-            ? csv.slice(0, 50_000) + '\n…(truncated, full copy in clipboard)'
-            : csv,
-        title: `Chathouse · export ${kind}`,
-      });
-    } catch (e) {
-      Alert.alert('Erreur', e instanceof Error ? e.message : 'Échec export');
-    } finally {
-      setExporting(null);
-    }
-  }, []);
+  const handleExport = useCallback(
+    async (kind: 'users' | 'audit-log' | 'reports') => {
+      setExporting(kind);
+      try {
+        const csv = await adminService.exportCsv(kind);
+        // Two-step UX: copy to clipboard immediately, offer Share for
+        // operators who want to forward the dump out of the device. For a
+        // future iteration: write via expo-file-system + expo-sharing for
+        // an actual file attachment.
+        await Clipboard.setStringAsync(csv);
+        await Share.share({
+          message:
+            csv.length > 50_000
+              ? csv.slice(0, 50_000) + '\n…(truncated, full copy in clipboard)'
+              : csv,
+          title: `Chathouse · export ${kind}`,
+        });
+      } catch (e) {
+        Alert.alert(
+          t('common.error', 'Error'),
+          errorMessage(e, t('admin.home.exportError', 'Export failed')),
+        );
+      } finally {
+        setExporting(null);
+      }
+    },
+    [t],
+  );
 
-  if (isLoading) return <Loader fullscreen accessibilityLabel="Loading admin stats" />;
+  if (isLoading)
+    return (
+      <Loader fullscreen accessibilityLabel={t('admin.home.loading', 'Loading admin stats')} />
+    );
   if (isError || !stats) {
-    return <EmptyState title="Erreur" description="Impossible de charger les stats." />;
+    return (
+      <EmptyState
+        title={t('common.error', 'Error')}
+        description={t('admin.home.errorStats', 'Unable to load stats.')}
+      />
+    );
   }
 
   const canSeeAuditLog = me ? isAtLeast(me.appRole, 'SUPER_ADMIN') : false;
@@ -120,7 +137,10 @@ export const AdminHomeScreen: React.FC<SettingsStackScreenProps<'AdminHome'>> = 
 
   return (
     <View className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
-      <AdminHeader title="Godmode" subtitle={`Connecté en tant que ${me?.appRole ?? '—'}`} />
+      <AdminHeader
+        title={t('settings.godmode', 'Godmode')}
+        subtitle={t('admin.home.subtitle', 'Connected as {{role}}', { role: me?.appRole ?? '—' })}
+      />
       <ScrollView
         contentContainerStyle={{
           paddingHorizontal: spacing.xxl,
@@ -130,66 +150,73 @@ export const AdminHomeScreen: React.FC<SettingsStackScreenProps<'AdminHome'>> = 
         }}
       >
         <View className="gap-xs">
-          <Text className="text-3xl font-display text-white">Tableau de bord</Text>
+          <Text className="text-3xl font-display text-white">{t('admin.home.title')}</Text>
         </View>
 
         <View style={styles.kpiRow}>
           <KpiCard
-            label="Utilisateurs"
+            label={t('admin.home.stats.users', 'Users')}
             value={stats.users.total}
-            hint={`${stats.users.online} en ligne`}
+            hint={t('admin.home.stats.online', '{{count}} online', { count: stats.users.online })}
           />
           <KpiCard
-            label="Live"
+            label={t('admin.home.stats.live', 'Live')}
             value={stats.rooms.live}
-            hint={`${stats.rooms.total} rooms total`}
+            hint={t('admin.home.stats.roomsTotal', '{{count}} rooms total', {
+              count: stats.rooms.total,
+            })}
             tone="good"
           />
         </View>
         <View style={styles.kpiRow}>
           <KpiCard
-            label="Signalements"
+            label={t('admin.home.stats.reports', 'Reports')}
             value={stats.reports.open}
-            hint={`${stats.reports.total} historique`}
+            hint={t('admin.home.stats.reportsHistory', '{{count}} history', {
+              count: stats.reports.total,
+            })}
             tone={stats.reports.open > 0 ? 'warn' : 'default'}
           />
           <KpiCard
-            label="Suspendus"
+            label={t('admin.home.stats.suspended', 'Suspended')}
             value={stats.users.suspended}
             tone={stats.users.suspended > 0 ? 'danger' : 'default'}
           />
         </View>
         <View style={styles.kpiRow}>
           <KpiCard
-            label="Nouveaux 24h"
+            label={t('admin.home.stats.new24h', 'New 24h')}
             value={`+${stats.users.new24h}`}
-            hint={`+${stats.users.new7d} sur 7j`}
+            hint={t('admin.home.stats.new7d', '+{{count}} over 7d', { count: stats.users.new7d })}
           />
-          <KpiCard label="Messages 24h" value={stats.messages.last24h} />
+          <KpiCard
+            label={t('admin.home.stats.messages24h', 'Messages 24h')}
+            value={stats.messages.last24h}
+          />
         </View>
 
         <View className="gap-sm">
           <Text className="text-xs font-body-bold uppercase tracking-widest text-ink-muted">
-            Actions
+            {t('admin.home.actions', 'Actions')}
           </Text>
           <NavTile
             icon="people"
-            label="Utilisateurs"
-            hint="Recherche, rôles, suspensions"
+            label={t('admin.home.users')}
+            hint={t('admin.home.hints.users', 'Search, roles, suspensions')}
             onPress={goUsers}
           />
           <NavTile
             icon="flag"
-            label="Signalements"
-            hint="File de modération"
+            label={t('admin.home.reports')}
+            hint={t('admin.home.hints.reports', 'Moderation queue')}
             badge={stats.reports.open}
             onPress={goReports}
           />
           {canForceEnd ? (
             <NavTile
               icon="stop-circle"
-              label="Rooms en direct"
-              hint="Forcer la fin d'une room"
+              label={t('admin.home.rooms')}
+              hint={t('admin.home.hints.rooms', 'Force end a room')}
               badge={stats.rooms.live}
               onPress={goRooms}
             />
@@ -197,8 +224,8 @@ export const AdminHomeScreen: React.FC<SettingsStackScreenProps<'AdminHome'>> = 
           {canSeeAuditLog ? (
             <NavTile
               icon="history"
-              label="Journal d'audit"
-              hint="Toutes les actions privilégiées"
+              label={t('admin.home.auditLog')}
+              hint={t('admin.home.hints.auditLog', 'All privileged actions')}
               onPress={goAuditLog}
             />
           ) : null}
@@ -207,7 +234,7 @@ export const AdminHomeScreen: React.FC<SettingsStackScreenProps<'AdminHome'>> = 
         {canSeeAuditLog ? (
           <View className="gap-sm">
             <Text className="text-xs font-body-bold uppercase tracking-widest text-ink-muted">
-              Exports CSV
+              {t('admin.home.csvExports', 'CSV Exports')}
             </Text>
             <View style={styles.exportRow}>
               <Pressable
@@ -215,34 +242,46 @@ export const AdminHomeScreen: React.FC<SettingsStackScreenProps<'AdminHome'>> = 
                 onPress={() => handleExport('users')}
                 style={[styles.exportBtn, exporting === 'users' ? styles.exportBtnBusy : null]}
                 accessibilityRole="button"
-                accessibilityLabel="Exporter les utilisateurs en CSV"
+                accessibilityState={{ disabled: exporting !== null }}
+                accessibilityLabel={t('admin.home.csvA11yUsers', 'Export users to CSV')}
               >
                 <MaterialIcons name="people" size={16} color={colors.primary} />
-                <Text className="text-xs font-body-bold text-white ml-xs">Users</Text>
+                <Text className="text-xs font-body-bold text-white ml-xs">
+                  {t('admin.home.csvUsersLabel', 'Users')}
+                </Text>
               </Pressable>
               <Pressable
                 disabled={exporting !== null}
                 onPress={() => handleExport('audit-log')}
                 style={[styles.exportBtn, exporting === 'audit-log' ? styles.exportBtnBusy : null]}
                 accessibilityRole="button"
-                accessibilityLabel="Exporter le journal d'audit en CSV"
+                accessibilityState={{ disabled: exporting !== null }}
+                accessibilityLabel={t('admin.home.csvA11yAudit', 'Export audit log to CSV')}
               >
                 <MaterialIcons name="history" size={16} color={colors.primary} />
-                <Text className="text-xs font-body-bold text-white ml-xs">Audit log</Text>
+                <Text className="text-xs font-body-bold text-white ml-xs">
+                  {t('admin.home.csvAuditLabel', 'Audit log')}
+                </Text>
               </Pressable>
               <Pressable
                 disabled={exporting !== null}
                 onPress={() => handleExport('reports')}
                 style={[styles.exportBtn, exporting === 'reports' ? styles.exportBtnBusy : null]}
                 accessibilityRole="button"
-                accessibilityLabel="Exporter les signalements en CSV"
+                accessibilityState={{ disabled: exporting !== null }}
+                accessibilityLabel={t('admin.home.csvA11yReports', 'Export reports to CSV')}
               >
                 <MaterialIcons name="flag" size={16} color={colors.primary} />
-                <Text className="text-xs font-body-bold text-white ml-xs">Reports</Text>
+                <Text className="text-xs font-body-bold text-white ml-xs">
+                  {t('admin.home.csvReportsLabel', 'Reports')}
+                </Text>
               </Pressable>
             </View>
-            <Text className="text-[10px] text-ink-dim">
-              Le contenu est copié dans le presse-papier puis ouvre la feuille de partage native.
+            <Text className="text-xxs text-ink-dim">
+              {t(
+                'admin.home.csvHint',
+                'Content is copied to clipboard then opens the native share sheet.',
+              )}
             </Text>
           </View>
         ) : null}
@@ -264,12 +303,14 @@ const styles = StyleSheet.create({
   exportBtn: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 44,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
-    borderRadius: 999,
-    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: radii.pill,
+    backgroundColor: colors.overlayWhite5,
     borderWidth: 1,
-    borderColor: 'rgba(0,228,117,0.3)',
+    borderColor: withAlpha(colors.accent, 0.3),
   },
   exportBtnBusy: { opacity: 0.5 },
 });

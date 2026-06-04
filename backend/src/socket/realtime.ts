@@ -1,5 +1,6 @@
 import type { Server } from 'socket.io';
 import { HALLWAY_ROOM } from './handlers/hallway.handler';
+import { roomChannel, userChannel } from './channels';
 
 /**
  * Side-channel the HTTP layer uses to fan events into the socket tier.
@@ -33,6 +34,15 @@ export const emitHallwayRoomClosed = (roomId: string): void => {
   ioRef?.to(HALLWAY_ROOM).emit('hallway:room_closed', { roomId });
 };
 
+/**
+ * Tells everyone still in a room that it has ended, so non-host participants
+ * leave the screen. The socket `room:end` handler already emits this; the REST
+ * end() path must emit it too (its clients never send the socket event).
+ */
+export const emitRoomEnded = (roomId: string): void => {
+  ioRef?.to(roomChannel(roomId)).emit('room:ended', { roomId });
+};
+
 export const emitHallwayRoomUpdated = (
   roomId: string,
   partial: { participantCount?: number; title?: string },
@@ -44,8 +54,6 @@ export const emitHallwayRoomUpdated = (
 // Targets the `room:<id>` group that room.handler auto-joins on connect
 // for every participant. Callers pass pre-serialised payloads (ISO dates,
 // no Prisma Date objects) so the socket side stays transport-pure.
-
-const roomChannel = (roomId: string) => `room:${roomId}`;
 
 export const emitRoomHandRaised = (
   roomId: string,
@@ -111,6 +119,24 @@ export const emitRoomUserKicked = (
   ioRef?.to(roomChannel(roomId)).emit('room:user_kicked', { roomId, ...payload });
 };
 
+/**
+ * Server-side half of a kick: forcibly evict a user's socket(s) from the
+ * `room:<id>` channel. `emitRoomUserKicked` only *notifies* the room — a
+ * client that ignores the event would otherwise stay subscribed and keep
+ * receiving every room broadcast (chat, reactions, role/meta changes). This
+ * removes them authoritatively via `socketsLeave`, which works cluster-wide
+ * through the Redis adapter (it reaches the target's sockets on any node, not
+ * just this one). A dedicated `room:you_were_kicked` is pushed to the user's
+ * personal channel first so their client still gets a direct signal even
+ * though it's about to leave the room channel. No-op before socket boot.
+ */
+export const forceLeaveRoom = (roomId: string, userId: string, kickedBy: string): void => {
+  // Personal channel is independent of the room channel, so this lands
+  // regardless of the eviction below.
+  ioRef?.to(userChannel(userId)).emit('room:you_were_kicked', { roomId, kickedBy });
+  ioRef?.in(userChannel(userId)).socketsLeave(roomChannel(roomId));
+};
+
 export const emitRoomMuteChanged = (
   roomId: string,
   payload: { userId: string; isMuted: boolean },
@@ -132,7 +158,6 @@ export const emitRoomMetaUpdated = (
 // ─── Per-user notification events ────────────────────────
 // Fires on the user's personal channel so they get live notification
 // badge updates without polling.
-const userChannel = (userId: string) => `user:${userId}`;
 
 export const emitNotification = (
   userId: string,
@@ -150,4 +175,27 @@ export const emitNotification = (
 
 export const emitNotificationCount = (userId: string, count: number): void => {
   ioRef?.to(userChannel(userId)).emit('notification:count', { count });
+};
+
+/**
+ * Pushes a freshly-created DM to both parties' personal channels so the
+ * recipient's client updates in realtime. The REST send path (chat.service)
+ * must call this — its clients never emit the `chat:send` socket event, so
+ * without it the recipient sees nothing until a manual refetch.
+ */
+export const emitChatMessage = (senderId: string, receiverId: string, msg: unknown): void => {
+  ioRef?.to(userChannel(senderId)).emit('chat:message', msg);
+  ioRef?.to(userChannel(receiverId)).emit('chat:message', msg);
+};
+
+/**
+ * Fan a new group message out to every member's personal channel so their
+ * conversation list / open thread updates live. Group conversations have no
+ * dedicated socket room, so we target each member's `user:<id>` channel (the
+ * same one chat + notifications already use).
+ */
+export const emitGroupMessage = (memberIds: readonly string[], payload: unknown): void => {
+  for (const id of memberIds) {
+    ioRef?.to(userChannel(id)).emit('group:message', payload);
+  }
 };

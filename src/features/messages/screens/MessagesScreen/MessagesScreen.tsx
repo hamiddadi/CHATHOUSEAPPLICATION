@@ -1,5 +1,5 @@
-import React, { memo, useCallback } from 'react';
-import { Alert, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { memo, useCallback, useMemo } from 'react';
+import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -12,8 +12,12 @@ import { colors, layout, spacing } from '../../../../shared/constants/theme';
 import type { MessageStackParamList } from '../../../../core/navigation/types';
 import type { Conversation, UserSummary } from '../../../../shared/types/domain';
 import { CURRENT_USER } from '../../../../shared/mocks/users.mock';
+import { useAuthStore } from '../../../auth/store/authStore';
 import { useConversations } from '../../hooks/useMessages';
 import { useChatSocket } from '../../hooks/useChatSocket';
+import { useGroups } from '../../hooks/useGroups';
+import { useGroupSocket } from '../../hooks/useGroupSocket';
+import type { GroupConversation } from '../../services/groupService';
 import { OnlineUsersList } from '../../components/OnlineUsersList';
 
 type Nav = NativeStackNavigationProp<MessageStackParamList, 'MessagesList'>;
@@ -40,8 +44,21 @@ interface ConvoRowProps {
 }
 
 const ConvoRow: React.FC<ConvoRowProps> = memo(({ convo, onPress }) => {
+  const { t } = useTranslation();
   const handle = useCallback(() => onPress(convo.id), [convo.id, onPress]);
-  const other = otherParticipant(convo);
+  // Voice notes have no text body — show a 🎤 marker instead of an empty line.
+  let lastText = 'No messages yet';
+  if (convo.lastMessage) {
+    lastText = convo.lastMessage.kind === 'voice' ? t('voice.preview') : convo.lastMessage.text;
+  }
+  // Memoize the per-row derivations so they only recompute when the underlying
+  // conversation changes (the row is memo()'d on props). Note: the relative
+  // timestamp is intentionally frozen at render time — it refreshes whenever
+  // the conversation updates (which is what reshuffles the list anyway), not on
+  // a wall-clock tick. A global "now" ticker would be needed for live "2m → 3m"
+  // counting; that is deliberately out of scope here.
+  const other = useMemo(() => otherParticipant(convo), [convo]);
+  const timeLabel = useMemo(() => relativeTime(convo.updatedAt), [convo.updatedAt]);
   return (
     <Pressable
       onPress={handle}
@@ -55,7 +72,7 @@ const ConvoRow: React.FC<ConvoRowProps> = memo(({ convo, onPress }) => {
           <Text className="text-md font-body-bold text-ink" numberOfLines={1}>
             {other.displayName}
           </Text>
-          <Text className="text-xxs font-body text-ink-muted">{relativeTime(convo.updatedAt)}</Text>
+          <Text className="text-xxs font-body text-ink-muted">{timeLabel}</Text>
         </View>
         <View className="flex-row items-center justify-between mt-xxs">
           <Text
@@ -66,7 +83,7 @@ const ConvoRow: React.FC<ConvoRowProps> = memo(({ convo, onPress }) => {
             }
             numberOfLines={1}
           >
-            {convo.lastMessage?.text ?? 'No messages yet'}
+            {lastText}
           </Text>
           {convo.unreadCount > 0 && (
             <View className="bg-primary rounded-pill px-xs min-w-[20px] items-center justify-center h-[20px]">
@@ -82,6 +99,68 @@ const ConvoRow: React.FC<ConvoRowProps> = memo(({ convo, onPress }) => {
 });
 ConvoRow.displayName = 'ConvoRow';
 
+interface GroupRowProps {
+  group: GroupConversation;
+  myId: string | null;
+  onPress: (id: string) => void;
+}
+
+const GroupRow: React.FC<GroupRowProps> = memo(({ group, myId, onPress }) => {
+  const { t } = useTranslation();
+  const handle = useCallback(() => onPress(group.id), [group.id, onPress]);
+  let lastText = 'No messages yet';
+  if (group.lastMessage) {
+    lastText =
+      group.lastMessage.kind === 'voice' ? t('voice.preview') : (group.lastMessage.content ?? '');
+  }
+  const title = useMemo(() => {
+    if (group.title) return group.title;
+    const others = group.members.filter(m => m.id !== myId);
+    return others.map(m => m.displayName || m.username).join(', ') || 'Group';
+  }, [group.members, group.title, myId]);
+  const timeLabel = useMemo(() => relativeTime(group.updatedAt), [group.updatedAt]);
+  return (
+    <Pressable
+      onPress={handle}
+      accessibilityRole="button"
+      accessibilityLabel={`Open group ${title}`}
+      className="flex-row items-center gap-md px-xxl py-md"
+    >
+      <View className="w-12 h-12 rounded-full bg-primary/15 items-center justify-center">
+        <MaterialIcons name="groups" size={24} color={colors.primary} />
+      </View>
+      <View className="flex-1">
+        <View className="flex-row items-center justify-between">
+          <Text className="text-md font-body-bold text-ink" numberOfLines={1}>
+            {title}
+          </Text>
+          <Text className="text-xxs font-body text-ink-muted">{timeLabel}</Text>
+        </View>
+        <View className="flex-row items-center justify-between mt-xxs">
+          <Text
+            className={
+              group.unreadCount > 0
+                ? 'text-sm font-body-medium text-ink flex-1 mr-sm'
+                : 'text-sm font-body text-ink-muted flex-1 mr-sm'
+            }
+            numberOfLines={1}
+          >
+            {lastText}
+          </Text>
+          {group.unreadCount > 0 && (
+            <View className="bg-primary rounded-pill px-xs min-w-[20px] items-center justify-center h-[20px]">
+              <Text className="text-xxs font-body-bold text-primary-on-container">
+                {group.unreadCount}
+              </Text>
+            </View>
+          )}
+        </View>
+      </View>
+    </Pressable>
+  );
+});
+GroupRow.displayName = 'GroupRow';
+
 export const MessagesScreen: React.FC = () => {
   const navigation = useNavigation<Nav>();
   const insets = useSafeAreaInsets();
@@ -90,25 +169,24 @@ export const MessagesScreen: React.FC = () => {
   // invalidates the conversations query on every incoming message so the
   // list reshuffles without a manual pull-to-refresh.
   useChatSocket();
-  const { data: conversations, isLoading, isError, refetch } = useConversations();
+  useGroupSocket();
+  const myId = useAuthStore(s => s.user?.id ?? null);
+  const { data: conversations, isLoading, isError, refetch, isFetching } = useConversations();
+  const { data: groups } = useGroups();
 
   const handleOpen = useCallback(
     (conversationId: string) => navigation.navigate('ChatDetail', { conversationId }),
     [navigation],
   );
+  const handleOpenGroup = useCallback(
+    (conversationId: string) => navigation.navigate('GroupChat', { conversationId }),
+    [navigation],
+  );
 
-  // Starting a NEW conversation (vs opening an existing one) requires
-  // a user-search step that the Messages stack doesn't expose. The
-  // backend's mutual-follow rule means picking from "Following" is the
-  // right shortcut — for now we point the user to the Explore surface
-  // where they can find someone, then DM-from-profile.
-  const handleNewChat = useCallback(() => {
-    Alert.alert(
-      'Nouvelle conversation',
-      "Pour démarrer une discussion, ouvrez le profil d'un utilisateur (depuis Explore ou une room) et appuyez sur Message.",
-      [{ text: 'OK' }],
-    );
-  }, []);
+  // Start a NEW conversation: the picker screen searches users and routes to
+  // ChatDetail with the chosen peer id (DM is gated server-side on mutual
+  // follow, surfaced inside ChatDetail).
+  const handleNewChat = useCallback(() => navigation.navigate('NewMessage'), [navigation]);
 
   const renderItem = useCallback(
     ({ item }: { item: Conversation }) => <ConvoRow convo={item} onPress={handleOpen} />,
@@ -118,6 +196,24 @@ export const MessagesScreen: React.FC = () => {
   const renderSeparator = useCallback(
     () => <View className="h-px bg-overlay-white-5 ml-[76px]" />,
     [],
+  );
+
+  // Header = online-users strip + a "Groups" section (group DMs live in their
+  // own backend tables, so they're rendered above the 1:1 conversation list).
+  const ListHeader = (
+    <View>
+      <OnlineUsersList />
+      {groups && groups.length > 0 ? (
+        <View className="pt-sm">
+          <Text className="px-xxl pb-xs text-xs font-body-bold uppercase tracking-widest text-ink-muted">
+            {t('messages.groups', 'Groups')}
+          </Text>
+          {groups.map(g => (
+            <GroupRow key={g.id} group={g} myId={myId} onPress={handleOpenGroup} />
+          ))}
+        </View>
+      ) : null}
+    </View>
   );
 
   return (
@@ -145,8 +241,13 @@ export const MessagesScreen: React.FC = () => {
           renderItem={renderItem}
           keyExtractor={keyExtractor}
           ItemSeparatorComponent={renderSeparator}
-          ListHeaderComponent={OnlineUsersList}
-          refreshing={isLoading}
+          ListHeaderComponent={ListHeader}
+          ListEmptyComponent={
+            (groups?.length ?? 0) === 0 ? (
+              <EmptyState title={t('messages.empty')} description={t('messages.startHint')} />
+            ) : null
+          }
+          refreshing={isFetching}
           onRefresh={refetch}
           contentContainerStyle={[
             styles.list,

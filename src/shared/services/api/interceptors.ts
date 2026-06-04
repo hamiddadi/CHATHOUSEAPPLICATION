@@ -16,6 +16,10 @@ export interface InterceptorHandlers {
   onUnauthenticated?: () => void | Promise<void>;
 }
 
+// Backend contract: access tokens live ~15 min. Used only for a rough
+// `expiresAt` UI hint in tokenStorage, not for validation.
+const ACCESS_TOKEN_TTL_MS = 15 * 60 * 1000;
+
 // Guard against the internal retry spinning if `/auth/refresh` itself 401s.
 interface RetriableConfig extends InternalAxiosRequestConfig {
   _retry?: boolean;
@@ -26,6 +30,15 @@ interface RetriableConfig extends InternalAxiosRequestConfig {
  * API calls that all 401 don't trigger N refreshes (thundering-herd).
  */
 let refreshing: Promise<AuthSession | null> | null = null;
+
+// Guard so the auth teardown (clear tokens + onUnauthenticated) runs at most
+// once per session. Without it, (a) several requests that all 401 after the
+// access token expires each fire signOut → /auth/logout, and (b) the tokenless
+// /auth/logout POST itself 401s and re-enters this interceptor → another
+// teardown → another /auth/logout → unbounded recursion. The isAuthEndpoint
+// check below is the primary fix; this flag is defense-in-depth for concurrent
+// 401s.
+let teardownInProgress = false;
 
 const performRefresh = async (client: AxiosInstance): Promise<AuthSession | null> => {
   if (refreshing) return refreshing;
@@ -46,9 +59,9 @@ const performRefresh = async (client: AxiosInstance): Promise<AuthSession | null
       const next: AuthSession = {
         accessToken: res.data.data.accessToken,
         refreshToken: res.data.data.refreshToken,
-        // Backend contract is a 15-min access token; tokenStorage expects a
-        // rough expiresAt — not used for validation, only for UI hints.
-        expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+        // tokenStorage expects a rough expiresAt — not used for validation,
+        // only for UI hints. See ACCESS_TOKEN_TTL_MS above.
+        expiresAt: new Date(Date.now() + ACCESS_TOKEN_TTL_MS).toISOString(),
       };
       await tokenStorage.set(next);
       return next;
@@ -73,12 +86,21 @@ export const attachInterceptors = (
     }
     // Impersonation override: when an active impersonation token is set,
     // it replaces the super-admin's own bearer for *this* request only.
-    // Admin endpoints under /admin/* skip the override so the actual
-    // super-admin keeps moderation powers in another tab/screen — the
-    // impersonation surface should only act as the target user.
+    // Admin endpoints skip the override so the actual super-admin keeps
+    // moderation powers — the impersonation surface should only act as the
+    // target user.
+    //
+    // Intent is expressed explicitly via the `X-Skip-Impersonation` header
+    // (set by adminService), which is robust regardless of how `config.url`
+    // is built. We keep a hardened URL fallback (normalized regex tolerating
+    // a missing leading slash and an optional `/api` prefix) so callers that
+    // predate the header still bypass impersonation correctly.
+    const skipImpersonationHeader = config.headers.get('X-Skip-Impersonation') === '1';
+    if (skipImpersonationHeader) config.headers.delete('X-Skip-Impersonation');
     const url = config.url ?? '';
-    const isAdminCall = url.startsWith('/admin') || url.includes('/api/admin');
-    const impToken = !isAdminCall ? getImpersonationToken() : null;
+    const isAdminUrl = /^\/?(?:api\/)?admin(?:\/|$|\?)/.test(url);
+    const skipImpersonation = skipImpersonationHeader || isAdminUrl;
+    const impToken = !skipImpersonation ? getImpersonationToken() : null;
     if (impToken) {
       config.headers.set('Authorization', `Bearer ${impToken}`);
       return config;
@@ -97,12 +119,18 @@ export const attachInterceptors = (
       const appError: AppError = toAppError(error);
 
       const isAuthFailure = appError.kind === 'auth';
-      const isRefreshCall = original?.url?.includes('/auth/refresh') ?? false;
+      const url = original?.url ?? '';
+      // Never run refresh OR teardown for the auth endpoints themselves:
+      //  - /auth/refresh: a 401 there is handled by performRefresh returning null.
+      //  - /auth/logout: it's best-effort and runs AFTER tokens are cleared, so
+      //    its tokenless 401 must NOT re-trigger teardown — that caused an
+      //    unbounded logout → 401 → logout recursion flooding the server.
+      const isAuthEndpoint = url.includes('/auth/refresh') || url.includes('/auth/logout');
       const alreadyRetried = original?._retry === true;
 
       // Try ONE silent refresh on a genuine 401, then replay the original
-      // request. Skip for the refresh call itself and for retries.
-      if (isAuthFailure && original && !alreadyRetried && !isRefreshCall) {
+      // request. Skip for the auth endpoints and for retries.
+      if (isAuthFailure && original && !alreadyRetried && !isAuthEndpoint) {
         const newSession = await performRefresh(client);
         if (newSession) {
           original._retry = true;
@@ -111,9 +139,15 @@ export const attachInterceptors = (
         }
       }
 
-      if (isAuthFailure) {
-        await tokenStorage.clear();
-        await handlers.onUnauthenticated?.();
+      // Refresh failed (or wasn't possible): tear the session down ONCE.
+      if (isAuthFailure && !isAuthEndpoint && !teardownInProgress) {
+        teardownInProgress = true;
+        try {
+          await tokenStorage.clear();
+          await handlers.onUnauthenticated?.();
+        } finally {
+          teardownInProgress = false;
+        }
       }
       return Promise.reject(appError);
     },

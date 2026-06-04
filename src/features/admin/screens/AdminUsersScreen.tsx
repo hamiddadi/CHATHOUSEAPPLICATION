@@ -1,26 +1,36 @@
-import React, { memo, useEffect, useMemo, useState } from 'react';
+import React, { memo, useMemo, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import { Avatar } from '../../../shared/components/Avatar';
 import { EmptyState } from '../../../shared/components/EmptyState';
 import { Input } from '../../../shared/components/Input';
 import { Loader } from '../../../shared/components/Loader';
-import { colors, spacing } from '../../../shared/constants/theme';
+import { colors, radii, spacing, withAlpha } from '../../../shared/constants/theme';
+import { useDebouncedValue } from '../../../shared/hooks/useDebouncedValue';
 import { AdminHeader } from '../components/AdminHeader';
-import { useAdminUsers } from '../hooks/useAdmin';
+import { useAdminUsersInfinite } from '../hooks/useAdmin';
 import type { AdminUser, AppRole } from '../types/admin.types';
 import type { SettingsStackScreenProps } from '../../../core/navigation/types';
 
 type Nav = SettingsStackScreenProps<'AdminUsers'>['navigation'];
 
-const ROLES: readonly { id: AppRole | 'ALL'; label: string }[] = [
-  { id: 'ALL', label: 'Tous' },
-  { id: 'USER', label: 'User' },
-  { id: 'MODERATOR', label: 'Mod' },
-  { id: 'ADMIN', label: 'Admin' },
-  { id: 'SUPER_ADMIN', label: 'Super' },
+const SEARCH_DEBOUNCE_MS = 250;
+
+const getRoles = (t: TFunction): { id: AppRole | 'ALL'; label: string }[] => [
+  { id: 'ALL', label: t('admin.users.roles.all') },
+  { id: 'USER', label: t('admin.users.roles.user') },
+  { id: 'MODERATOR', label: t('admin.users.roles.mod') },
+  { id: 'ADMIN', label: t('admin.users.roles.admin') },
+  { id: 'SUPER_ADMIN', label: t('admin.users.roles.super') },
 ];
 
+// Role-identity accent palette. These are intentional, mutually-distinct
+// literals — NOT theme surface tokens. In particular ADMIN must not be routed
+// through colors.danger (#ffb4ab): that is the same hue the Suspended/Deleted
+// badges use (text-danger), so an ADMIN who is also suspended would show two
+// badges in identical color, destroying the visual distinction.
 const roleColor = (role: AppRole): string =>
   role === 'SUPER_ADMIN'
     ? '#FFB300'
@@ -32,6 +42,7 @@ const roleColor = (role: AppRole): string =>
 
 const UserRow: React.FC<{ user: AdminUser; onPress: (id: string) => void }> = memo(
   ({ user, onPress }) => {
+    const { t } = useTranslation();
     const isSuspended = user.suspendedUntil && new Date(user.suspendedUntil) > new Date();
     return (
       <Pressable
@@ -64,12 +75,16 @@ const UserRow: React.FC<{ user: AdminUser; onPress: (id: string) => void }> = me
             </View>
             {isSuspended ? (
               <View style={styles.suspendedBadge}>
-                <Text className="text-[9px] font-body-bold text-danger">SUSPENDU</Text>
+                <Text className="text-[9px] font-body-bold text-danger">
+                  {t('admin.users.badgeSuspended')}
+                </Text>
               </View>
             ) : null}
             {user.deletedAt ? (
               <View style={styles.suspendedBadge}>
-                <Text className="text-[9px] font-body-bold text-danger">SUPPRIMÉ</Text>
+                <Text className="text-[9px] font-body-bold text-danger">
+                  {t('admin.users.badgeDeleted')}
+                </Text>
               </View>
             ) : null}
           </View>
@@ -85,15 +100,12 @@ export const AdminUsersScreen: React.FC<SettingsStackScreenProps<'AdminUsers'>> 
 }: {
   navigation: Nav;
 }) => {
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const [query, setQuery] = useState('');
-  const [debounced, setDebounced] = useState('');
   const [roleFilter, setRoleFilter] = useState<AppRole | 'ALL'>('ALL');
 
-  useEffect(() => {
-    const id = setTimeout(() => setDebounced(query.trim()), 250);
-    return () => clearTimeout(id);
-  }, [query]);
+  const debounced = useDebouncedValue(query, SEARCH_DEBOUNCE_MS).trim();
 
   const params = useMemo(
     () => ({
@@ -103,23 +115,37 @@ export const AdminUsersScreen: React.FC<SettingsStackScreenProps<'AdminUsers'>> 
     }),
     [debounced, roleFilter],
   );
-  const { data, isLoading, isError, refetch } = useAdminUsers(params);
+  const {
+    data,
+    isLoading,
+    isError,
+    refetch,
+    isRefetching,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useAdminUsersInfinite(params);
+  // Flatten the cursor pages into a single list for the FlatList.
+  const users = useMemo(() => data?.pages.flatMap(p => p.data) ?? [], [data]);
 
   const handleOpen = (id: string) => navigation.navigate('AdminUserDetail', { userId: id });
+  const handleEndReached = () => {
+    if (hasNextPage && !isFetchingNextPage) void fetchNextPage();
+  };
 
   return (
     <View className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
-      <AdminHeader title="Utilisateurs" />
+      <AdminHeader title={t('admin.users.title')} />
       <View className="px-xxl gap-md">
         <Input
-          placeholder="Rechercher par nom, email, téléphone…"
+          placeholder={t('admin.users.searchPlaceholder')}
           value={query}
           onChangeText={setQuery}
           autoCapitalize="none"
           autoCorrect={false}
         />
         <View style={styles.filterRow}>
-          {ROLES.map(r => {
+          {getRoles(t).map(r => {
             const selected = roleFilter === r.id;
             return (
               <Pressable
@@ -145,12 +171,12 @@ export const AdminUsersScreen: React.FC<SettingsStackScreenProps<'AdminUsers'>> 
       </View>
 
       {isLoading ? (
-        <Loader fullscreen accessibilityLabel="Chargement…" />
+        <Loader fullscreen accessibilityLabel={t('common.loading', 'Loading…')} />
       ) : isError || !data ? (
-        <EmptyState title="Erreur de chargement" description="Réessayez plus tard." />
+        <EmptyState title={t('admin.users.errorTitle')} description={t('admin.users.errorBody')} />
       ) : (
         <FlatList
-          data={data.data}
+          data={users}
           renderItem={({ item }) => <UserRow user={item} onPress={handleOpen} />}
           keyExtractor={u => u.id}
           ItemSeparatorComponent={() => <View style={{ height: spacing.xs }} />}
@@ -160,10 +186,22 @@ export const AdminUsersScreen: React.FC<SettingsStackScreenProps<'AdminUsers'>> 
             paddingBottom: insets.bottom + spacing.giant,
           }}
           ListEmptyComponent={
-            <EmptyState title="Aucun utilisateur" description="Aucun résultat avec ces filtres." />
+            <EmptyState
+              title={t('admin.users.emptyTitle')}
+              description={t('admin.users.emptyBody')}
+            />
+          }
+          onEndReached={handleEndReached}
+          onEndReachedThreshold={0.5}
+          ListFooterComponent={
+            isFetchingNextPage ? (
+              <View style={{ paddingVertical: spacing.lg }}>
+                <Loader accessibilityLabel={t('common.loading', 'Loading…')} />
+              </View>
+            ) : null
           }
           onRefresh={refetch}
-          refreshing={isLoading}
+          refreshing={isRefetching}
           showsVerticalScrollIndicator={false}
         />
       )}
@@ -176,21 +214,23 @@ const styles = StyleSheet.create({
   filterChip: {
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs,
-    borderRadius: 999,
+    borderRadius: radii.pill,
     borderWidth: 1,
+    minHeight: 44,
+    justifyContent: 'center',
   },
   filterChipOn: { borderColor: colors.primary, backgroundColor: colors.primary },
-  filterChipOff: { borderColor: 'rgba(255,255,255,0.15)', backgroundColor: 'transparent' },
+  filterChipOff: { borderColor: colors.overlayWhite15, backgroundColor: 'transparent' },
   roleBadge: {
     paddingHorizontal: 6,
     paddingVertical: 2,
-    borderRadius: 4,
+    borderRadius: radii.xs,
     borderWidth: 1,
   },
   suspendedBadge: {
     paddingHorizontal: 6,
     paddingVertical: 2,
-    borderRadius: 4,
-    backgroundColor: 'rgba(239,68,68,0.15)',
+    borderRadius: radii.xs,
+    backgroundColor: withAlpha(colors.danger, 0.15),
   },
 });

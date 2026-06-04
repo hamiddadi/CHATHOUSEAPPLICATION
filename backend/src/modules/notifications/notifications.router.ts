@@ -4,30 +4,26 @@ import { asyncHandler } from '../../utils/asyncHandler';
 import { requireAuth } from '../../middlewares/auth.middleware';
 import { sendOk } from '../../utils/response';
 import { AppError } from '../../middlewares/error.middleware';
-import { notificationsService } from './notifications.service';
+import { authedUserId as uid } from '../../utils/authedUserId';
+import { notificationsService, parseFilter } from './notifications.service';
 
 export const notificationsRouter: Router = Router();
 
 notificationsRouter.use(requireAuth);
 
-const uid = (req: Request): string => {
-  if (!req.userId) throw new AppError('AUTH_003');
-  return req.userId;
-};
-
-const FILTER_VALUES = ['all', 'rooms', 'social', 'clubs'] as const;
-type FilterValue = (typeof FILTER_VALUES)[number];
-
-const isFilter = (v: unknown): v is FilterValue =>
-  typeof v === 'string' && (FILTER_VALUES as readonly string[]).includes(v);
-
 notificationsRouter.get(
   '/',
   asyncHandler(async (req, res) => {
-    const raw = req.query['filter'];
-    const filter = isFilter(raw) ? raw : 'all';
-    const rows = await notificationsService.list(uid(req), filter);
-    sendOk(res, rows);
+    const filter = parseFilter(req.query['filter']);
+    const limitRaw = req.query['limit'];
+    const parsedLimit = typeof limitRaw === 'string' ? Number(limitRaw) : NaN;
+    const limit = Number.isFinite(parsedLimit) ? Math.min(50, Math.max(1, parsedLimit)) : 50;
+    const cursor = typeof req.query['cursor'] === 'string' ? req.query['cursor'] : undefined;
+    const page = await notificationsService.list(uid(req), filter, limit, cursor);
+    // Return the array directly (matches the OpenAPI contract: data: array).
+    // The clients read `data` as the notification array; wrapping the paginated
+    // object here made them `.map` over an object and crash.
+    sendOk(res, page.data);
   }),
 );
 

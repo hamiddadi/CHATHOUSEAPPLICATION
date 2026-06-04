@@ -1,8 +1,9 @@
 import React, { memo, useCallback, useState } from 'react';
-import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useTranslation } from 'react-i18next';
 import { Avatar } from '../../../../shared/components/Avatar';
 import { Button } from '../../../../shared/components/Button';
 import { Loader } from '../../../../shared/components/Loader';
@@ -22,6 +23,7 @@ interface UserRowProps {
 }
 
 const UserRow: React.FC<UserRowProps> = memo(({ user, onToggle, pending }) => {
+  const { t } = useTranslation();
   const handle = useCallback(() => onToggle(user), [onToggle, user]);
   return (
     <View className="flex-row items-center gap-md p-md rounded-md bg-overlay-white-5">
@@ -31,7 +33,9 @@ const UserRow: React.FC<UserRowProps> = memo(({ user, onToggle, pending }) => {
         <Text className="text-xs font-body text-ink-muted">@{user.username}</Text>
       </View>
       <Button
-        label={user.isFollowedByMe ? 'Following' : 'Follow'}
+        label={
+          user.isFollowedByMe ? t('profile.following', 'Following') : t('profile.follow', 'Follow')
+        }
         variant={user.isFollowedByMe ? 'ghost' : 'primary'}
         size="sm"
         loading={pending}
@@ -48,6 +52,7 @@ interface TabToggleProps {
 }
 
 const TabToggle: React.FC<TabToggleProps> = memo(({ value, onChange }) => {
+  const { t } = useTranslation();
   const setF = useCallback(() => onChange('followers'), [onChange]);
   const setG = useCallback(() => onChange('following'), [onChange]);
   return (
@@ -69,7 +74,7 @@ const TabToggle: React.FC<TabToggleProps> = memo(({ value, onChange }) => {
               : 'text-sm font-body-bold text-ink-muted'
           }
         >
-          Followers
+          {t('profile.followers', 'Followers')}
         </Text>
       </Pressable>
       <Pressable
@@ -89,7 +94,7 @@ const TabToggle: React.FC<TabToggleProps> = memo(({ value, onChange }) => {
               : 'text-sm font-body-bold text-ink-muted'
           }
         >
-          Following
+          {t('profile.following', 'Following')}
         </Text>
       </Pressable>
     </View>
@@ -98,6 +103,7 @@ const TabToggle: React.FC<TabToggleProps> = memo(({ value, onChange }) => {
 TabToggle.displayName = 'TabToggle';
 
 export const FollowersScreen: React.FC = () => {
+  const { t } = useTranslation();
   const navigation = useNavigation();
   const route = useRoute<Route>();
   const insets = useSafeAreaInsets();
@@ -111,10 +117,18 @@ export const FollowersScreen: React.FC = () => {
   const handleBack = useCallback(() => navigation.goBack(), [navigation]);
   const handleToggle = useCallback(
     (user: User) => {
-      if (user.isFollowedByMe) unfollow.mutate(user.id);
-      else follow.mutate(user.id);
+      // Surface follow/unfollow failures — the hook re-syncs the cache on
+      // error, but without this the button gives no feedback on a network
+      // failure (mirrors ProfileScreen's toggle-error Alert).
+      const onError = (): void =>
+        Alert.alert(
+          t('common.error', 'Something went wrong'),
+          t('profile.actionFailed', 'Action failed. Please try again.'),
+        );
+      if (user.isFollowedByMe) unfollow.mutate(user.id, { onError });
+      else follow.mutate(user.id, { onError });
     },
-    [follow, unfollow],
+    [follow, t, unfollow],
   );
 
   const active = tab === 'followers' ? followersQuery : followingQuery;
@@ -139,12 +153,14 @@ export const FollowersScreen: React.FC = () => {
         <Pressable
           onPress={handleBack}
           accessibilityRole="button"
-          accessibilityLabel="Back"
+          accessibilityLabel={t('common.back', 'Back')}
           hitSlop={8}
         >
           <MaterialIcons name="arrow-back" size={24} color={colors.text} />
         </Pressable>
-        <Text className="text-lg font-headline text-ink">Connections</Text>
+        <Text className="text-lg font-headline text-ink">
+          {t('profile.connections', 'Connections')}
+        </Text>
       </View>
 
       <View className="px-xxl mb-lg">
@@ -152,9 +168,15 @@ export const FollowersScreen: React.FC = () => {
       </View>
 
       {active.isLoading ? (
-        <Loader fullscreen accessibilityLabel="Loading connections" />
+        <Loader
+          fullscreen
+          accessibilityLabel={t('profile.loadingConnections', 'Loading connections')}
+        />
       ) : active.isError ? (
-        <EmptyState title="Couldn't load list" description="Please try again." />
+        <EmptyState
+          title={t('profile.couldNotLoadConnections', "Couldn't load list")}
+          description={t('profile.pleaseTryAgain', 'Please try again.')}
+        />
       ) : (
         <FlatList
           data={active.data ?? []}
@@ -162,6 +184,19 @@ export const FollowersScreen: React.FC = () => {
           keyExtractor={keyExtractor}
           ItemSeparatorComponent={renderSeparator}
           contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + spacing.giant }]}
+          ListEmptyComponent={
+            <EmptyState
+              title={
+                tab === 'followers'
+                  ? t('profile.noFollowers', 'No followers yet')
+                  : t('profile.noFollowing', 'Not following anyone yet')
+              }
+              description={t(
+                'profile.emptyConnectionsHint',
+                'When there are people here, they show up in this list.',
+              )}
+            />
+          }
           showsVerticalScrollIndicator={false}
         />
       )}

@@ -21,7 +21,11 @@ interface RootNavigatorProps {
 /**
  * RootNavigator
  * - Picks between AuthNavigator and MainNavigator based on auth state.
- * - Fires `onReady` once the nav container is mounted — used to hide the splash.
+ * - Fires `onReady` once the nav container is mounted — this is the SINGLE
+ *   signal used to hide the native splash (see App.tsx). While `isHydrating`
+ *   we render AnimatedSplashScreen as a cover and `onReady` does NOT fire, so
+ *   the native splash stays underneath until the real UI is mounted —
+ *   avoiding the fonts-ready/nav-not-ready flash.
  */
 export const RootNavigator: React.FC<RootNavigatorProps> = ({ onReady }) => {
   const status = useAuthStore(s => s.status);

@@ -1,5 +1,6 @@
 import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
 import {
+  Alert,
   FlatList,
   KeyboardAvoidingView,
   Modal,
@@ -15,12 +16,24 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Avatar } from '../../../../shared/components/Avatar';
 import { colors, spacing } from '../../../../shared/constants/theme';
 import { getSocket } from '../../../../shared/services/realtime/socketClient';
+import { errorMessage } from '../../../../shared/utils/errorMessage';
 import { roomKeys, useRoomMessages, useSendRoomMessage } from '../../hooks/useRooms';
+
+// Defer the scroll-to-end so the FlatList finishes layout before scrolling.
+const SCROLL_DEFER_MS = 50;
+// Per-message character cap — mirrors the backend's room-message limit.
+const MAX_MESSAGE_LENGTH = 500;
 
 interface RoomChatSidebarProps {
   visible: boolean;
   roomId: string;
   onClose: () => void;
+  // Posting gate (defaults keep the composer enabled for backward compat). The
+  // backend enforces these too; surfacing them here avoids a misleading composer
+  // that only errors on send.
+  chatEnabled?: boolean;
+  chatVisibility?: 'ALL' | 'MODS_ONLY';
+  canModerate?: boolean;
 }
 
 interface ChatUser {
@@ -69,7 +82,20 @@ const normalizeUser = (u: IncomingChatPayload['user']): ChatUser => ({
 });
 
 export const RoomChatSidebar: React.FC<RoomChatSidebarProps> = memo(
-  ({ visible, roomId, onClose }) => {
+  ({
+    visible,
+    roomId,
+    onClose,
+    chatEnabled = true,
+    chatVisibility = 'ALL',
+    canModerate = false,
+  }) => {
+    // Can the viewer post? Chat must be on, and either open to all or the viewer
+    // is a host/moderator. When they can't, we replace the composer with a note.
+    const canPost = chatEnabled && (chatVisibility !== 'MODS_ONLY' || canModerate);
+    const cantPostNotice = !chatEnabled
+      ? 'Le chat est désactivé pour cette room.'
+      : 'Le chat est réservé aux modérateurs.';
     const { data: messages = [] } = useRoomMessages(visible ? roomId : null);
     const sendMessage = useSendRoomMessage();
     const qc = useQueryClient();
@@ -124,14 +150,20 @@ export const RoomChatSidebar: React.FC<RoomChatSidebarProps> = memo(
     useEffect(() => {
       if (visible && messages.length > 0) {
         // Defer scroll so the FlatList finishes layout first.
-        const id = setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 50);
+        const id = setTimeout(
+          () => listRef.current?.scrollToEnd({ animated: true }),
+          SCROLL_DEFER_MS,
+        );
         return () => clearTimeout(id);
       }
     }, [messages.length, visible]);
 
     const handleSend = useCallback(() => {
       const content = draft.trim();
-      if (content.length === 0) return;
+      // Guard against a double-tap firing two mutations before isPending
+      // flips (React state is async): otherwise the same message is sent
+      // twice since the draft is only cleared in onSuccess.
+      if (content.length === 0 || sendMessage.isPending) return;
       sendMessage.mutate(
         { roomId, content, replyToId: replyTo?.id },
         {
@@ -139,6 +171,7 @@ export const RoomChatSidebar: React.FC<RoomChatSidebarProps> = memo(
             setDraft('');
             setReplyTo(null);
           },
+          onError: e => Alert.alert('Erreur', errorMessage(e, "Échec de l'envoi")),
         },
       );
     }, [draft, roomId, replyTo, sendMessage]);
@@ -204,6 +237,10 @@ export const RoomChatSidebar: React.FC<RoomChatSidebarProps> = memo(
                 keyExtractor={m => m.id}
                 contentContainerStyle={styles.listContent}
                 showsVerticalScrollIndicator={false}
+                initialNumToRender={20}
+                maxToRenderPerBatch={20}
+                windowSize={11}
+                removeClippedSubviews
               />
               {replyTo ? (
                 <View style={styles.replyBanner}>
@@ -225,30 +262,39 @@ export const RoomChatSidebar: React.FC<RoomChatSidebarProps> = memo(
                   </Pressable>
                 </View>
               ) : null}
-              <View style={styles.composer}>
-                <TextInput
-                  value={draft}
-                  onChangeText={setDraft}
-                  placeholder={replyTo ? 'Réponse…' : 'Écrire…'}
-                  placeholderTextColor={colors.textMuted}
-                  style={styles.input}
-                  multiline
-                  maxLength={500}
-                  accessibilityLabel="Message de chat"
-                />
-                <Pressable
-                  onPress={handleSend}
-                  disabled={draft.trim().length === 0 || sendMessage.isPending}
-                  accessibilityRole="button"
-                  accessibilityLabel="Envoyer"
-                  style={[
-                    styles.sendBtn,
-                    draft.trim().length === 0 ? styles.sendBtnDisabled : null,
-                  ]}
-                >
-                  <MaterialIcons name="send" size={18} color={colors.background} />
-                </Pressable>
-              </View>
+              {canPost ? (
+                <View style={styles.composer}>
+                  <TextInput
+                    value={draft}
+                    onChangeText={setDraft}
+                    placeholder={replyTo ? 'Réponse…' : 'Écrire…'}
+                    placeholderTextColor={colors.textMuted}
+                    style={styles.input}
+                    multiline
+                    maxLength={MAX_MESSAGE_LENGTH}
+                    accessibilityLabel="Message de chat"
+                  />
+                  <Pressable
+                    onPress={handleSend}
+                    disabled={draft.trim().length === 0 || sendMessage.isPending}
+                    accessibilityRole="button"
+                    accessibilityLabel="Envoyer"
+                    style={[
+                      styles.sendBtn,
+                      draft.trim().length === 0 || sendMessage.isPending
+                        ? styles.sendBtnDisabled
+                        : null,
+                    ]}
+                  >
+                    <MaterialIcons name="send" size={18} color={colors.background} />
+                  </Pressable>
+                </View>
+              ) : (
+                <View style={styles.composerDisabled}>
+                  <MaterialIcons name="lock" size={16} color={colors.textMuted} />
+                  <Text style={styles.composerDisabledText}>{cantPostNotice}</Text>
+                </View>
+              )}
             </KeyboardAvoidingView>
           </Pressable>
         </Pressable>
@@ -300,6 +346,16 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: 'rgba(255,255,255,0.08)',
   },
+  composerDisabled: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    padding: spacing.lg,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(255,255,255,0.08)',
+  },
+  composerDisabledText: { color: colors.textMuted, fontSize: 13 },
   input: {
     flex: 1,
     color: colors.text,

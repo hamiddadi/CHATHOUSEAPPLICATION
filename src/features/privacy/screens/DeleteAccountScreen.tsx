@@ -1,39 +1,42 @@
 import React, { useCallback, useState } from 'react';
 import { Alert, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useTranslation } from 'react-i18next';
 import { Button } from '../../../shared/components/Button';
-import { colors, spacing } from '../../../shared/constants/theme';
+import { colors, radii, spacing } from '../../../shared/constants/theme';
 import { useAuthStore } from '../../auth/store/authStore';
 import { privacyService } from '../services/privacyService';
-
-const CONFIRM_PHRASE = 'SUPPRIMER';
+import { errorMessage } from '../../../shared/utils/errorMessage';
 
 export const DeleteAccountScreen: React.FC = () => {
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const signOut = useAuthStore(s => s.signOut);
   const [confirm, setConfirm] = useState('');
   const [busy, setBusy] = useState(false);
 
-  const canDelete = confirm.trim().toUpperCase() === CONFIRM_PHRASE && !busy;
+  const confirmPhrase = t('privacy.delete.confirmPhrase', 'DELETE');
+  const canDelete = confirm.trim().toUpperCase() === confirmPhrase.toUpperCase() && !busy;
 
   const handleDelete = useCallback(() => {
     Alert.alert(
-      'Confirmer la suppression',
-      `Votre compte sera désactivé immédiatement et définitivement supprimé après 30 jours.\n\nVous serez déconnecté·e dès maintenant. Vous pouvez vous reconnecter dans les 30 jours pour annuler la suppression.\n\nContinuer ?`,
+      t('privacy.delete.title'),
+      `${t('privacy.delete.description')}\n\n${t('privacy.delete.grace')}`,
       [
-        { text: 'Annuler', style: 'cancel' },
+        { text: t('privacy.delete.buttonCancel'), style: 'cancel' },
         {
-          text: 'Supprimer',
+          text: t('privacy.delete.buttonDelete'),
           style: 'destructive',
           onPress: async () => {
             setBusy(true);
             try {
               await privacyService.requestDeletion();
-              // Sign out clears tokens + push registration so the user can't
-              // keep transacting with the now-soft-deleted account.
               await signOut();
             } catch (e) {
-              Alert.alert('Erreur', e instanceof Error ? e.message : 'Échec');
+              Alert.alert(
+                t('privacy.delete.errorTitle'),
+                errorMessage(e, t('privacy.delete.errorBody')),
+              );
             } finally {
               setBusy(false);
             }
@@ -41,7 +44,7 @@ export const DeleteAccountScreen: React.FC = () => {
         },
       ],
     );
-  }, [signOut]);
+  }, [signOut, t]);
 
   return (
     <ScrollView
@@ -54,50 +57,55 @@ export const DeleteAccountScreen: React.FC = () => {
       }}
       keyboardShouldPersistTaps="handled"
     >
-      <Text style={styles.h1}>Supprimer mon compte</Text>
+      <Text style={styles.h1} accessibilityRole="header">
+        {t('privacy.delete.title')}
+      </Text>
 
       <View style={styles.warningCard}>
-        <Text style={styles.warningTitle}>⚠️ Action quasi-irréversible</Text>
-        <Text style={styles.warningBody}>
-          Vous disposerez de 30 jours pour annuler la suppression en vous reconnectant. Passé ce
-          délai, l&apos;intégralité de vos données sera purgée définitivement (hormis les journaux
-          légalement requis pour la modération, conservés 1 an).
+        <Text style={styles.warningTitle}>
+          {t('privacy.delete.warningTitle', '⚠️ Near-irreversible action')}
         </Text>
+        <Text style={styles.warningBody}>{t('privacy.delete.grace')}</Text>
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>Avant de supprimer</Text>
+        <Text style={styles.cardTitle}>{t('privacy.delete.beforeDelete', 'Before deleting')}</Text>
         <Text style={styles.body}>
-          • Vous pouvez exporter vos données depuis Paramètres → Confidentialité → Exporter mes
-          données.
+          {t(
+            'privacy.delete.stepExport',
+            '• You can export your data from Settings → Privacy → Export my data.',
+          )}
         </Text>
         <Text style={styles.body}>
-          • Les rooms que vous avez hébergées seront fermées si elles sont actives.
+          {t('privacy.delete.stepRooms', '• Rooms you hosted will be closed if they are active.')}
         </Text>
         <Text style={styles.body}>
-          • Vos messages directs envoyés à d&apos;autres utilisateurs resteront visibles côté
-          destinataire (impossible de les retirer après envoi).
+          {t(
+            'privacy.delete.stepMessages',
+            '• Direct messages you sent to other users will remain visible to the recipient (cannot be retracted after sending).',
+          )}
         </Text>
       </View>
 
       <View>
         <Text style={styles.confirmLabel}>
-          Pour confirmer, tapez <Text style={styles.confirmPhrase}>{CONFIRM_PHRASE}</Text>
+          {t('privacy.delete.confirmInputLabel')}{' '}
+          <Text style={styles.confirmPhrase}>{confirmPhrase}</Text>
         </Text>
         <TextInput
           value={confirm}
           onChangeText={setConfirm}
-          placeholder={CONFIRM_PHRASE}
+          placeholder={confirmPhrase}
           placeholderTextColor={colors.textMuted}
           autoCapitalize="characters"
           autoCorrect={false}
           style={styles.input}
-          accessibilityLabel="Saisie de confirmation de suppression"
+          accessibilityLabel={t('privacy.delete.a11yInput', 'Deletion confirmation input')}
         />
       </View>
 
       <Button
-        label={busy ? 'Suppression…' : 'Supprimer définitivement'}
+        label={busy ? '...' : t('privacy.delete.buttonDelete')}
         variant="danger"
         size="lg"
         fullWidth
@@ -111,22 +119,26 @@ export const DeleteAccountScreen: React.FC = () => {
 
 const styles = StyleSheet.create({
   h1: { color: colors.text, fontSize: 24, fontWeight: '700' },
+  // Saturated-red literals (NOT withAlpha(colors.danger,…)). colors.danger is
+  // the pale error *foreground* role (#ffb4ab) and stays as the warningTitle/
+  // confirmPhrase text color; the card fill + border keep the vivid #ef4444
+  // 'danger zone' affordance for this irreversible-deletion warning.
   warningCard: {
-    backgroundColor: 'rgba(239,68,68,0.1)',
-    borderRadius: 12,
+    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+    borderRadius: radii.md,
     padding: spacing.lg,
     borderWidth: 1,
-    borderColor: 'rgba(239,68,68,0.4)',
+    borderColor: 'rgba(239, 68, 68, 0.4)',
     gap: spacing.sm,
   },
   warningTitle: { color: colors.danger, fontSize: 14, fontWeight: '700' },
   warningBody: { color: colors.text, fontSize: 13, lineHeight: 19 },
   card: {
-    backgroundColor: 'rgba(255,255,255,0.04)',
-    borderRadius: 12,
+    backgroundColor: colors.overlayWhite4,
+    borderRadius: radii.md,
     padding: spacing.lg,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
+    borderColor: colors.glassStrong,
     gap: 6,
   },
   cardTitle: { color: colors.text, fontSize: 13, fontWeight: '700', marginBottom: 4 },
@@ -134,12 +146,12 @@ const styles = StyleSheet.create({
   confirmLabel: { color: colors.text, fontSize: 13, marginBottom: spacing.sm },
   confirmPhrase: { color: colors.danger, fontWeight: '700' },
   input: {
-    backgroundColor: 'rgba(255,255,255,0.05)',
+    backgroundColor: colors.overlayWhite5,
     color: colors.text,
-    borderRadius: 12,
+    borderRadius: radii.md,
     padding: spacing.md,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.15)',
+    borderColor: colors.overlayWhite15,
     fontSize: 15,
     letterSpacing: 1,
   },

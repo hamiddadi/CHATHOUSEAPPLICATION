@@ -1,0 +1,79 @@
+# ═════════════════════════════════════════════════════════════════════════════
+# GitHub Environment — STAGING (DOCUMENTATION ONLY)
+#
+# ┌───────────────────────────────────────────────────────────────────────────┐
+# │ IMPORTANT: GitHub does NOT auto-read environments from this file.          │
+# │ Environments are configured in:                                            │
+# │   • repo Settings → Environments  (UI), or                                 │
+# │   • the GitHub REST API (PUT /repos/{owner}/{repo}/environments/{name}),   │
+# │   • Terraform (github_repository_environment / *_deployment_branch_policy /│
+# │     github_actions_environment_secret resources).                          │
+# │ This file documents the DESIRED STATE so it is reviewable in PRs and the   │
+# │ intended config is version-controlled. Apply it by hand or via IaC.        │
+# └───────────────────────────────────────────────────────────────────────────┘
+#
+# Referenced by `.github/workflows/cd-staging.yml` (job deploy-staging:
+# `environment: staging`) and by `.github/workflows/rollback.yml`.
+# ═════════════════════════════════════════════════════════════════════════════
+
+environment:
+  name: staging
+
+  # The deployment URL shown in the GitHub UI for this environment.
+  url: https://staging-api.chathouse.app
+
+  # ── Protection rules ──────────────────────────────────────────────────────
+  # Staging is low-friction: auto-deploy from main, no manual approval. Tighten
+  # for production (see note at bottom).
+  protection_rules:
+    # No required reviewers on staging → deploys proceed automatically.
+    required_reviewers: []
+
+    # Optional wait timer (minutes) before a deployment runs. 0 = none.
+    wait_timer_minutes: 0
+
+    # Prevent self-review (only relevant once reviewers are added).
+    prevent_self_review: false
+
+    # Allow administrators to bypass configured protection rules.
+    allow_admins_to_bypass: true
+
+  # ── Deployment branch policy ──────────────────────────────────────────────
+  # Only deployments originating from `main` may use this environment.
+  deployment_branch_policy:
+    protected_branches: false
+    custom_branch_policies: true
+    allowed_branches:
+      - main
+
+  # ── Environment SECRETS ───────────────────────────────────────────────────
+  # Values are NOT stored here — set them in Settings → Environments → staging
+  # → Environment secrets (or via the REST/Terraform API). Listed for tracking.
+  secrets:
+    - name: STAGING_HOST # staging host IP / DNS for SSH deploy
+    - name: STAGING_USER # SSH user on the staging host
+    - name: STAGING_SSH_KEY # private SSH key (PEM) for STAGING_USER
+    - name: SLACK_WEBHOOK_URL # deploy notifications channel webhook
+    # GITHUB_TOKEN is auto-provided to the workflow for GHCR push — not set here.
+
+  # ── Environment VARIABLES (non-secret) ────────────────────────────────────
+  # Visible config; safe to expose. Set under Environment variables.
+  variables:
+    - name: DEPLOY_DIR
+      value: /opt/chathouse/backend # dir on host holding docker-compose.yml + .env
+    - name: BASE_URL
+      value: http://localhost:4000 # health-check target on the host
+    - name: API_SERVICE
+      value: api # docker compose service name to recreate
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PRODUCTION environment (create separately, same mechanism, STRICTER rules):
+#   • name: production
+#   • protection_rules.required_reviewers: [<at least one on-call/lead>]
+#   • protection_rules.prevent_self_review: true
+#   • protection_rules.allow_admins_to_bypass: false
+#   • deployment_branch_policy: tags only (custom policy allowing v*.*.*)
+#   • secrets: PROD_HOST, PROD_USER, PROD_SSH_KEY, SLACK_WEBHOOK_URL
+# Referenced by `.github/workflows/cd-production.yml` (environment: production).
+# ─────────────────────────────────────────────────────────────────────────────

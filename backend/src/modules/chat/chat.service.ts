@@ -1,7 +1,8 @@
 import { prisma } from '../../config/database';
 import { AppError } from '../../middlewares/error.middleware';
 import { notificationsService } from '../notifications/notifications.service';
-import type { ListMessagesInput, SendMessageInput } from './chat.schema';
+import { emitChatMessage } from '../../socket/realtime';
+import type { ListMessagesInput, SendMessageInput, SendVoiceMessageInput } from './chat.schema';
 
 const publicUser = {
   id: true,
@@ -34,7 +35,29 @@ const assertMutualFollow = async (a: string, b: string): Promise<void> => {
 };
 
 export const chatService = {
-  async listConversations(userId: string) {
+  /**
+   * Conversation list with cursor pagination.
+   *
+   * Note on accuracy: DM history has no dedicated `Conversation` table in
+   * the current Prisma schema, so the per-peer aggregation is still derived
+   * from the user's recent message window. We page the *conversation list*
+   * via a cursor on the peer's `lastMessage.createdAt` (returning `limit`
+   * conversations + a `nextCursor`), while keeping the unread tally scoped
+   * to the same window. The window is sized generously relative to `limit`
+   * so an active conversation can't crowd the others out of a single page.
+   *
+   * TODO(audit): introduce a `Conversation` model (groupBy on the user pair
+   * + an indexed unread count per pair) to make `unreadCount` exact and the
+   * list pageable purely at the DB level instead of aggregating in memory.
+   *
+   * `limit`/`cursor` are optional to keep the public signature
+   * backward-compatible with existing callers.
+   */
+  async listConversations(userId: string, limit = 30, cursor?: string) {
+    // Pull a window large enough to surface `limit` distinct peers even when
+    // a single conversation is very chatty. Bounded so it stays a single
+    // indexed query rather than an unbounded scan.
+    const windowSize = Math.min(500, Math.max(100, limit * 10));
     const messages = await prisma.message.findMany({
       where: {
         OR: [{ senderId: userId }, { receiverId: userId }],
@@ -44,7 +67,7 @@ export const chatService = {
       include: {
         sender: { select: publicUser },
       },
-      take: 500,
+      take: windowSize,
     });
 
     const byPeer = new Map<
@@ -78,7 +101,7 @@ export const chatService = {
     });
     const peerById = new Map(peers.map(p => [p.id, p]));
 
-    return Array.from(byPeer.values())
+    const sorted = Array.from(byPeer.values())
       .map(e => ({
         peer: peerById.get(e.peerId),
         lastMessage: e.lastMessage,
@@ -86,6 +109,48 @@ export const chatService = {
       }))
       .filter(c => c.peer)
       .sort((a, b) => b.lastMessage.createdAt.getTime() - a.lastMessage.createdAt.getTime());
+
+    // Cursor on lastMessage.createdAt: skip everything at or after the
+    // supplied cursor, then return at most `limit` conversations.
+    const cutoff = cursor ? new Date(cursor).getTime() : null;
+    const filtered =
+      cutoff === null ? sorted : sorted.filter(c => c.lastMessage.createdAt.getTime() < cutoff);
+    const data = filtered.slice(0, limit);
+    const hasMore = filtered.length > limit;
+    const nextCursor = hasMore
+      ? (data[data.length - 1]?.lastMessage.createdAt.toISOString() ?? null)
+      : null;
+
+    return { data, nextCursor, hasMore };
+  },
+
+  /**
+   * Single conversation summary for one peer — `{ peer, lastMessage,
+   * unreadCount }`. Lets the client open a thread without scanning the full
+   * conversations list (the O(all conversations) round-trip the mobile client
+   * used to pay). `lastMessage` is null when there's no history yet.
+   */
+  async conversationWith(userId: string, peerId: string) {
+    if (userId === peerId) throw new AppError('CHAT_001');
+    const peer = await prisma.user.findUnique({ where: { id: peerId }, select: publicUser });
+    if (!peer) throw new AppError('USER_001');
+
+    const [lo, hi] = conversationPair(userId, peerId);
+    const lastMessage = await prisma.message.findFirst({
+      where: {
+        roomId: null,
+        OR: [
+          { senderId: lo, receiverId: hi },
+          { senderId: hi, receiverId: lo },
+        ],
+      },
+      orderBy: { createdAt: 'desc' },
+      include: { sender: { select: publicUser } },
+    });
+    const unreadCount = await prisma.message.count({
+      where: { roomId: null, senderId: peerId, receiverId: userId, isRead: false },
+    });
+    return { peer, lastMessage, unreadCount };
   },
 
   async listWithPeer(userId: string, peerId: string, input: ListMessagesInput) {
@@ -132,14 +197,65 @@ export const chatService = {
       include: { sender: { select: publicUser } },
     });
 
-    // Fire-and-forget notification + push. The recipient's in-app socket
-    // gets the message directly via chat:message; the Notification row
-    // is the offline fallback that lights up the bell badge next launch.
+    // Push the message to both parties in realtime. REST is the only send path
+    // the clients use (they never emit `chat:send`), so this is what makes the
+    // recipient's conversation list / unread badge / open thread update live.
+    emitChatMessage(senderId, receiverId, msg);
+
+    // Fire-and-forget notification + push. The realtime emit above handles the
+    // in-app update; the Notification row is the offline fallback that lights
+    // up the bell badge next launch.
     void notificationsService.create({
       userId: receiverId,
       type: 'NEW_MESSAGE',
       title: handle,
       body: input.content.slice(0, 160),
+      data: { messageId: msg.id, senderId, conversation: 'dm' },
+    });
+
+    return msg;
+  },
+
+  /**
+   * Send an async voice note to a peer. The clip is already uploaded to
+   * /upload/voice; we persist a VOICE-kind message and fan it out exactly like
+   * {@link send} (same mutual-follow gate, same realtime emit), with a 🎤
+   * notification body instead of the text preview.
+   */
+  async sendVoice(senderId: string, receiverId: string, input: SendVoiceMessageInput) {
+    if (senderId === receiverId) throw new AppError('CHAT_001');
+    const peer = await prisma.user.findUnique({
+      where: { id: receiverId },
+      select: { id: true, username: true, displayName: true },
+    });
+    if (!peer) throw new AppError('USER_001');
+
+    await assertMutualFollow(senderId, receiverId);
+
+    const sender = await prisma.user.findUnique({
+      where: { id: senderId },
+      select: { username: true, displayName: true },
+    });
+    const handle = sender?.displayName ?? sender?.username ?? 'Someone';
+
+    const msg = await prisma.message.create({
+      data: {
+        senderId,
+        receiverId,
+        kind: 'VOICE',
+        audioUrl: input.audioUrl,
+        audioDurationMs: input.durationMs,
+      },
+      include: { sender: { select: publicUser } },
+    });
+
+    emitChatMessage(senderId, receiverId, msg);
+
+    void notificationsService.create({
+      userId: receiverId,
+      type: 'NEW_MESSAGE',
+      title: handle,
+      body: '🎤 Voice message',
       data: { messageId: msg.id, senderId, conversation: 'dm' },
     });
 

@@ -2,8 +2,12 @@ import type { Request, Response } from 'express';
 import { sendOk } from '../../utils/response';
 import { AppError } from '../../middlewares/error.middleware';
 import { prisma } from '../../config/database';
-import { closeRoom as closeSfuRoom } from '../../webrtc/mediasoup.manager';
-import { agoraService, type AgoraParticipantRole } from './agora.service';
+import {
+  closeRoom as closeSfuRoom,
+  closeProducersForUserInRoom,
+} from '../../webrtc/mediasoup.manager';
+import { authedUserId as requireUserId } from '../../utils/authedUserId';
+import { livekitService, type LivekitParticipantRole } from './livekit.service';
 import {
   createRoomSchema,
   inviteToRoomSchema,
@@ -11,7 +15,6 @@ import {
   listRoomsSchema,
   muteAllSchema,
   muteSchema,
-  pingUserSchema,
   sendReactionSchema,
   sendRoomMessageSchema,
   toggleRoomChatSchema,
@@ -20,16 +23,18 @@ import {
 } from './rooms.schema';
 import { roomsService } from './rooms.service';
 
-const requireUserId = (req: Request): string => {
-  if (!req.userId) throw new AppError('AUTH_003');
-  return req.userId;
-};
-
 const paramId = (req: Request, key: string): string => {
   const raw = req.params[key];
   const id = Array.isArray(raw) ? raw[0] : raw;
   if (!id) throw new AppError('ROOM_001');
   return id;
+};
+
+// Shared list pagination guard for the limit query param: parses to an int,
+// clamps to [1, max] and falls back to `def` for missing/non-numeric input.
+const parseLimit = (raw: unknown, def = 20, max = 50): number => {
+  const n = typeof raw === 'string' ? Number.parseInt(raw, 10) : NaN;
+  return Number.isFinite(n) ? Math.max(1, Math.min(max, n)) : def;
 };
 
 export const roomsController = {
@@ -46,7 +51,12 @@ export const roomsController = {
   },
 
   async get(req: Request, res: Response) {
-    const room = await roomsService.get(paramId(req, 'id'));
+    // Pass the authenticated viewer so the service can annotate each
+    // LISTENER with `followedByViewer`. The rooms router mounts every route
+    // behind requireAuth, so req.userId is populated; it stays optional in
+    // the service (undefined → flag false everywhere) for callers without
+    // an authenticated viewer.
+    const room = await roomsService.get(paramId(req, 'id'), req.userId);
     sendOk(res, room);
   },
 
@@ -92,7 +102,11 @@ export const roomsController = {
   },
 
   async listRsvps(req: Request, res: Response) {
-    const rows = await roomsService.listRsvps(paramId(req, 'id'));
+    const roomId = paramId(req, 'id');
+    const userId = requireUserId(req);
+    // viewerId lets the service hide the attendee list of private rooms from
+    // non-members (see roomsService.listRsvps).
+    const rows = await roomsService.listRsvps(roomId, userId);
     sendOk(res, rows);
   },
 
@@ -102,17 +116,13 @@ export const roomsController = {
   },
 
   async myHistory(req: Request, res: Response) {
-    const raw = req.query['limit'];
-    const parsed = typeof raw === 'string' ? Number.parseInt(raw, 10) : NaN;
-    const limit = Number.isFinite(parsed) ? Math.max(1, Math.min(50, parsed)) : 20;
+    const limit = parseLimit(req.query['limit']);
     const rows = await roomsService.myRoomHistory(requireUserId(req), limit);
     sendOk(res, rows);
   },
 
   async feed(req: Request, res: Response) {
-    const raw = req.query['limit'];
-    const parsed = typeof raw === 'string' ? Number.parseInt(raw, 10) : NaN;
-    const limit = Number.isFinite(parsed) ? Math.max(1, Math.min(50, parsed)) : 20;
+    const limit = parseLimit(req.query['limit']);
     // Optional topic / following filter — passed through to the service so
     // the scoring pool is narrowed before ranking. `topic=tech` matches
     // both Room.topic (single) and Room.topics[] (array).
@@ -121,9 +131,13 @@ export const roomsController = {
       typeof topicQ === 'string' && topicQ.length > 0 ? topicQ.toLowerCase() : undefined;
     const followingQ = req.query['following'];
     const following = followingQ === 'true' || followingQ === '1';
+    // `clubs=true` restricts the feed to rooms attached to a club.
+    const clubsQ = req.query['clubs'];
+    const clubs = clubsQ === 'true' || clubsQ === '1';
     const rows = await roomsService.feed(requireUserId(req), limit, undefined, {
       topic,
       following,
+      clubs,
     });
     sendOk(res, rows);
   },
@@ -162,10 +176,17 @@ export const roomsController = {
 
   async kick(req: Request, res: Response) {
     const input = kickSchema.parse(req.body);
-    const result = await roomsService.kick(paramId(req, 'id'), requireUserId(req), input.userId, {
+    const roomId = paramId(req, 'id');
+    const result = await roomsService.kick(roomId, requireUserId(req), input.userId, {
       banMinutes: input.banMinutes,
       reason: input.reason,
     });
+    // Tear down the kicked user's SFU producers so peers stop consuming their
+    // audio immediately — the socket `room:user_kicked` broadcast (emitted by
+    // roomsService.kick) already pops the client out of the room. The Producer
+    // `close` handler fans out `rtc:producer-closed` so consumers clean up.
+    // Idempotent: a no-op (returns 0) if RTC wasn't in use for this user.
+    closeProducersForUserInRoom(roomId, input.userId);
     sendOk(res, result);
   },
 
@@ -194,9 +215,11 @@ export const roomsController = {
   },
 
   async ping(req: Request, res: Response) {
-    const input = pingUserSchema.parse(req.body);
+    // roomId + targetUserId both come from the path so the endpoint is
+    // consistent with the rest of the file (no mixing body + params).
+    // Wired as POST /:id/ping/:userId in rooms.router.ts.
     const result = await roomsService.pingUser(
-      input.roomId,
+      paramId(req, 'id'),
       requireUserId(req),
       paramId(req, 'userId'),
     );
@@ -204,13 +227,13 @@ export const roomsController = {
   },
 
   /**
-   * Issue an Agora token for the caller's current role in the room. The
-   * token is bound to (channel = roomId, uid = FNV-1a(userId), role).
-   * Caller MUST be an active participant — listeners get a SUBSCRIBER
-   * token, host/mod/speaker get a PUBLISHER token. The client refetches
-   * this on `onTokenPrivilegeWillExpire` to renew without rejoining.
+   * Issue a LiveKit token for the caller's current role in the room. The
+   * token is bound to (room = roomId, identity = userId, canPublish).
+   * Caller MUST be an active participant — listeners get canPublish=false,
+   * host/mod/speaker get canPublish=true. The client refetches this to
+   * renew before the token expires.
    */
-  async agoraToken(req: Request, res: Response) {
+  async livekitToken(req: Request, res: Response) {
     const userId = requireUserId(req);
     const roomId = paramId(req, 'id');
 
@@ -220,10 +243,10 @@ export const roomsController = {
     });
     if (!participant || participant.leftAt) throw new AppError('ROOM_005');
 
-    const result = agoraService.issueRoomToken({
+    const result = await livekitService.issueRoomToken({
       roomId,
       userId,
-      role: participant.role as AgoraParticipantRole,
+      role: participant.role as LivekitParticipantRole,
     });
     sendOk(res, result);
   },

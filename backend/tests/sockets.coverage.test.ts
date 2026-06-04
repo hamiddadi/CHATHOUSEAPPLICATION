@@ -17,6 +17,8 @@ const { createSocketServer } =
 const { prisma } = require('../src/config/database') as typeof import('../src/config/database');
 const { connectRedis, disconnectRedis } =
   require('../src/config/redis') as typeof import('../src/config/redis');
+const { roomChannel } =
+  require('../src/socket/channels') as typeof import('../src/socket/channels');
 /* eslint-enable @typescript-eslint/no-require-imports */
 
 const rand = () => Math.random().toString(36).slice(2, 10);
@@ -89,6 +91,21 @@ describe('Socket.IO — room broadcasts + chat presence events', () => {
       });
     });
 
+  // Poll an async predicate until it returns a truthy value or times out. Used
+  // for fire-and-forget side effects, e.g. the offline Notification row that
+  // chatService.send writes without awaiting.
+  const pollFor = <T>(fn: () => Promise<T | null>, timeoutMs = 3_000): Promise<T | null> =>
+    new Promise(resolve => {
+      const start = Date.now();
+      const tick = (): void => {
+        void fn().then(v => {
+          if (v || Date.now() - start >= timeoutMs) return resolve(v);
+          setTimeout(tick, 50);
+        });
+      };
+      tick();
+    });
+
   // 4.1 — room:join broadcasts to existing members
   it('room:join broadcasts room:user-joined to existing members', async () => {
     const alice = await register(app);
@@ -154,7 +171,9 @@ describe('Socket.IO — room broadcasts + chat presence events', () => {
     );
     await emitWithAck(hostSock, 'room:mute', { roomId, isMuted: true });
     const msg = await muteChangedOnPeer;
-    expect(msg).toEqual({ userId: host.id, isMuted: true });
+    // The event also carries roomId now; assert the required fields are present
+    // rather than an exact shape so adding context fields isn't a breaking test.
+    expect(msg).toMatchObject({ userId: host.id, isMuted: true });
 
     hostSock.disconnect();
     peerSock.disconnect();
@@ -193,6 +212,80 @@ describe('Socket.IO — room broadcasts + chat presence events', () => {
 
     hostSock.disconnect();
     askrSock.disconnect();
+  }, 30_000);
+
+  // 4.10 — moderator kick forcibly evicts the target's socket from the room
+  // channel (server-enforced, not client-cooperative).
+  it('kick forcibly removes the target socket from the room channel', async () => {
+    const host = await register(app);
+    const target = await register(app);
+    createdUserIds.push(host.id, target.id);
+
+    const created = await request(app)
+      .post('/api/rooms')
+      .set('Authorization', `Bearer ${host.token}`)
+      .send({ title: 'kick room' });
+    const roomId = created.body.data.id as string;
+    createdRoomIds.push(roomId);
+
+    await request(app)
+      .post(`/api/rooms/${roomId}/join`)
+      .set('Authorization', `Bearer ${target.token}`);
+
+    const hostSock = await connect(host.token);
+    const targetSock = await connect(target.token);
+    await emitWithAck(hostSock, 'room:join', { roomId });
+    await emitWithAck(targetSock, 'room:join', { roomId });
+
+    // Server-side socket ids (=== the connected client ids). Narrow away the
+    // `string | undefined` the client type carries pre-connect.
+    const hostSid = hostSock.id;
+    const targetSid = targetSock.id;
+    if (!hostSid || !targetSid) throw new Error('expected both sockets to be connected');
+
+    // Membership is read from the live (local) adapter room map by socket id —
+    // synchronous and authoritative, vs. fetchSockets() which does a Redis
+    // round-trip that can read a stale snapshot.
+    const roomMembers = (): Set<string> =>
+      io.sockets.adapter.rooms.get(roomChannel(roomId)) ?? new Set<string>();
+    const waitUntil = (cond: () => boolean, timeoutMs = 2_000): Promise<void> =>
+      new Promise((resolve, reject) => {
+        const start = Date.now();
+        const tick = (): void => {
+          if (cond()) return resolve();
+          if (Date.now() - start >= timeoutMs) return reject(new Error('waitUntil timeout'));
+          setTimeout(tick, 25);
+        };
+        tick();
+      });
+
+    // Both sockets are members of the room channel before the kick.
+    expect(roomMembers().has(hostSid)).toBe(true);
+    expect(roomMembers().has(targetSid)).toBe(true);
+
+    // Host kicks target via REST. The target must get a direct personal signal
+    // on its user channel AND be evicted from the room channel server-side.
+    const kicked = waitForEvent<{ roomId: string; kickedBy: string }>(
+      targetSock,
+      'room:you_were_kicked',
+    );
+    await request(app)
+      .post(`/api/rooms/${roomId}/kick`)
+      .set('Authorization', `Bearer ${host.token}`)
+      .send({ userId: target.id });
+
+    expect(await kicked).toMatchObject({ roomId, kickedBy: host.id });
+
+    // socketsLeave propagates through the adapter; poll until the target is
+    // evicted (bounded, so a genuine no-op still fails fast).
+    await waitUntil(() => !roomMembers().has(targetSid));
+
+    // Eviction is targeted: the host (and the channel) survive.
+    expect(roomMembers().has(targetSid)).toBe(false);
+    expect(roomMembers().has(hostSid)).toBe(true);
+
+    hostSock.disconnect();
+    targetSock.disconnect();
   }, 30_000);
 
   // 5.8 — chat:typing relayed to the receiver only
@@ -240,5 +333,159 @@ describe('Socket.IO — room broadcasts + chat presence events', () => {
 
     aliceSock.disconnect();
     bobSock.disconnect();
+  }, 20_000);
+
+  // 3.6 — application-level RTT probe: rtt:ping acks immediately with serverTime
+  // (+ echoes the client's send timestamp) so the client can compute latency.
+  it('rtt:ping acks with serverTime so the client can measure round-trip', async () => {
+    const u = await register(app);
+    createdUserIds.push(u.id);
+    const sock = await connect(u.token);
+
+    const res = await emitWithAck<{ serverTime: number; echo: number | null }>(sock, 'rtt:ping', {
+      t: 1234,
+    });
+    expect(typeof res.serverTime).toBe('number');
+    expect(res.echo).toBe(1234);
+
+    sock.disconnect();
+  }, 20_000);
+
+  // 4.2 — a user joining mid-session receives the current room state (the
+  // participant list) rather than only future deltas.
+  it('room:join replies with the current participant list (late-join state)', async () => {
+    const host = await register(app);
+    const late = await register(app);
+    createdUserIds.push(host.id, late.id);
+
+    const created = await request(app)
+      .post('/api/rooms')
+      .set('Authorization', `Bearer ${host.token}`)
+      .send({ title: 'late join room' });
+    const roomId = created.body.data.id as string;
+    createdRoomIds.push(roomId);
+
+    // Host is already in the room before the late joiner arrives.
+    const hostSock = await connect(host.token);
+    await emitWithAck(hostSock, 'room:join', { roomId });
+
+    await request(app)
+      .post(`/api/rooms/${roomId}/join`)
+      .set('Authorization', `Bearer ${late.token}`);
+    const lateSock = await connect(late.token);
+
+    const state = waitForEvent<{ participants: { userId: string }[] }>(
+      lateSock,
+      'room:participants',
+    );
+    await emitWithAck(lateSock, 'room:join', { roomId });
+
+    const payload = await state;
+    expect(Array.isArray(payload.participants)).toBe(true);
+    expect(payload.participants.some(p => p.userId === host.id)).toBe(true);
+
+    hostSock.disconnect();
+    lateSock.disconnect();
+  }, 30_000);
+
+  // 1.x — offline recipient: a DM still persists a NEW_MESSAGE notification
+  // (the durable fallback that lights the bell badge next launch) even though
+  // the realtime emit to bob's user channel is a no-op while he's disconnected.
+  it('DM to an offline user persists a NEW_MESSAGE notification (offline fallback)', async () => {
+    const alice = await register(app);
+    const bob = await register(app);
+    createdUserIds.push(alice.id, bob.id);
+
+    await request(app).post(`/api/follow/${bob.id}`).set('Authorization', `Bearer ${alice.token}`);
+    await request(app).post(`/api/follow/${alice.id}`).set('Authorization', `Bearer ${bob.token}`);
+
+    // Bob is NOT connected. Alice sends a DM via REST.
+    await request(app)
+      .post(`/api/chat/${bob.id}`)
+      .set('Authorization', `Bearer ${alice.token}`)
+      .send({ content: 'ping while you were away' });
+
+    // notificationsService.create runs fire-and-forget; poll for the row.
+    const notif = await pollFor(() =>
+      prisma.notification.findFirst({ where: { userId: bob.id, type: 'NEW_MESSAGE' } }),
+    );
+    expect(notif).not.toBeNull();
+  }, 20_000);
+
+  // 4.7 — room capacity: promoting past maxSpeakers is rejected (ROOM_002).
+  // The HOST role doesn't count toward the speaker cap, so maxSpeakers:1 means
+  // exactly one listener can be promoted before the stage is full.
+  it('blocks SPEAKER promotion when the stage is at maxSpeakers capacity', async () => {
+    const host = await register(app);
+    const u1 = await register(app);
+    const u2 = await register(app);
+    createdUserIds.push(host.id, u1.id, u2.id);
+
+    const created = await request(app)
+      .post('/api/rooms')
+      .set('Authorization', `Bearer ${host.token}`)
+      .send({ title: 'capacity room', maxSpeakers: 1 });
+    const roomId = created.body.data.id as string;
+    createdRoomIds.push(roomId);
+
+    await request(app).post(`/api/rooms/${roomId}/join`).set('Authorization', `Bearer ${u1.token}`);
+    await request(app).post(`/api/rooms/${roomId}/join`).set('Authorization', `Bearer ${u2.token}`);
+
+    // First promotion fills the single speaker slot.
+    const ok = await request(app)
+      .patch(`/api/rooms/${roomId}/role`)
+      .set('Authorization', `Bearer ${host.token}`)
+      .send({ userId: u1.id, role: 'SPEAKER' });
+    expect(ok.status).toBe(200);
+
+    // Second promotion overshoots maxSpeakers → 403 ROOM_002 ("Room is full").
+    const full = await request(app)
+      .patch(`/api/rooms/${roomId}/role`)
+      .set('Authorization', `Bearer ${host.token}`)
+      .send({ userId: u2.id, role: 'SPEAKER' });
+    expect(full.status).toBe(403);
+    expect(full.body.error.code).toBe('ROOM_002');
+  }, 30_000);
+
+  // 3.1 — connection lifecycle: a transport-level drop triggers the client's
+  // built-in reconnection (re-authenticating with the same token) rather than
+  // staying dead. Uses a dedicated client with reconnection enabled (the shared
+  // `connect()` helper disables it for deterministic single-shot tests).
+  it('client auto-reconnects after a transport drop (reconnection lifecycle)', async () => {
+    const u = await register(app);
+    createdUserIds.push(u.id);
+
+    const s = ioClient(url, {
+      transports: ['websocket'],
+      auth: { token: u.token },
+      reconnection: true,
+      reconnectionDelay: 100,
+      reconnectionDelayMax: 300,
+      forceNew: true,
+    });
+    await new Promise<void>((resolve, reject) => {
+      s.once('connect', () => resolve());
+      s.once('connect_error', reject);
+    });
+
+    // Wait on the SOCKET's own 'connect' (it re-fires on every reconnection),
+    // not the Manager's 'reconnect' — the latter signals the transport is back
+    // but precedes the namespace handshake, so `s.connected` can still be false
+    // at that instant. By the time the socket emits 'connect', it is true.
+    const reconnected = new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('did not reconnect')), 10_000);
+      s.once('connect', () => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
+
+    // Simulate a network drop at the transport layer.
+    s.io.engine.close();
+
+    await reconnected;
+    expect(s.connected).toBe(true);
+
+    s.disconnect();
   }, 20_000);
 });

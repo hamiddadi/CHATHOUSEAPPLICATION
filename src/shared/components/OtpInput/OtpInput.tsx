@@ -15,6 +15,13 @@ interface OtpInputProps {
   onChange: (code: string) => void;
   error?: string;
   autoFocus?: boolean;
+  /**
+   * Screen-reader label for the (visually reduced) real input. Optional so
+   * callers can localize it; defaults to an English description.
+   */
+  accessibilityLabel?: string;
+  /** Screen-reader hint describing how to enter the code. */
+  accessibilityHint?: string;
 }
 
 /**
@@ -24,7 +31,14 @@ interface OtpInputProps {
  * just styled Views — so keyboard handling is native and consistent.
  */
 export const OtpInput: React.FC<OtpInputProps> = memo(
-  ({ value, onChange, error, autoFocus = true }) => {
+  ({
+    value,
+    onChange,
+    error,
+    autoFocus = true,
+    accessibilityLabel = `Verification code, ${OTP_LENGTH} digits`,
+    accessibilityHint = 'Enter the code you received by text message.',
+  }) => {
     const inputRef = useRef<TextInput>(null);
     const cursor = useSharedValue(1);
 
@@ -53,7 +67,12 @@ export const OtpInput: React.FC<OtpInputProps> = memo(
 
     return (
       <View>
-        <Pressable onPress={handlePress} accessibilityRole="none" style={styles.row}>
+        <Pressable
+          onPress={handlePress}
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants"
+          style={styles.row}
+        >
           {Array.from({ length: OTP_LENGTH }).map((_, i) => {
             const char = value[i];
             const isFocused = i === focusedIndex && value.length < OTP_LENGTH;
@@ -86,6 +105,10 @@ export const OtpInput: React.FC<OtpInputProps> = memo(
           autoFocus={autoFocus}
           autoComplete="one-time-code"
           textContentType="oneTimeCode"
+          accessible
+          accessibilityLabel={accessibilityLabel}
+          accessibilityHint={accessibilityHint}
+          accessibilityValue={{ text: `${value.length} of ${OTP_LENGTH} digits entered` }}
           style={styles.hidden}
           caretHidden
         />

@@ -55,6 +55,10 @@ export const WelcomeSlidesScreen: React.FC = () => {
       void goLanding();
       return;
     }
+    // Drive `index` (and the progress dots) from the button itself — relying
+    // solely on onMomentumScrollEnd left it stale when a programmatic scroll
+    // didn't emit a momentum-end event on some platforms.
+    setIndex(next);
     listRef.current?.scrollToIndex({ index: next, animated: true });
   }, [goLanding, index]);
 

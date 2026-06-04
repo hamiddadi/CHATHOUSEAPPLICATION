@@ -6,11 +6,13 @@ import { useEffect, useRef } from 'react';
  * `react-hooks/exhaustive-deps` doesn't false-positive.
  */
 export const useOnMount = (callback: () => void | (() => void)): void => {
-  const ran = useRef(false);
+  // Hold the latest callback in a ref so the effect can depend on [] only.
+  // Depending on [callback] (an unstable inline function) would tear the effect
+  // down on every render — running the returned cleanup mid-mount — while the
+  // `ran` guard then skips re-registering it.
+  const cbRef = useRef(callback);
+  cbRef.current = callback;
   useEffect(() => {
-    if (ran.current) return;
-    ran.current = true;
-    return callback();
-    // Intentional: this hook is the source of truth for mount-once semantics.
-  }, [callback]);
+    return cbRef.current();
+  }, []);
 };

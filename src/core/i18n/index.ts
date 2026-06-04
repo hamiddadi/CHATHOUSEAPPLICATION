@@ -12,8 +12,9 @@ import fr from './locales/fr.json';
  * synchronously from bundled JSON; no remote fetch so the app never blocks
  * on i18n and works offline out of the box.
  */
+const SUPPORTED_LOCALES = ['fr', 'en'] as const;
 const deviceTag = getLocales()[0]?.languageCode ?? 'en';
-const initialLng = deviceTag in { fr: 1, en: 1 } ? deviceTag : 'en';
+const initialLng = (SUPPORTED_LOCALES as readonly string[]).includes(deviceTag) ? deviceTag : 'en';
 
 /* eslint-disable-next-line import/no-named-as-default-member */
 void i18next.use(initReactI18next).init({

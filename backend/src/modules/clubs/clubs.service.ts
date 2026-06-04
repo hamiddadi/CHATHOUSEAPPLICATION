@@ -1,8 +1,16 @@
-import type { Prisma, ClubMemberRole, ClubPrivacy } from '@prisma/client';
+import type { ClubMemberRole, Prisma } from '@prisma/client';
 import { prisma } from '../../config/database';
 import { AppError } from '../../middlewares/error.middleware';
 import { notificationsService } from '../notifications/notifications.service';
+import { clubInclude, privacyToDb, toApi, toSummary } from './clubs.mapper';
 import type { CreateClubInput, ListClubsInput, UpdateClubInput } from './clubs.schema';
+
+/** Map the frontend's lowercase role to the Prisma ClubMemberRole enum. */
+const roleToDb = (role: 'admin' | 'moderator' | 'member'): ClubMemberRole => {
+  if (role === 'admin') return 'ADMIN';
+  if (role === 'moderator') return 'MODERATOR';
+  return 'MEMBER';
+};
 
 /** Slugify a club name: lowercase, replace spaces with hyphens, strip non-alnum. */
 const slugify = (name: string): string =>
@@ -12,94 +20,6 @@ const slugify = (name: string): string =>
     .replace(/\s+/g, '-')
     .replace(/[^a-z0-9-]/g, '')
     .slice(0, 60);
-
-const publicUser = {
-  id: true,
-  username: true,
-  displayName: true,
-  avatarUrl: true,
-  bio: true,
-} as const;
-
-const clubInclude = {
-  members: {
-    include: { user: { select: publicUser } },
-    orderBy: { joinedAt: 'asc' },
-  },
-  _count: {
-    select: {
-      members: true,
-      rooms: { where: { isLive: true, endedAt: null } },
-    },
-  },
-} satisfies Prisma.ClubInclude;
-
-type ClubWithRelations = Prisma.ClubGetPayload<{ include: typeof clubInclude }>;
-
-// Frontend expects lowercase; Prisma stores uppercase enum values.
-const privacyToApi = (p: ClubPrivacy): 'open' | 'private' | 'social' => {
-  if (p === 'PRIVATE') return 'private';
-  if (p === 'SOCIAL') return 'social';
-  return 'open';
-};
-
-const roleToApi = (r: ClubMemberRole): 'admin' | 'moderator' | 'member' => {
-  if (r === 'ADMIN') return 'admin';
-  if (r === 'MODERATOR') return 'moderator';
-  return 'member';
-};
-
-const privacyToDb = (
-  p: 'open' | 'private' | 'social' | 'OPEN' | 'PRIVATE' | 'SOCIAL',
-): ClubPrivacy => {
-  const upper = p.toUpperCase();
-  if (upper === 'PRIVATE') return 'PRIVATE';
-  if (upper === 'SOCIAL') return 'SOCIAL';
-  return 'OPEN';
-};
-
-const userToSummary = (u: {
-  id: string;
-  username: string | null;
-  displayName: string | null;
-  avatarUrl: string | null;
-  bio: string | null;
-}) => ({
-  id: u.id,
-  username: u.username ?? '',
-  displayName: u.displayName ?? u.username ?? '',
-  avatarUrl: u.avatarUrl,
-  bio: u.bio ?? null,
-});
-
-const toApi = (club: ClubWithRelations, viewerId: string) => ({
-  id: club.id,
-  name: club.name,
-  description: club.description ?? '',
-  category: club.category,
-  categoryEmoji: club.categoryEmoji,
-  iconUrl: club.iconUrl,
-  privacy: privacyToApi(club.privacy),
-  membersCount: club._count.members,
-  liveRoomsCount: club._count.rooms,
-  isJoinedByMe: club.members.some(m => m.userId === viewerId),
-  members: club.members.map(m => ({
-    ...userToSummary(m.user),
-    role: roleToApi(m.role),
-    joinedAt: m.joinedAt.toISOString(),
-  })),
-  createdAt: club.createdAt.toISOString(),
-});
-
-const toSummary = (club: ClubWithRelations) => ({
-  id: club.id,
-  name: club.name,
-  category: club.category,
-  categoryEmoji: club.categoryEmoji,
-  iconUrl: club.iconUrl,
-  membersCount: club._count.members,
-  privacy: privacyToApi(club.privacy),
-});
 
 export const clubsService = {
   async list(viewerId: string, input: ListClubsInput) {
@@ -254,6 +174,21 @@ export const clubsService = {
     });
     if (existing) return { joined: true as const };
 
+    // SECURITY: require a real CLUB_INVITE addressed to this user for this
+    // club. Without this check any authenticated user could POST
+    // /clubs/:id/accept and join ANY club — including PRIVATE ones — bypassing
+    // the join() guard (CLUB_003). invite() materialises the invitation as a
+    // CLUB_INVITE notification carrying { clubId } in its data payload.
+    const invite = await prisma.notification.findFirst({
+      where: {
+        userId: viewerId,
+        type: 'CLUB_INVITE',
+        data: { path: ['clubId'], equals: clubId },
+      },
+      select: { id: true },
+    });
+    if (!invite) throw new AppError('CLUB_007');
+
     await prisma.$transaction([
       prisma.clubMember.create({
         data: { clubId, userId: viewerId, role: 'MEMBER' },
@@ -261,6 +196,43 @@ export const clubsService = {
       prisma.club.update({ where: { id: clubId }, data: { memberCount: { increment: 1 } } }),
     ]);
     return { joined: true as const };
+  },
+
+  /**
+   * Change a member's role within a club. Only an ADMIN member or the club
+   * owner may do this. The owner's role can never be altered (they remain the
+   * authoritative ADMIN), and the target must already be a member.
+   */
+  async setMemberRole(
+    viewerId: string,
+    clubId: string,
+    targetUserId: string,
+    role: 'admin' | 'moderator' | 'member',
+  ) {
+    const club = await prisma.club.findUnique({ where: { id: clubId } });
+    if (!club) throw new AppError('CLUB_001');
+
+    // Authorisation: viewer must be the owner or an ADMIN member.
+    const viewerMembership = await prisma.clubMember.findUnique({
+      where: { clubId_userId: { clubId, userId: viewerId } },
+    });
+    const isAdmin = viewerMembership?.role === 'ADMIN';
+    if (!isAdmin && club.ownerId !== viewerId) throw new AppError('CLUB_002');
+
+    // The owner's role is immutable — they always stay ADMIN.
+    if (club.ownerId === targetUserId) throw new AppError('CLUB_002');
+
+    const targetMembership = await prisma.clubMember.findUnique({
+      where: { clubId_userId: { clubId, userId: targetUserId } },
+    });
+    if (!targetMembership) throw new AppError('CLUB_002');
+
+    await prisma.clubMember.update({
+      where: { clubId_userId: { clubId, userId: targetUserId } },
+      data: { role: roleToDb(role) },
+    });
+
+    return this.get(viewerId, clubId);
   },
 
   /**

@@ -49,6 +49,49 @@ describe('toAppError', () => {
     expect(res.message).toBe('Invalid');
   });
 
+  it('maps the real backend envelope (400 VALIDATION_001 + Zod details) to validation', () => {
+    const res = toAppError(
+      axiosErr({
+        response: {
+          status: 400,
+          data: {
+            success: false,
+            error: {
+              code: 'VALIDATION_001',
+              message: 'Invalid request payload',
+              details: { title: ['Too short'], topics: ['Max 5'] },
+            },
+          },
+        },
+      }),
+    );
+    expect(res.kind).toBe('validation');
+    expect(res.message).toBe('Invalid request payload');
+    // Zod fieldErrors (string[]) flatten to the first message per field.
+    expect(res.fields).toEqual({ title: 'Too short', topics: 'Max 5' });
+  });
+
+  it('surfaces the backend error.message for non-validation errors', () => {
+    const res = toAppError(
+      axiosErr({
+        response: {
+          status: 403,
+          data: { success: false, error: { message: 'Godmode is disabled' } },
+        },
+      }),
+    );
+    expect(res.kind).toBe('forbidden');
+    expect(res.message).toBe('Godmode is disabled');
+  });
+
+  it('is idempotent — an already-normalized AppError passes through unchanged', () => {
+    const appError = toAppError(axiosErr({ response: { status: 403 } }));
+    // Re-normalizing must NOT collapse it to kind:unknown / "Unexpected error".
+    const again = toAppError(appError);
+    expect(again).toBe(appError);
+    expect(again.kind).toBe('forbidden');
+  });
+
   it('maps 5xx to kind:server', () => {
     expect(toAppError(axiosErr({ response: { status: 500 } })).kind).toBe('server');
     expect(toAppError(axiosErr({ response: { status: 503 } })).kind).toBe('server');

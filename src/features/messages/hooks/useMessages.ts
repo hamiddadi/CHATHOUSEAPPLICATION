@@ -51,12 +51,36 @@ export const useSendMessage = () => {
   });
 };
 
+export const useSendVoiceMessage = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      conversationId,
+      audioUrl,
+      durationMs,
+    }: {
+      conversationId: string;
+      audioUrl: string;
+      durationMs: number;
+    }) => messageService.sendVoice(conversationId, audioUrl, durationMs),
+    onSuccess: message => {
+      qc.setQueryData<Message[]>(messageKeys.messages(message.conversationId), prev =>
+        prev ? [...prev, message] : [message],
+      );
+      void qc.invalidateQueries({ queryKey: messageKeys.conversations() });
+    },
+  });
+};
+
 export const useMarkConversationRead = () => {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (conversationId: string) => messageService.markAsRead(conversationId),
-    onSuccess: () => {
+    onSuccess: (_res, conversationId) => {
       void qc.invalidateQueries({ queryKey: messageKeys.conversations() });
+      // The tab badge reads messageKeys.unread() — without this it stays lit.
+      void qc.invalidateQueries({ queryKey: messageKeys.unread() });
+      void qc.invalidateQueries({ queryKey: messageKeys.conversation(conversationId) });
     },
   });
 };

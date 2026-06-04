@@ -1,32 +1,38 @@
-import React, { memo, useCallback, useState } from 'react';
+import React, { memo, useCallback, useMemo, useState } from 'react';
 import { FlatList, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
+import { useTranslation } from 'react-i18next';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated from 'react-native-reanimated';
+import { useQuery } from '@tanstack/react-query';
 import { Avatar } from '../../../../shared/components/Avatar';
-import { Loader } from '../../../../shared/components/Loader';
 import { EmptyState } from '../../../../shared/components/EmptyState';
 import { useAnimatedPress } from '../../../../shared/hooks/useAnimatedPress';
 import { colors, layout, spacing } from '../../../../shared/constants/theme';
 import type { RoomStackParamList } from '../../../../core/navigation/types';
 import type { RoomSummary, UserSummary } from '../../../../shared/types/domain';
-import { useRooms } from '../../hooks/useRooms';
+import { useRooms, roomKeys } from '../../hooks/useRooms';
+import { roomService } from '../../services/roomService';
 import { useHallwaySocket } from '../../hooks/useHallwaySocket';
 import { useUnreadNotificationCount } from '../../../notifications/hooks/useNotifications';
+import { formatScheduled } from '../../../../shared/utils/formatScheduled';
+import { RoomFeedSkeleton } from './RoomFeedSkeleton';
 
 type Nav = NativeStackNavigationProp<RoomStackParamList, 'RoomFeed'>;
 
-const FILTERS = ['All', 'Following', 'Tech', 'Music', 'Business', 'Health'] as const;
+const FILTERS = ['All', 'Following', 'Clubs', 'Tech', 'Music', 'Business', 'Health'] as const;
 type Filter = (typeof FILTERS)[number];
 
-// Map UI labels to the backend's topic / following params. `All` is the
-// no-filter case (sends nothing), `Following` flips the following flag,
-// the rest become a `topic` query string.
-const filterToParams = (f: Filter): { topic?: string; following?: boolean } => {
+// Map UI labels to the backend's topic / following / clubs params. `All` is
+// the no-filter case (sends nothing), `Following` flips the following flag,
+// `Clubs` restricts to club-attached rooms, the rest become a `topic` query
+// string.
+const filterToParams = (f: Filter): { topic?: string; following?: boolean; clubs?: boolean } => {
   if (f === 'All') return {};
   if (f === 'Following') return { following: true };
+  if (f === 'Clubs') return { clubs: true };
   return { topic: f.toLowerCase() };
 };
 
@@ -93,7 +99,7 @@ const ParticipantsRow: React.FC<ParticipantsRowProps> = memo(({ speakers, listen
     contentContainerStyle={styles.participantsRow}
   >
     {speakers.map(s => (
-      <View key={`sp-${s.id}`} style={styles.avatarSlot}>
+      <View key={`sp-${s.id}`} style={[styles.avatarSlot, styles.speakerSlot]}>
         <Avatar
           uri={s.avatarUrl ?? undefined}
           name={s.displayName}
@@ -101,6 +107,12 @@ const ParticipantsRow: React.FC<ParticipantsRowProps> = memo(({ speakers, listen
           shape="circle"
           status="speaking"
         />
+        <Text
+          className="text-xxs font-body-medium text-ink-muted mt-xxs text-center"
+          numberOfLines={1}
+        >
+          {s.displayName}
+        </Text>
       </View>
     ))}
     {speakers.length > 0 && listeners.length > 0 && <View style={styles.participantsDivider} />}
@@ -124,6 +136,7 @@ interface RoomCardProps {
 }
 
 const RoomCard: React.FC<RoomCardProps> = memo(({ room, onJoin }) => {
+  const { t } = useTranslation();
   const { animatedStyle, onPressIn, onPressOut } = useAnimatedPress({ scaleTo: 0.96 });
   const handleJoin = useCallback(() => onJoin(room.id), [onJoin, room.id]);
   const colorClass = CATEGORY_COLOR_CLASS[room.category] ?? 'text-primary';
@@ -140,7 +153,7 @@ const RoomCard: React.FC<RoomCardProps> = memo(({ room, onJoin }) => {
             </View>
             {room.houseName && (
               <Text className="text-xs font-body-medium text-ink-muted" numberOfLines={1}>
-                Inside {room.houseName}
+                {t('feed.insideHouse', 'Inside {{houseName}}', { houseName: room.houseName })}
               </Text>
             )}
           </View>
@@ -154,16 +167,27 @@ const RoomCard: React.FC<RoomCardProps> = memo(({ room, onJoin }) => {
             <View className="flex-row items-center gap-xs">
               <Text className="text-xs">🎙️</Text>
               <Text className="text-xs font-body-medium text-ink-dim">
-                {room.speakersCount} speakers
+                {t('feed.speakersCount', '{{count}} speakers', { count: room.speakersCount })}
               </Text>
             </View>
-            <Text className="text-xs text-ink-dim opacity-50">·</Text>
+            <Text className="text-xs text-ink-muted">·</Text>
             <View className="flex-row items-center gap-xs">
               <Text className="text-xs">👂</Text>
               <Text className="text-xs font-body text-ink-muted">
-                {room.listenersCount} listeners
+                {t('feed.listenersCount', '{{count}} listeners', { count: room.listenersCount })}
               </Text>
             </View>
+            {typeof room.participantCount === 'number' && (
+              <>
+                <Text className="text-xs text-ink-muted">·</Text>
+                <View className="flex-row items-center gap-xs">
+                  <Text className="text-xs">👥</Text>
+                  <Text className="text-xs font-body text-ink-muted">
+                    {t('feed.inRoom', '{{count}} in room', { count: room.participantCount })}
+                  </Text>
+                </View>
+              </>
+            )}
           </View>
 
           <Animated.View style={animatedStyle}>
@@ -175,7 +199,9 @@ const RoomCard: React.FC<RoomCardProps> = memo(({ room, onJoin }) => {
               accessibilityLabel={`Join room: ${room.title}`}
               className="bg-primary rounded-pill px-xxl py-sm items-center justify-center ml-md"
             >
-              <Text className="text-sm font-display text-primary-on-container">Join</Text>
+              <Text className="text-sm font-display text-primary-on-container">
+                {t('feed.join', 'Join')}
+              </Text>
             </Pressable>
           </Animated.View>
         </View>
@@ -188,6 +214,7 @@ RoomCard.displayName = 'RoomCard';
 interface HeaderProps {
   onSearch: () => void;
   onEvents: () => void;
+  onReplays: () => void;
   onNotifications: () => void;
   unreadCount: number;
 }
@@ -219,34 +246,112 @@ const HeaderIcon: React.FC<{
   </Pressable>
 );
 
-const Header: React.FC<HeaderProps> = memo(
-  ({ onSearch, onEvents, onNotifications, unreadCount }) => (
-    <View className="flex-row items-center justify-between px-xxl py-lg">
-      <View className="flex-row items-center gap-sm">
-        <MaterialIcons name="graphic-eq" size={HEADER_ICON_SIZE} color={colors.primary} />
-        <Text className="text-xxl font-display text-primary tracking-tighter">Chathouse</Text>
-      </View>
-      <View className="flex-row items-center gap-sm">
-        <HeaderIcon name="search" label="Explore" onPress={onSearch} />
-        <HeaderIcon name="event" label="Events" onPress={onEvents} />
-        <HeaderIcon
-          name="notifications"
-          label="Notifications"
-          onPress={onNotifications}
-          badge={unreadCount}
-        />
-      </View>
+interface UpcomingRowProps {
+  rooms: readonly RoomSummary[];
+  onOpen: (roomId: string) => void;
+}
+
+const UpcomingRoomCard: React.FC<{ room: RoomSummary; onOpen: (roomId: string) => void }> = memo(
+  ({ room, onOpen }) => {
+    const { t } = useTranslation();
+    const handlePress = useCallback(() => onOpen(room.id), [onOpen, room.id]);
+    return (
+      <Pressable
+        onPress={handlePress}
+        accessibilityRole="button"
+        accessibilityLabel={`Upcoming room: ${room.title}`}
+        style={styles.upcomingCard}
+        className="rounded-md bg-overlay-white-5 border border-overlay-white-10 p-lg gap-xs"
+      >
+        <View className="flex-row items-center gap-xs">
+          <MaterialIcons name="schedule" size={14} color={colors.primary} />
+          <Text className="text-xxs font-body-bold text-primary" numberOfLines={1}>
+            {formatScheduled(room.scheduledFor)}
+          </Text>
+        </View>
+        <Text className="text-sm font-display text-white leading-snug" numberOfLines={2}>
+          {room.title}
+        </Text>
+        {room.houseName ? (
+          <Text className="text-xxs font-body-medium text-ink-muted" numberOfLines={1}>
+            {t('feed.insideHouse', 'Inside {{houseName}}', { houseName: room.houseName })}
+          </Text>
+        ) : null}
+      </Pressable>
+    );
+  },
+);
+UpcomingRoomCard.displayName = 'UpcomingRoomCard';
+
+const UpcomingRow: React.FC<UpcomingRowProps> = memo(({ rooms, onOpen }) => {
+  const { t } = useTranslation();
+  if (rooms.length === 0) return null;
+  return (
+    <View className="gap-md">
+      <Text className="text-xl font-headline text-ink tracking-tight">
+        {t('feed.upcoming', 'Upcoming')}
+      </Text>
+      <FlatList
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        data={rooms}
+        keyExtractor={r => r.id}
+        renderItem={({ item }) => <UpcomingRoomCard room={item} onOpen={onOpen} />}
+        contentContainerStyle={styles.upcomingRow}
+      />
     </View>
-  ),
+  );
+});
+UpcomingRow.displayName = 'UpcomingRow';
+
+const Header: React.FC<HeaderProps> = memo(
+  ({ onSearch, onEvents, onReplays, onNotifications, unreadCount }) => {
+    const { t } = useTranslation();
+    return (
+      <View className="flex-row items-center justify-between px-xxl py-lg">
+        <View className="flex-row items-center gap-sm">
+          <MaterialIcons name="graphic-eq" size={HEADER_ICON_SIZE} color={colors.primary} />
+          <Text className="text-xxl font-display text-primary tracking-tighter">
+            {t('common.appName', 'Chathouse')}
+          </Text>
+        </View>
+        <View className="flex-row items-center gap-sm">
+          <HeaderIcon name="search" label={t('feed.exploreA11y', 'Explore')} onPress={onSearch} />
+          <HeaderIcon name="event" label={t('feed.eventsA11y', 'Events')} onPress={onEvents} />
+          <HeaderIcon
+            name="play-circle-outline"
+            label={t('replays.title', 'Replays')}
+            onPress={onReplays}
+          />
+          <HeaderIcon
+            name="notifications"
+            label={t('feed.notificationsA11y', 'Notifications')}
+            onPress={onNotifications}
+            badge={unreadCount}
+          />
+        </View>
+      </View>
+    );
+  },
 );
 Header.displayName = 'Header';
 
 export const RoomFeedScreen: React.FC = () => {
+  const { t } = useTranslation();
   const navigation = useNavigation<Nav>();
   const insets = useSafeAreaInsets();
   const [activeFilter, setActiveFilter] = useState<Filter>('All');
   const fab = useAnimatedPress({ scaleTo: 0.9 });
-  const { data: rooms, isLoading, isError, refetch } = useRooms(filterToParams(activeFilter));
+  const filterParams = useMemo(() => filterToParams(activeFilter), [activeFilter]);
+  const { data: rooms, isLoading, isError, refetch, isRefetching } = useRooms(filterParams);
+
+  // Scheduled rooms shown as a horizontal "Upcoming" band above Live Now.
+  // Backend's `upcoming` filter already orders by scheduledFor ascending.
+  const { data: upcoming = [] } = useQuery<RoomSummary[]>({
+    queryKey: [...roomKeys.list(), { filter: 'upcoming' }],
+    queryFn: () => roomService.list({ filter: 'upcoming' }),
+    staleTime: 60_000,
+  });
 
   // Subscribe to live hallway broadcasts — new/ended rooms invalidate
   // the scored feed so ranking stays fresh without manual refreshes.
@@ -260,6 +365,7 @@ export const RoomFeedScreen: React.FC = () => {
   const handleStartRoom = useCallback(() => navigation.navigate('CreateRoom'), [navigation]);
   const handleSearch = useCallback(() => navigation.navigate('Explore'), [navigation]);
   const handleEvents = useCallback(() => navigation.navigate('Events'), [navigation]);
+  const handleReplays = useCallback(() => navigation.navigate('Replays'), [navigation]);
   const handleNotifications = useCallback(() => navigation.navigate('Notifications'), [navigation]);
 
   const renderItem = useCallback(
@@ -274,16 +380,17 @@ export const RoomFeedScreen: React.FC = () => {
       <Header
         onSearch={handleSearch}
         onEvents={handleEvents}
+        onReplays={handleReplays}
         onNotifications={handleNotifications}
         unreadCount={unreadCount}
       />
 
       {isLoading ? (
-        <Loader fullscreen accessibilityLabel="Loading live rooms" />
+        <RoomFeedSkeleton />
       ) : isError ? (
         <EmptyState
-          title="Couldn't load rooms"
-          description="Check your connection and try again."
+          title={t('feed.couldNotLoad', "Couldn't load rooms")}
+          description={t('feed.checkConnection', 'Check your connection and try again.')}
         />
       ) : (
         <FlatList
@@ -291,7 +398,7 @@ export const RoomFeedScreen: React.FC = () => {
           renderItem={renderItem}
           keyExtractor={keyExtractor}
           ItemSeparatorComponent={renderSeparator}
-          refreshing={isLoading}
+          refreshing={isRefetching}
           onRefresh={refetch}
           contentContainerStyle={[
             styles.listContent,
@@ -309,7 +416,10 @@ export const RoomFeedScreen: React.FC = () => {
                   />
                 ))}
               </View>
-              <Text className="text-xl font-headline text-ink tracking-tight">Live Now</Text>
+              <UpcomingRow rooms={upcoming} onOpen={handleJoin} />
+              <Text className="text-xl font-headline text-ink tracking-tight">
+                {t('feed.liveNow', 'Live Now')}
+              </Text>
             </View>
           }
           showsVerticalScrollIndicator={false}
@@ -329,8 +439,8 @@ export const RoomFeedScreen: React.FC = () => {
           onPressIn={fab.onPressIn}
           onPressOut={fab.onPressOut}
           accessibilityRole="button"
-          accessibilityLabel="Start a new room"
-          accessibilityHint="Opens the room creation modal"
+          accessibilityLabel={t('feed.startNewA11y', 'Start a new room')}
+          accessibilityHint={t('feed.startNewHint', 'Opens the room creation modal')}
           className="w-16 h-16 rounded-pill bg-primary items-center justify-center shadow-glow-primary"
         >
           <MaterialIcons name="add" size={FAB_ICON_SIZE} color={colors.onPrimary} />
@@ -343,12 +453,18 @@ export const RoomFeedScreen: React.FC = () => {
 const styles = StyleSheet.create({
   listContent: { paddingHorizontal: spacing.xxl },
   fab: { position: 'absolute', right: spacing.xxl },
-  participantsRow: { alignItems: 'center' },
+  participantsRow: { alignItems: 'flex-start' },
   avatarSlot: { marginRight: AVATAR_GAP },
+  // Speaker slots reserve a little extra width so the name label below the
+  // avatar can render without truncating short display names.
+  speakerSlot: { width: SPEAKER_AVATAR_SIZE + 16, alignItems: 'center' },
   participantsDivider: {
     width: StyleSheet.hairlineWidth,
     height: 20,
-    backgroundColor: 'rgba(255,255,255,0.15)',
+    backgroundColor: colors.overlayWhite15,
     marginHorizontal: spacing.sm,
+    marginTop: (SPEAKER_AVATAR_SIZE - 20) / 2,
   },
+  upcomingRow: { gap: spacing.md, paddingRight: spacing.md },
+  upcomingCard: { width: 220 },
 });

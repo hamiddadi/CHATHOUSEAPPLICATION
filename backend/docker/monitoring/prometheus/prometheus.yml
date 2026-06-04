@@ -1,0 +1,57 @@
+# Prometheus scrape configuration for the Chathouse monitoring stack.
+#
+# This Prometheus runs in a SEPARATE compose project from the backend
+# (docker/monitoring/docker-compose.monitoring.yml). It reaches the API by
+# joining the backend's default network (external `backend_default`) and
+# scraping the `api` service container at api:4000.
+#
+# Fallback when NOT sharing the backend network (e.g. API runs on the host via
+# `npm start`): replace `api:4000` below with `host.docker.internal:4000`.
+
+global:
+  scrape_interval: 15s
+  scrape_timeout: 10s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: chathouse
+
+# Alerting rules (recording + alerting) loaded from the mounted rules dir.
+rule_files:
+  - rules/alerts.yml
+
+# Route fired alerts to Alertmanager (same compose project, default DNS).
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - alertmanager:9093
+
+scrape_configs:
+  # The Chathouse API exposes prom-client metrics at /metrics (chathouse_*).
+  - job_name: chathouse-api
+    metrics_path: /metrics
+    scrape_interval: 15s
+    static_configs:
+      - targets:
+          - api:4000
+        labels:
+          service: chathouse-api
+    # If Prometheus is NOT attached to backend_default, comment the target
+    # above and use the host gateway instead:
+    #   - targets: ['host.docker.internal:4000']
+
+  # Host-level metrics (CPU, memory, disk, filesystem) from node-exporter.
+  - job_name: node-exporter
+    static_configs:
+      - targets:
+          - node-exporter:9100
+        labels:
+          service: node-exporter
+
+  # Prometheus scraping itself for self-observability.
+  - job_name: prometheus
+    static_configs:
+      - targets:
+          - localhost:9090
+        labels:
+          service: prometheus

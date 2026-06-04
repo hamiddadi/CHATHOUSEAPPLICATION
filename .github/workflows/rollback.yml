@@ -1,0 +1,135 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Rollback
+#
+# Manual, on-demand rollback for either environment. Use this when a deploy
+# went bad after the fact (e.g. a latent bug surfaced minutes later) and the
+# in-pipeline auto-rollback already ran or never triggered.
+#
+# Inputs:
+#   environment  choice  staging | production
+#   image_tag    string  the tag to roll (back) to, e.g.
+#                          ghcr.io/<owner>/<repo>/api:v1.4.1  OR just  v1.4.1
+#                          (a bare tag is expanded to the full GHCR ref).
+#
+# The job picks the host/credentials matching the chosen environment, deploys
+# the requested image, verifies /health, and logs the rollback to Slack.
+#
+# Required secrets: GITHUB_TOKEN (auto), STAGING_HOST/USER/SSH_KEY,
+#                   PROD_HOST/USER/SSH_KEY, SLACK_WEBHOOK_URL.
+# ─────────────────────────────────────────────────────────────────────────────
+name: Rollback
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment to roll back'
+        type: choice
+        required: true
+        options:
+          - staging
+          - production
+      image_tag:
+        description: 'Image tag or full GHCR ref to deploy (e.g. v1.4.1 or ghcr.io/owner/repo/api:v1.4.1)'
+        type: string
+        required: true
+
+concurrency:
+  group: cd-${{ inputs.environment }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}/api
+
+jobs:
+  rollback:
+    name: Rollback ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - name: Resolve target host + image ref
+        id: resolve
+        run: |
+          set -euo pipefail
+          # Expand a bare tag (no slash) into the full GHCR ref.
+          TAG="${{ inputs.image_tag }}"
+          case "$TAG" in
+            */*) IMAGE="$TAG" ;;
+            *)   IMAGE="${REGISTRY}/${IMAGE_NAME}:${TAG}" ;;
+          esac
+          echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
+          echo "Resolved image ref: ${IMAGE}"
+
+      - name: SSH rollback + health verify
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          ROLLBACK_IMAGE: ${{ steps.resolve.outputs.image }}
+          REGISTRY: ${{ env.REGISTRY }}
+          REGISTRY_USER: ${{ github.actor }}
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          # appleboy/ssh-action evaluates these expressions; the unused set just
+          # resolves to empty strings for the environment we didn't pick.
+          host: ${{ inputs.environment == 'production' && secrets.PROD_HOST || secrets.STAGING_HOST }}
+          username: ${{ inputs.environment == 'production' && secrets.PROD_USER || secrets.STAGING_USER }}
+          key: ${{ inputs.environment == 'production' && secrets.PROD_SSH_KEY || secrets.STAGING_SSH_KEY }}
+          envs: ROLLBACK_IMAGE,REGISTRY,REGISTRY_USER,REGISTRY_TOKEN
+          script_stop: true
+          command_timeout: 15m
+          script: |
+            set -euo pipefail
+            log() { printf '%s [rollback] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
+
+            DEPLOY_DIR="${DEPLOY_DIR:-/opt/chathouse/backend}"
+            cd "$DEPLOY_DIR"
+
+            log "Logging in to ${REGISTRY}"
+            echo "$REGISTRY_TOKEN" | docker login "$REGISTRY" -u "$REGISTRY_USER" --password-stdin
+
+            log "Rolling back to ${ROLLBACK_IMAGE}"
+            docker pull "$ROLLBACK_IMAGE"
+
+            export CHATHOUSE_API_IMAGE="$ROLLBACK_IMAGE"
+            docker compose up -d --no-deps --pull always api || \
+              docker compose up -d --no-deps api
+
+            HEALTH_URL="${HEALTH_URL:-http://localhost:4000/health}"
+            ok=0
+            for i in $(seq 1 10); do
+              code="$(curl -fsS -o /tmp/health.json -w '%{http_code}' "$HEALTH_URL" || echo 000)"
+              if [ "$code" = "200" ] && grep -q '"database":true' /tmp/health.json && grep -q '"redis":true' /tmp/health.json; then
+                log "Health OK on attempt ${i}"
+                ok=1
+                break
+              fi
+              log "Health attempt ${i}/10 failed (http=${code}); retrying in 5s"
+              sleep 5
+            done
+
+            if [ "$ok" -ne 1 ]; then
+              log "Rollback target is UNHEALTHY — manual intervention required"
+              exit 1
+            fi
+
+            log "Rollback to ${ROLLBACK_IMAGE} succeeded"
+
+      - name: Notify Slack
+        if: ${{ always() && env.SLACK_WEBHOOK_URL != '' }}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          if [ "${{ job.status }}" = "success" ]; then
+            emoji=":leftwards_arrow_with_hook:"
+            verdict="ROLLBACK SUCCEEDED"
+          else
+            emoji=":x:"
+            verdict="ROLLBACK FAILED"
+          fi
+          payload=$(cat <<JSON
+          {
+            "text": "${emoji} *${verdict}* on *${{ inputs.environment }}*\n• image: \`${{ steps.resolve.outputs.image }}\`\n• repo: ${{ github.repository }}\n• actor: ${{ github.actor }}\n• run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          }
+          JSON
+          )
+          curl -fsS -X POST -H 'Content-Type: application/json' -d "$payload" "$SLACK_WEBHOOK_URL"

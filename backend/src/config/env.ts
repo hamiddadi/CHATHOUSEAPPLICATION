@@ -2,6 +2,23 @@ import 'dotenv/config';
 import { z } from 'zod';
 
 /**
+ * Strict boolean parser for env flags. `z.coerce.boolean()` applies
+ * `Boolean(string)`, so ANY non-empty string — including 'false', '0',
+ * 'off' — coerces to `true`. That silently broke kill-switches like
+ * GODMODE_ENABLED=false. This only treats 'true'/'1' (case-insensitive)
+ * as true; everything else (and unset) falls back to `def`.
+ */
+const boolFromString = (def: boolean) =>
+  z
+    .string()
+    .optional()
+    .transform(v => {
+      if (v === undefined) return def;
+      const s = v.trim().toLowerCase();
+      return s === 'true' || s === '1';
+    });
+
+/**
  * Runtime environment — validated at process boot. Missing or malformed vars
  * cause the process to exit with code 1 before any route is registered.
  */
@@ -40,24 +57,108 @@ const envSchema = z.object({
   // Master switch for the Godmode admin surface. When false, every
   // /api/admin/* endpoint returns ADMIN_003 even for SUPER_ADMINs — useful
   // for an emergency lockdown without redeploying.
-  GODMODE_ENABLED: z.coerce.boolean().default(true),
+  GODMODE_ENABLED: boolFromString(true),
 
-  // ─── Agora (audio engine) ──────────────────────────────────────────
-  // APP_ID is shipped to clients (it's public). PRIMARY_CERTIFICATE is a
-  // SECRET used to sign per-room tokens — must NEVER leak to the bundle.
-  // SECONDARY_CERTIFICATE is the rolling key for zero-downtime rotation.
-  // When unset, /rooms/:id/agora-token returns 503 and the client falls
-  // back to its env-baked temp token (dev-only path).
-  AGORA_APP_ID: z.string().min(1).optional(),
-  AGORA_PRIMARY_CERTIFICATE: z.string().min(1).optional(),
-  AGORA_SECONDARY_CERTIFICATE: z.string().min(1).optional(),
+  // When true, the main entry point (dist/app.js) also mounts the
+  // `/api/ext/*` extension routers so the API contract is identical
+  // regardless of which entry point boots. Default true so the documented
+  // extension features are actually reachable in production.
+  EXTENSIONS_ENABLED: boolFromString(true),
+
+  // ─── LiveKit (audio engine) ─────────────────────────────────────────
+  // LIVEKIT_URL is the WebSocket endpoint of the LiveKit server. Shipped
+  // to clients via the token response (never hardcoded in the bundle).
+  // API_KEY and API_SECRET are used to sign per-room JWT tokens — the
+  // secret must NEVER leak to the bundle.
+  // When unset, /rooms/:id/livekit-token returns 503.
+  LIVEKIT_URL: z.string().min(1).optional(),
+  LIVEKIT_API_KEY: z.string().min(1).optional(),
+  LIVEKIT_API_SECRET: z.string().min(1).optional(),
   // Token TTL — clients renew ~30s before expiry so even short windows
   // are stable. 1h is a sensible default; raise for low-traffic setups.
-  AGORA_TOKEN_TTL_SECONDS: z.coerce.number().int().min(60).max(86400).default(3600),
+  LIVEKIT_TOKEN_TTL_SECONDS: z.coerce.number().int().min(60).max(86400).default(3600),
+
+  // ─── Recording / Egress (room Replays) ──────────────────────────────
+  // Server-side room recording via LiveKit Egress → an S3-compatible bucket.
+  // Entirely optional: recording is "configured" only when EGRESS_ENABLED is
+  // true AND the bucket + keys below are set AND LiveKit itself is configured
+  // (see recordings.service.isConfigured). When unconfigured, rooms still work
+  // exactly as before — no Recording rows are ever created.
+  EGRESS_ENABLED: boolFromString(false),
+  RECORDING_S3_BUCKET: z.string().optional(),
+  RECORDING_S3_REGION: z.string().optional(),
+  RECORDING_S3_ACCESS_KEY: z.string().optional(),
+  RECORDING_S3_SECRET: z.string().optional(),
+  // Custom S3 endpoint for non-AWS providers (Cloudflare R2, MinIO, GCS S3
+  // interop). Leave unset for AWS S3.
+  RECORDING_S3_ENDPOINT: z.string().optional(),
+  // Public base URL the stored objects are served from (e.g. an R2 public
+  // bucket URL or a CloudFront distribution). The object key is appended to
+  // build the playback URL; falls back to the egress-reported location.
+  RECORDING_PUBLIC_BASE_URL: z.string().optional(),
+
+  // ─── Monetization (Stripe tips + premium) ───────────────────────────
+  // All optional: payments + premium are feature-flagged and no-op when unset
+  // (mirrors the LiveKit/recording gating). The `stripe` npm package itself is
+  // an optional dynamic import — install it in backend/ to actually charge.
+  STRIPE_SECRET_KEY: z.string().optional(),
+  // Verifies incoming webhook signatures. Without it the webhook endpoint
+  // rejects every event (fail closed) rather than trusting forged ones.
+  STRIPE_WEBHOOK_SECRET: z.string().optional(),
+  // Hosted-page return URLs (Connect onboarding + Checkout success/cancel +
+  // billing portal). No placeholder fallback — flows fail closed when unset.
+  STRIPE_RETURN_URL: z.string().url().optional(),
+  STRIPE_REFRESH_URL: z.string().url().optional(),
+  // Premium plan: monthly price in minor units + the product label shown on
+  // the Stripe-hosted Checkout page.
+  PREMIUM_PRICE_CENTS: z.coerce.number().int().positive().default(499),
+  PREMIUM_PRODUCT_NAME: z.string().default('ChatHouse Premium'),
+  // Supported payment currencies (lower-case ISO-4217), comma-separated; the
+  // first is the default. Restricted to 2-decimal currencies since amounts are
+  // minor units — add zero-decimal handling before enabling JPY/KRW/etc.
+  PAYMENT_CURRENCIES: z
+    .string()
+    .default('usd,eur,gbp,cad,aud')
+    .transform((s, ctx) => {
+      const list = s
+        .split(',')
+        .map(c => c.trim().toLowerCase())
+        .filter(Boolean);
+      // Amounts are treated as 2-decimal minor units (× 100). Zero-decimal
+      // currencies (JPY, KRW, …) would be mis-scaled 100×, so reject them at
+      // boot rather than silently overcharge — honour the comment above.
+      const ZERO_DECIMAL = [
+        'bif',
+        'clp',
+        'djf',
+        'gnf',
+        'jpy',
+        'kmf',
+        'krw',
+        'mga',
+        'pyg',
+        'rwf',
+        'ugx',
+        'vnd',
+        'vuv',
+        'xaf',
+        'xof',
+        'xpf',
+      ];
+      const bad = list.filter(c => ZERO_DECIMAL.includes(c));
+      if (bad.length > 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `PAYMENT_CURRENCIES contains unsupported zero-decimal currencies (add minor-unit handling first): ${bad.join(', ')}`,
+        });
+        return z.NEVER;
+      }
+      return list;
+    }),
 
   // mediasoup (phase 4). Disabled by default because the npm package compiles
   // C++ from source at install time — turn ON in docker-compose only.
-  MEDIASOUP_ENABLED: z.coerce.boolean().default(false),
+  MEDIASOUP_ENABLED: boolFromString(false),
   MEDIASOUP_ANNOUNCED_IP: z.string().default('127.0.0.1'),
   MEDIASOUP_LISTEN_IP: z.string().default('0.0.0.0'),
   MEDIASOUP_RTC_MIN_PORT: z.coerce.number().int().min(1024).max(65535).default(40000),
@@ -81,7 +182,7 @@ const envSchema = z.object({
   // When false (the default outside production), sendToExpo logs the
   // payload instead of calling the HTTP endpoint. Flip on in prod so
   // push actually reaches devices.
-  PUSH_DISPATCH_ENABLED: z.coerce.boolean().default(false),
+  PUSH_DISPATCH_ENABLED: boolFromString(false),
 
   // ICE servers — JSON array string sent to clients for NAT traversal.
   // Default uses Google's public STUN only; for prod add a TURN server
@@ -91,9 +192,16 @@ const envSchema = z.object({
     .default('[{"urls":"stun:stun.l.google.com:19302"}]')
     .transform((raw, ctx) => {
       try {
-        const parsed = JSON.parse(raw) as { urls: string | string[] }[];
+        const parsed: unknown = JSON.parse(raw);
         if (!Array.isArray(parsed)) throw new Error('not an array');
-        return parsed;
+        // Validate the element shape instead of blindly casting, so a
+        // malformed entry is caught at boot rather than at NAT-traversal time.
+        const iceServerSchema = z.object({
+          urls: z.union([z.string(), z.array(z.string())]),
+          username: z.string().optional(),
+          credential: z.string().optional(),
+        });
+        return z.array(iceServerSchema).parse(parsed);
       } catch (err) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,

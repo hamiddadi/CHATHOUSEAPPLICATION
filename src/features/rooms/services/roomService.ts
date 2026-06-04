@@ -7,6 +7,7 @@ import type {
   RoomVisibility,
   UserSummary,
 } from '../../../shared/types/domain';
+import type { Envelope } from '../../../shared/types/api';
 
 /**
  * Backend is now authoritative for rooms. The service translates the
@@ -25,12 +26,10 @@ export interface CreateRoomInput {
   coHostIds?: readonly string[];
   isPrivate?: boolean;
   chatEnabled?: boolean;
+  // Host opt-in: record the room for later Replay (audio-only). Only takes
+  // effect when the backend has egress configured (otherwise a harmless no-op).
+  recordingEnabled?: boolean;
   maxSpeakers?: number;
-}
-
-interface Envelope<T> {
-  success: true;
-  data: T;
 }
 
 interface RawUser {
@@ -38,7 +37,20 @@ interface RawUser {
   username: string | null;
   displayName: string | null;
   avatarUrl: string | null;
+  // Backend-computed: is this listener followed by the current viewer?
+  // Absent on legacy payloads — treated as `undefined` (see RoomScreen
+  // fallback that keeps the previous positional split when no flag exists).
+  followedByViewer?: boolean;
 }
+
+/**
+ * A room listener carries the optional `followedByViewer` enrichment on top
+ * of the lightweight `UserSummary`. Kept local to the service (domain types
+ * are frozen — the Prisma client can't be regenerated) so the RoomScreen can
+ * partition listeners into "followed by you" vs "others" without a positional
+ * heuristic.
+ */
+export type RoomListener = UserSummary & { followedByViewer?: boolean };
 
 interface RawParticipant {
   role: 'HOST' | 'MODERATOR' | 'SPEAKER' | 'LISTENER';
@@ -54,8 +66,13 @@ interface RawRoom {
   clubId: string | null;
   isLive: boolean;
   isPrivate: boolean;
+  // Mutual-follow gating tier. Spread verbatim from the Prisma room in the
+  // backend `get` serializer, so it's present on fetched rooms (absent on
+  // some legacy/feed payloads — `pickVisibility` falls back to isPrivate).
+  roomType?: 'OPEN' | 'SOCIAL' | 'CLOSED';
   chatEnabled?: boolean;
   chatVisibility?: 'ALL' | 'MODS_ONLY';
+  recordingEnabled?: boolean;
   topic: string | null;
   topics?: string[];
   scheduledFor: string | null;
@@ -63,10 +80,18 @@ interface RawRoom {
   endedAt: string | null;
   host?: RawUser;
   participants?: RawParticipant[];
+  club?: { id: string; name: string; iconUrl: string | null } | null;
+  participantCount?: number;
   _count?: { rsvps?: number; participants?: number };
   knownSpeakers?: RawUser[];
   hasKnownSpeakers?: boolean;
 }
+
+// Feed page size requested from GET /rooms/feed (backend caps at 50).
+const FEED_PAGE_SIZE = 30;
+// Avatar preview counts surfaced in a room summary card.
+const TOP_SPEAKERS_PREVIEW = 3;
+const TOP_LISTENERS_PREVIEW = 5;
 
 const CATEGORY_EMOJI: Record<RoomCategory, string> = {
   tech: '💻',
@@ -85,6 +110,17 @@ const toSummaryUser = (u: RawUser | undefined): UserSummary => ({
   avatarUrl: u?.avatarUrl ?? null,
 });
 
+// Like `toSummaryUser` but preserves the backend's `followedByViewer` flag so
+// the room view can split listeners into "followed by you" vs "others". The
+// flag is only forwarded when present (truthy or explicit boolean); legacy
+// payloads leave it `undefined`.
+const toListener = (u: RawUser | undefined): RoomListener => {
+  const base = toSummaryUser(u);
+  return u?.followedByViewer === undefined
+    ? base
+    : { ...base, followedByViewer: u.followedByViewer };
+};
+
 const pickCategory = (raw: RawRoom): RoomCategory => {
   const tags = [...(raw.topics ?? []), raw.topic ?? ''];
   for (const t of tags) {
@@ -94,7 +130,14 @@ const pickCategory = (raw: RawRoom): RoomCategory => {
   return 'tech';
 };
 
-const pickVisibility = (raw: RawRoom): RoomVisibility => (raw.isPrivate ? 'closed' : 'public');
+const pickVisibility = (raw: RawRoom): RoomVisibility => {
+  // Prefer the explicit roomType when the backend sends it; fall back to the
+  // legacy isPrivate flag so feed/legacy payloads without roomType still read
+  // correctly (closed when private, public otherwise).
+  if (raw.roomType === 'CLOSED' || raw.isPrivate) return 'closed';
+  if (raw.roomType === 'SOCIAL') return 'social';
+  return 'public';
+};
 
 const toParticipant = (p: RawParticipant): RoomParticipant => ({
   ...toSummaryUser(p.user),
@@ -106,7 +149,7 @@ const toParticipant = (p: RawParticipant): RoomParticipant => ({
 const toRoom = (raw: RawRoom): Room => {
   const participants = raw.participants ?? [];
   const speakers = participants.filter(p => p.role !== 'LISTENER').map(toParticipant);
-  const listeners = participants.filter(p => p.role === 'LISTENER').map(p => toSummaryUser(p.user));
+  const listeners = participants.filter(p => p.role === 'LISTENER').map(p => toListener(p.user));
 
   const category = pickCategory(raw);
   return {
@@ -117,16 +160,18 @@ const toRoom = (raw: RawRoom): Room => {
     categoryEmoji: CATEGORY_EMOJI[category],
     visibility: pickVisibility(raw),
     houseId: raw.clubId,
-    // houseName would require a separate fetch; left null until the
-    // backend embeds the club in the room payload.
-    houseName: null,
+    // The backend now embeds the club (id/name/iconUrl) in the room
+    // payload, so we surface its name + icon directly.
+    houseName: raw.club?.name ?? null,
+    houseIcon: raw.club?.iconUrl ?? null,
     hostId: raw.hostId,
     speakers,
     listeners,
     speakersCount: speakers.length,
     listenersCount: listeners.length,
+    participantCount: raw.participantCount ?? speakers.length + listeners.length,
     isLive: raw.isLive,
-    isRecording: false,
+    isRecording: raw.recordingEnabled ?? false,
     chatEnabled: raw.chatEnabled ?? true,
     chatVisibility: raw.chatVisibility ?? 'ALL',
     startedAt: raw.createdAt,
@@ -137,24 +182,22 @@ const toRoom = (raw: RawRoom): Room => {
 const toSummary = (raw: RawRoom): RoomSummary => {
   const category = pickCategory(raw);
   const participants = raw.participants ?? [];
-  const topSpeakers = participants
-    .filter(p => p.role !== 'LISTENER')
-    .slice(0, 3)
-    .map(p => toSummaryUser(p.user));
-  const topListeners = participants
-    .filter(p => p.role === 'LISTENER')
-    .slice(0, 5)
-    .map(p => toSummaryUser(p.user));
+  const speakers = participants.filter(p => p.role !== 'LISTENER');
+  const listeners = participants.filter(p => p.role === 'LISTENER');
   return {
     id: raw.id,
     title: raw.title,
     category,
     categoryEmoji: CATEGORY_EMOJI[category],
-    houseName: null,
-    speakersCount: participants.filter(p => p.role !== 'LISTENER').length,
-    listenersCount: participants.filter(p => p.role === 'LISTENER').length,
-    topSpeakers,
-    topListeners,
+    houseName: raw.club?.name ?? null,
+    houseIcon: raw.club?.iconUrl ?? null,
+    speakersCount: speakers.length,
+    listenersCount: listeners.length,
+    participantCount: raw.participantCount ?? speakers.length + listeners.length,
+    scheduledFor: raw.scheduledFor,
+    isLive: raw.isLive,
+    topSpeakers: speakers.slice(0, TOP_SPEAKERS_PREVIEW).map(p => toSummaryUser(p.user)),
+    topListeners: listeners.slice(0, TOP_LISTENERS_PREVIEW).map(p => toSummaryUser(p.user)),
   };
 };
 
@@ -163,26 +206,51 @@ const visibilityToBackend = (
   hint?: boolean,
 ): {
   isPrivate: boolean;
+  roomType: 'OPEN' | 'SOCIAL' | 'CLOSED';
 } => {
-  // Backend has a single `isPrivate` flag; "social" currently collapses
-  // onto "public" (gating by mutual-follow is client-side today). If
-  // `hint` (explicit isPrivate from the caller) is given it wins.
-  if (hint !== undefined) return { isPrivate: hint };
-  return { isPrivate: v === 'closed' };
+  // Map the 3-way UI visibility onto the backend's two independent gating
+  // mechanisms (both enforced in rooms.service.join):
+  //   - 'closed' → isPrivate=true,  roomType=CLOSED → invite-only
+  //   - 'social' → isPrivate=false, roomType=SOCIAL → mutual-follow gate
+  //   - 'public' → isPrivate=false, roomType=OPEN   → anyone can join
+  // SOCIAL must keep isPrivate=false so the follow-gate path runs rather than
+  // the stricter invite-only path. `hint` (explicit isPrivate override) only
+  // forces the private flag; roomType still follows the chosen visibility.
+  const roomType = v === 'closed' ? 'CLOSED' : v === 'social' ? 'SOCIAL' : 'OPEN';
+  const isPrivate = hint !== undefined ? hint : v === 'closed';
+  return { isPrivate, roomType };
 };
 
 export interface RoomsListFilter {
   topic?: string;
   following?: boolean;
+  clubs?: boolean;
+  // When set, bypass the personalised feed and hit GET /rooms which honors
+  // the list filters (notably `upcoming` for scheduled rooms).
+  filter?: 'live' | 'upcoming' | 'mine';
 }
 
 export const roomService = {
   async list(filter: RoomsListFilter = {}): Promise<RoomSummary[]> {
+    // The `upcoming`/`mine`/`live` list filters live on GET /rooms (the
+    // personalised /rooms/feed only ranks live rooms). Route there when a
+    // `filter` is requested so the "À venir" band can pull scheduled rooms.
+    if (filter.filter) {
+      const res = await apiClient.get<Envelope<RawRoom[]>>('/rooms', {
+        params: {
+          limit: FEED_PAGE_SIZE,
+          filter: filter.filter,
+          ...(filter.clubs ? { clubs: 'true' } : {}),
+        },
+      });
+      return res.data.data.map(toSummary);
+    }
     const res = await apiClient.get<Envelope<RawRoom[]>>('/rooms/feed', {
       params: {
-        limit: 30,
+        limit: FEED_PAGE_SIZE,
         ...(filter.topic ? { topic: filter.topic } : {}),
         ...(filter.following ? { following: 'true' } : {}),
+        ...(filter.clubs ? { clubs: 'true' } : {}),
       },
     });
     return res.data.data.map(toSummary);
@@ -196,12 +264,14 @@ export const roomService = {
   async create(input: CreateRoomInput): Promise<Room> {
     const trimmed = input.title.trim();
     if (trimmed.length === 0) throw new Error('Title is required');
-    const { isPrivate } = visibilityToBackend(input.visibility, input.isPrivate);
+    const { isPrivate, roomType } = visibilityToBackend(input.visibility, input.isPrivate);
     const res = await apiClient.post<Envelope<RawRoom>>('/rooms', {
       title: trimmed,
       description: input.description?.trim() || undefined,
       isPrivate,
+      roomType,
       chatEnabled: input.chatEnabled ?? true,
+      recordingEnabled: input.recordingEnabled ?? false,
       maxSpeakers: input.maxSpeakers,
       clubId: input.houseId ?? undefined,
       scheduledFor: input.scheduledFor ?? undefined,
@@ -403,33 +473,32 @@ export const roomService = {
   },
 
   /**
-   * Fetch a freshly-signed Agora token bound to the caller's CURRENT
-   * role in the room. Use the result immediately for `joinChannel` and
+   * Fetch a freshly-signed LiveKit token bound to the caller's CURRENT
+   * role in the room. Use the result immediately for `room.connect()` and
    * remember to refetch ~30s before `expiresAt` so the SDK can renew
-   * without dropping the call. Backend returns 503 (AGORA_001) when the
-   * server-side certificate isn't configured — caller should fall back
-   * to env.AGORA_TEMP_TOKEN if present.
+   * without dropping the call. Backend returns 503 (LIVEKIT_001) when the
+   * server-side credentials aren't configured.
    */
-  async getAgoraToken(roomId: string): Promise<{
+  async getLivekitToken(roomId: string): Promise<{
     token: string;
-    appId: string;
-    channel: string;
-    uid: number;
-    role: 'publisher' | 'subscriber';
+    url: string;
+    room: string;
+    identity: string;
+    canPublish: boolean;
     expiresAt: string;
     expiresInSec: number;
   }> {
     const res = await apiClient.get<
       Envelope<{
         token: string;
-        appId: string;
-        channel: string;
-        uid: number;
-        role: 'publisher' | 'subscriber';
+        url: string;
+        room: string;
+        identity: string;
+        canPublish: boolean;
         expiresAt: string;
         expiresInSec: number;
       }>
-    >(`/rooms/${roomId}/agora-token`);
+    >(`/rooms/${roomId}/livekit-token`);
     return res.data.data;
   },
 

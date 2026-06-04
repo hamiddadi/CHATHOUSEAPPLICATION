@@ -6,15 +6,12 @@ import type {
   AdminStats,
   AdminUser,
   AdminUserDetail,
+  AdminUserRef,
   AppRole,
   AuditAction,
   Paginated,
 } from '../types/admin.types';
-
-interface Envelope<T> {
-  success: true;
-  data: T;
-}
+import type { Envelope } from '../../../shared/types/api';
 
 export interface ListUsersParams {
   q?: string;
@@ -126,23 +123,13 @@ export const adminService = {
   async startImpersonation(userId: string): Promise<{
     token: string;
     expiresInSec: number;
-    user: {
-      id: string;
-      username: string | null;
-      displayName: string | null;
-      avatarUrl: string | null;
-    };
+    user: AdminUserRef;
   }> {
     const res = await apiClient.post<
       Envelope<{
         token: string;
         expiresInSec: number;
-        user: {
-          id: string;
-          username: string | null;
-          displayName: string | null;
-          avatarUrl: string | null;
-        };
+        user: AdminUserRef;
       }>
     >(`/admin/users/${userId}/impersonate`);
     return res.data.data;

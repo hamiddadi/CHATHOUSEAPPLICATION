@@ -7,11 +7,17 @@
     "orientation": "portrait",
     "scheme": "chathouse",
     "userInterfaceStyle": "dark",
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0c112e"
+    },
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.chathouse.app",
       "infoPlist": {
-        "NSMicrophoneUsageDescription": "Chathouse uses your microphone so you can speak in audio rooms.",
+        "NSMicrophoneUsageDescription": "Chathouse uses your microphone so you can speak in audio rooms and record voice messages.",
         "NSCameraUsageDescription": "Chathouse uses the camera so you can update your profile photo.",
         "NSPhotoLibraryUsageDescription": "Chathouse needs access to your photos so you can update your profile photo.",
         "NSLocationWhenInUseUsageDescription": "Chathouse shows friends and rooms on the map when you allow location access.",
@@ -21,6 +27,7 @@
     },
     "android": {
       "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0c112e"
       },
       "package": "com.chathouse.app",
@@ -38,7 +45,8 @@
       ]
     },
     "web": {
-      "bundler": "metro"
+      "bundler": "metro",
+      "favicon": "./assets/favicon.png"
     },
     "plugins": [
       "expo-font",

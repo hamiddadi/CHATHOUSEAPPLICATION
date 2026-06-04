@@ -1,25 +1,16 @@
-import React, { memo, useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Alert, FlatList, Pressable, Share, StyleSheet, Text, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Animated from 'react-native-reanimated';
 import { useTranslation } from 'react-i18next';
-import { Avatar } from '../../../../shared/components/Avatar';
 import { Loader } from '../../../../shared/components/Loader';
 import { EmptyState } from '../../../../shared/components/EmptyState';
-import { useAnimatedPress } from '../../../../shared/hooks/useAnimatedPress';
 import { colors, layout, spacing } from '../../../../shared/constants/theme';
 import type { RoomStackParamList } from '../../../../core/navigation/types';
-import type {
-  RoomAudioState,
-  RoomParticipant,
-  RoomRole,
-  UserSummary,
-} from '../../../../shared/types/domain';
+import type { RoomParticipant, UserSummary } from '../../../../shared/types/domain';
 import {
   useEndRoom,
   useHandRaises,
@@ -30,6 +21,7 @@ import {
   useRoom,
   useSetMute,
 } from '../../hooks/useRooms';
+import type { RoomListener } from '../../services/roomService';
 import { useRoomSocket } from '../../hooks/useRoomSocket';
 import {
   SPEAKING_SCORE_THRESHOLD,
@@ -45,163 +37,38 @@ import { TitleEditModal } from '../../components/TitleEditModal';
 import { RoomTimer } from '../../components/RoomTimer';
 import { useAuthStore } from '../../../auth/store/authStore';
 import { getSocket } from '../../../../shared/services/realtime/socketClient';
+import { formatScheduled } from '../../../../shared/utils/formatScheduled';
+import StageGrid from './partials/StageGrid';
+import HandRaiseQueue from './partials/HandRaiseQueue';
+import FollowedByListeners from './partials/FollowedByListeners';
+import SectionLabel from './partials/SectionLabel';
+import { OtherCell } from './partials/ListenerCell';
+import RoomActionBar from './partials/RoomActionBar';
 
 // Public landing URL for share-sheet messages. Universal Links (iOS) /
 // App Links (Android) on this domain redirect to chathouse:// when the
-// app is installed; the prefixes are declared in core/navigation/linking.ts.
-const ROOM_SHARE_BASE_URL = 'https://app.chathouse.com/r';
+// app is installed. The path MUST match the route declared in
+// core/navigation/linking.ts (Room: 'room/:roomId') — `/r/<id>` matched no
+// screen and silently failed to open the room.
+const ROOM_SHARE_BASE_URL = 'https://app.chathouse.com/room';
 
 type Nav = NativeStackNavigationProp<RoomStackParamList, 'Room'>;
 type Route = RouteProp<RoomStackParamList, 'Room'>;
 
 const HEADER_ICON_SIZE = 22;
-const ACTION_BAR_ICON_SIZE = 18;
-const ROLE_ICON_SIZE = 10;
-const SPEAKER_AVATAR = 56;
-const SECONDARY_AVATAR = 52;
-const OTHER_AVATAR = 40;
 const FOLLOWED_COUNT = 5;
+const OTHERS_GRID_COLUMNS = 5;
+const OTHER_AVATAR = 40;
 
-const GREEN = '#00e475';
-
-const ROLE_COLORS = {
-  shield: '#22C55E',
-  mic: '#22C55E',
-  micOff: '#EF4444',
-} as const;
-
-type RoleIconName = 'shield' | 'mic' | 'mic-off';
-
-const getRoleIconProps = (
-  role: RoomRole,
-  audio: RoomAudioState,
-): { icon: RoleIconName; color: string } => {
-  if (role === 'host') return { icon: 'shield', color: ROLE_COLORS.shield };
-  if (audio === 'muted') return { icon: 'mic-off', color: ROLE_COLORS.micOff };
-  return { icon: 'mic', color: ROLE_COLORS.mic };
-};
-
-const SpeakerCell: React.FC<{ speaker: RoomParticipant; isSpeakingLive?: boolean }> = memo(
-  ({ speaker, isSpeakingLive = false }) => {
-    // Live "is speaking" comes from mediasoup score broadcasts when audio is
-    // active; `speaker.audio === 'speaking'` is a static fallback for the
-    // unsupported case (no audio engine).
-    const isSpeaking = isSpeakingLive || speaker.audio === 'speaking';
-    const isHost = speaker.role === 'host';
-    const pulse = useAnimatedPress({ pulse: isSpeaking });
-    const { icon: roleIcon, color: roleColor } = getRoleIconProps(speaker.role, speaker.audio);
-    const { t } = useTranslation();
-    const roleLabel = isHost ? t('room.host') : t('room.speaker');
-
-    return (
-      <View style={styles.speakerCell}>
-        <Animated.View style={[pulse.animatedStyle, styles.speakerRingWrapper]}>
-          <Avatar
-            uri={speaker.avatarUrl ?? undefined}
-            name={speaker.displayName}
-            sizeValue={SPEAKER_AVATAR}
-            ring={isSpeaking}
-            ringColor={GREEN}
-            ringWidth={2}
-          />
-          {isSpeaking && (
-            <View style={styles.speakerMicBadge}>
-              <MaterialIcons name="graphic-eq" size={10} color="#00210b" />
-            </View>
-          )}
-        </Animated.View>
-        <Text
-          className="text-[10px] font-body-bold text-white text-center"
-          numberOfLines={1}
-          style={styles.speakerName}
-        >
-          {speaker.displayName}
-        </Text>
-        <View className="flex-row items-center gap-xxs">
-          <MaterialIcons name={roleIcon} size={ROLE_ICON_SIZE} color={roleColor} />
-          <Text
-            style={{ fontSize: ROLE_ICON_SIZE, lineHeight: ROLE_ICON_SIZE + 2, color: roleColor }}
-            className="font-body-bold uppercase tracking-tighter"
-          >
-            {roleLabel}
-          </Text>
-        </View>
-      </View>
-    );
-  },
-);
-SpeakerCell.displayName = 'SpeakerCell';
-
-const HandRaisedCell: React.FC<{ listener: UserSummary }> = memo(({ listener }) => (
-  <View style={styles.gridCell}>
-    <View style={styles.handRaisedCell}>
-      <Avatar
-        uri={listener.avatarUrl ?? undefined}
-        name={listener.displayName}
-        sizeValue={SECONDARY_AVATAR}
-      />
-      <View style={styles.handEmoji} pointerEvents="none">
-        <Text className="text-sm">👋</Text>
-      </View>
-    </View>
-  </View>
-));
-HandRaisedCell.displayName = 'HandRaisedCell';
-
-const FollowedCell: React.FC<{ listener: UserSummary }> = memo(({ listener }) => (
-  <View style={styles.gridCell}>
-    <Avatar
-      uri={listener.avatarUrl ?? undefined}
-      name={listener.displayName}
-      sizeValue={SECONDARY_AVATAR}
-    />
-  </View>
-));
-FollowedCell.displayName = 'FollowedCell';
-
-const OtherCell: React.FC<{ listener: UserSummary }> = memo(({ listener }) => (
-  <View style={[styles.gridCell, styles.otherCell]}>
-    <Avatar
-      uri={listener.avatarUrl ?? undefined}
-      name={listener.displayName}
-      sizeValue={OTHER_AVATAR}
-    />
-  </View>
-));
-OtherCell.displayName = 'OtherCell';
-
-interface SectionLabelProps {
-  label: string;
-  emphasis?: boolean;
-}
-
-const SectionLabel: React.FC<SectionLabelProps> = memo(({ label, emphasis = false }) => (
-  <View className="flex-row items-center gap-sm mb-lg px-xs">
-    <Text
-      className={
-        emphasis
-          ? 'text-[10px] font-body-bold text-accent tracking-widest uppercase'
-          : 'text-[10px] font-body-bold text-ink-muted tracking-widest uppercase'
-      }
-    >
-      {label}
-    </Text>
-    {emphasis && (
-      <LinearGradient
-        colors={['rgba(0,228,117,0.2)', 'rgba(0,228,117,0)']}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 0 }}
-        style={styles.sectionGradientLine}
-      />
-    )}
-  </View>
-));
-SectionLabel.displayName = 'SectionLabel';
+// Pure layout constant (depends only on imported theme tokens) — hoisted so
+// it isn't recomputed every render and can be shared by the inline styles.
+const ACTION_BAR_BOTTOM_OFFSET = layout.tabBarHeight + layout.tabBarBottomOffset + spacing.xxl;
 
 export const RoomScreen: React.FC = () => {
   const navigation = useNavigation<Nav>();
   const route = useRoute<Route>();
   const insets = useSafeAreaInsets();
+  const { t } = useTranslation();
   const [isMuted, setIsMuted] = useState(false);
   const [isHandRaised, setIsHandRaised] = useState(false);
 
@@ -213,6 +80,9 @@ export const RoomScreen: React.FC = () => {
   const endRoom = useEndRoom();
   const reportRoom = useReportRoom();
   const viewerId = useAuthStore(s => s.user?.id ?? null);
+  // Stable room id for effects that only need the identifier (not the whole
+  // `room` object, which gets a fresh reference on every React Query refetch).
+  const roomId = room?.id ?? null;
   const { data: handRaises = [] } = useHandRaises(room?.id ?? null);
   const [actionTarget, setActionTarget] = useState<RoomParticipant | null>(null);
   // Listener taps surface a profile sheet (follow / wave / ping); host taps
@@ -234,8 +104,8 @@ export const RoomScreen: React.FC = () => {
   const viewerIsHost = Boolean(room && viewerId && room.hostId === viewerId);
   const viewerCanModerate = viewerIsHost || viewerRole === 'moderator';
   // The mic button only makes sense for users with publishing rights
-  // (Agora "Broadcaster"). Listeners are "Audience" and silently produce
-  // nothing — showing a Mute button to them would be a dead control.
+  // (LiveKit "canPublish"). Listeners have canPublish=false and silently
+  // produce nothing — showing a Mute button to them would be a dead control.
   const viewerCanSpeak = Boolean(
     viewerRole && (viewerRole === 'host' || viewerRole === 'moderator' || viewerRole === 'speaker'),
   );
@@ -245,8 +115,8 @@ export const RoomScreen: React.FC = () => {
   // never reflects what other participants do.
   useRoomSocket(room?.id ?? null);
 
-  // Capture mic + start producing once we're in the room. The Agora
-  // engine auto-activates if `react-native-agora` is installed; in Expo
+  // Capture mic + start producing once we're in the room. The LiveKit
+  // engine auto-activates if `@livekit/react-native` is installed; in Expo
   // Go it returns `status: 'unsupported'` and the rest of the screen
   // (chat, hand-raise, reactions) keeps working.
   const audio = useRoomAudio({ roomId: room?.id ?? null, enabled: Boolean(room) });
@@ -264,7 +134,7 @@ export const RoomScreen: React.FC = () => {
     let cancelled = false;
     let cleanup: (() => void) | undefined;
     void (async () => {
-      if (!room || !viewerId) return;
+      if (!roomId || !viewerId) return;
       const socket = await getSocket();
       if (cancelled || !socket) return;
       const muteHandler = (payload: {
@@ -273,63 +143,77 @@ export const RoomScreen: React.FC = () => {
         roomId?: string;
       }): void => {
         if (payload.userId !== viewerId) return;
-        if (payload.roomId && payload.roomId !== room.id) return;
+        if (payload.roomId && payload.roomId !== roomId) return;
         setIsMuted(payload.isMuted);
       };
       const kickHandler = (payload: { userId: string; roomId?: string }): void => {
         if (payload.userId !== viewerId) return;
-        if (payload.roomId && payload.roomId !== room.id) return;
+        if (payload.roomId && payload.roomId !== roomId) return;
         // Pop the screen first so the user lands somewhere safe even if
         // they dismiss the alert. The 30-min RoomBan installed by the
         // backend prevents an immediate re-join.
         navigation.goBack();
         Alert.alert(
-          'Vous avez été retiré',
-          'Un modérateur vous a expulsé de cette room. Vous ne pouvez pas y revenir avant 30 minutes.',
+          t('room.alert.removedTitle', 'You have been removed'),
+          t(
+            'room.alert.removedBody',
+            'A moderator has expelled you from this room. You cannot rejoin for 30 minutes.',
+          ),
+        );
+      };
+      // The host closed the room (REST /rooms/:id/end or socket room:end).
+      // A missing roomId means "this room"; otherwise it must match the one
+      // we're viewing. Pop the screen and tell the user it's over.
+      const endedHandler = (payload: { roomId?: string }): void => {
+        if (payload.roomId && payload.roomId !== roomId) return;
+        navigation.goBack();
+        Alert.alert(
+          t('room.alert.endedTitle', 'Room ended'),
+          t('room.alert.endedBody', 'This room has been closed by the host.'),
         );
       };
       const roleHandler = (payload: { userId: string; role: string; roomId?: string }): void => {
         if (payload.userId !== viewerId) return;
-        if (payload.roomId && payload.roomId !== room.id) return;
+        if (payload.roomId && payload.roomId !== roomId) return;
         // Promotion to a publishing role — celebrate locally so the user
         // notices the new mic button before they wonder where it came from.
         if (payload.role === 'SPEAKER' || payload.role === 'MODERATOR' || payload.role === 'HOST') {
           void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
           Alert.alert(
-            'Sur la scène 🎙️',
+            t('room.alert.stageTitle', 'On stage 🎙️'),
             payload.role === 'HOST'
-              ? "Vous êtes maintenant l'hôte de la room."
+              ? t('room.alert.roleHost', 'You are now the host of the room.')
               : payload.role === 'MODERATOR'
-                ? 'Vous êtes désormais modérateur.'
-                : 'Vous pouvez parler — appuyez sur Mute pour activer votre micro.',
+                ? t('room.alert.roleMod', 'You are now a moderator.')
+                : t(
+                    'room.alert.roleSpeaker',
+                    'You can speak — tap Mute to toggle your microphone.',
+                  ),
           );
         }
       };
       socket.on('room:mute-changed', muteHandler);
       socket.on('room:user_kicked', kickHandler);
       socket.on('room:role_changed', roleHandler);
+      socket.on('room:ended', endedHandler);
       cleanup = () => {
         socket.off('room:mute-changed', muteHandler);
         socket.off('room:user_kicked', kickHandler);
         socket.off('room:role_changed', roleHandler);
+        socket.off('room:ended', endedHandler);
       };
     })();
     return () => {
       cancelled = true;
       cleanup?.();
     };
-  }, [navigation, room, viewerId]);
-
-  const muteBtn = useAnimatedPress({ scaleTo: 0.96 });
-  const raiseBtn = useAnimatedPress({ scaleTo: 0.96 });
-  const leaveBtn = useAnimatedPress({ scaleTo: 0.96 });
-  const { t } = useTranslation();
+  }, [navigation, roomId, viewerId, t]);
 
   const handleToggleMute = useCallback(async () => {
     if (!room) return;
     const next = !isMuted;
     // Optimistic flip — the badge follows the press immediately. Backend
-    // is the source of truth: if it rejects, we roll back. The Agora
+    // is the source of truth: if it rejects, we roll back. The LiveKit
     // mute is fire-and-forget and not awaited because it's local — its
     // failure shouldn't drag down the API success.
     setIsMuted(next);
@@ -337,7 +221,7 @@ export const RoomScreen: React.FC = () => {
     try {
       await setMute.mutateAsync({ roomId: room.id, isMuted: next });
     } catch {
-      // Backend refused — undo both the badge AND Agora to keep them
+      // Backend refused — undo both the badge AND LiveKit to keep them
       // consistent.
       setIsMuted(!next);
       void audio.setMuted(!next);
@@ -366,31 +250,43 @@ export const RoomScreen: React.FC = () => {
   const handleEndRoom = useCallback(() => {
     if (!room) return;
     Alert.alert(
-      'Fermer la room',
-      `"${room.title}" sera fermée pour tous les participants. Continuer ?`,
+      t('room.alert.confirmEndTitle', 'End Room'),
+      t('room.alert.confirmEndBody', '"{{title}}" will be closed for all participants. Continue?', {
+        title: room.title,
+      }),
       [
-        { text: 'Annuler', style: 'cancel' },
+        { text: t('common.cancel', 'Cancel'), style: 'cancel' },
         {
-          text: 'Fermer',
+          text: t('room.closeRoom', 'End Room'),
           style: 'destructive',
           onPress: () => endRoom.mutate(room.id, { onSettled: () => navigation.goBack() }),
         },
       ],
     );
-  }, [endRoom, navigation, room]);
+  }, [endRoom, navigation, room, t]);
 
   const handleReportRoom = useCallback(() => {
     if (!room) return;
-    Alert.alert('Signaler cette room', 'Quelle est la raison ?', [
-      { text: 'Annuler', style: 'cancel' },
-      { text: 'Spam', onPress: () => reportRoom.mutate({ roomId: room.id, reason: 'spam' }) },
-      {
-        text: 'Harcèlement',
-        onPress: () => reportRoom.mutate({ roomId: room.id, reason: 'harassment' }),
-      },
-      { text: 'Autre', onPress: () => reportRoom.mutate({ roomId: room.id, reason: 'other' }) },
-    ]);
-  }, [reportRoom, room]);
+    Alert.alert(
+      t('room.alert.reportTitle', 'Report this room'),
+      t('room.alert.reportReason', 'What is the reason?'),
+      [
+        { text: t('common.cancel', 'Cancel'), style: 'cancel' },
+        {
+          text: t('profile.reasons.spam', 'Spam'),
+          onPress: () => reportRoom.mutate({ roomId: room.id, reason: 'spam' }),
+        },
+        {
+          text: t('profile.reasons.harassment', 'Harassment'),
+          onPress: () => reportRoom.mutate({ roomId: room.id, reason: 'harassment' }),
+        },
+        {
+          text: t('profile.reasons.other', 'Other'),
+          onPress: () => reportRoom.mutate({ roomId: room.id, reason: 'other' }),
+        },
+      ],
+    );
+  }, [reportRoom, room, t]);
 
   const handleParticipantPress = useCallback(
     (participant: RoomParticipant) => {
@@ -419,6 +315,21 @@ export const RoomScreen: React.FC = () => {
     [viewerId],
   );
 
+  // Promote a hand-raised listener: synthesise the RoomParticipant shape the
+  // moderation/profile press handler expects (the queue only carries the
+  // lightweight UserSummary).
+  const handlePromoteHandRaise = useCallback(
+    (listener: UserSummary) => {
+      handleParticipantPress({
+        ...listener,
+        role: 'listener',
+        audio: 'idle',
+        handRaised: true,
+      });
+    },
+    [handleParticipantPress],
+  );
+
   const handleShare = useCallback(async () => {
     if (!room) return;
     try {
@@ -444,14 +355,69 @@ export const RoomScreen: React.FC = () => {
       })),
     [handRaises],
   );
-  const followedListeners = useMemo(
-    () => (room ? room.listeners.slice(0, FOLLOWED_COUNT) : []),
-    [room],
-  );
-  const otherListeners = useMemo(() => (room ? room.listeners.slice(FOLLOWED_COUNT) : []), [room]);
   const othersOverflow = room ? Math.max(0, room.listenersCount - room.listeners.length) : 0;
 
-  const actionBarBottomOffset = layout.tabBarHeight + layout.tabBarBottomOffset + spacing.xxl;
+  // Virtualized "Others" grid helpers — hoisted above the early returns so
+  // the hook call count stays stable across renders.
+  const othersKeyExtractor = useCallback((item: UserSummary) => item.id, []);
+  const renderOtherItem = useCallback(
+    ({ item }: { item: UserSummary }) => (
+      <Pressable
+        onPress={() => handleListenerPress(item)}
+        accessibilityRole="button"
+        accessibilityLabel={t('room.profileA11y', 'Profile of {{name}}', {
+          name: item.displayName ?? item.username,
+        })}
+        style={styles.othersCell}
+      >
+        <OtherCell listener={item} />
+      </Pressable>
+    ),
+    [handleListenerPress, t],
+  );
+
+  // Partition listeners into "followed by you" vs "others" using the
+  // backend-computed `followedByViewer` flag (carried on each listener by
+  // roomService). When NO listener is flagged — either a legacy payload
+  // without the flag, or genuinely none followed — we fall back to the
+  // previous positional behaviour (first FOLLOWED_COUNT in the followed row,
+  // the rest in the grid) so the layout never regresses.
+  const { followedListeners, otherListeners } = useMemo(() => {
+    const listeners = (room?.listeners ?? []) as RoomListener[];
+    const followed = listeners.filter(l => l.followedByViewer);
+    if (followed.length === 0) {
+      // No flagged followers → keep the historical positional split.
+      return {
+        followedListeners: listeners.slice(0, FOLLOWED_COUNT),
+        otherListeners: listeners.slice(FOLLOWED_COUNT),
+      };
+    }
+    // Cap the followed row at FOLLOWED_COUNT and spill the overflow into
+    // "Others" so a viewer who follows >FOLLOWED_COUNT listeners never loses
+    // anyone (the followed partial only renders maxVisible avatars).
+    return {
+      followedListeners: followed.slice(0, FOLLOWED_COUNT),
+      otherListeners: [
+        ...followed.slice(FOLLOWED_COUNT),
+        ...listeners.filter(l => !l.followedByViewer),
+      ],
+    };
+  }, [room?.listeners]);
+
+  // Live "is speaking" per speaker, keyed by speaker id. The score map
+  // keys the local user under SPEAKING_SELF_KEY; everyone else is keyed by
+  // their user id. Computed here so the score graph stays in the orchestrator
+  // and StageGrid stays purely presentational.
+  const speakingLiveByUser = useMemo(() => {
+    const map = new Map<string, boolean>();
+    if (!room) return map;
+    for (const s of room.speakers) {
+      const key = s.id === viewerId ? SPEAKING_SELF_KEY : s.id;
+      const score = audio.scores.get(key) ?? 0;
+      map.set(s.id, score >= SPEAKING_SCORE_THRESHOLD && s.audio !== 'muted');
+    }
+    return map;
+  }, [room, viewerId, audio.scores]);
 
   if (isLoading) return <Loader fullscreen accessibilityLabel={t('common.loading')} />;
   if (isError || !room) {
@@ -463,13 +429,15 @@ export const RoomScreen: React.FC = () => {
       <View style={[styles.topBar, { paddingTop: insets.top + spacing.sm }]}>
         <View className="flex-row items-center gap-sm">
           <MaterialIcons name="graphic-eq" size={HEADER_ICON_SIZE} color={colors.primary} />
-          <Text className="text-lg font-display text-primary tracking-tighter">Chathouse</Text>
+          <Text className="text-lg font-display text-primary tracking-tighter">
+            {t('common.appName', 'Chathouse')}
+          </Text>
         </View>
         <View className="flex-row items-center gap-xs">
           <Pressable
             onPress={handleShare}
             accessibilityRole="button"
-            accessibilityLabel="Partager le lien de la room"
+            accessibilityLabel={t('room.shareA11y', 'Share room link')}
             hitSlop={8}
             className="w-9 h-9 items-center justify-center rounded-pill bg-overlay-white-5"
           >
@@ -478,7 +446,7 @@ export const RoomScreen: React.FC = () => {
           <Pressable
             onPress={() => setChatOpen(true)}
             accessibilityRole="button"
-            accessibilityLabel="Ouvrir le chat"
+            accessibilityLabel={t('room.openChatA11y', 'Open chat')}
             hitSlop={8}
             className="w-9 h-9 items-center justify-center rounded-pill bg-overlay-white-5"
           >
@@ -488,7 +456,7 @@ export const RoomScreen: React.FC = () => {
             <Pressable
               onPress={() => setControlsOpen(true)}
               accessibilityRole="button"
-              accessibilityLabel="Contrôles de la room"
+              accessibilityLabel={t('room.controlsA11y', 'Room controls')}
               hitSlop={8}
               className="w-9 h-9 items-center justify-center rounded-pill bg-overlay-white-5"
             >
@@ -499,7 +467,7 @@ export const RoomScreen: React.FC = () => {
             <Pressable
               onPress={handleReportRoom}
               accessibilityRole="button"
-              accessibilityLabel="Signaler cette room"
+              accessibilityLabel={t('room.reportA11y', 'Report room')}
               hitSlop={8}
               className="w-9 h-9 items-center justify-center rounded-pill bg-overlay-white-5"
             >
@@ -510,208 +478,175 @@ export const RoomScreen: React.FC = () => {
             <Pressable
               onPress={handleEndRoom}
               accessibilityRole="button"
-              accessibilityLabel="Fermer la room"
+              accessibilityLabel={t('room.closeRoom', 'End Room')}
               hitSlop={8}
               className="bg-danger/15 border border-danger/30 px-lg py-xs rounded-pill"
             >
-              <Text className="text-sm font-body-bold text-danger">Fermer</Text>
+              <Text className="text-sm font-body-bold text-danger">
+                {t('room.closeRoom', 'End Room')}
+              </Text>
             </Pressable>
           )}
         </View>
       </View>
 
-      <ScrollView
+      <FlatList
         className="flex-1"
+        data={otherListeners}
+        numColumns={OTHERS_GRID_COLUMNS}
+        keyExtractor={othersKeyExtractor}
+        renderItem={renderOtherItem}
         contentContainerStyle={{
           paddingHorizontal: spacing.xxl,
           paddingTop: insets.top + spacing.mega,
-          paddingBottom: insets.bottom + actionBarBottomOffset + spacing.mega,
+          paddingBottom: insets.bottom + ACTION_BAR_BOTTOM_OFFSET + spacing.mega,
         }}
         showsVerticalScrollIndicator={false}
-      >
-        {/* Audio status banner — driven by the Agora engine state. We
-            only render it for non-live states so a healthy room has an
-            uncluttered top section. */}
-        {audio.status !== 'live' && audio.status !== 'idle' ? (
-          <View
-            accessibilityRole="alert"
-            accessibilityLiveRegion={audio.status === 'error' ? 'assertive' : 'polite'}
-            className={
-              audio.status === 'error'
-                ? 'mb-xl px-md py-sm rounded-md bg-danger/10 border border-danger/30'
-                : audio.status === 'unsupported'
-                  ? 'mb-xl px-md py-sm rounded-md bg-warning/10 border border-warning/30'
-                  : 'mb-xl px-md py-sm rounded-md bg-primary/10 border border-primary/20'
-            }
-          >
-            <Text
-              className={
-                audio.status === 'error'
-                  ? 'text-xs font-body-medium text-danger text-center'
-                  : audio.status === 'unsupported'
-                    ? 'text-xs font-body-medium text-warning text-center'
-                    : 'text-xs font-body-medium text-primary text-center'
-              }
-            >
-              {audio.status === 'connecting'
-                ? '🔊 Connexion à Agora…'
-                : audio.status === 'unsupported'
-                  ? '⚠️ Audio nécessite un dev-client EAS (react-native-agora indisponible en Expo Go)'
-                  : audio.status === 'error'
-                    ? `❌ ${audio.error ?? 'Erreur audio'}`
-                    : t('room.audioBanner')}
-            </Text>
-          </View>
-        ) : null}
-
-        <View className="mb-huge gap-md">
-          <View className="flex-row items-center justify-between">
-            <View className="flex-row items-center gap-xs flex-wrap flex-1">
-              {room.houseName && (
-                <View className="bg-surface-highest px-sm py-xxs rounded-xs">
-                  <Text className="text-[10px] font-body-bold text-ink-muted uppercase tracking-wider">
-                    {room.houseName}
-                  </Text>
-                </View>
-              )}
-              <View className="bg-primary/10 px-sm py-xxs rounded-xs">
-                <Text className="text-[10px] font-body-bold text-primary uppercase tracking-wider">
-                  {room.categoryEmoji} {room.category}
+        ListHeaderComponent={
+          <>
+            {/* Audio status banner — driven by the LiveKit engine state. We
+                only render it for non-live states so a healthy room has an
+                uncluttered top section. */}
+            {audio.status !== 'live' && audio.status !== 'idle' ? (
+              <View
+                accessibilityRole="alert"
+                accessibilityLiveRegion={audio.status === 'error' ? 'assertive' : 'polite'}
+                className={
+                  audio.status === 'error'
+                    ? 'mb-xl px-md py-sm rounded-md bg-danger/10 border border-danger/30'
+                    : audio.status === 'unsupported'
+                      ? 'mb-xl px-md py-sm rounded-md bg-warning/10 border border-warning/30'
+                      : 'mb-xl px-md py-sm rounded-md bg-primary/10 border border-primary/20'
+                }
+              >
+                <Text
+                  className={
+                    audio.status === 'error'
+                      ? 'text-xs font-body-medium text-danger text-center'
+                      : audio.status === 'unsupported'
+                        ? 'text-xs font-body-medium text-warning text-center'
+                        : 'text-xs font-body-medium text-primary text-center'
+                  }
+                >
+                  {audio.status === 'connecting'
+                    ? t('room.audioConnecting', '🔊 Connecting audio…')
+                    : audio.status === 'unsupported'
+                      ? t(
+                          'room.audioUnsupported',
+                          '⚠️ Audio requires an EAS dev-client (@livekit/react-native is unavailable in Expo Go).',
+                        )
+                      : audio.status === 'error'
+                        ? `❌ ${audio.error ?? t('room.audioError', 'Audio error')}`
+                        : t('room.audioBanner')}
                 </Text>
               </View>
-            </View>
-            {room.isRecording && (
-              <View className="flex-row items-center gap-xs bg-danger/20 px-sm py-xxs rounded-sm">
-                <View className="w-xs h-xs rounded-pill bg-danger" />
-                <Text className="text-[10px] font-body-bold text-danger tracking-widest">
-                  {t('room.rec')}
-                </Text>
-              </View>
-            )}
-          </View>
-          <Pressable
-            onPress={viewerCanModerate ? () => setTitleEditOpen(true) : undefined}
-            disabled={!viewerCanModerate}
-            accessibilityRole={viewerCanModerate ? 'button' : 'header'}
-            accessibilityLabel={
-              viewerCanModerate ? `Modifier le titre : ${room.title}` : room.title
-            }
-          >
-            <Text className="text-display font-display text-white tracking-tight leading-tight">
-              {room.title}
-            </Text>
-          </Pressable>
-          <View className="flex-row items-center gap-sm mt-xs">
-            <RoomTimer startedAt={room.startedAt} />
-            <Text className="text-[10px] text-ink-dim">
-              {room.speakersCount} speakers · {room.listenersCount} listeners
-            </Text>
-          </View>
-        </View>
+            ) : null}
 
-        <View className="mb-huge">
-          <SectionLabel label={`⭐ ${t('room.stage')}`} emphasis />
-          <View style={styles.stageGrid}>
-            {room.speakers.map(s => {
-              const key = s.id === viewerId ? SPEAKING_SELF_KEY : s.id;
-              const score = audio.scores.get(key) ?? 0;
-              const isSpeakingLive = score >= SPEAKING_SCORE_THRESHOLD && s.audio !== 'muted';
-              return (
-                <Pressable
-                  key={s.id}
-                  onPress={() => handleParticipantPress(s)}
-                  accessibilityRole={viewerCanModerate ? 'button' : undefined}
-                  accessibilityLabel={
-                    viewerCanModerate ? `Actions pour ${s.displayName}` : s.displayName
-                  }
-                  style={styles.speakerPress}
-                >
-                  <SpeakerCell speaker={s} isSpeakingLive={isSpeakingLive} />
-                </Pressable>
-              );
-            })}
-          </View>
-        </View>
-
-        {handRaisedUsers.length > 0 && (
-          <View className="mb-huge">
-            <SectionLabel label={`${t('room.handRaised')} · ${handRaisedUsers.length}`} />
-            <View style={styles.handRaisedRow}>
-              {handRaisedUsers.map(l => (
-                <Pressable
-                  key={l.id}
-                  onPress={() =>
-                    handleParticipantPress({
-                      ...l,
-                      role: 'listener',
-                      audio: 'idle',
-                      handRaised: true,
-                    })
-                  }
-                  accessibilityRole={viewerCanModerate ? 'button' : undefined}
-                  accessibilityLabel={
-                    viewerCanModerate ? `Inviter ${l.displayName} à parler` : l.displayName
-                  }
-                >
-                  <HandRaisedCell listener={l} />
-                </Pressable>
-              ))}
-            </View>
-          </View>
-        )}
-
-        {followedListeners.length > 0 && (
-          <View className="mb-huge">
-            <SectionLabel label={t('room.followedBy')} />
-            <View style={styles.followedRow}>
-              {followedListeners.map(l => (
-                <Pressable
-                  key={l.id}
-                  onPress={() => handleListenerPress(l)}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Profil de ${l.displayName ?? l.username}`}
-                >
-                  <FollowedCell listener={l} />
-                </Pressable>
-              ))}
-            </View>
-          </View>
-        )}
-
-        {(otherListeners.length > 0 || othersOverflow > 0) && (
-          <View className="mb-huge">
-            <SectionLabel label={t('room.others')} />
-            <View style={styles.othersGrid}>
-              {otherListeners.map(o => (
-                <Pressable
-                  key={o.id}
-                  onPress={() => handleListenerPress(o)}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Profil de ${o.displayName ?? o.username}`}
-                >
-                  <OtherCell listener={o} />
-                </Pressable>
-              ))}
-              {othersOverflow > 0 && (
-                <View style={styles.gridCell}>
-                  <View style={styles.overflowChip}>
-                    <Text className="text-[9px] font-body-bold text-primary">
-                      +{othersOverflow}
+            <View className="mb-huge gap-md">
+              <View className="flex-row items-center justify-between">
+                <View className="flex-row items-center gap-xs flex-wrap flex-1">
+                  {room.houseName && (
+                    <View className="bg-surface-highest px-sm py-xxs rounded-xs">
+                      <Text className="text-[10px] font-body-bold text-ink-muted uppercase tracking-wider">
+                        {room.houseName}
+                      </Text>
+                    </View>
+                  )}
+                  <View className="bg-primary/10 px-sm py-xxs rounded-xs">
+                    <Text className="text-[10px] font-body-bold text-primary uppercase tracking-wider">
+                      {room.categoryEmoji} {room.category}
                     </Text>
                   </View>
                 </View>
-              )}
+                {room.isRecording && (
+                  <View className="flex-row items-center gap-xs bg-danger/20 px-sm py-xxs rounded-sm">
+                    <View className="w-xs h-xs rounded-pill bg-danger" />
+                    <Text className="text-[10px] font-body-bold text-danger tracking-widest">
+                      {t('room.rec')}
+                    </Text>
+                  </View>
+                )}
+              </View>
+              <Pressable
+                onPress={viewerCanModerate ? () => setTitleEditOpen(true) : undefined}
+                disabled={!viewerCanModerate}
+                accessibilityRole={viewerCanModerate ? 'button' : 'header'}
+                accessibilityLabel={
+                  viewerCanModerate
+                    ? t('room.editTitleA11y', 'Edit title: {{title}}', { title: room.title })
+                    : room.title
+                }
+              >
+                <Text className="text-display font-display text-white tracking-tight leading-tight">
+                  {room.title}
+                </Text>
+              </Pressable>
+              <View className="flex-row items-center gap-sm mt-xs">
+                {room.isLive ? (
+                  <RoomTimer startedAt={room.startedAt} />
+                ) : (
+                  <Text className="text-[10px] text-ink-dim">
+                    {room.scheduledFor
+                      ? formatScheduled(room.scheduledFor)
+                      : t('room.upcoming', 'Upcoming')}
+                  </Text>
+                )}
+                <Text className="text-[10px] text-ink-dim">
+                  {t('room.participants', '{{speakers}} speakers · {{listeners}} listeners', {
+                    speakers: room.speakersCount,
+                    listeners: room.listenersCount,
+                  })}
+                </Text>
+              </View>
             </View>
-          </View>
-        )}
-      </ScrollView>
+
+            <StageGrid
+              speakers={room.speakers}
+              speakingLiveByUser={speakingLiveByUser}
+              viewerCanModerate={viewerCanModerate}
+              onParticipantPress={handleParticipantPress}
+            />
+
+            <HandRaiseQueue
+              handRaises={handRaisedUsers}
+              viewerCanModerate={viewerCanModerate}
+              onPromote={handlePromoteHandRaise}
+            />
+
+            <FollowedByListeners
+              participants={followedListeners}
+              maxVisible={FOLLOWED_COUNT}
+              onTap={handleListenerPress}
+            />
+
+            {/* Section label for the virtualized "Others" grid */}
+            {(otherListeners.length > 0 || othersOverflow > 0) && (
+              <View className="mb-md">
+                <SectionLabel label={t('room.others')} />
+              </View>
+            )}
+          </>
+        }
+        ListFooterComponent={
+          othersOverflow > 0 ? (
+            <View style={styles.overflowChipWrapper}>
+              <View style={styles.overflowChip}>
+                <Text className="text-[9px] font-body-bold text-primary">+{othersOverflow}</Text>
+              </View>
+            </View>
+          ) : (
+            <View className="mb-huge" />
+          )
+        }
+        columnWrapperStyle={styles.othersColumnWrapper}
+      />
 
       {/* Floating reactions bar — sits just above the action pill so the
           float-up emojis fly in front of the controls. pointerEvents
           'box-none' on the wrapper lets taps on the action pill pass
           through the float layer. */}
       <View
-        style={[styles.reactionsWrapper, { bottom: insets.bottom + actionBarBottomOffset + 60 }]}
+        style={[styles.reactionsWrapper, { bottom: insets.bottom + ACTION_BAR_BOTTOM_OFFSET + 60 }]}
         pointerEvents="box-none"
       >
         <ReactionsBar roomId={room.id} />
@@ -719,64 +654,18 @@ export const RoomScreen: React.FC = () => {
 
       <View
         className="absolute left-0 right-0 items-center"
-        style={{ bottom: insets.bottom + actionBarBottomOffset }}
+        style={{ bottom: insets.bottom + ACTION_BAR_BOTTOM_OFFSET }}
         pointerEvents="box-none"
       >
-        <View style={styles.actionPill}>
-          {viewerCanSpeak ? (
-            <Animated.View style={muteBtn.animatedStyle}>
-              <Pressable
-                onPress={handleToggleMute}
-                onPressIn={muteBtn.onPressIn}
-                onPressOut={muteBtn.onPressOut}
-                accessibilityRole="button"
-                accessibilityLabel={isMuted ? 'Unmute microphone' : 'Mute microphone'}
-                accessibilityState={{ selected: isMuted }}
-                className="flex-row items-center gap-sm bg-danger rounded-pill py-sm px-xl"
-              >
-                <MaterialIcons
-                  name={isMuted ? 'mic-off' : 'mic'}
-                  size={ACTION_BAR_ICON_SIZE}
-                  color={colors.white}
-                />
-                <Text className="text-sm font-body-bold text-white">
-                  {isMuted ? t('room.unmute') : t('room.mute')}
-                </Text>
-              </Pressable>
-            </Animated.View>
-          ) : null}
-
-          <Animated.View style={raiseBtn.animatedStyle}>
-            <Pressable
-              onPress={handleToggleHand}
-              onPressIn={raiseBtn.onPressIn}
-              onPressOut={raiseBtn.onPressOut}
-              accessibilityRole="button"
-              accessibilityLabel={isHandRaised ? 'Lower hand' : 'Raise hand'}
-              accessibilityState={{ selected: isHandRaised }}
-              className="flex-row items-center gap-sm bg-primary/20 rounded-pill py-sm px-lg"
-            >
-              <MaterialIcons name="pan-tool" size={ACTION_BAR_ICON_SIZE} color={colors.primary} />
-              <Text className="text-sm font-body-bold text-primary">
-                {isHandRaised ? t('room.lower') : t('room.raise')}
-              </Text>
-            </Pressable>
-          </Animated.View>
-
-          <Animated.View style={leaveBtn.animatedStyle}>
-            <Pressable
-              onPress={handleLeave}
-              onPressIn={leaveBtn.onPressIn}
-              onPressOut={leaveBtn.onPressOut}
-              accessibilityRole="button"
-              accessibilityLabel={t('room.leave')}
-              className="flex-row items-center gap-sm border border-overlay-white-20 rounded-pill py-sm px-xl"
-            >
-              <MaterialIcons name="logout" size={ACTION_BAR_ICON_SIZE} color={colors.danger} />
-              <Text className="text-sm font-body-bold text-white">{t('room.leave')}</Text>
-            </Pressable>
-          </Animated.View>
-        </View>
+        <RoomActionBar
+          viewerCanSpeak={viewerCanSpeak}
+          isMuted={isMuted}
+          isHandRaised={isHandRaised}
+          onToggleMute={handleToggleMute}
+          onToggleHand={handleToggleHand}
+          onInvite={() => navigation.navigate('InviteToRoom', { roomId: room.id })}
+          onLeave={handleLeave}
+        />
       </View>
 
       <HostActionsSheet
@@ -791,7 +680,14 @@ export const RoomScreen: React.FC = () => {
         viewerId={viewerId}
         onClose={() => setProfileTarget(null)}
       />
-      <RoomChatSidebar visible={chatOpen} roomId={room.id} onClose={() => setChatOpen(false)} />
+      <RoomChatSidebar
+        visible={chatOpen}
+        roomId={room.id}
+        onClose={() => setChatOpen(false)}
+        chatEnabled={room.chatEnabled}
+        chatVisibility={room.chatVisibility}
+        canModerate={viewerCanModerate}
+      />
       <RoomControlsSheet
         visible={controlsOpen}
         roomId={room.id}
@@ -825,71 +721,24 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.sm,
     backgroundColor: 'rgba(7,11,40,0.35)',
   },
-  sectionGradientLine: {
+  reactionsWrapper: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+  },
+  othersColumnWrapper: {
+    marginBottom: spacing.md,
+  },
+  othersCell: {
     flex: 1,
-    height: StyleSheet.hairlineWidth,
-  },
-  stageGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    rowGap: spacing.md,
-  },
-  speakerCell: {
-    width: '100%',
-    alignItems: 'center',
-    gap: spacing.xs,
-  },
-  speakerPress: {
-    width: '20%',
-  },
-  speakerRingWrapper: {
-    position: 'relative',
-  },
-  speakerMicBadge: {
-    position: 'absolute',
-    bottom: -2,
-    right: -2,
-    backgroundColor: GREEN,
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    borderWidth: 1.5,
-    borderColor: colors.background,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  speakerName: {
-    maxWidth: SPEAKER_AVATAR,
-  },
-  handRaisedRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    rowGap: spacing.lg,
-  },
-  handRaisedCell: {
-    position: 'relative',
-  },
-  handEmoji: {
-    position: 'absolute',
-    right: -2,
-    bottom: -2,
-  },
-  followedRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    rowGap: spacing.md,
-  },
-  othersGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    rowGap: spacing.md,
-  },
-  gridCell: {
-    width: '20%',
+    maxWidth: `${100 / OTHERS_GRID_COLUMNS}%`,
     alignItems: 'center',
   },
-  otherCell: {
-    opacity: 0.6,
+  overflowChipWrapper: {
+    width: `${100 / OTHERS_GRID_COLUMNS}%`,
+    alignItems: 'center',
+    marginBottom: spacing.xxl,
   },
   overflowChip: {
     width: OTHER_AVATAR,
@@ -900,21 +749,5 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.1)',
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  actionPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    backgroundColor: 'rgba(12,17,46,0.9)',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.1)',
-    borderRadius: 9999,
-    padding: spacing.xs,
-  },
-  reactionsWrapper: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    alignItems: 'center',
   },
 });

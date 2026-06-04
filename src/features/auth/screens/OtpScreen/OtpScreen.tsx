@@ -45,6 +45,7 @@ export const OtpScreen: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [attempts, setAttempts] = useState(0);
   const [countdown, setCountdown] = useState(RESEND_COOLDOWN_SECONDS);
+  const [isCounting, setIsCounting] = useState(true);
   const [isResending, setIsResending] = useState(false);
 
   // Shake animation on error
@@ -64,39 +65,51 @@ export const OtpScreen: React.FC = () => {
     );
   }, [shakeX]);
 
-  // Countdown timer for resend
+  // Countdown timer for resend. Depend on `isCounting` (a stable boolean)
+  // rather than `countdown` so the interval is created once per cooldown
+  // instead of being torn down and recreated on every tick.
   useEffect(() => {
-    if (countdown <= 0) return;
+    if (!isCounting) return;
     const id = setInterval(() => {
       setCountdown(prev => {
         if (prev <= 1) {
-          clearInterval(id);
+          setIsCounting(false);
           return 0;
         }
         return prev - 1;
       });
     }, 1000);
     return () => clearInterval(id);
-  }, [countdown]);
+  }, [isCounting]);
 
   const handleBack = useCallback(() => navigation.goBack(), [navigation]);
+
+  const locked = attempts >= MAX_ATTEMPTS;
 
   // Auto-submit when 6 digits entered
   const handleCodeChange = useCallback(
     async (newCode: string) => {
+      // Once the attempt budget is exhausted, stop accepting submissions
+      // client-side (backend also rate-limits). The user must resend a code,
+      // which resets `attempts` below.
+      if (locked) {
+        setError(t('auth.otp.errors.tooManyAttempts', 'Too many attempts. Resend a new code.'));
+        return;
+      }
       setCode(newCode);
       setError(undefined);
       if (newCode.length === OTP_LENGTH) {
         setIsSubmitting(true);
         try {
           const { isNewUser } = await verifyOtp(phoneNumber, newCode);
-          if (isNewUser) navigation.navigate('Username', { phoneNumber });
-        } catch (err) {
-          const msg =
-            err && typeof err === 'object' && 'message' in err
-              ? (err as { message: string }).message
-              : t('auth.otp.errors.invalid');
-          setError(msg);
+          // New users pick a real name first (Clubhouse order), then a username.
+          if (isNewUser) navigation.navigate('Name', { phoneNumber });
+        } catch {
+          // Almost every verify failure is a wrong/expired code. Show the
+          // localized message instead of leaking the raw HTTP error string
+          // (e.g. "Request failed with status code 401"); the attempt budget +
+          // "too many attempts" copy are tracked/surfaced separately.
+          setError(t('auth.otp.errors.invalid'));
           setAttempts(prev => prev + 1);
           triggerShake();
           setCode('');
@@ -105,7 +118,7 @@ export const OtpScreen: React.FC = () => {
         }
       }
     },
-    [navigation, phoneNumber, t, triggerShake, verifyOtp],
+    [locked, navigation, phoneNumber, t, triggerShake, verifyOtp],
   );
 
   const handleResend = useCallback(async () => {
@@ -114,6 +127,7 @@ export const OtpScreen: React.FC = () => {
     try {
       await requestOtp(phoneNumber);
       setCountdown(RESEND_COOLDOWN_SECONDS);
+      setIsCounting(true);
       setAttempts(0);
       setError(undefined);
       setCode('');
@@ -165,14 +179,23 @@ export const OtpScreen: React.FC = () => {
 
         {/* Remaining attempts warning */}
         {attempts > 0 && remainingAttempts > 0 && (
-          <Text className="text-xs text-danger text-center">
+          <Text className="text-xs text-danger text-center" accessibilityLiveRegion="assertive">
             {t('auth.otp.attemptsRemaining', { count: remainingAttempts })}
+          </Text>
+        )}
+
+        {/* Locked: too many attempts — invite a resend */}
+        {locked && (
+          <Text className="text-xs text-danger text-center" accessibilityLiveRegion="polite">
+            {t('auth.otp.errors.tooManyAttempts', 'Too many attempts. Resend a new code.')}
           </Text>
         )}
 
         {/* Loading indicator during submit */}
         {isSubmitting && (
-          <Text className="text-xs text-ink-muted text-center">{t('auth.otp.verifying')}</Text>
+          <Text className="text-xs text-ink-muted text-center" accessibilityLiveRegion="polite">
+            {t('auth.otp.verifying')}
+          </Text>
         )}
 
         {/* Resend with countdown */}

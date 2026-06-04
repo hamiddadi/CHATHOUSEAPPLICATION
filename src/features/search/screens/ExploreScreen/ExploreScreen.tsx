@@ -1,19 +1,18 @@
-import React, { memo, useCallback, useEffect, useState } from 'react';
-import { FlatList, Pressable, ScrollView, Text, View } from 'react-native';
+import React, { useCallback, useState } from 'react';
+import { Pressable, Text, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
-import { Avatar } from '../../../../shared/components/Avatar';
 import { Input } from '../../../../shared/components/Input';
 import { Loader } from '../../../../shared/components/Loader';
-import { EmptyState } from '../../../../shared/components/EmptyState';
-import { colors, spacing } from '../../../../shared/constants/theme';
+import { colors } from '../../../../shared/constants/theme';
 import type { RoomStackParamList } from '../../../../core/navigation/types';
+import { useDebouncedValue } from '../../../../shared/hooks/useDebouncedValue';
 import { useExplore, useSearch } from '../../hooks/useSearch';
-import type { SearchRoomHit } from '../../services/searchService';
-import type { ExploreClubHit, ExploreUserHit } from '../../services/exploreService';
+import { SearchResultsView } from './partials/SearchResultsView';
+import { ExploreFeedView } from './partials/ExploreFeedView';
 
 type Nav = NativeStackNavigationProp<RoomStackParamList, 'Explore'>;
 
@@ -25,89 +24,13 @@ type Nav = NativeStackNavigationProp<RoomStackParamList, 'Explore'>;
  */
 const DEBOUNCE_MS = 200;
 
-const RoomRow: React.FC<{ room: SearchRoomHit; onPress: (id: string) => void }> = memo(
-  ({ room, onPress }) => (
-    <Pressable
-      onPress={() => onPress(room.id)}
-      accessibilityRole="button"
-      className="flex-row items-center gap-md py-md"
-    >
-      <View className="w-10 h-10 rounded-md bg-surface-container items-center justify-center">
-        <MaterialIcons
-          name={room.isLive ? 'mic' : 'schedule'}
-          size={20}
-          color={room.isLive ? colors.accent : colors.primary}
-        />
-      </View>
-      <View className="flex-1 gap-xxs">
-        <Text className="text-md font-body-medium text-ink" numberOfLines={1}>
-          {room.title}
-        </Text>
-        <Text className="text-xs text-ink-muted" numberOfLines={1}>
-          {room.host.displayName} · {room.listenersCount} listeners
-        </Text>
-      </View>
-    </Pressable>
-  ),
-);
-RoomRow.displayName = 'RoomRow';
-
-const ClubRow: React.FC<{ club: ExploreClubHit; onPress: (id: string) => void }> = memo(
-  ({ club, onPress }) => (
-    <Pressable
-      onPress={() => onPress(club.id)}
-      accessibilityRole="button"
-      className="flex-row items-center gap-md py-md"
-    >
-      <View className="w-10 h-10 rounded-md bg-surface-container items-center justify-center">
-        <Text className="text-lg">{club.categoryEmoji}</Text>
-      </View>
-      <View className="flex-1 gap-xxs">
-        <Text className="text-md font-body-medium text-ink" numberOfLines={1}>
-          {club.name}
-        </Text>
-        <Text className="text-xs text-ink-muted" numberOfLines={1}>
-          {club.membersCount} members · {club.liveRoomsCount} live
-        </Text>
-      </View>
-    </Pressable>
-  ),
-);
-ClubRow.displayName = 'ClubRow';
-
-const UserRow: React.FC<{ user: ExploreUserHit; onPress: (id: string) => void }> = memo(
-  ({ user, onPress }) => (
-    <Pressable
-      onPress={() => onPress(user.id)}
-      accessibilityRole="button"
-      className="flex-row items-center gap-md py-md"
-    >
-      <Avatar uri={user.avatarUrl ?? undefined} name={user.displayName} sizeValue={40} />
-      <View className="flex-1 gap-xxs">
-        <Text className="text-md font-body-medium text-ink" numberOfLines={1}>
-          {user.displayName}
-        </Text>
-        <Text className="text-xs text-ink-muted" numberOfLines={1}>
-          @{user.username} · {user.followersCount} followers
-        </Text>
-      </View>
-    </Pressable>
-  ),
-);
-UserRow.displayName = 'UserRow';
-
 export const ExploreScreen: React.FC = () => {
   const navigation = useNavigation<Nav>();
   const insets = useSafeAreaInsets();
   const { t } = useTranslation();
 
   const [rawQuery, setRawQuery] = useState('');
-  const [debouncedQuery, setDebouncedQuery] = useState('');
-
-  useEffect(() => {
-    const id = setTimeout(() => setDebouncedQuery(rawQuery.trim()), DEBOUNCE_MS);
-    return () => clearTimeout(id);
-  }, [rawQuery]);
+  const debouncedQuery = useDebouncedValue(rawQuery.trim(), DEBOUNCE_MS);
 
   const explore = useExplore();
   const search = useSearch(debouncedQuery);
@@ -152,103 +75,30 @@ export const ExploreScreen: React.FC = () => {
         search.isLoading ? (
           <Loader fullscreen accessibilityLabel={t('explore.searchResults')} />
         ) : (
-          <ScrollView
-            contentContainerStyle={{
-              paddingBottom: insets.bottom + spacing.huge,
-              paddingHorizontal: spacing.xxl,
-            }}
-          >
-            {(search.data?.users.length ?? 0) +
-              (search.data?.clubs.length ?? 0) +
-              (search.data?.rooms.length ?? 0) ===
-            0 ? (
-              <EmptyState title={t('explore.searchEmpty', { q: debouncedQuery })} description="" />
-            ) : (
-              <View className="gap-xxl">
-                <Section
-                  title={t('explore.peopleToFollow')}
-                  items={search.data?.users}
-                  render={u => (
-                    <UserRow key={u.id} user={{ ...u, followersCount: 0 }} onPress={goUser} />
-                  )}
-                />
-                <Section
-                  title={t('explore.popularClubs')}
-                  items={search.data?.clubs}
-                  render={c => (
-                    <ClubRow key={c.id} club={{ ...c, liveRoomsCount: 0 }} onPress={goClub} />
-                  )}
-                />
-                <Section
-                  title={t('explore.trendingRooms')}
-                  items={search.data?.rooms}
-                  render={r => <RoomRow key={r.id} room={r} onPress={goRoom} />}
-                />
-              </View>
-            )}
-          </ScrollView>
+          <SearchResultsView
+            data={search.data}
+            debouncedQuery={debouncedQuery}
+            bottomInset={insets.bottom}
+            goUser={goUser}
+            goClub={goClub}
+            goRoom={goRoom}
+            t={t}
+          />
         )
       ) : explore.isLoading ? (
         <Loader fullscreen accessibilityLabel={t('explore.title')} />
       ) : (
-        <FlatList
-          data={[0] as const}
-          keyExtractor={() => 'sections'}
-          contentContainerStyle={{
-            paddingBottom: insets.bottom + spacing.huge,
-            paddingHorizontal: spacing.xxl,
-          }}
-          renderItem={() => (
-            <View className="gap-xxl">
-              <Section
-                title={t('explore.trendingRooms')}
-                empty={t('explore.emptyRooms')}
-                items={explore.data?.rooms}
-                render={r => <RoomRow key={r.id} room={r} onPress={goRoom} />}
-              />
-              <Section
-                title={t('explore.popularClubs')}
-                empty={t('explore.emptyClubs')}
-                items={explore.data?.clubs}
-                render={c => <ClubRow key={c.id} club={c} onPress={goClub} />}
-              />
-              <Section
-                title={t('explore.peopleToFollow')}
-                empty={t('explore.emptyUsers')}
-                items={explore.data?.users}
-                render={u => <UserRow key={u.id} user={u} onPress={goUser} />}
-              />
-            </View>
-          )}
-          refreshing={explore.isFetching}
+        <ExploreFeedView
+          data={explore.data}
+          bottomInset={insets.bottom}
+          isFetching={explore.isFetching}
           onRefresh={() => void explore.refetch()}
-          showsVerticalScrollIndicator={false}
+          goUser={goUser}
+          goClub={goClub}
+          goRoom={goRoom}
+          t={t}
         />
       )}
     </View>
   );
 };
-
-interface SectionProps<T> {
-  title: string;
-  empty?: string;
-  items?: readonly T[];
-  render: (item: T) => React.ReactNode;
-}
-
-function Section<T>({ title, empty, items, render }: SectionProps<T>) {
-  return (
-    <View>
-      <Text className="text-sm font-body-bold text-ink-muted uppercase tracking-wider mb-md">
-        {title}
-      </Text>
-      {!items || items.length === 0 ? (
-        empty ? (
-          <Text className="text-sm text-ink-dim">{empty}</Text>
-        ) : null
-      ) : (
-        items.map(render)
-      )}
-    </View>
-  );
-}

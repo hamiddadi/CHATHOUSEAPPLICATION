@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, {
+  cancelAnimation,
   Easing,
   runOnJS,
   useAnimatedStyle,
@@ -47,7 +48,13 @@ const ToastItem: React.FC<ToastItemProps> = ({ toast }) => {
         () => runOnJS(dismiss)(toast.id),
       );
     }, toast.duration);
-    return () => clearTimeout(t);
+    return () => {
+      clearTimeout(t);
+      // Cancel any in-flight entry/exit animation so its runOnJS(dismiss)
+      // callback can't fire after this item unmounts. `dismiss` is idempotent
+      // (filters by id), so a benign double-call stays harmless.
+      cancelAnimation(translateY);
+    };
   }, [dismiss, toast.duration, toast.id, translateY]);
 
   const handlePress = () => {

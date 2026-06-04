@@ -2,12 +2,17 @@ import type { Prisma } from '@prisma/client';
 import { prisma } from '../../config/database';
 import { AppError } from '../../middlewares/error.middleware';
 import { notificationsService } from '../notifications/notifications.service';
+import { recordingsService } from '../recordings/recordings.service';
 import { getBlockedIdSet } from '../social/blocks';
 import { cancelEventReminder, scheduleEventReminder } from '../../queues/eventReminders';
+import { fanoutOne } from '../../extensions/queues/followFanout';
+import { emitRoomJoinedByFollowing } from '../../extensions/realtime/aliases';
+import { logger } from '../../config/logger';
 import {
   emitHallwayRoomClosed,
   emitHallwayRoomCreated,
   emitHallwayRoomUpdated,
+  emitRoomEnded,
   emitRoomHandLowered,
   emitRoomHandRaised,
   emitRoomMessage,
@@ -16,6 +21,7 @@ import {
   emitRoomReaction,
   emitRoomRoleChanged,
   emitRoomUserKicked,
+  forceLeaveRoom,
 } from '../../socket/realtime';
 import type {
   CreateRoomInput,
@@ -37,9 +43,22 @@ const publicUser = {
   avatarUrl: true,
 } as const;
 
+const MS_PER_MINUTE = 60_000;
+// Default ban applied on kick when no explicit duration is given — long
+// enough to discourage immediate re-join, short enough to forgive a mistake.
+const DEFAULT_KICK_BAN_MINUTES = 30;
+
+// Hallway feed scoring weights (see `feed()` doc): a followed speaker is
+// worth more than a topic match, which beats raw popularity.
+const FOLLOW_SPEAKER_WEIGHT = 3;
+const TOPIC_MATCH_WEIGHT = 2;
+const POPULARITY_CAP = 5;
+const POPULARITY_BUCKET = 10;
+
 const roomInclude = {
   host: { select: publicUser },
   participants: { include: { user: { select: publicUser } }, where: { leftAt: null } },
+  club: { select: { id: true, name: true, iconUrl: true } },
   _count: { select: { rsvps: true } },
 } satisfies Prisma.RoomInclude;
 
@@ -76,17 +95,27 @@ export const roomsService = {
     // callers keep working without code changes.
     const effectiveFilter = input.filter ?? (input.live === false ? undefined : 'live');
 
+    // 'past' lists ended rooms (e.g. a club's room archive) — so it must
+    // invert the default endedAt:null guard and instead require endedAt set.
+    const isPast = effectiveFilter === 'past';
+
     const where: Prisma.RoomWhereInput = {
-      endedAt: null,
+      ...(isPast ? { endedAt: { not: null } } : { endedAt: null }),
       isPrivate: false,
       ...(input.clubId ? { clubId: input.clubId } : {}),
     };
     if (effectiveFilter === 'live') where.isLive = true;
     if (effectiveFilter === 'upcoming') where.scheduledFor = { gte: new Date() };
 
+    const orderBy: Prisma.RoomOrderByWithRelationInput = isPast
+      ? { endedAt: 'desc' }
+      : effectiveFilter === 'upcoming'
+        ? { scheduledFor: 'asc' }
+        : { createdAt: 'desc' };
+
     return prisma.room.findMany({
       where,
-      orderBy: effectiveFilter === 'upcoming' ? { scheduledFor: 'asc' } : { createdAt: 'desc' },
+      orderBy,
       take: input.limit,
       include: roomInclude,
     });
@@ -136,6 +165,9 @@ export const roomsService = {
         isPrivate: input.isPrivate,
         roomType: input.roomType ?? 'OPEN',
         chatEnabled: input.chatEnabled,
+        // TODO(phase-N): recordingEnabled is a schema placeholder — no
+        // server-side recording pipeline (S3/GCS + transcoding) exists yet.
+        // Do NOT expose in client UI until the pipeline is implemented.
         recordingEnabled: input.recordingEnabled ?? false,
         maxSpeakers: input.maxSpeakers,
         hostId,
@@ -203,15 +235,65 @@ export const roomsService = {
         scheduledFor: room.scheduledFor?.toISOString() ?? null,
         createdAt: room.createdAt.toISOString(),
       });
+
+      // Fan out a "started a room" notification to the host's followers
+      // immediately on create, rather than waiting up to 30s for the
+      // periodic scan worker. fanoutOne is idempotent (Redis SET NX on the
+      // same dedup key the scanner uses) so this never double-notifies even
+      // when the worker also picks the room up. Best-effort: a failure here
+      // must never block room creation, so we swallow + log and let the scan
+      // worker retry on its next pass.
+      void fanoutOne(room.id).catch(err =>
+        logger.warn('rooms.create: follower fan-out failed', { err, roomId: room.id }),
+      );
+    }
+
+    // Kick off the Replay recording when the host opted in (Room.recordingEnabled)
+    // and egress is configured. Best-effort + gated — a no-op when egress is off,
+    // and a failure here must never block room creation.
+    if (isLive && room.recordingEnabled) {
+      void recordingsService
+        .startForRoom(room.id)
+        .catch(err =>
+          logger.warn('rooms.create: recording start failed', { err, roomId: room.id }),
+        );
     }
 
     return room;
   },
 
-  async get(roomId: string) {
+  /**
+   * Fetch a room with its participants. When `viewerId` is supplied, each
+   * LISTENER participant is annotated with a `followedByViewer` boolean
+   * computed from the viewer's follow graph (a single `prisma.follow` query
+   * scoped to the listener ids). Speakers (HOST / MODERATOR / SPEAKER) are
+   * returned unchanged. With no viewer, `followedByViewer` is `false` on
+   * every listener.
+   */
+  async get(roomId: string, viewerId?: string) {
     const room = await prisma.room.findUnique({ where: { id: roomId }, include: roomInclude });
     if (!room) throw new AppError('ROOM_001');
-    return room;
+
+    // Collect listener ids so we can resolve the viewer's follow edges in a
+    // single query (scoped to listeners — we never expose the flag on
+    // speakers, whose shape must stay untouched).
+    const listenerIds = room.participants.filter(p => p.role === 'LISTENER').map(p => p.userId);
+
+    let followedSet = new Set<string>();
+    if (viewerId && listenerIds.length > 0) {
+      const edges = await prisma.follow.findMany({
+        where: { followerId: viewerId, followingId: { in: listenerIds } },
+        select: { followingId: true },
+      });
+      followedSet = new Set(edges.map(e => e.followingId));
+    }
+
+    return {
+      ...room,
+      participants: room.participants.map(p =>
+        p.role === 'LISTENER' ? { ...p, followedByViewer: followedSet.has(p.userId) } : p,
+      ),
+    };
   },
 
   async join(roomId: string, userId: string) {
@@ -235,6 +317,17 @@ export const roomsService = {
     // even if they discovered the room id. The host themselves always passes.
     if (room.isPrivate && room.hostId !== userId && !existing) {
       throw new AppError('ROOM_007');
+    }
+
+    // SOCIAL rooms gate on the follow graph: anyone but the host or an
+    // existing participant must already follow the host to get in. This
+    // mirrors Clubhouse's "social" mode where rooms are open to the host's
+    // network rather than the whole hallway.
+    if (room.roomType === 'SOCIAL' && room.hostId !== userId && !existing) {
+      const f = await prisma.follow.findUnique({
+        where: { followerId_followingId: { followerId: userId, followingId: room.hostId } },
+      });
+      if (!f) throw new AppError('ROOM_007');
     }
 
     // Active ban check — a moderator-issued kick installs a RoomBan row;
@@ -265,14 +358,57 @@ export const roomsService = {
 
     // Track current room + bump denormalized count
     if (!wasAlreadyActive) {
-      await prisma.$transaction([
+      // Broadcast the COMMITTED count (read back from the atomic increment),
+      // not `room.participantCount + 1` — the latter is a pre-mutation snapshot
+      // that drifts under concurrent joins/leaves.
+      const [, updatedRoom] = await prisma.$transaction([
         prisma.user.update({ where: { id: userId }, data: { currentRoomId: roomId } }),
-        prisma.room.update({ where: { id: roomId }, data: { participantCount: { increment: 1 } } }),
+        prisma.room.update({
+          where: { id: roomId },
+          data: { participantCount: { increment: 1 } },
+          select: { participantCount: true },
+        }),
       ]);
-      emitHallwayRoomUpdated(roomId, { participantCount: room.participantCount + 1 });
+      emitHallwayRoomUpdated(roomId, { participantCount: updatedRoom.participantCount });
+
+      // Ephemeral "someone you follow just joined a room" realtime ping to
+      // the joiner's followers. Best-effort and fire-and-forget: it must
+      // never block (or fail) the join. Not persisted as a Prisma
+      // notification — there's no enum for it and the client can't be
+      // regenerated, so this stays purely on the realtime tier. Only fired
+      // for a genuinely new active presence (not a re-join of an already
+      // active participant).
+      void (async () => {
+        try {
+          const [joiner, followers] = await Promise.all([
+            prisma.user.findUnique({
+              where: { id: userId },
+              select: { id: true, username: true, displayName: true, avatarUrl: true },
+            }),
+            prisma.follow.findMany({
+              where: { followingId: userId },
+              select: { followerId: true },
+              take: 500,
+            }),
+          ]);
+          if (!joiner) return;
+          const payload = {
+            roomId,
+            userId: joiner.id,
+            username: joiner.username,
+            displayName: joiner.displayName,
+            avatarUrl: joiner.avatarUrl,
+          };
+          for (const f of followers) {
+            emitRoomJoinedByFollowing(f.followerId, payload);
+          }
+        } catch (err) {
+          logger.warn('rooms.join: follower join-activity emit failed', { err, roomId, userId });
+        }
+      })();
     }
 
-    return roomsService.get(roomId);
+    return roomsService.get(roomId, userId);
   },
 
   async leave(roomId: string, userId: string) {
@@ -319,6 +455,10 @@ export const roomsService = {
             });
             await cancelEventReminder(roomId);
             emitHallwayRoomClosed(roomId);
+            // Finalize the Replay when an empty room auto-closes (gated/no-op).
+            void recordingsService
+              .stopForRoom(roomId)
+              .catch(err => logger.warn('rooms.leave: recording stop failed', { err, roomId }));
           }
         }
       }
@@ -357,6 +497,13 @@ export const roomsService = {
     // Drop any pending reminder — the room is over.
     await cancelEventReminder(roomId);
     emitHallwayRoomClosed(roomId);
+    // Tell participants still in the room to leave (REST end() path; the socket
+    // room:end handler already emits this for the socket path).
+    emitRoomEnded(roomId);
+    // Stop + finalize the Replay recording if one is running (gated/no-op).
+    void recordingsService
+      .stopForRoom(roomId)
+      .catch(err => logger.warn('rooms.end: recording stop failed', { err, roomId }));
     return { ended: true };
   },
 
@@ -368,18 +515,35 @@ export const roomsService = {
       throw new AppError('ROOM_003');
     }
 
+    // SPEAKER promotion: the capacity check + the role write must be atomic,
+    // otherwise two concurrent promotions can both read activeSpeakers < max and
+    // both succeed, overshooting maxSpeakers (TOCTOU). Serializable isolation
+    // makes the DB abort one racer (rare; the client just retries). Other roles
+    // have no cap, so they take the plain single-statement path.
+    let updatedCount: number;
     if (input.role === 'SPEAKER') {
-      const activeSpeakers = await prisma.participant.count({
-        where: { roomId, leftAt: null, role: 'SPEAKER' },
+      updatedCount = await prisma.$transaction(
+        async tx => {
+          const activeSpeakers = await tx.participant.count({
+            where: { roomId, leftAt: null, role: 'SPEAKER' },
+          });
+          if (activeSpeakers >= room.maxSpeakers) throw new AppError('ROOM_002');
+          const res = await tx.participant.updateMany({
+            where: { roomId, userId: input.userId, leftAt: null },
+            data: { role: input.role },
+          });
+          return res.count;
+        },
+        { isolationLevel: 'Serializable' },
+      );
+    } else {
+      const res = await prisma.participant.updateMany({
+        where: { roomId, userId: input.userId, leftAt: null },
+        data: { role: input.role },
       });
-      if (activeSpeakers >= room.maxSpeakers) throw new AppError('ROOM_002');
+      updatedCount = res.count;
     }
-
-    const updated = await prisma.participant.updateMany({
-      where: { roomId, userId: input.userId, leftAt: null },
-      data: { role: input.role },
-    });
-    if (updated.count === 0) throw new AppError('USER_001');
+    if (updatedCount === 0) throw new AppError('USER_001');
 
     // Transferring HOST must also flip Room.hostId and demote the previous
     // host to SPEAKER, otherwise requireHost() keeps protecting the old user
@@ -458,11 +622,35 @@ export const roomsService = {
     return { cancelled: true as const };
   },
 
-  async listRsvps(roomId: string) {
+  async listRsvps(roomId: string, viewerId?: string, opts?: { limit?: number; cursor?: string }) {
+    const room = await prisma.room.findUnique({
+      where: { id: roomId },
+      select: { id: true, hostId: true, isPrivate: true },
+    });
+    if (!room) throw new AppError('ROOM_001');
+
+    // AuthZ: the full RSVP list of a private/closed room is only visible to
+    // its host or an (active) participant — otherwise anyone who discovered
+    // the id could enumerate who's attending a private event. Public rooms
+    // stay open to any authenticated viewer.
+    if (room.isPrivate && viewerId !== undefined && room.hostId !== viewerId) {
+      const p = await prisma.participant.findUnique({
+        where: { userId_roomId: { userId: viewerId, roomId } },
+        select: { leftAt: true },
+      });
+      if (!p || p.leftAt) throw new AppError('ROOM_007');
+    }
+
+    // Cursor pagination so a room with tens of thousands of RSVPs doesn't
+    // return everything in one shot. `cursor` is a RoomRsvp id.
+    const limit = Math.max(1, Math.min(100, opts?.limit ?? 100));
+    const cursor = opts?.cursor;
     const rows = await prisma.roomRsvp.findMany({
       where: { roomId },
       include: { user: { select: publicUser } },
       orderBy: { createdAt: 'asc' },
+      take: limit,
+      ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
     });
     return rows.map(r => r.user);
   },
@@ -514,7 +702,7 @@ export const roomsService = {
     viewerId: string,
     limit = 20,
     _cursor?: string,
-    filters: { topic?: string; following?: boolean } = {},
+    filters: { topic?: string; following?: boolean; clubs?: boolean } = {},
   ) {
     const CANDIDATE_POOL = 200;
     const topicLower = filters.topic?.toLowerCase();
@@ -536,6 +724,8 @@ export const roomsService = {
           isLive: true,
           isPrivate: false,
           endedAt: null,
+          // `clubs` filter narrows the pool to club-attached rooms only.
+          ...(filters.clubs ? { clubId: { not: null } } : {}),
           ...(topicLower
             ? {
                 OR: [
@@ -552,6 +742,7 @@ export const roomsService = {
             where: { leftAt: null },
             include: { user: { select: publicUser } },
           },
+          club: { select: { id: true, name: true, iconUrl: true } },
           _count: { select: { rsvps: true } },
         },
         orderBy: { createdAt: 'desc' },
@@ -593,9 +784,10 @@ export const roomsService = {
       }
 
       const listenerCount = room.participants.length;
-      const popularity = Math.min(5, Math.floor(listenerCount / 10));
+      const popularity = Math.min(POPULARITY_CAP, Math.floor(listenerCount / POPULARITY_BUCKET));
 
-      const score = followSpeakerCount * 3 + topicMatch * 2 + popularity;
+      const score =
+        followSpeakerCount * FOLLOW_SPEAKER_WEIGHT + topicMatch * TOPIC_MATCH_WEIGHT + popularity;
       return { room, score, followSpeakerCount };
     });
 
@@ -807,8 +999,8 @@ export const roomsService = {
 
     // Install ban so they can't bounce right back. banMinutes=0 → permanent.
     // Default 30 min keeps the friction proportionate to the offense.
-    const minutes = options.banMinutes ?? 30;
-    const expiresAt = minutes === 0 ? null : new Date(Date.now() + minutes * 60_000);
+    const minutes = options.banMinutes ?? DEFAULT_KICK_BAN_MINUTES;
+    const expiresAt = minutes === 0 ? null : new Date(Date.now() + minutes * MS_PER_MINUTE);
     await prisma.roomBan.upsert({
       where: { roomId_userId: { roomId, userId: targetUserId } },
       create: {
@@ -826,6 +1018,10 @@ export const roomsService = {
     });
 
     emitRoomUserKicked(roomId, { userId: targetUserId, kickedBy: callerUserId });
+    // Authoritatively evict the kicked user's socket(s) from the room channel —
+    // the broadcast above only notifies; this enforces it server-side so a
+    // client that ignores the event can't keep receiving room broadcasts.
+    forceLeaveRoom(roomId, targetUserId, callerUserId);
     emitHallwayRoomUpdated(roomId, { participantCount: Math.max(0, room.participantCount - 1) });
     return { kicked: true as const };
   },
@@ -930,17 +1126,18 @@ export const roomsService = {
     const validIds = existing.map(u => u.id);
 
     // Closed rooms: pre-seat invitees as LISTENER so the join guard accepts
-    // them. We use upsert so re-invites don't break unique constraints.
+    // them. Two bulk queries (createMany skipDuplicates + updateMany to
+    // un-leave re-invites) instead of N upserts — avoids up to 50 DB
+    // round-trips when inviting the full batch.
     if (room.isPrivate && validIds.length > 0) {
-      await Promise.all(
-        validIds.map(userId =>
-          prisma.participant.upsert({
-            where: { userId_roomId: { userId, roomId } },
-            create: { roomId, userId, role: 'LISTENER' },
-            update: { leftAt: null },
-          }),
-        ),
-      );
+      await prisma.participant.createMany({
+        data: validIds.map(userId => ({ roomId, userId, role: 'LISTENER' as const })),
+        skipDuplicates: true,
+      });
+      await prisma.participant.updateMany({
+        where: { roomId, userId: { in: validIds }, leftAt: { not: null } },
+        data: { leftAt: null },
+      });
     }
 
     await Promise.all(

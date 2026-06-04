@@ -1,5 +1,13 @@
 import React, { useCallback, useState } from 'react';
-import { KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import {
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -13,30 +21,58 @@ import { useTranslation } from 'react-i18next';
 import { Button } from '../../../../shared/components/Button';
 import { Input } from '../../../../shared/components/Input';
 import { colors, spacing } from '../../../../shared/constants/theme';
+import { mediaService } from '../../../../shared/services/api/mediaService';
+import { errorMessage } from '../../../../shared/utils/errorMessage';
 import type { OnboardingStackParamList } from '../../../../core/navigation/types';
 import { setupProfileFormSchema, type SetupProfileFormValues } from '../../schemas';
 import { useOnboardingStore } from '../../store/onboardingStore';
 
 type Nav = NativeStackNavigationProp<OnboardingStackParamList, 'Onboarding'>;
 
+const BIO_MAX = 150;
+
 export const SetupProfileScreen: React.FC = () => {
   const navigation = useNavigation<Nav>();
   const insets = useSafeAreaInsets();
   const setProfile = useOnboardingStore(s => s.setProfile);
   const { t } = useTranslation();
+  // `avatarUri` is the local preview; `avatarBase64`/`avatarMime` feed the
+  // upload that swaps it for a remote https URL before onboarding completes.
   const [avatarUri, setAvatarUri] = useState<string | null>(null);
+  const [avatarBase64, setAvatarBase64] = useState<string | null>(null);
+  const [avatarMime, setAvatarMime] = useState<string | undefined>(undefined);
+  const [uploading, setUploading] = useState(false);
 
   const pickImage = async () => {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      allowsEditing: true,
-      aspect: [1, 1], // For circular crop
-      quality: 0.8,
-    });
+    try {
+      // Request media-library permission first; on some OSes launching the
+      // picker without it rejects with an unhandled promise.
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert(
+          t('common.permissionDenied', 'Permission required'),
+          t('onboarding.setupProfile.photoPermission', 'Allow photo access to choose a picture.'),
+        );
+        return;
+      }
 
-    if (!result.canceled && result.assets[0]) {
-      setAvatarUri(result.assets[0].uri);
-      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'],
+        allowsEditing: true,
+        aspect: [1, 1], // For circular crop
+        quality: 0.8,
+        base64: true,
+      });
+
+      const asset = result.canceled ? undefined : result.assets[0];
+      if (asset) {
+        setAvatarUri(asset.uri);
+        setAvatarBase64(asset.base64 ?? null);
+        setAvatarMime(asset.mimeType);
+        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      }
+    } catch {
+      Alert.alert(t('common.error', 'Something went wrong'));
     }
   };
 
@@ -51,16 +87,34 @@ export const SetupProfileScreen: React.FC = () => {
   });
 
   const onSubmit = useCallback(
-    (values: SetupProfileFormValues) => {
-      setProfile({
-        displayName: values.displayName || undefined,
-        bio: values.bio || undefined,
-        avatarUrl: avatarUri,
-      });
-      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      navigation.navigate('InterestSelection');
+    async (values: SetupProfileFormValues) => {
+      try {
+        // A locally-picked image is a file:// URI the backend can't read.
+        // Upload its base64 first and store the REMOTE https URL so the later
+        // completeOnboarding() flush (SuggestedFollows step) sends a usable
+        // avatarUrl. With no pick, leave it null/undefined.
+        let avatarUrl: string | null = null;
+        if (avatarBase64) {
+          setUploading(true);
+          avatarUrl = await mediaService.uploadAvatar(avatarBase64, avatarMime);
+        }
+        setProfile({
+          displayName: values.displayName || undefined,
+          bio: values.bio || undefined,
+          avatarUrl,
+        });
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        navigation.navigate('InterestSelection');
+      } catch (err) {
+        Alert.alert(
+          t('common.error', 'Something went wrong'),
+          errorMessage(err, t('common.error', 'Something went wrong')),
+        );
+      } finally {
+        setUploading(false);
+      }
     },
-    [navigation, setProfile, avatarUri],
+    [navigation, setProfile, avatarBase64, avatarMime, t],
   );
 
   const onSkip = useCallback(() => {
@@ -137,10 +191,11 @@ export const SetupProfileScreen: React.FC = () => {
                 value={value ?? ''}
                 onChangeText={onChange}
                 onBlur={onBlur}
-                maxLength={280}
+                maxLength={BIO_MAX}
                 multiline
                 numberOfLines={4}
                 error={bioError}
+                helperText={`${(value ?? '').length} / ${BIO_MAX}`}
                 size="lg"
               />
             )}
@@ -155,7 +210,8 @@ export const SetupProfileScreen: React.FC = () => {
             variant="primary"
             size="lg"
             fullWidth
-            loading={isSubmitting}
+            loading={isSubmitting || uploading}
+            disabled={isSubmitting || uploading}
             onPress={handleSubmit(onSubmit)}
           />
           <Pressable onPress={onSkip} accessibilityRole="button" className="items-center py-sm">

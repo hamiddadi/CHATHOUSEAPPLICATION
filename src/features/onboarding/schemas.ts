@@ -14,7 +14,7 @@ export const setupProfileFormSchema = z.object({
   bio: z
     .string()
     .transform(s => s.trim())
-    .pipe(z.string().max(280, 'onboarding.setupProfile.errors.bioTooLong').optional())
+    .pipe(z.string().max(150, 'onboarding.setupProfile.errors.bioTooLong').optional())
     .optional(),
 });
 

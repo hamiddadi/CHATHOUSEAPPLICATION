@@ -137,6 +137,8 @@ export const authService = {
 
   async completeOnboarding(input: {
     displayName?: string;
+    firstName?: string;
+    lastName?: string;
     bio?: string;
     avatarUrl?: string | null;
     interests?: string[];

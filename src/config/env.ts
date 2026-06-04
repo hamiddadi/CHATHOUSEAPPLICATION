@@ -19,15 +19,12 @@ const envSchema = z.object({
   ENV: z.enum(['development', 'staging', 'production']).default('development'),
   SENTRY_DSN: z.string().url().optional(),
 
-  // ─── Agora (audio engine) ────────────────────────────────
-  // AGORA_APP_ID is the public app identifier — safe to ship in client
-  // builds. The PRIMARY_CERTIFICATE / SECONDARY_CERTIFICATE are SECRETS
-  // and MUST NEVER be embedded in the client bundle — the backend signs
-  // tokens using them. The temp token below is short-lived (max 24h)
-  // and is fine for development; production must call a token endpoint.
-  AGORA_APP_ID: z.string().min(1).optional(),
-  AGORA_DEFAULT_CHANNEL: z.string().min(1).default('CHATHOUSE'),
-  AGORA_TEMP_TOKEN: z.string().min(1).optional(),
+  // ─── LiveKit (audio engine) ───────────────────────────────
+  // LIVEKIT_URL is the WebSocket endpoint of the LiveKit server.
+  // The backend signs tokens — no secrets needed client-side.
+  // The URL is also returned in the token response, but having it
+  // here allows early connection setup.
+  LIVEKIT_URL: z.string().min(1).optional(),
 });
 
 const extra = Constants.expoConfig?.extra ?? {};

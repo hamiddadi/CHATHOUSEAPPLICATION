@@ -1,12 +1,15 @@
 import React, { memo } from 'react';
 import { Alert, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useTranslation } from 'react-i18next';
 import { Avatar } from '../../../shared/components/Avatar';
 import { EmptyState } from '../../../shared/components/EmptyState';
 import { Loader } from '../../../shared/components/Loader';
-import { colors, spacing } from '../../../shared/constants/theme';
+import { colors, palette, radii, spacing, withAlpha } from '../../../shared/constants/theme';
+import { errorMessage } from '../../../shared/utils/errorMessage';
 import { AdminHeader } from '../components/AdminHeader';
 import { useAdminRooms, useForceEndRoom } from '../hooks/useAdmin';
+import { promptForReason } from '../promptForReason';
 import type { AdminRoom } from '../types/admin.types';
 
 const RoomRow: React.FC<{
@@ -14,6 +17,7 @@ const RoomRow: React.FC<{
   onForceEnd: (id: string, title: string) => void;
   busy: boolean;
 }> = memo(({ room, onForceEnd, busy }) => {
+  const { t } = useTranslation();
   const participants = room._count?.participants ?? room.participantCount;
   return (
     <View style={styles.row}>
@@ -28,12 +32,17 @@ const RoomRow: React.FC<{
             {room.title}
           </Text>
           <Text className="text-xs text-ink-muted">
-            par @{room.host.username ?? '—'} · {participants} participant·e·s
+            {t('admin.rooms.hostBy', 'by @{{username}} · {{count}} participants', {
+              username: room.host.username ?? '—',
+              count: participants,
+            })}
           </Text>
         </View>
         {room.isLive ? (
           <View style={styles.liveBadge}>
-            <Text className="text-[9px] font-body-bold text-danger">LIVE</Text>
+            <Text className="text-[9px] font-body-bold text-danger">
+              {t('admin.rooms.liveBadge', 'LIVE')}
+            </Text>
           </View>
         ) : null}
       </View>
@@ -42,10 +51,14 @@ const RoomRow: React.FC<{
         onPress={() => onForceEnd(room.id, room.title)}
         style={[styles.endBtn, !room.isLive && styles.endBtnDisabled]}
         accessibilityRole="button"
-        accessibilityLabel={`Forcer la fin de ${room.title}`}
+        accessibilityState={{ disabled: busy || !room.isLive }}
+        accessibilityLabel={`${t('admin.rooms.closeRoom')} ${room.title}`}
       >
-        <Text className="text-xs font-body-bold text-white">
-          {room.isLive ? 'Forcer la fin' : 'Terminée'}
+        <Text
+          className="text-xs font-body-bold"
+          style={{ color: room.isLive ? palette.onError : colors.textMuted }}
+        >
+          {room.isLive ? t('admin.rooms.closeRoom') : t('admin.rooms.ended', 'Ended')}
         </Text>
       </Pressable>
     </View>
@@ -54,63 +67,63 @@ const RoomRow: React.FC<{
 RoomRow.displayName = 'RoomRow';
 
 export const AdminRoomsScreen: React.FC = () => {
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
-  const { data: rooms, isLoading, isError, refetch } = useAdminRooms({ live: true });
+  const { data: rooms, isLoading, isError, refetch, isRefetching } = useAdminRooms({ live: true });
   const forceEnd = useForceEndRoom();
 
-  const handleForceEnd = (roomId: string, title: string) => {
-    // Alert.prompt is iOS-only; on Android we fall back to a generic reason.
+  const handleForceEnd = (roomId: string) => {
     const fire = (reason: string) =>
       forceEnd.mutate(
         { roomId, reason },
-        { onError: e => Alert.alert('Erreur', e instanceof Error ? e.message : 'Échec') },
-      );
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    if ((Alert as any).prompt) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (Alert as any).prompt(
-        'Forcer la fin',
-        `"${title}" sera fermée pour tous les participants.\n\nMotif :`,
-        [
-          { text: 'Annuler', style: 'cancel' },
-          {
-            text: 'Fermer',
-            style: 'destructive',
-            onPress: (text: string | undefined) => fire((text ?? '').trim() || 'Fermeture admin'),
-          },
-        ],
-        'plain-text',
-      );
-    } else {
-      Alert.alert('Forcer la fin', `Fermer "${title}" ?`, [
-        { text: 'Annuler', style: 'cancel' },
         {
-          text: 'Confirmer',
-          style: 'destructive',
-          onPress: () => fire('Fermeture admin'),
+          onError: e =>
+            Alert.alert(
+              t('common.error', 'Error'),
+              errorMessage(e, t('admin.rooms.failedEnd', 'Failed to close the room.')),
+            ),
         },
-      ]);
-    }
+      );
+    promptForReason(
+      {
+        title: t('admin.rooms.closeRoom'),
+        message: t('admin.rooms.confirmClose'),
+        confirmLabel: 'OK',
+        defaultReason: 'Admin',
+        androidConfirm: { message: t('admin.rooms.confirmClose'), confirmLabel: 'OK' },
+      },
+      fire,
+    );
   };
 
   return (
     <View className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
-      <AdminHeader title="Rooms en direct" />
+      <AdminHeader title={t('admin.rooms.liveRooms', 'Live Rooms')} />
       <View className="px-xxl">
         <Text className="text-xs text-ink-muted">
-          Forcer la fin notifie tous les participants et ferme le canal Agora.
+          {t(
+            'admin.rooms.forceEndNotice',
+            'Forcing termination notifies all participants and closes the LiveKit channel.',
+          )}
         </Text>
       </View>
 
       {isLoading ? (
-        <Loader fullscreen accessibilityLabel="Chargement…" />
+        <Loader fullscreen accessibilityLabel={t('common.loading', 'Loading…')} />
       ) : isError || !rooms ? (
-        <EmptyState title="Erreur" description="Impossible de charger les rooms." />
+        <EmptyState
+          title={t('common.error', 'Error')}
+          description={t('admin.rooms.errorLoadingRooms', 'Unable to load rooms.')}
+        />
       ) : (
         <FlatList
           data={rooms}
           renderItem={({ item }) => (
-            <RoomRow room={item} onForceEnd={handleForceEnd} busy={forceEnd.isPending} />
+            <RoomRow
+              room={item}
+              onForceEnd={handleForceEnd}
+              busy={forceEnd.isPending && forceEnd.variables?.roomId === item.id}
+            />
           )}
           keyExtractor={r => r.id}
           ItemSeparatorComponent={() => <View style={{ height: spacing.sm }} />}
@@ -119,11 +132,9 @@ export const AdminRoomsScreen: React.FC = () => {
             paddingTop: spacing.lg,
             paddingBottom: insets.bottom + spacing.giant,
           }}
-          ListEmptyComponent={
-            <EmptyState title="Aucune room en direct" description="Tout est calme." />
-          }
+          ListEmptyComponent={<EmptyState title={t('admin.rooms.empty')} description="" />}
           onRefresh={refetch}
-          refreshing={isLoading}
+          refreshing={isRefetching}
           showsVerticalScrollIndicator={false}
         />
       )}
@@ -133,26 +144,28 @@ export const AdminRoomsScreen: React.FC = () => {
 
 const styles = StyleSheet.create({
   row: {
-    backgroundColor: 'rgba(255,255,255,0.04)',
-    borderRadius: 12,
+    backgroundColor: colors.overlayWhite4,
+    borderRadius: radii.md,
     padding: spacing.lg,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
+    borderColor: colors.glassStrong,
     gap: spacing.sm,
   },
   host: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   liveBadge: {
     paddingHorizontal: 6,
     paddingVertical: 3,
-    borderRadius: 4,
-    backgroundColor: 'rgba(239,68,68,0.15)',
+    borderRadius: radii.xs,
+    backgroundColor: withAlpha(colors.danger, 0.15),
   },
   endBtn: {
     paddingVertical: spacing.sm,
-    borderRadius: 999,
+    minHeight: 44,
+    justifyContent: 'center',
+    borderRadius: radii.pill,
     backgroundColor: colors.danger,
     alignItems: 'center',
   },
-  endBtnDisabled: { backgroundColor: 'rgba(255,255,255,0.1)' },
+  endBtnDisabled: { backgroundColor: colors.borderSoft },
   hostInfo: { flex: 1 },
 });

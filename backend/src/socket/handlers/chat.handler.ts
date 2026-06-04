@@ -1,8 +1,8 @@
 import type { Server, Socket } from 'socket.io';
 import { chatService } from '../../modules/chat/chat.service';
 import { logger } from '../../config/logger';
-
-const userChannel = (userId: string): string => `user:${userId}`;
+import { userChannel } from '../channels';
+import { getUserId } from '../socket.middleware';
 
 interface SendPayload {
   receiverId: string;
@@ -22,15 +22,14 @@ interface ReadPayload {
  * adapter.
  */
 export const registerChatHandlers = (io: Server, socket: Socket): void => {
-  const me = (): string => socket.data.userId as string;
+  const me = (): string => getUserId(socket);
   void socket.join(userChannel(me()));
 
   socket.on('chat:send', async (payload: SendPayload, ack?: (ok: boolean) => void) => {
     try {
-      const msg = await chatService.send(me(), payload.receiverId, { content: payload.content });
-      // Emit to both the sender (for echo/UI confirmation) and the receiver.
-      io.to(userChannel(me())).emit('chat:message', msg);
-      io.to(userChannel(payload.receiverId)).emit('chat:message', msg);
+      // chatService.send now emits `chat:message` to both parties itself
+      // (so the REST path is covered too) — don't double-emit here.
+      await chatService.send(me(), payload.receiverId, { content: payload.content });
       ack?.(true);
     } catch (err) {
       logger.warn('chat:send failed', { err });
@@ -44,6 +43,13 @@ export const registerChatHandlers = (io: Server, socket: Socket): void => {
 
   socket.on('chat:read', async (payload: ReadPayload, ack?: (ok: boolean) => void) => {
     try {
+      // Validate the socket payload before hitting the service: an absent /
+      // non-string messageId would otherwise reach Prisma as
+      // `where: { id: undefined }`.
+      if (typeof payload?.messageId !== 'string' || !payload.messageId) {
+        ack?.(false);
+        return;
+      }
       const msg = await chatService.markRead(me(), payload.messageId);
       io.to(userChannel(msg.senderId)).emit('chat:read', { messageId: msg.id });
       ack?.(true);

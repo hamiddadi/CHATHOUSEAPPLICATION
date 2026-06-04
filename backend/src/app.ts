@@ -1,5 +1,9 @@
 import http from 'node:http';
-import express, { json as expressJson, urlencoded as expressUrlencoded } from 'express';
+import express, {
+  json as expressJson,
+  urlencoded as expressUrlencoded,
+  static as expressStatic,
+} from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
 import compression from 'compression';
@@ -17,6 +21,7 @@ import { usersRouter } from './modules/users/users.router';
 import { followRouter } from './modules/follow/follow.router';
 import { roomsRouter } from './modules/rooms/rooms.router';
 import { chatRouter } from './modules/chat/chat.router';
+import { groupsRouter } from './modules/groups/groups.router';
 import { mapsRouter } from './modules/maps/maps.router';
 import { notificationsRouter } from './modules/notifications/notifications.router';
 import { clubsRouter } from './modules/clubs/clubs.router';
@@ -24,15 +29,39 @@ import { searchRouter } from './modules/search/search.router';
 import { exploreRouter } from './modules/explore/explore.router';
 import { pushRouter } from './modules/push/push.router';
 import { adminRouter } from './modules/admin/admin.router';
+import { uploadRouter } from './modules/upload/upload.router';
+import { recordingsRouter } from './modules/recordings/recordings.router';
+import { livekitWebhookRouter } from './modules/recordings/recordings.webhook';
+import { stripeWebhookRouter } from './extensions/modules/payments/payments.webhook';
+import { UPLOADS_DIR } from './modules/upload/upload.service';
 import { createSocketServer } from './socket/socket.server';
+import { mountExtensions } from './extensions/mount';
+import { setRealtimeAliasServer } from './extensions/realtime/aliases';
 import { initMediasoup, shutdownMediasoup } from './webrtc/mediasoup.manager';
 import { startReminderWorker, shutdownReminders } from './queues/eventReminders';
+import { startLocationPurgeWorker, shutdownLocationPurge } from './queues/locationPurge';
+import { registerGdprPurgeWorker, shutdownGdprPurge } from './workers/gdpr-purge.worker';
 import { ensureSearchIndexes } from './config/searchIndexes';
+import { initSentry } from './monitoring/sentry';
+import { httpMetricsMiddleware, metricsHandler } from './monitoring/metrics';
+
+// Grace period before a hung server.close() is hard-killed during shutdown.
+const SHUTDOWN_GRACE_MS = 10_000;
 
 export const createApp = (): express.Express => {
   const app = express();
 
   app.set('trust proxy', 1);
+
+  // LiveKit egress webhook — mounted BEFORE the JSON parser because signature
+  // verification needs the raw request body (the router installs its own
+  // express.raw parser). Unauthenticated by design; the signed Authorization
+  // header is the auth. No-op unless egress is configured.
+  app.use('/webhooks', livekitWebhookRouter);
+  // Stripe webhook (POST /webhooks/stripe) — same raw-body-before-JSON-parser
+  // requirement; verified with STRIPE_WEBHOOK_SECRET. No-op/503 unless Stripe is
+  // configured. Syncs the tip ledger + premium entitlements (the only writer).
+  app.use('/webhooks', stripeWebhookRouter);
 
   // Body parsers — cap at 1 MB; avatar uploads go through /upload (phase 2)
   app.use(expressJson({ limit: '1mb' }));
@@ -62,12 +91,42 @@ export const createApp = (): express.Express => {
     }),
   );
 
+  // Record per-request Prometheus timings. Mounted early so the histogram
+  // covers downstream middleware/routers; uses the matched route pattern as
+  // the label to avoid high-cardinality raw paths.
+  app.use(httpMetricsMiddleware);
+
+  // Prometheus scrape endpoint — unauthenticated by default for local/dev. In
+  // production it requires `Authorization: Bearer <METRICS_TOKEN>` when that env
+  // var is set, so the metric surface isn't publicly enumerable. Mounted BEFORE
+  // the /api globalLimiter so scrapes don't burn the API budget.
+  app.get('/metrics', (req, res, next) => {
+    const token = process.env.METRICS_TOKEN;
+    if (token && req.get('authorization') !== `Bearer ${token}`) {
+      res.status(403).end();
+      return;
+    }
+    void metricsHandler(req, res, next);
+  });
+
   // Health is unauthenticated and unratelimited (Kubernetes/ECS probes).
   app.use(healthRouter);
 
-  // OpenAPI/Swagger UI — also unauthenticated + unratelimited so consumers
-  // can browse the contract. Mount BEFORE the /api globalLimiter.
-  app.use('/api/docs', docsRouter);
+  // Serve locally-stored uploads (avatars). Public + unratelimited so the
+  // mobile app's <Image> can fetch them without a bearer token, and mounted
+  // BEFORE the /api globalLimiter so image loads don't burn the API budget.
+  // express.static creates no directory itself; upload.service.ts mkdirs it
+  // on first write. The crossOriginResourcePolicy: 'cross-origin' helmet
+  // setting above lets RN/web clients on other origins load these.
+  app.use('/uploads', expressStatic(UPLOADS_DIR));
+
+  // OpenAPI/Swagger UI — unauthenticated, so keep it out of production to
+  // avoid handing an attacker a free map of the API surface. Browse the
+  // contract in dev/staging, or front it with requireAuth+requireAdmin if
+  // you must expose it in prod. Mount BEFORE the /api globalLimiter.
+  if (env.NODE_ENV !== 'production') {
+    app.use('/api/docs', docsRouter);
+  }
 
   // Everything else is under /api and globally rate-limited.
   app.use('/api', globalLimiter);
@@ -78,7 +137,9 @@ export const createApp = (): express.Express => {
   app.use('/api/follow', followRouter);
   // Phase 3 feature routers
   app.use('/api/rooms', roomsRouter);
+  app.use('/api/recordings', recordingsRouter);
   app.use('/api/chat', chatRouter);
+  app.use('/api/groups', groupsRouter);
   app.use('/api/maps', mapsRouter);
   app.use('/api/notifications', notificationsRouter);
   app.use('/api/clubs', clubsRouter);
@@ -89,6 +150,9 @@ export const createApp = (): express.Express => {
   // inside the router. Always mounted so the `/api/admin/me` probe stays
   // available; the writable endpoints reject non-admins.
   app.use('/api/admin', adminRouter);
+  // Avatar upload (local-disk, no multer). Mounts its own 8 MB JSON parser
+  // internally since the global 1 MB cap is too small for base64 images.
+  app.use('/api/upload', uploadRouter);
 
   app.use(notFoundHandler);
   app.use(errorMiddleware);
@@ -97,6 +161,10 @@ export const createApp = (): express.Express => {
 };
 
 const startServer = async (): Promise<void> => {
+  // Initialise error tracking FIRST — as early as possible so the HTTP
+  // instrumentation can patch the layer before any service connects. No-op
+  // when SENTRY_DSN is unset (the normal local/dev/CI state).
+  initSentry();
   await connectRedis();
   await ensureSearchIndexes();
   // mediasoup boots best-effort: if the native build is unavailable the rest
@@ -107,9 +175,26 @@ const startServer = async (): Promise<void> => {
   // Boot the reminder worker in-process. Spin out to its own service when
   // scheduled-room volume warrants it.
   startReminderWorker();
+  await startLocationPurgeWorker();
+  // GDPR retention sweep (daily cron). Applies the policy in
+  // docs/rgpd/data-retention-policy.md: hard-deletes soft-deleted accounts past
+  // the grace window and purges expired tokens/OTPs/audit logs.
+  await registerGdprPurgeWorker();
   const app = createApp();
+  // Mount the `/api/ext/*` extension contract on the SAME entry point that
+  // production uses (`dist/app.js`), gated by env. Previously these routers
+  // were only mounted by the alternate `extensions/server.ts`, so the whole
+  // extension surface 404'd under the default `npm start`.
+  if (env.EXTENSIONS_ENABLED) {
+    mountExtensions(app);
+  }
   const server = http.createServer(app);
   const io = await createSocketServer(server);
+  // Bind the alias emitter so extension realtime events publish under their
+  // Clubhouse-spec names (e.g. `room_title_updated`).
+  if (env.EXTENSIONS_ENABLED) {
+    setRealtimeAliasServer(io);
+  }
 
   server.listen(env.PORT, env.HOST, () => {
     logger.info(
@@ -127,6 +212,8 @@ const startServer = async (): Promise<void> => {
       try {
         await shutdownMediasoup();
         await shutdownReminders();
+        await shutdownLocationPurge();
+        await shutdownGdprPurge();
         await disconnectDatabase();
         await disconnectRedis();
         logger.info('server stopped cleanly');
@@ -136,11 +223,11 @@ const startServer = async (): Promise<void> => {
         process.exit(1);
       }
     });
-    // Hard-kill after 10s if close() hangs
+    // Hard-kill after the grace period if close() hangs
     setTimeout(() => {
-      logger.error('forced shutdown after 10s');
+      logger.error(`forced shutdown after ${SHUTDOWN_GRACE_MS / 1000}s`);
       process.exit(1);
-    }, 10_000).unref();
+    }, SHUTDOWN_GRACE_MS).unref();
   };
 
   process.on('SIGTERM', () => {

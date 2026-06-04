@@ -1,0 +1,60 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# ChatHouse PostgreSQL backup — compose OVERRIDE.
+#
+# This file is meant to be COMBINED with the main backend compose so it shares
+# the default network (backend_default) and can reach the DB at host "postgres".
+# Run from the backend/ directory:
+#
+#   docker compose -f docker-compose.yml -f docker/backup/docker-compose.backup.yml up -d backup
+#
+# To trigger an ad-hoc backup immediately:
+#   docker compose -f docker-compose.yml -f docker/backup/docker-compose.backup.yml run --rm backup pg_backup.sh
+#
+# To restore interactively:
+#   docker compose -f docker-compose.yml -f docker/backup/docker-compose.backup.yml run --rm backup pg_restore.sh
+# ─────────────────────────────────────────────────────────────────────────────
+version: '3.8'
+
+services:
+  backup:
+    build:
+      # Context is the backend/ directory (relative to this override's invocation
+      # from backend/), so the Dockerfile can COPY scripts/backup/* .
+      context: .
+      dockerfile: docker/backup/Dockerfile
+    container_name: chathouse-backup
+    restart: unless-stopped
+    depends_on:
+      - postgres
+    environment:
+      # ── PostgreSQL connection ──────────────────────────────────────────────
+      # Reaches the postgres service over the shared default network on its
+      # INTERNAL port 5432 (the host 5433 mapping is irrelevant inside Docker).
+      POSTGRES_HOST: ${POSTGRES_HOST:-postgres}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_DB: ${POSTGRES_DB:-chathouse}
+      POSTGRES_USER: ${POSTGRES_USER:-chathouse}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-chathouse}
+      # ── Backup behaviour ───────────────────────────────────────────────────
+      # Cron schedule for the recurring dump (default: 02:00 every day).
+      BACKUP_CRON_SCHEDULE: ${BACKUP_CRON_SCHEDULE:-0 2 * * *}
+      # Local retention in days (find -mtime +N -delete).
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-7}
+      # Where dumps are written inside the container (mounted below).
+      BACKUP_DIR: /backups
+      # Set true to run one backup at container start (useful for verification).
+      BACKUP_RUN_ON_START: ${BACKUP_RUN_ON_START:-false}
+      # ── Optional S3 offsite copy ───────────────────────────────────────────
+      # Leave S3_BACKUP_BUCKET empty to keep backups local-only.
+      S3_BACKUP_BUCKET: ${S3_BACKUP_BUCKET:-}
+      S3_BACKUP_PREFIX: ${S3_BACKUP_PREFIX:-chathouse}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-us-east-1}
+    volumes:
+      # Persist dumps on a named volume. Swap for a bind mount (./backups:/backups)
+      # if you want the dumps visible on the host filesystem.
+      - backup-data:/backups
+
+volumes:
+  backup-data:

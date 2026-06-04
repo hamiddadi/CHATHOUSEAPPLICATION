@@ -1,4 +1,4 @@
-import React, { memo, useCallback } from 'react';
+import React, { memo, useCallback, useState } from 'react';
 import { Alert, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useMutation } from '@tanstack/react-query';
@@ -6,7 +6,10 @@ import { Avatar } from '../../../../shared/components/Avatar';
 import { colors, spacing } from '../../../../shared/constants/theme';
 import { apiClient } from '../../../../shared/services/api/apiClient';
 import { usePingUserToRoom } from '../../hooks/useRooms';
+import { errorMessage } from '../../../../shared/utils/errorMessage';
 import type { UserSummary } from '../../../../shared/types/domain';
+import { useExtBackend } from '../../../extensions/hooks/useExtBackend';
+import { ExtTipSheet } from '../../../extensions/components/ExtTipSheet';
 
 // Direct REST shims — the existing `profileService.follow/wave` are
 // in-memory mocks. We hit the real API here so taps actually mutate
@@ -39,6 +42,14 @@ export const ProfileActionSheet: React.FC<ProfileActionSheetProps> = memo(
     const follow = useMutation({ mutationFn: realFollow });
     const ping = usePingUserToRoom();
     const wave = useMutation({ mutationFn: realWave });
+    const { status: extStatus } = useExtBackend();
+    const [tipping, setTipping] = useState(false);
+    const handleTip = useCallback(() => setTipping(true), []);
+    const handleTipClose = useCallback(() => setTipping(false), []);
+    const handleTipSent = useCallback(() => {
+      setTipping(false);
+      onClose();
+    }, [onClose]);
 
     const handleFollow = useCallback(() => {
       if (!target) return;
@@ -47,7 +58,7 @@ export const ProfileActionSheet: React.FC<ProfileActionSheetProps> = memo(
           Alert.alert('OK', `Vous suivez maintenant @${target.username ?? target.displayName}.`);
           onClose();
         },
-        onError: e => Alert.alert('Erreur', e instanceof Error ? e.message : 'Échec'),
+        onError: e => Alert.alert('Erreur', errorMessage(e, 'Échec')),
       });
     }, [follow, onClose, target]);
 
@@ -63,7 +74,7 @@ export const ProfileActionSheet: React.FC<ProfileActionSheetProps> = memo(
             );
             onClose();
           },
-          onError: e => Alert.alert('Erreur', e instanceof Error ? e.message : 'Échec'),
+          onError: e => Alert.alert('Erreur', errorMessage(e, 'Échec')),
         },
       );
     }, [onClose, ping, roomId, target]);
@@ -72,7 +83,7 @@ export const ProfileActionSheet: React.FC<ProfileActionSheetProps> = memo(
       if (!target) return;
       wave.mutate(target.id, {
         onSuccess: () => onClose(),
-        onError: e => Alert.alert('Erreur', e instanceof Error ? e.message : 'Échec'),
+        onError: e => Alert.alert('Erreur', errorMessage(e, 'Échec')),
       });
     }, [onClose, target, wave]);
 
@@ -86,49 +97,63 @@ export const ProfileActionSheet: React.FC<ProfileActionSheetProps> = memo(
     const isSelf = viewerId === target.id;
 
     return (
-      <Modal visible transparent animationType="slide" onRequestClose={onClose}>
-        <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="Fermer">
-          <Pressable style={styles.sheet} onPress={() => undefined}>
-            <View style={styles.handle} />
-            <View style={styles.header}>
-              <Avatar
-                uri={target.avatarUrl ?? undefined}
-                name={target.displayName ?? target.username ?? '?'}
-                sizeValue={56}
-              />
-              <View style={styles.headerInfo}>
-                <Text style={styles.name}>{target.displayName ?? target.username ?? '—'}</Text>
-                <Text style={styles.username}>@{target.username ?? '—'}</Text>
+      <>
+        <Modal visible transparent animationType="slide" onRequestClose={onClose}>
+          <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="Fermer">
+            <Pressable style={styles.sheet} onPress={() => undefined}>
+              <View style={styles.handle} />
+              <View style={styles.header}>
+                <Avatar
+                  uri={target.avatarUrl ?? undefined}
+                  name={target.displayName ?? target.username ?? '?'}
+                  sizeValue={56}
+                />
+                <View style={styles.headerInfo}>
+                  <Text style={styles.name}>{target.displayName ?? target.username ?? '—'}</Text>
+                  <Text style={styles.username}>@{target.username ?? '—'}</Text>
+                </View>
               </View>
-            </View>
 
-            {!isSelf ? (
-              <>
-                <ActionRow icon="person-add" label="Suivre" onPress={handleFollow} />
-                <ActionRow icon="notifications" label="Ping (rejoins-moi)" onPress={handlePing} />
-                <ActionRow icon="waves" label="Envoyer un wave 🌊" onPress={handleWave} />
-                {onOpenProfile ? (
-                  <ActionRow
-                    icon="person"
-                    label="Voir le profil complet"
-                    onPress={handleOpenProfile}
-                  />
-                ) : null}
-              </>
-            ) : (
-              <Text style={styles.selfNote}>C&apos;est vous 👋</Text>
-            )}
-            <Pressable
-              onPress={onClose}
-              style={styles.cancel}
-              accessibilityRole="button"
-              accessibilityLabel="Fermer"
-            >
-              <Text style={styles.cancelLabel}>Annuler</Text>
+              {!isSelf ? (
+                <>
+                  <ActionRow icon="person-add" label="Suivre" onPress={handleFollow} />
+                  <ActionRow icon="notifications" label="Ping (rejoins-moi)" onPress={handlePing} />
+                  <ActionRow icon="waves" label="Envoyer un wave 🌊" onPress={handleWave} />
+                  {extStatus.features.payments ? (
+                    <ActionRow
+                      icon="volunteer-activism"
+                      label="Envoyer un pourboire 💸"
+                      onPress={handleTip}
+                    />
+                  ) : null}
+                  {onOpenProfile ? (
+                    <ActionRow
+                      icon="person"
+                      label="Voir le profil complet"
+                      onPress={handleOpenProfile}
+                    />
+                  ) : null}
+                </>
+              ) : (
+                <Text style={styles.selfNote}>C&apos;est vous 👋</Text>
+              )}
+              <Pressable
+                onPress={onClose}
+                style={styles.cancel}
+                accessibilityRole="button"
+                accessibilityLabel="Fermer"
+              >
+                <Text style={styles.cancelLabel}>Annuler</Text>
+              </Pressable>
             </Pressable>
           </Pressable>
-        </Pressable>
-      </Modal>
+        </Modal>
+        <ExtTipSheet
+          target={tipping ? target : null}
+          onClose={handleTipClose}
+          onSent={handleTipSent}
+        />
+      </>
     );
   },
 );

@@ -4,6 +4,7 @@ import { TokenExpiredError, JsonWebTokenError } from 'jsonwebtoken';
 import { logger } from '../config/logger';
 import { env } from '../config/env';
 import { sendError } from '../utils/response';
+import { Sentry } from '../monitoring/sentry';
 
 /**
  * Standardised error codes. Format: DOMAIN_NNN so clients can branch on a
@@ -20,9 +21,12 @@ export const ERROR_CODES = {
   AUTH_008: { status: 403, message: 'Insufficient privileges' },
   ADMIN_001: { status: 403, message: 'Cannot demote the only super-admin' },
   ADMIN_002: { status: 403, message: 'Cannot modify a higher-ranked admin' },
-  ADMIN_003: { status: 410, message: 'Godmode is disabled' },
+  // 403 Forbidden — the surface exists but is administratively disabled.
+  // 410 Gone implies permanent removal, which is wrong for a toggleable
+  // kill-switch and misleads clients/proxies into caching the failure.
+  ADMIN_003: { status: 403, message: 'Godmode is disabled' },
 
-  AGORA_001: { status: 503, message: 'Agora is not configured on this server' },
+  LIVEKIT_001: { status: 503, message: 'LiveKit is not configured on this server' },
 
   ROOM_001: { status: 404, message: 'Room not found' },
   ROOM_002: { status: 403, message: 'Room is full' },
@@ -39,11 +43,18 @@ export const ERROR_CODES = {
   USER_003: { status: 403, message: 'Cannot follow yourself' },
   USER_004: { status: 403, message: 'Cannot block yourself' },
   USER_005: { status: 429, message: 'Wave already sent recently' },
+  USER_006: { status: 403, message: 'User does not accept waves' },
 
   CHAT_001: { status: 404, message: 'Conversation not found' },
   CHAT_002: { status: 404, message: 'Message not found' },
   CHAT_003: { status: 403, message: 'Not your message' },
   CHAT_004: { status: 403, message: 'Direct messages are limited to mutual follows' },
+
+  GROUP_001: { status: 404, message: 'Group conversation not found' },
+  GROUP_002: { status: 403, message: 'Not a member of this group' },
+  GROUP_003: { status: 400, message: 'A group needs at least two other members' },
+  GROUP_004: { status: 403, message: 'Only the group owner can do that' },
+  GROUP_005: { status: 400, message: 'Use leave to remove yourself' },
 
   CLUB_001: { status: 404, message: 'Club not found' },
   CLUB_002: { status: 403, message: 'Not a club admin' },
@@ -51,6 +62,7 @@ export const ERROR_CODES = {
   CLUB_004: { status: 409, message: 'Already a member' },
   CLUB_005: { status: 403, message: 'Owner cannot leave their own club' },
   CLUB_006: { status: 403, message: 'Club creation limit reached' },
+  CLUB_007: { status: 403, message: 'A valid invitation is required to join this club' },
 
   ACCOUNT_001: { status: 409, message: 'Account already scheduled for deletion' },
 
@@ -110,6 +122,13 @@ export const errorMiddleware: ErrorRequestHandler = (err, req: Request, res, _ne
     stack: err instanceof Error && env.NODE_ENV !== 'production' ? err.stack : undefined,
     details,
   });
+
+  // Report unexpected server-side failures (5xx) to Sentry. 4xx are client
+  // errors (validation, auth, not-found) and are intentionally not captured to
+  // keep the issue stream signal-rich. No-op when SENTRY_DSN is unset.
+  if (status >= 500) {
+    Sentry.captureException(err);
+  }
 
   sendError(res, code, message, status, env.NODE_ENV === 'production' ? undefined : details);
 };

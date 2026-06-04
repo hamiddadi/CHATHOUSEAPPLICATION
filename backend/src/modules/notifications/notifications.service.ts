@@ -1,6 +1,7 @@
 import type { NotificationPreference, NotificationType, Prisma } from '@prisma/client';
 import { prisma } from '../../config/database';
 import { redis } from '../../config/redis';
+import { logger } from '../../config/logger';
 import { AppError } from '../../middlewares/error.middleware';
 import { pushService } from '../push/push.service';
 import { emitNotification, emitNotificationCount } from '../../socket/realtime';
@@ -45,13 +46,34 @@ const isPushAllowed = async (userId: string, type: NotificationType): Promise<bo
  * NotificationType values. Kept in one place so the API contract and
  * the UI don't drift.
  */
-const FILTER_GROUPS: Record<string, NotificationType[]> = {
+const FILTER_GROUPS = {
   rooms: ['ROOM_INVITE', 'ROOM_STARTED', 'HAND_ACCEPTED', 'RSVP_REMINDER', 'SPEAKER_REQUEST'],
   social: ['NEW_FOLLOWER', 'WAVE', 'NEW_MESSAGE', 'MENTION'],
   clubs: ['CLUB_INVITE'],
-};
+} satisfies Record<string, NotificationType[]>;
 
 export type NotificationFilter = keyof typeof FILTER_GROUPS | 'all';
+
+/**
+ * The complete set of filter values accepted by the notifications list
+ * endpoint: every surface bucket plus the catch-all 'all'. Single source
+ * of truth — the router validates incoming query strings against this
+ * instead of re-listing the values.
+ */
+export const FILTER_VALUES: readonly NotificationFilter[] = [
+  'all',
+  ...(Object.keys(FILTER_GROUPS) as (keyof typeof FILTER_GROUPS)[]),
+];
+
+/**
+ * Coerce a raw (untrusted) query value into a valid NotificationFilter,
+ * falling back to 'all' for anything unrecognised — including non-string
+ * values such as repeated query params.
+ */
+export const parseFilter = (raw: unknown): NotificationFilter =>
+  typeof raw === 'string' && (FILTER_VALUES as readonly string[]).includes(raw)
+    ? (raw as NotificationFilter)
+    : 'all';
 
 const unreadCacheKey = (userId: string) => `notif:unread:${userId}`;
 const UNREAD_CACHE_TTL = 60; // 60s
@@ -151,9 +173,6 @@ export const notificationsService = {
       },
     });
 
-    // Invalidate unread cache
-    await redis.del(unreadCacheKey(input.userId));
-
     // Emit real-time notification over WebSocket
     emitNotification(input.userId, {
       id: row.id,
@@ -164,10 +183,24 @@ export const notificationsService = {
       createdAt: row.createdAt.toISOString(),
     });
 
-    // Emit updated badge count
-    const count = await prisma.notification.count({
-      where: { userId: input.userId, isRead: false },
-    });
+    // Bump the unread badge. A freshly created notification is always
+    // unread, so the cached count grows by exactly 1. Increment the cache
+    // in place instead of re-running a full COUNT on every create (which
+    // got hammered under reminder fan-out: one create per club member).
+    const key = unreadCacheKey(input.userId);
+    // Atomic INCR: creates the key at 1 if it was absent/expired. That single
+    // op closes the get→incr race (where the TTL expired between the two calls
+    // and the badge reset to 1). On a 1 result we self-heal by recomputing the
+    // true unread count once and seeding the cache.
+    let count = await redis.incr(key);
+    if (count === 1) {
+      count = await prisma.notification.count({
+        where: { userId: input.userId, isRead: false },
+      });
+      await redis.set(key, String(count), { EX: UNREAD_CACHE_TTL });
+    } else {
+      await redis.expire(key, UNREAD_CACHE_TTL);
+    }
     emitNotificationCount(input.userId, count);
 
     // Fire-and-forget push dispatch — gated on the user's per-type
@@ -186,7 +219,7 @@ export const notificationsService = {
             : {}),
         },
       });
-    })();
+    })().catch(err => logger.warn('notif push dispatch failed', { err, userId: input.userId }));
     return row;
   },
 };

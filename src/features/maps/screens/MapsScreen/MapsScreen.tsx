@@ -4,6 +4,7 @@ import { useNavigation } from '@react-navigation/native';
 import type { NavigationProp } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import MapView, { Marker, UrlTile } from 'react-native-maps'; // OSM Migration — replace PROVIDER_DEFAULT import with UrlTile
+import { useTranslation } from 'react-i18next';
 import { Loader } from '../../../../shared/components/Loader';
 import { EmptyState } from '../../../../shared/components/EmptyState';
 import { layout, spacing } from '../../../../shared/constants/theme';
@@ -26,6 +27,24 @@ import { UserLocationPulse } from '../../components/UserLocationPulse';
 const HEADER_HEIGHT = 64;
 const SEARCH_BAR_TOP_OFFSET = HEADER_HEIGHT + 8;
 const MINI_CARD_BOTTOM_OFFSET = layout.tabBarHeight + layout.tabBarBottomOffset + spacing.xxxl;
+// Extra lift applied to the floating controls when the mini-card is visible,
+// so they sit above the card instead of being covered by it.
+const MINI_CARD_LIFT = 120;
+// Settle window during which markers keep tracking view changes so their
+// custom content rasterizes, before we stop continuous re-rasterization.
+const MARKER_TRACK_SETTLE_MS = 1500;
+// Default map zoom level used for auto-center / pin-press / recenter regions.
+const ZOOM_DELTA = 0.01;
+
+const regionFor = (
+  latitude: number,
+  longitude: number,
+): { latitude: number; longitude: number; latitudeDelta: number; longitudeDelta: number } => ({
+  latitude,
+  longitude,
+  latitudeDelta: ZOOM_DELTA,
+  longitudeDelta: ZOOM_DELTA,
+});
 
 const matches = (follower: FollowerOnMap, query: string): boolean => {
   const q = query.trim().toLowerCase();
@@ -36,49 +55,47 @@ const matches = (follower: FollowerOnMap, query: string): boolean => {
 };
 
 export const MapsScreen: React.FC = () => {
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<NavigationProp<RootStackParamList>>();
-  const { permission, coords, requestAgain } = useCurrentLocation();
+  const { permission, coords, requestAgain, ready } = useCurrentLocation();
   useLocationBroadcast(coords);
   const followers = useFollowersOnMap();
 
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<FollowerOnMap | null>(null);
+  // Marker pins must track view changes briefly so their custom content
+  // rasterizes, then stop — otherwise "live" pins re-rasterize continuously,
+  // which is expensive on Android. We flip this to false shortly after mount.
+  const [tracksMarkers, setTracksMarkers] = useState(true);
   const mapRef = useRef<MapView>(null);
   const didAutoCenterRef = useRef(false);
+
+  useEffect(() => {
+    const id = setTimeout(() => setTracksMarkers(false), MARKER_TRACK_SETTLE_MS);
+    return () => clearTimeout(id);
+  }, []);
 
   // Auto-center the map on the user's first GPS fix, one-shot. Subsequent
   // coord updates don't re-center (the user may have panned away deliberately).
   useEffect(() => {
     if (didAutoCenterRef.current || !coords) return;
     didAutoCenterRef.current = true;
-    mapRef.current?.animateToRegion(
-      {
-        latitude: coords.latitude,
-        longitude: coords.longitude,
-        latitudeDelta: 0.01,
-        longitudeDelta: 0.01,
-      },
-      1000,
-    );
+    mapRef.current?.animateToRegion(regionFor(coords.latitude, coords.longitude), 1000);
   }, [coords]);
 
   const filteredFollowers = useMemo(
-    // Ghost Mode users are dropped upstream by the backend; here we also drop
-    // offline followers so the map only shows reachable, live-or-recent users.
-    () => followers.filter(f => f.presence !== 'offline' && matches(f, search)),
+    // Ghost Mode + offline users are already dropped upstream (backend roster +
+    // the maps:user-offline socket event), so the roster only ever holds
+    // online/recently-active followers — we just apply the search filter here.
+    () => followers.filter(f => matches(f, search)),
     [followers, search],
   );
 
   const handlePinPress = useCallback((follower: FollowerOnMap) => {
     setSelected(follower);
     mapRef.current?.animateToRegion(
-      {
-        latitude: follower.location.latitude,
-        longitude: follower.location.longitude,
-        latitudeDelta: 0.01,
-        longitudeDelta: 0.01,
-      },
+      regionFor(follower.location.latitude, follower.location.longitude),
       400,
     );
   }, []);
@@ -91,15 +108,7 @@ export const MapsScreen: React.FC = () => {
       await requestAgain();
       return;
     }
-    mapRef.current?.animateToRegion(
-      {
-        latitude: coords.latitude,
-        longitude: coords.longitude,
-        latitudeDelta: 0.01,
-        longitudeDelta: 0.01,
-      },
-      800,
-    );
+    mapRef.current?.animateToRegion(regionFor(coords.latitude, coords.longitude), 800);
   }, [coords, requestAgain]);
 
   const handleJoinRoom = useCallback(
@@ -113,37 +122,42 @@ export const MapsScreen: React.FC = () => {
     [navigation],
   );
 
-  const handleSendMessage = useCallback(() => {
-    setSelected(null);
-    navigation.navigate('Main', {
-      screen: 'MessagesTab',
-      params: { screen: 'MessagesList' },
-    });
-  }, [navigation]);
+  const handleSendMessage = useCallback(
+    (userId: string) => {
+      setSelected(null);
+      // The DM service keys conversations by the peer's userId (conversationId
+      // === peerId), so open the thread directly with this follower.
+      navigation.navigate('Main', {
+        screen: 'MessagesTab',
+        params: { screen: 'ChatDetail', params: { conversationId: userId } },
+      });
+    },
+    [navigation],
+  );
 
   const initialRegion = useMemo(
-    () =>
-      coords
-        ? {
-            latitude: coords.latitude,
-            longitude: coords.longitude,
-            latitudeDelta: 0.01,
-            longitudeDelta: 0.01,
-          }
-        : DEFAULT_MAP_CENTER,
+    () => (coords ? regionFor(coords.latitude, coords.longitude) : DEFAULT_MAP_CENTER),
     [coords],
   );
 
   if (permission === 'denied') {
     return (
-      <EmptyState title="Location permission needed" description="">
+      <EmptyState
+        title={t('explorer.maps.permissionTitle', 'Location permission needed')}
+        description=""
+      >
         <Pressable
           onPress={requestAgain}
           accessibilityRole="button"
-          accessibilityLabel="Try requesting location again"
+          accessibilityLabel={t(
+            'explorer.maps.permissionRetryA11y',
+            'Try requesting location again',
+          )}
           className="bg-primary rounded-pill px-xxl py-md mt-md"
         >
-          <Text className="text-sm font-display text-primary-on-container">Grant access</Text>
+          <Text className="text-sm font-display text-primary-on-container">
+            {t('explorer.maps.permissionBtn', 'Grant access')}
+          </Text>
         </Pressable>
       </EmptyState>
     );
@@ -152,16 +166,24 @@ export const MapsScreen: React.FC = () => {
   if (permission === 'disabled') {
     return (
       <EmptyState
-        title="Turn on location services"
-        description="Enable GPS in your device settings to see friends on the map."
+        title={t('explorer.maps.locationDisabledTitle', 'Turn on location services')}
+        description={t(
+          'explorer.maps.locationDisabledBody',
+          'Enable GPS in your device settings to see friends on the map.',
+        )}
       />
     );
   }
 
   // Auto-center on mount — block the map render until we have a first GPS fix
   // so the user never sees a default (Dakar) centroid before their real position.
-  if (!coords) {
-    return <Loader fullscreen accessibilityLabel="Locating you" />;
+  // Once the initial fix attempt has finished (or timed out) we render anyway and
+  // fall back to DEFAULT_MAP_CENTER, so a device without a GPS fix is never stuck
+  // on the loader indefinitely.
+  if (!coords && !ready) {
+    return (
+      <Loader fullscreen accessibilityLabel={t('explorer.maps.locatingA11y', 'Locating you')} />
+    );
   }
 
   return (
@@ -191,8 +213,8 @@ export const MapsScreen: React.FC = () => {
           <Marker
             coordinate={{ latitude: coords.latitude, longitude: coords.longitude }}
             anchor={{ x: 0.5, y: 0.5 }}
-            tracksViewChanges
-            accessibilityLabel="Your location"
+            tracksViewChanges={tracksMarkers}
+            accessibilityLabel={t('explorer.maps.yourLocationA11y', 'Your location')}
           >
             <UserLocationPulse />
           </Marker>
@@ -205,8 +227,9 @@ export const MapsScreen: React.FC = () => {
               longitude: f.location.longitude,
             }}
             onPress={() => handlePinPress(f)}
-            tracksViewChanges={f.liveRoomId !== null}
+            tracksViewChanges={tracksMarkers}
             anchor={{ x: 0.5, y: 0.5 }}
+            accessibilityLabel={`${f.displayName}${f.liveRoomId ? ', live' : ''}`}
           >
             <FollowerPin follower={f} />
           </Marker>
@@ -230,7 +253,7 @@ export const MapsScreen: React.FC = () => {
         pointerEvents="box-none"
         style={[
           styles.floatingButtons,
-          { bottom: insets.bottom + MINI_CARD_BOTTOM_OFFSET + (selected ? 120 : 0) },
+          { bottom: insets.bottom + MINI_CARD_BOTTOM_OFFSET + (selected ? MINI_CARD_LIFT : 0) },
         ]}
       >
         <MyLocationButton onPress={handleRecenter} disabled={!coords} />

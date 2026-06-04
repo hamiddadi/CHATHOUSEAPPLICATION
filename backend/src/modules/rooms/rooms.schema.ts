@@ -14,6 +14,7 @@ export const createRoomSchema = z
     isPrivate: z.boolean().default(false),
     roomType: z.enum(['OPEN', 'SOCIAL', 'CLOSED']).default('OPEN'),
     chatEnabled: z.boolean().default(true),
+    // TODO(phase-N): Dead flag. No server-side media recording pipeline exists yet.
     recordingEnabled: z.boolean().default(false),
     maxSpeakers: z.number().int().min(1).max(50).default(10),
     clubId: z.string().min(1).optional(),
@@ -56,10 +57,6 @@ export const inviteToRoomSchema = z.object({
   userIds: z.array(z.string().min(1)).min(1).max(50),
 });
 
-export const pingUserSchema = z.object({
-  roomId: z.string().min(1),
-});
-
 export const sendReactionSchema = z.object({
   // Short emoji — covers most pictographs and ZWJ sequences up to 16 chars.
   emoji: z.string().min(1).max(16),
@@ -67,8 +64,10 @@ export const sendReactionSchema = z.object({
 
 export const listRoomsSchema = z.object({
   live: z.coerce.boolean().optional(),
-  filter: z.enum(['live', 'upcoming', 'mine']).optional(),
+  filter: z.enum(['live', 'upcoming', 'mine', 'past']).optional(),
   clubId: z.string().min(1).optional(),
+  // When true, restrict the hallway feed to club-attached rooms only.
+  clubs: z.coerce.boolean().optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
 });
 
@@ -109,4 +108,3 @@ export type UpdateRoomTitleInput = z.infer<typeof updateRoomTitleSchema>;
 export type ToggleRoomChatInput = z.infer<typeof toggleRoomChatSchema>;
 export type MuteAllInput = z.infer<typeof muteAllSchema>;
 export type InviteToRoomInput = z.infer<typeof inviteToRoomSchema>;
-export type PingUserInput = z.infer<typeof pingUserSchema>;

@@ -1,19 +1,22 @@
 import React, { memo, useState } from 'react';
 import { Alert, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import { Avatar } from '../../../shared/components/Avatar';
 import { EmptyState } from '../../../shared/components/EmptyState';
 import { Loader } from '../../../shared/components/Loader';
-import { colors, spacing } from '../../../shared/constants/theme';
+import { colors, radii, spacing, withAlpha } from '../../../shared/constants/theme';
 import { AdminHeader } from '../components/AdminHeader';
 import { useAdminReports, useResolveReport } from '../hooks/useAdmin';
 import type { AdminReport } from '../types/admin.types';
 import { formatDateTime } from '../../../shared/utils/intl';
+import { errorMessage } from '../../../shared/utils/errorMessage';
 
-const TABS: readonly { id: 'open' | 'resolved' | 'all'; label: string }[] = [
-  { id: 'open', label: 'En attente' },
-  { id: 'resolved', label: 'Traités' },
-  { id: 'all', label: 'Tous' },
+const getTabs = (t: TFunction): { id: 'open' | 'resolved' | 'all'; label: string }[] => [
+  { id: 'open', label: t('admin.reports.tabs.open') },
+  { id: 'resolved', label: t('admin.reports.tabs.resolved') },
+  { id: 'all', label: t('admin.reports.tabs.all') },
 ];
 
 const ReportRow: React.FC<{
@@ -21,6 +24,7 @@ const ReportRow: React.FC<{
   onResolve: (id: string, outcome: 'resolved' | 'dismissed') => void;
   busy: boolean;
 }> = memo(({ report, onResolve, busy }) => {
+  const { t } = useTranslation();
   const target = report.targetKind === 'USER' ? report.reported : null;
   const room = report.reportedRoom;
   return (
@@ -33,7 +37,9 @@ const ReportRow: React.FC<{
         </View>
         {report.resolvedAt ? (
           <View style={styles.resolvedBadge}>
-            <Text className="text-[9px] font-body-bold text-ink-dim">RÉSOLU</Text>
+            <Text className="text-[9px] font-body-bold text-ink-dim">
+              {t('admin.reports.resolvedBadge')}
+            </Text>
           </View>
         ) : null}
       </View>
@@ -47,7 +53,7 @@ const ReportRow: React.FC<{
           />
           <View style={styles.partyInfo}>
             <Text className="text-sm font-body-bold text-white" numberOfLines={1}>
-              Cible : {target.displayName ?? target.username ?? '—'}
+              {t('admin.reports.target')} : {target.displayName ?? target.username ?? '—'}
             </Text>
             <Text className="text-xs text-ink-muted">@{target.username ?? '—'}</Text>
           </View>
@@ -61,16 +67,19 @@ const ReportRow: React.FC<{
           </View>
           <View style={styles.partyInfo}>
             <Text className="text-sm font-body-bold text-white" numberOfLines={1}>
-              Room : {room.title}
+              {t('admin.reports.room')} : {room.title}
             </Text>
-            <Text className="text-xs text-ink-muted">{room.isLive ? 'En direct' : 'Terminée'}</Text>
+            <Text className="text-xs text-ink-muted">
+              {room.isLive ? t('admin.reports.roomLive') : t('admin.reports.roomEnded')}
+            </Text>
           </View>
         </View>
       ) : null}
 
       {report.reporter ? (
         <Text className="text-xs text-ink-dim">
-          Signalé par @{report.reporter.username ?? '—'} · {formatDateTime(report.createdAt)}
+          {t('admin.reports.reportedBy')} @{report.reporter.username ?? '—'} ·{' '}
+          {formatDateTime(report.createdAt)}
         </Text>
       ) : null}
 
@@ -87,18 +96,22 @@ const ReportRow: React.FC<{
             onPress={() => onResolve(report.id, 'dismissed')}
             style={[styles.actionBtn, styles.actionDismiss]}
             accessibilityRole="button"
-            accessibilityLabel="Rejeter ce signalement"
+            accessibilityState={{ disabled: busy }}
+            accessibilityLabel={t('admin.reports.dismissA11y')}
           >
-            <Text className="text-xs font-body-bold text-ink-muted">Rejeter</Text>
+            <Text className="text-xs font-body-bold text-ink-muted">
+              {t('admin.reports.dismiss')}
+            </Text>
           </Pressable>
           <Pressable
             disabled={busy}
             onPress={() => onResolve(report.id, 'resolved')}
             style={[styles.actionBtn, styles.actionResolve]}
             accessibilityRole="button"
-            accessibilityLabel="Marquer comme résolu"
+            accessibilityState={{ disabled: busy }}
+            accessibilityLabel={t('admin.reports.resolveA11y')}
           >
-            <Text className="text-xs font-body-bold text-white">Résolu</Text>
+            <Text className="text-xs font-body-bold text-white">{t('admin.reports.resolve')}</Text>
           </Pressable>
         </View>
       ) : null}
@@ -108,29 +121,51 @@ const ReportRow: React.FC<{
 ReportRow.displayName = 'ReportRow';
 
 export const AdminReportsScreen: React.FC = () => {
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const [tab, setTab] = useState<'open' | 'resolved' | 'all'>('open');
-  const { data, isLoading, isError, refetch } = useAdminReports({ status: tab });
+  const { data, isLoading, isError, refetch, isRefetching } = useAdminReports({ status: tab });
   const resolve = useResolveReport();
 
   const handleResolve = (reportId: string, outcome: 'resolved' | 'dismissed') => {
-    resolve.mutate(
-      { reportId, outcome },
-      { onError: e => Alert.alert('Erreur', e instanceof Error ? e.message : 'Échec') },
+    const isResolve = outcome === 'resolved';
+    // Resolving/dismissing closes a moderation report — confirm before the
+    // irreversible mutation rather than firing on a single tap.
+    Alert.alert(
+      isResolve ? t('admin.reports.confirmResolveTitle') : t('admin.reports.confirmDismissTitle'),
+      isResolve ? t('admin.reports.confirmResolveBody') : t('admin.reports.confirmDismissBody'),
+      [
+        { text: t('common.cancel'), style: 'cancel' },
+        {
+          text: isResolve ? t('admin.reports.resolve') : t('admin.reports.dismiss'),
+          style: isResolve ? 'default' : 'destructive',
+          onPress: () =>
+            resolve.mutate(
+              { reportId, outcome },
+              {
+                onError: e =>
+                  Alert.alert(
+                    t('admin.reports.errorTitle'),
+                    errorMessage(e, t('admin.reports.actionFailed')),
+                  ),
+              },
+            ),
+        },
+      ],
     );
   };
 
   return (
     <View className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
-      <AdminHeader title="Signalements" />
+      <AdminHeader title={t('admin.reports.title')} />
       <View className="px-xxl gap-md">
         <View style={styles.tabRow}>
-          {TABS.map(t => {
-            const selected = tab === t.id;
+          {getTabs(t).map(tObj => {
+            const selected = tab === tObj.id;
             return (
               <Pressable
-                key={t.id}
-                onPress={() => setTab(t.id)}
+                key={tObj.id}
+                onPress={() => setTab(tObj.id)}
                 accessibilityRole="tab"
                 accessibilityState={{ selected }}
                 style={[styles.tabPill, selected ? styles.tabPillOn : styles.tabPillOff]}
@@ -142,7 +177,7 @@ export const AdminReportsScreen: React.FC = () => {
                       : 'text-xs font-body-bold text-ink-muted'
                   }
                 >
-                  {t.label}
+                  {tObj.label}
                 </Text>
               </Pressable>
             );
@@ -151,14 +186,21 @@ export const AdminReportsScreen: React.FC = () => {
       </View>
 
       {isLoading ? (
-        <Loader fullscreen accessibilityLabel="Chargement…" />
+        <Loader fullscreen accessibilityLabel={t('common.loading', 'Loading…')} />
       ) : isError || !data ? (
-        <EmptyState title="Erreur" description="Impossible de charger la file." />
+        <EmptyState
+          title={t('admin.reports.errorTitle')}
+          description={t('admin.reports.errorBody')}
+        />
       ) : (
         <FlatList
           data={data.data}
           renderItem={({ item }) => (
-            <ReportRow report={item} onResolve={handleResolve} busy={resolve.isPending} />
+            <ReportRow
+              report={item}
+              onResolve={handleResolve}
+              busy={resolve.isPending && resolve.variables?.reportId === item.id}
+            />
           )}
           keyExtractor={r => r.id}
           ItemSeparatorComponent={() => <View style={{ height: spacing.sm }} />}
@@ -169,14 +211,14 @@ export const AdminReportsScreen: React.FC = () => {
           }}
           ListEmptyComponent={
             <EmptyState
-              title="Aucun signalement"
+              title={t('admin.reports.emptyTitle')}
               description={
-                tab === 'open' ? 'La file est vide — bonne nouvelle.' : 'Aucun élément à afficher.'
+                tab === 'open' ? t('admin.reports.emptyOpen') : t('admin.reports.emptyAll')
               }
             />
           }
           onRefresh={refetch}
-          refreshing={isLoading}
+          refreshing={isRefetching}
           showsVerticalScrollIndicator={false}
         />
       )}
@@ -189,31 +231,34 @@ const styles = StyleSheet.create({
   tabPill: {
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.xs,
-    borderRadius: 999,
+    borderRadius: radii.pill,
     borderWidth: 1,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   tabPillOn: { borderColor: colors.primary, backgroundColor: colors.primary },
-  tabPillOff: { borderColor: 'rgba(255,255,255,0.15)', backgroundColor: 'transparent' },
+  tabPillOff: { borderColor: colors.overlayWhite15, backgroundColor: 'transparent' },
   row: {
-    backgroundColor: 'rgba(255,255,255,0.04)',
-    borderRadius: 12,
+    backgroundColor: colors.overlayWhite4,
+    borderRadius: radii.md,
     padding: spacing.lg,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
+    borderColor: colors.glassStrong,
     gap: spacing.sm,
   },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   kindBadge: {
     paddingHorizontal: 6,
     paddingVertical: 3,
-    borderRadius: 4,
-    backgroundColor: 'rgba(0,228,117,0.1)',
+    borderRadius: radii.xs,
+    backgroundColor: withAlpha(colors.accent, 0.1),
   },
   resolvedBadge: {
     paddingHorizontal: 6,
     paddingVertical: 3,
-    borderRadius: 4,
-    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: radii.xs,
+    backgroundColor: colors.overlayWhite5,
   },
   party: {
     flexDirection: 'row',
@@ -223,8 +268,8 @@ const styles = StyleSheet.create({
   roomIcon: {
     width: 32,
     height: 32,
-    borderRadius: 8,
-    backgroundColor: 'rgba(0,228,117,0.1)',
+    borderRadius: radii.sm,
+    backgroundColor: withAlpha(colors.accent, 0.1),
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -236,13 +281,14 @@ const styles = StyleSheet.create({
   actionBtn: {
     flex: 1,
     paddingVertical: spacing.sm,
-    borderRadius: 999,
+    borderRadius: radii.pill,
+    minHeight: 44,
     alignItems: 'center',
     justifyContent: 'center',
   },
   actionDismiss: {
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.15)',
+    borderColor: colors.overlayWhite15,
   },
   actionResolve: {
     backgroundColor: colors.primary,

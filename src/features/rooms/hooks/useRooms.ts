@@ -1,4 +1,6 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useCallback } from 'react';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { env } from '../../../config/env';
 import { roomService, type CreateRoomInput } from '../services/roomService';
 import type { Room, RoomSummary } from '../../../shared/types/domain';
 import { useCurrentRoomStore } from '../store/currentRoomStore';
@@ -8,6 +10,7 @@ export const roomKeys = {
   list: () => [...roomKeys.all, 'list'] as const,
   detail: (id: string) => [...roomKeys.all, 'detail', id] as const,
   history: () => [...roomKeys.all, 'history', 'mine'] as const,
+  handRaises: (id: string) => [...roomKeys.all, 'hand-raises', id] as const,
 };
 
 export const useMyRoomHistory = (limit = 20) =>
@@ -22,12 +25,18 @@ export const useMyRoomHistory = (limit = 20) =>
 export interface RoomsFilter {
   topic?: string;
   following?: boolean;
+  clubs?: boolean;
 }
 
 export const useRooms = (filter: RoomsFilter = {}) =>
   useQuery<RoomSummary[]>({
     queryKey: [...roomKeys.list(), filter],
     queryFn: () => roomService.list(filter),
+    // Keep the previously-fetched feed on screen while a new filter loads so
+    // switching pills doesn't flash the skeleton. `isLoading` stays false on
+    // these transitions (data is defined), so the skeleton only shows on the
+    // genuine first load with an empty cache.
+    placeholderData: keepPreviousData,
   });
 
 export const useRoom = (roomId: string) =>
@@ -59,8 +68,9 @@ export const useRaiseHand = () =>
 export const useLowerHand = () =>
   useMutation({ mutationFn: (roomId: string) => roomService.lowerHand(roomId) });
 
-export const useSetMute = () =>
-  useMutation({
+export const useSetMute = () => {
+  const qc = useQueryClient();
+  return useMutation({
     mutationFn: ({
       roomId,
       isMuted,
@@ -70,7 +80,14 @@ export const useSetMute = () =>
       isMuted: boolean;
       userId?: string;
     }) => roomService.setMute(roomId, isMuted, userId),
+    // Reflect the new mute state in the room detail. With realtime on the
+    // `room:mute-changed` socket event already does this; this keeps the UI in
+    // sync when realtime is off (the demo/dev config), where there's no socket.
+    onSuccess: (_res, vars) => {
+      void qc.invalidateQueries({ queryKey: roomKeys.detail(vars.roomId) });
+    },
   });
+};
 
 export const useSetRole = () => {
   const qc = useQueryClient();
@@ -135,10 +152,14 @@ export const useReportRoom = () =>
 
 export const useHandRaises = (roomId: string | null) =>
   useQuery({
-    queryKey: [...roomKeys.all, 'hand-raises', roomId ?? ''] as const,
+    queryKey: roomKeys.handRaises(roomId ?? ''),
     queryFn: () => roomService.listHandRaises(roomId as string),
     enabled: Boolean(roomId),
-    refetchInterval: 10_000,
+    // When realtime is on, useRoomSocket invalidates roomKeys.handRaises on
+    // hand_raised/lowered, so the interval would be duplicate work — disable it.
+    // Otherwise poll every 10s, but never while the app is backgrounded.
+    refetchInterval: env.REALTIME_ENABLED ? false : 10_000,
+    refetchIntervalInBackground: false,
   });
 
 export const useRoomMessages = (roomId: string | null) =>
@@ -229,9 +250,22 @@ export const usePingUserToRoom = () =>
 export const useCurrentRoom = () => {
   const room = useCurrentRoomStore(s => s.room);
   const isMuted = useCurrentRoomStore(s => s.isMuted);
-  const toggleMute = useCurrentRoomStore(s => s.toggleMute);
+  const storeToggleMute = useCurrentRoomStore(s => s.toggleMute);
   const clearRoom = useCurrentRoomStore(s => s.clear);
   const leaveRoom = useLeaveRoom();
+  const setMute = useSetMute();
+
+  // Real mute toggle: flip local state optimistically, persist to the server
+  // so other participants see it, and roll back on failure. The server
+  // broadcasts `room:mute-changed` which the `roomAudioService` listens for
+  // and calls `setLiveKitMuted` on the active room — so the SDK-level mute
+  // happens automatically via the socket event flow.
+  const toggleMute = useCallback(() => {
+    if (!room) return;
+    const next = !useCurrentRoomStore.getState().isMuted;
+    storeToggleMute();
+    setMute.mutate({ roomId: room.id, isMuted: next }, { onError: () => storeToggleMute() });
+  }, [room, setMute, storeToggleMute]);
 
   const leave = () => {
     if (room) {

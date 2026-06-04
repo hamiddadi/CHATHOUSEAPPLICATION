@@ -2,7 +2,6 @@ import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, {
   Easing,
-  runOnJS,
   useAnimatedStyle,
   useSharedValue,
   withSequence,
@@ -43,6 +42,10 @@ interface IncomingReaction {
 export const ReactionsBar: React.FC<ReactionsBarProps> = memo(({ roomId }) => {
   const sendReaction = useSendReaction();
   const [floats, setFloats] = useState<FloatingEmoji[]>([]);
+  // Track in-flight cleanup timers so they can be purged on unmount —
+  // otherwise a room that's left mid-animation leaves orphan timers that
+  // fire setState on an unmounted component.
+  const timers = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
 
   const removeFloat = useCallback((id: string) => {
     setFloats(prev => prev.filter(f => f.id !== id));
@@ -55,10 +58,23 @@ export const ReactionsBar: React.FC<ReactionsBarProps> = memo(({ roomId }) => {
       setFloats(prev => [...prev, { id, emoji, startX }]);
       // Cleanup matches the animation duration exactly so we never leave
       // a ghost mounted after the fade-out finishes.
-      setTimeout(() => removeFloat(id), FLY_DURATION_MS + 100);
+      const t = setTimeout(() => {
+        timers.current.delete(t);
+        removeFloat(id);
+      }, FLY_DURATION_MS + 100);
+      timers.current.add(t);
     },
     [removeFloat],
   );
+
+  // Purge any pending spawn timers when the bar unmounts.
+  useEffect(() => {
+    const pending = timers.current;
+    return () => {
+      pending.forEach(clearTimeout);
+      pending.clear();
+    };
+  }, []);
 
   const handleTap = useCallback(
     (emoji: Emoji) => {
@@ -108,7 +124,7 @@ export const ReactionsBar: React.FC<ReactionsBarProps> = memo(({ roomId }) => {
             accessibilityRole="button"
             accessibilityLabel={`Send reaction ${e}`}
             style={styles.emojiBtn}
-            hitSlop={4}
+            hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
           >
             <Text style={styles.emojiText}>{e}</Text>
           </Pressable>
@@ -135,13 +151,10 @@ const FloatingEmojiView: React.FC<{ emoji: string; startX: number }> = memo(({ e
       withTiming(0, { duration: 480 }),
     );
     scale.value = withTiming(1.1, { duration: 200, easing: Easing.out(Easing.cubic) });
-    translateY.value = withTiming(
-      -180,
-      { duration: FLY_DURATION_MS, easing: Easing.out(Easing.quad) },
-      () => {
-        runOnJS(noop)();
-      },
-    );
+    translateY.value = withTiming(-180, {
+      duration: FLY_DURATION_MS,
+      easing: Easing.out(Easing.quad),
+    });
   }, [opacity, scale, translateY]);
 
   const animatedStyle = useAnimatedStyle(() => ({
@@ -156,8 +169,6 @@ const FloatingEmojiView: React.FC<{ emoji: string; startX: number }> = memo(({ e
   );
 });
 FloatingEmojiView.displayName = 'FloatingEmojiView';
-
-const noop = (): void => undefined;
 
 const styles = StyleSheet.create({
   wrap: {

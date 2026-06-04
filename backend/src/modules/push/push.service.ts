@@ -48,6 +48,22 @@ interface ExpoMessage {
 
 export const pushService = {
   async register(userId: string, input: RegisterPushInput) {
+    // A token's unique key is the token string itself, so registering a
+    // token currently owned by another account silently reassigns it. That
+    // is the intended behaviour for "same device, new login", but it also
+    // lets anyone who observes a valid Expo token hijack the device's push
+    // stream. Probability is low (tokens are long & opaque) but we trace
+    // every reassignment so it's auditable after the fact.
+    // TODO(audit): gate reassignment behind a device proof-of-possession
+    //   before treating an observed token as authoritative for a new user.
+    const existing = await prisma.pushToken.findUnique({
+      where: { token: input.token },
+      select: { userId: true },
+    });
+    if (existing && existing.userId !== userId) {
+      logger.info('push: token reassigned', { from: existing.userId, to: userId });
+    }
+
     await prisma.pushToken.upsert({
       where: { token: input.token },
       create: { userId, token: input.token, platform: input.platform },

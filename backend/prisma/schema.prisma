@@ -101,6 +101,10 @@ enum RoomChatVisibility {
 model User {
   id           String    @id @default(cuid())
   username     String?   @unique
+  // NOTE(audit): PostgreSQL `text` is case-sensitive, so this @unique does not
+  // prevent 'A@x.com' vs 'a@x.com' duplicates. The auth layer now normalises
+  // email to lower-case before insert/lookup (auth.schema). For defence in
+  // depth, migrate this column to the `citext` type (CREATE EXTENSION citext).
   email        String?   @unique
   passwordHash String?
   phoneNumber  String?   @unique
@@ -113,7 +117,7 @@ model User {
   twitter      String?   @db.VarChar(50)
   instagram    String?   @db.VarChar(50)
   isOnline     Boolean   @default(false)
-  isVisible    Boolean   @default(true) // Ghost Mode off → visible on map
+  isVisible    Boolean   @default(false) // Ghost Mode ON by default → user must opt-in to map visibility (privacy-safe)
   allowWaves   Boolean   @default(true)
   isPrivateAccount Boolean @default(false)
   latitude     Float?
@@ -126,9 +130,23 @@ model User {
   // Denormalized counts — updated via service on follow/unfollow.
   followerCount  Int       @default(0)
   followingCount Int       @default(0)
+  // ─── Premium / billing (monetization) ───
+  // stripeCustomerId is set on first premium checkout. isPremium + premiumUntil
+  // are the SERVER-SIDE entitlement source of truth, synced only by the Stripe
+  // webhook (never trusted from the client).
+  stripeCustomerId String?  @unique
+  isPremium        Boolean  @default(false)
+  premiumUntil     DateTime?
   // ─── Onboarding ─────────────────────────
   interests              String[]  @default([])
   hasCompletedOnboarding Boolean   @default(false)
+  // ─── Referral / invites (Clubhouse-style virality) ───
+  // `invitedById` records who brought this user in (set once, at redemption,
+  // only while null → idempotent). `invitesRemaining` is the per-user invite
+  // quota consumed when someone redeems this user's link. Self-relation
+  // "UserInvites": invitedBy (the inviter) ←→ invitedUsers (people I invited).
+  invitedById      String?
+  invitesRemaining Int       @default(3)
   // ─── Account deletion ───────────────────
   deletedAt    DateTime? // Soft delete: non-null = pending deletion
   // ─── Platform admin role + suspension ───
@@ -147,6 +165,10 @@ model User {
   roomBansIssued      RoomBan[]            @relation("BanIssuer")
   roomBansReceived    RoomBan[]            @relation("BanTarget")
   sentMessages        Message[]            @relation("MessageSender")
+  receivedMessages    Message[]            @relation("MessageReceiver")
+  ownedConversations      Conversation[]       @relation("ConvOwner")
+  conversationMemberships ConversationMember[] @relation("ConvMembership")
+  groupMessagesSent       GroupMessage[]       @relation("GroupMsgSender")
   followers           Follow[]             @relation("Following")
   following           Follow[]             @relation("Follower")
   notifications       Notification[]       @relation("NotifRecipient")
@@ -167,6 +189,12 @@ model User {
   notifPreferences    NotificationPreference?
   auditLogsAuthored   AuditLog[]            @relation("AuditActor")
   auditLogsTargeted   AuditLog[]            @relation("AuditTargetUser")
+  tipsSent            Tip[]                @relation("TipsSent")
+  tipsReceived        Tip[]                @relation("TipsReceived")
+  subscription        Subscription?
+  // Referral self-relation: the user who invited me, and everyone I invited.
+  invitedBy           User?                @relation("UserInvites", fields: [invitedById], references: [id], onDelete: SetNull)
+  invitedUsers        User[]               @relation("UserInvites")
 
   @@index([isOnline])
   @@index([isVisible])
@@ -174,6 +202,59 @@ model User {
   @@index([currentRoomId])
   @@index([appRole])
   @@index([suspendedUntil])
+  @@index([invitedById])
+  // Covers getOnlineLocations (map): visible + online + recently-seen.
+  @@index([isVisible, isOnline, lastSeenAt])
+}
+
+// ─── Monetization: Tip ledger ───────────────────────────
+// One row per tip PaymentIntent. Created PENDING when the Checkout/intent is
+// opened; flipped to SUCCEEDED/FAILED only by the verified Stripe webhook (the
+// server never trusts the client to confirm a payment). Unique on
+// paymentIntentId so a retried/duplicated webhook is idempotent.
+enum TipStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  REFUNDED
+}
+
+model Tip {
+  id              String    @id @default(cuid())
+  fromUserId      String
+  toUserId        String
+  paymentIntentId String    @unique
+  amount          Int // minor units (e.g. cents)
+  currency        String    @db.VarChar(3)
+  status          TipStatus @default(PENDING)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  fromUser User @relation("TipsSent", fields: [fromUserId], references: [id], onDelete: Cascade)
+  toUser   User @relation("TipsReceived", fields: [toUserId], references: [id], onDelete: Cascade)
+
+  @@index([toUserId, createdAt])
+  @@index([fromUserId, createdAt])
+}
+
+// ─── Monetization: Premium subscription ─────────────────
+// Mirrors the Stripe subscription for a user (1:1). `status` holds Stripe's
+// subscription status verbatim; User.isPremium/premiumUntil are derived from it
+// by the webhook. Both this row and the User flags are written ONLY by the
+// webhook handler.
+model Subscription {
+  id                   String    @id @default(cuid())
+  userId               String    @unique
+  stripeSubscriptionId String    @unique
+  stripeCustomerId     String
+  status               String    @db.VarChar(32) // active | trialing | past_due | canceled | ...
+  currentPeriodEnd     DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([stripeCustomerId])
 }
 
 // ─── Room ───────────────────────────────────────────────
@@ -213,6 +294,7 @@ model Room {
   reactions        RoomReaction[]
   bans             RoomBan[]
   reports          Report[]          @relation("ReportRoomTarget")
+  recordings       Recording[]
   currentListeners User[]            @relation("UserCurrentRoom")
 
   @@index([isLive])
@@ -265,6 +347,37 @@ model RoomChatMessage {
   @@index([roomId, createdAt])
   @@index([userId])
   @@index([replyToId])
+}
+
+// ─── Recording (room Replays) ──────────────────────────
+// One row per LiveKit Egress session for a room. Created when recording
+// starts (host opted in via Room.recordingEnabled AND egress is configured),
+// finalized by the LiveKit egress webhook (or a reconcile sweep) with the
+// public playback URL + clip length. Gated entirely behind env — when egress
+// isn't configured no rows are ever created (see recordings.service).
+enum RecordingStatus {
+  STARTING
+  ACTIVE
+  COMPLETED
+  FAILED
+  ABORTED
+}
+
+model Recording {
+  id         String          @id @default(cuid())
+  roomId     String
+  egressId   String          @unique // LiveKit egress id — webhook/reconcile key
+  status     RecordingStatus @default(STARTING)
+  fileUrl    String?         @db.VarChar(2048) // public playback URL once COMPLETED
+  durationMs Int?
+  startedAt  DateTime        @default(now())
+  endedAt    DateTime?
+  createdAt  DateTime        @default(now())
+
+  room Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@index([roomId, createdAt])
+  @@index([status])
 }
 
 // ─── RoomReaction (ephemeral float-up emoji) ───────────
@@ -320,23 +433,97 @@ model Participant {
   @@index([userId])
 }
 
+// Discriminates a text message from an async voice note (Clubhouse-style
+// "Chats"). VOICE rows carry audioUrl + audioDurationMs and a null content;
+// TEXT rows keep content and leave the audio columns null.
+enum MessageKind {
+  TEXT
+  VOICE
+}
+
 // ─── Message (room + direct) ────────────────────────────
 model Message {
-  id         String   @id @default(cuid())
-  content    String
+  id         String      @id @default(cuid())
+  // Nullable since a voice note has no text body. TEXT messages still carry it.
+  content    String?     @db.VarChar(4000) // was unbounded TEXT — cap payload size
+  kind       MessageKind @default(TEXT)
+  audioUrl   String?     @db.VarChar(2048) // public URL of the stored voice clip
+  audioDurationMs Int?    // clip length in ms, captured client-side at record time
   senderId   String
   roomId     String?
   receiverId String?
-  isRead     Boolean  @default(false)
-  createdAt  DateTime @default(now())
+  isRead     Boolean     @default(false)
+  createdAt  DateTime    @default(now())
 
-  sender User  @relation("MessageSender", fields: [senderId], references: [id], onDelete: Cascade)
-  room   Room? @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  sender   User  @relation("MessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+  room     Room? @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  // receiverId now has a real FK + relation (was a dangling string) so DMs
+  // enforce referential integrity and cascade-clean on user deletion.
+  receiver User? @relation("MessageReceiver", fields: [receiverId], references: [id], onDelete: Cascade)
 
   @@index([senderId])
   @@index([receiverId])
   @@index([roomId])
   @@index([createdAt])
+  // Serve the windowed, createdAt-ordered DM-conversation scan (chat.service
+  // listConversations) from an index instead of a sort on a sender/receiver
+  // filtered set.
+  @@index([receiverId, createdAt])
+  @@index([senderId, createdAt])
+}
+
+// ─── Group DM (Backchannel groups) ─────────────────────
+// Group conversations live in their own tables, separate from the 1:1
+// `Message` table (which stays peer/receiverId based). This keeps the
+// existing DM path untouched while adding multi-party threads. A
+// Conversation has N members and an append-only message log.
+model Conversation {
+  id        String   @id @default(cuid())
+  title     String?  @db.VarChar(80) // optional group name; UI falls back to member names
+  ownerId   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  owner    User                 @relation("ConvOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  members  ConversationMember[]
+  messages GroupMessage[]
+
+  @@index([ownerId])
+}
+
+model ConversationMember {
+  id             String    @id @default(cuid())
+  conversationId String
+  userId         String
+  // High-water mark for unread computation: messages newer than this (and not
+  // sent by the member) are unread. NULL = never opened.
+  lastReadAt     DateTime?
+  joinedAt       DateTime  @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user         User         @relation("ConvMembership", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId, userId])
+  @@index([userId])
+  @@index([conversationId])
+}
+
+model GroupMessage {
+  id             String      @id @default(cuid())
+  conversationId String
+  senderId       String
+  // Nullable: voice notes have no text body (kind=VOICE + audioUrl instead).
+  content        String?     @db.VarChar(2000)
+  kind           MessageKind @default(TEXT)
+  audioUrl       String?     @db.VarChar(2048)
+  audioDurationMs Int?
+  createdAt      DateTime    @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender       User         @relation("GroupMsgSender", fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+  @@index([senderId])
 }
 
 // ─── Follow ─────────────────────────────────────────────
@@ -360,8 +547,8 @@ model Notification {
   userId    String
   actorId   String?          // Who triggered the notification
   type      NotificationType
-  title     String
-  body      String
+  title     String           @db.VarChar(150) // was unbounded TEXT
+  body      String           @db.VarChar(500) // was unbounded TEXT
   data      Json?
   targetId  String?          // ID of the target entity (room, club, user)
   targetType String?         @db.VarChar(32) // 'room', 'club', 'user'
@@ -469,6 +656,8 @@ model OtpCode {
 
   @@index([phoneNumber])
   @@index([expiresAt])
+  // Covers the verify() lookup: latest unused, unexpired code for a phone.
+  @@index([phoneNumber, isUsed, expiresAt])
 }
 
 // ─── Password reset token ──────────────────────────────

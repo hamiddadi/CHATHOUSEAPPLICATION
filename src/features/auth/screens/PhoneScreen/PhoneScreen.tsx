@@ -48,12 +48,14 @@ export const PhoneScreen: React.FC = () => {
   } = useForm<PhoneFormValues>({
     resolver: zodResolver(phoneFormSchema),
     mode: 'onChange',
-    defaultValues: { phoneNumber: detectedCountry.callingCode },
+    defaultValues: { phoneNumber: detectedCountry.callingCode, ageConfirmed: false },
   });
 
   const handleApiError = useFormApiErrors(setError);
 
   const handleBack = useCallback(() => navigation.goBack(), [navigation]);
+  const handleTerms = useCallback(() => navigation.navigate('Terms'), [navigation]);
+  const handlePrivacy = useCallback(() => navigation.navigate('PrivacyPolicy'), [navigation]);
 
   const onSubmit = useCallback(
     async ({ phoneNumber }: PhoneFormValues) => {
@@ -156,6 +158,30 @@ export const PhoneScreen: React.FC = () => {
 
         <View className="flex-1" />
 
+        <Controller
+          control={control}
+          name="ageConfirmed"
+          render={({ field: { onChange, value } }) => (
+            <Pressable
+              onPress={() => onChange(!value)}
+              className="flex-row items-center gap-sm mb-md"
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: value }}
+            >
+              <View
+                className={`w-6 h-6 rounded border items-center justify-center ${
+                  value ? 'bg-primary border-primary' : 'border-overlay-white-30 bg-transparent'
+                }`}
+              >
+                {value && <MaterialIcons name="check" size={16} color="white" />}
+              </View>
+              <Text className="text-sm font-body-semibold text-ink flex-1">
+                {t('auth.phone.ageVerification', 'I confirm I am at least 16 years old')}
+              </Text>
+            </Pressable>
+          )}
+        />
+
         <Button
           label={t('auth.phone.submit', 'Next')}
           variant="primary"
@@ -168,10 +194,24 @@ export const PhoneScreen: React.FC = () => {
 
         <Text className="text-center text-xs text-ink-muted leading-5 mt-md">
           {t('auth.phone.terms', 'By entering your number, you’re agreeing to our ')}
-          <Text className="text-primary font-body-medium">Terms of Service</Text>
+          <Text
+            onPress={handleTerms}
+            accessibilityRole="link"
+            accessibilityLabel={t('auth.phone.termsLinkA11y', 'Terms of Service')}
+            className="text-primary font-body-medium"
+          >
+            {t('auth.phone.termsLinkA11y', 'Terms of Service')}
+          </Text>
           {t('auth.phone.termsAnd', ' and ')}
-          <Text className="text-primary font-body-medium">Privacy Policy</Text>.
-          {t('auth.phone.termsEnd', ' Thanks!')}
+          <Text
+            onPress={handlePrivacy}
+            accessibilityRole="link"
+            accessibilityLabel={t('auth.phone.privacyLinkA11y', 'Privacy Policy')}
+            className="text-primary font-body-medium"
+          >
+            {t('auth.phone.privacyLinkA11y', 'Privacy Policy')}
+          </Text>
+          .{t('auth.phone.termsEnd', ' Thanks!')}
         </Text>
       </View>
 

@@ -1,9 +1,12 @@
+import type { Prisma } from '@prisma/client';
 import { prisma } from '../../config/database';
 import { AppError } from '../../middlewares/error.middleware';
+import { getBlockedIdSet } from '../social/blocks';
 import type {
   CompleteOnboardingInput,
   InterestsInput,
   LocationInput,
+  NotifPrefsInput,
   SearchQueryInput,
   SetUsernameInput,
   UpdateMeInput,
@@ -44,6 +47,19 @@ const meSelect = {
   deletedAt: true,
 } as const;
 
+// Only surface users seen within this window on the live map.
+const ONLINE_WINDOW_MS = 30 * 60 * 1000;
+// Grace period between a deletion request and the permanent purge.
+const DELETION_GRACE_MS = 30 * 24 * 60 * 60 * 1000;
+// Hard caps on how many pins a single map query materialises.
+const ONLINE_MAP_LIMIT = 200;
+const FOLLOWING_MAP_LIMIT = 500;
+
+// Canonical interest list: trimmed, lowercased, de-duplicated.
+const normaliseInterests = (xs: string[]): string[] => [
+  ...new Set(xs.map(i => i.trim().toLowerCase())),
+];
+
 export const usersService = {
   async getMe(userId: string) {
     const me = await prisma.user.findUnique({ where: { id: userId }, select: meSelect });
@@ -75,10 +91,36 @@ export const usersService = {
     });
   },
 
-  async getById(id: string) {
-    const user = await prisma.user.findUnique({ where: { id }, select: publicSelect });
+  async getById(id: string, viewerId?: string) {
+    // A block is a symmetric break: a blocked user's profile must not be
+    // readable by the other party. Also hide soft-deleted accounts.
+    if (viewerId && viewerId !== id) {
+      const blocked = await getBlockedIdSet(viewerId);
+      if (blocked.has(id)) throw new AppError('USER_001');
+    }
+    const user = await prisma.user.findFirst({
+      where: { id, deletedAt: null },
+      // Inline the inviter relation here (not in the shared publicSelect) so
+      // the "Nominated by @inviter" line rides on the detail payload without
+      // adding a join to every search-result row.
+      select: {
+        ...publicSelect,
+        invitedBy: { select: { id: true, username: true, displayName: true } },
+      },
+    });
     if (!user) throw new AppError('USER_001');
-    return user;
+
+    // Per-viewer relationship flag so the client can render Follow/Following
+    // without a second round-trip. Cheap indexed lookup on the unique pair.
+    let isFollowedByMe = false;
+    if (viewerId && viewerId !== id) {
+      const rel = await prisma.follow.findUnique({
+        where: { followerId_followingId: { followerId: viewerId, followingId: id } },
+        select: { followerId: true },
+      });
+      isFollowedByMe = rel !== null;
+    }
+    return { ...user, isFollowedByMe };
   },
 
   async checkUsername(input: UsernameAvailabilityInput) {
@@ -131,10 +173,15 @@ export const usersService = {
     });
   },
 
-  async search(input: SearchQueryInput) {
+  async search(input: SearchQueryInput, viewerId?: string) {
     const term = input.q.trim();
+    // Exclude blocked/blocking users and soft-deleted accounts, consistent
+    // with search.service / explore.service (a block is symmetric everywhere).
+    const blocked = viewerId ? await getBlockedIdSet(viewerId) : new Set<string>();
     return prisma.user.findMany({
       where: {
+        deletedAt: null,
+        id: { notIn: [...blocked] },
         OR: [
           { username: { contains: term, mode: 'insensitive' } },
           { displayName: { contains: term, mode: 'insensitive' } },
@@ -149,7 +196,7 @@ export const usersService = {
   async setInterests(userId: string, input: InterestsInput) {
     // Lowercase + dedupe server-side so the list stored is canonical,
     // regardless of how the client sends it.
-    const normalised = [...new Set(input.interests.map(i => i.trim().toLowerCase()))];
+    const normalised = normaliseInterests(input.interests);
     return prisma.user.update({
       where: { id: userId },
       data: { interests: normalised },
@@ -158,14 +205,16 @@ export const usersService = {
   },
 
   async completeOnboarding(userId: string, input: CompleteOnboardingInput) {
-    const data: Parameters<typeof prisma.user.update>[0]['data'] = {
+    const data: Prisma.UserUpdateInput = {
       hasCompletedOnboarding: true,
     };
     if (input.displayName !== undefined) data.displayName = input.displayName;
+    if (input.firstName !== undefined) data.firstName = input.firstName;
+    if (input.lastName !== undefined) data.lastName = input.lastName;
     if (input.bio !== undefined) data.bio = input.bio;
     if (input.avatarUrl !== undefined) data.avatarUrl = input.avatarUrl;
     if (input.interests !== undefined) {
-      data.interests = [...new Set(input.interests.map(i => i.trim().toLowerCase()))];
+      data.interests = normaliseInterests(input.interests);
     }
     return prisma.user.update({
       where: { id: userId },
@@ -177,12 +226,17 @@ export const usersService = {
   async getOnlineLocations(viewerId: string) {
     // Exclude ghost-mode users and the viewer themself. Only users with
     // recorded coordinates and seen in the last 30 min are surfaced.
-    const thirtyMinAgo = new Date(Date.now() - 30 * 60 * 1000);
+    // CRITICAL: also exclude blocked/blocking users — the map is the most
+    // sensitive surface (precise GPS), so a blocked harasser must never be
+    // able to locate (or be located by) the viewer. And hide soft-deleted.
+    const thirtyMinAgo = new Date(Date.now() - ONLINE_WINDOW_MS);
+    const blocked = await getBlockedIdSet(viewerId);
     return prisma.user.findMany({
       where: {
         isVisible: true,
         isOnline: true,
-        NOT: { id: viewerId },
+        deletedAt: null,
+        id: { notIn: [viewerId, ...blocked] },
         latitude: { not: null },
         longitude: { not: null },
         lastSeenAt: { gte: thirtyMinAgo },
@@ -197,7 +251,52 @@ export const usersService = {
         lastSeenAt: true,
         currentRoomId: true,
       },
-      take: 200,
+      take: ONLINE_MAP_LIMIT,
+    });
+  },
+
+  /**
+   * Snapshot of the people the caller FOLLOWS who are on the map right now:
+   * visible (Ghost Mode off), online, with coordinates, seen in the last
+   * 30 min. Excludes blocked/blocking users and soft-deleted accounts.
+   *
+   * This is the initial roster for the maps feature — the WebSocket only
+   * streams coordinate deltas (maps:user-moved/-offline) and can't materialise
+   * a new pin (no username/avatar in the payload), so the client seeds from
+   * this and then relocates known followers live.
+   */
+  async getFollowingOnMap(viewerId: string) {
+    const thirtyMinAgo = new Date(Date.now() - ONLINE_WINDOW_MS);
+    const blocked = await getBlockedIdSet(viewerId);
+    const follows = await prisma.follow.findMany({
+      where: { followerId: viewerId },
+      select: { followingId: true },
+    });
+    const ids = follows.map(f => f.followingId).filter(id => !blocked.has(id));
+    if (ids.length === 0) return [];
+    return prisma.user.findMany({
+      where: {
+        id: { in: ids },
+        isVisible: true,
+        isOnline: true,
+        deletedAt: null,
+        latitude: { not: null },
+        longitude: { not: null },
+        lastSeenAt: { gte: thirtyMinAgo },
+      },
+      select: {
+        id: true,
+        username: true,
+        displayName: true,
+        avatarUrl: true,
+        latitude: true,
+        longitude: true,
+        lastSeenAt: true,
+        currentRoomId: true,
+        // Live-room badge on the pin (only meaningful while the room is live).
+        currentRoom: { select: { id: true, title: true, isLive: true } },
+      },
+      take: FOLLOWING_MAP_LIMIT,
     });
   },
 
@@ -214,7 +313,7 @@ export const usersService = {
     });
     return {
       deletedAt: deletedAt.toISOString(),
-      permanentDeletionAt: new Date(deletedAt.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+      permanentDeletionAt: new Date(deletedAt.getTime() + DELETION_GRACE_MS).toISOString(),
     };
   },
 
@@ -236,7 +335,7 @@ export const usersService = {
     return prefs;
   },
 
-  async updateNotificationPreferences(userId: string, input: Record<string, boolean>) {
+  async updateNotificationPreferences(userId: string, input: NotifPrefsInput) {
     return prisma.notificationPreference.upsert({
       where: { userId },
       create: { userId, ...input },

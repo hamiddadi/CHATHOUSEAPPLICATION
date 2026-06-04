@@ -109,7 +109,7 @@ describe('OTP flow — send / verify / replay / expired / rate limit', () => {
     }
   });
 
-  it('locks after 5 wrong attempts — next attempt returns AUTH_001', async () => {
+  it('locks after max wrong attempts — next attempt returns RATE_LIMIT_001 (429)', async () => {
     const phoneNumber = randomPhone();
     await captureOtp(async () => {
       await request(app).post('/api/auth/send-otp').send({ phoneNumber });
@@ -117,12 +117,14 @@ describe('OTP flow — send / verify / replay / expired / rate limit', () => {
     for (let i = 0; i < 5; i++) {
       await request(app).post('/api/auth/verify-otp').send({ phoneNumber, code: '000000' });
     }
-    // 6th attempt: the record has attempts >= MAX, so service marks it used
-    // and returns AUTH_001.
+    // Once attempts >= OTP_MAX_ATTEMPTS the service marks the code used and
+    // returns RATE_LIMIT_001 (429) — deliberately distinct from AUTH_001 (401)
+    // so the client can tell "exhausted attempts" from "wrong code" (see
+    // otp.service.ts).
     const res = await request(app)
       .post('/api/auth/verify-otp')
       .send({ phoneNumber, code: '000000' });
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(429);
   });
 
   it('rate-limits to 3 sends/hour (OTP_RATE_LIMIT_PER_HOUR=3 in this suite)', async () => {

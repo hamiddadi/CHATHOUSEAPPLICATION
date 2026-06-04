@@ -1,9 +1,5 @@
 import { apiClient } from '../../../shared/services/api/apiClient';
-
-interface Envelope<T> {
-  success: true;
-  data: T;
-}
+import type { Envelope } from '../../../shared/types/api';
 
 export const privacyService = {
   /**

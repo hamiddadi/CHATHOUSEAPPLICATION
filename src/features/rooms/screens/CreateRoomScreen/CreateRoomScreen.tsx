@@ -10,7 +10,9 @@ import { Button } from '../../../../shared/components/Button';
 import { Input } from '../../../../shared/components/Input';
 import { colors, radii, spacing } from '../../../../shared/constants/theme';
 import type { RoomStackParamList } from '../../../../core/navigation/types';
+import { errorMessage } from '../../../../shared/utils/errorMessage';
 import { useCreateRoom } from '../../hooks/useRooms';
+import { DateTimePickerInline } from '../../components/DateTimePickerInline';
 import { searchService } from '../../../search/services/searchService';
 import { INTEREST_CATEGORIES } from '../../../onboarding/schemas';
 
@@ -27,10 +29,14 @@ interface VisibilityOption {
 
 const VISIBILITY_OPTIONS: readonly VisibilityOption[] = [
   { id: 'public', icon: 'public', label: 'Open', description: 'Anyone in Chathouse can join' },
+  // 'Social' is enforced server-side: rooms.service gates join on the follow
+  // graph (roomType=SOCIAL) — only the host and people who follow the host can
+  // enter. Mapping lives in roomService.visibilityToBackend.
   { id: 'social', icon: 'people', label: 'Social', description: 'Only people you follow can join' },
   { id: 'closed', icon: 'lock', label: 'Closed', description: 'Only people you invite' },
 ];
 
+const TITLE_MIN = 3;
 const TITLE_MAX = 80;
 const DESCRIPTION_MAX = 200;
 const MAX_TOPICS = 5;
@@ -38,7 +44,8 @@ const MAX_COHOSTS = 5;
 const SEARCH_DEBOUNCE_MS = 250;
 
 // Presets keep the UX one-tap without pulling a native date picker (which
-// would need EAS dev-client). Custom datetime selection lands later.
+// would need EAS dev-client). The "custom" mode swaps in DateTimePickerInline,
+// a JS-only date+time selector — still no native module required.
 const SCHEDULE_PRESETS = [
   { id: '30min', label: '+30 min', minutes: 30 },
   { id: '1h', label: '+1 h', minutes: 60 },
@@ -46,6 +53,10 @@ const SCHEDULE_PRESETS = [
   { id: '1d', label: '+1 j', minutes: 60 * 24 },
 ] as const;
 type SchedulePresetId = (typeof SCHEDULE_PRESETS)[number]['id'];
+
+type ScheduleMode = 'preset' | 'custom';
+// Default the custom picker one hour out so the first paint is already valid.
+const DEFAULT_CUSTOM_LEAD_MS = 60 * 60 * 1000;
 
 interface VisibilityRowProps {
   option: VisibilityOption;
@@ -153,9 +164,14 @@ export const CreateRoomScreen: React.FC = () => {
   const [description, setDescription] = useState('');
   const [visibility, setVisibility] = useState<Visibility>('public');
   const [isScheduled, setIsScheduled] = useState(false);
+  const [scheduleMode, setScheduleMode] = useState<ScheduleMode>('preset');
   const [schedulePreset, setSchedulePreset] = useState<SchedulePresetId>('1h');
+  const [customScheduledFor, setCustomScheduledFor] = useState<string>(() =>
+    new Date(Date.now() + DEFAULT_CUSTOM_LEAD_MS).toISOString(),
+  );
   const [topics, setTopics] = useState<Set<string>>(new Set());
   const [coHosts, setCoHosts] = useState<SearchHit[]>([]);
+  const [recordingEnabled, setRecordingEnabled] = useState(false);
 
   const [query, setQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
@@ -225,9 +241,13 @@ export const CreateRoomScreen: React.FC = () => {
   const handleStart = useCallback(async () => {
     let scheduledFor: string | undefined;
     if (isScheduled) {
-      const preset = SCHEDULE_PRESETS.find(p => p.id === schedulePreset);
-      if (preset) {
-        scheduledFor = new Date(Date.now() + preset.minutes * 60_000).toISOString();
+      if (scheduleMode === 'custom') {
+        scheduledFor = customScheduledFor;
+      } else {
+        const preset = SCHEDULE_PRESETS.find(p => p.id === schedulePreset);
+        if (preset) {
+          scheduledFor = new Date(Date.now() + preset.minutes * 60_000).toISOString();
+        }
       }
     }
     try {
@@ -238,12 +258,13 @@ export const CreateRoomScreen: React.FC = () => {
         topics: [...topics],
         coHostIds: coHosts.map(u => u.id),
         scheduledFor,
+        recordingEnabled,
       });
       navigation.goBack();
     } catch (err) {
       Alert.alert(
-        t('createRoom.errorTitle'),
-        err instanceof Error ? err.message : t('createRoom.errorBody'),
+        t('createRoom.errorTitle', 'Création impossible'),
+        errorMessage(err, t('createRoom.errorBody', 'Impossible de créer la room. Réessaie.')),
       );
     }
   }, [
@@ -255,12 +276,22 @@ export const CreateRoomScreen: React.FC = () => {
     topics,
     coHosts,
     isScheduled,
+    scheduleMode,
     schedulePreset,
+    customScheduledFor,
+    recordingEnabled,
     t,
   ]);
   const handleToggleSchedule = useCallback(() => setIsScheduled(prev => !prev), []);
+  const handleToggleRecording = useCallback(() => setRecordingEnabled(prev => !prev), []);
+  const handleSelectPresetMode = useCallback(() => setScheduleMode('preset'), []);
+  const handleSelectCustomMode = useCallback(() => setScheduleMode('custom'), []);
 
-  const canStart = title.trim().length > 0 && !createRoom.isPending;
+  // Align with TitleEditModal's bounds so creation and editing agree:
+  // a 1-char title was previously accepted on create but rejected on edit.
+  const trimmedTitle = title.trim();
+  const canStart =
+    trimmedTitle.length >= TITLE_MIN && trimmedTitle.length <= TITLE_MAX && !createRoom.isPending;
   const topicsArray = useMemo(() => [...topics], [topics]);
 
   return (
@@ -417,26 +448,110 @@ export const CreateRoomScreen: React.FC = () => {
         </Pressable>
 
         {isScheduled && (
-          <View className="flex-row flex-wrap gap-sm pt-xs">
-            {SCHEDULE_PRESETS.map(preset => {
-              const selected = schedulePreset === preset.id;
-              return (
-                <Pressable
-                  key={preset.id}
-                  onPress={() => setSchedulePreset(preset.id)}
-                  accessibilityRole="radio"
-                  accessibilityLabel={`Schedule ${preset.label}`}
-                  accessibilityState={{ selected }}
-                  style={[styles.chip, selected ? styles.chipSelected : styles.chipUnselected]}
+          <View className="gap-md pt-xs">
+            <View className="flex-row gap-sm" accessibilityRole="radiogroup">
+              <Pressable
+                onPress={handleSelectPresetMode}
+                accessibilityRole="radio"
+                accessibilityLabel={t('createRoom.scheduleModeQuick', 'Quick presets')}
+                accessibilityState={{ selected: scheduleMode === 'preset' }}
+                style={[
+                  styles.chip,
+                  scheduleMode === 'preset' ? styles.chipSelected : styles.chipUnselected,
+                ]}
+              >
+                <Text
+                  style={
+                    scheduleMode === 'preset'
+                      ? styles.chipLabelSelected
+                      : styles.chipLabelUnselected
+                  }
                 >
-                  <Text style={selected ? styles.chipLabelSelected : styles.chipLabelUnselected}>
-                    {preset.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
+                  {t('createRoom.scheduleModeQuick', 'Quick presets')}
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={handleSelectCustomMode}
+                accessibilityRole="radio"
+                accessibilityLabel={t('createRoom.scheduleModeCustom', 'Pick date & time')}
+                accessibilityState={{ selected: scheduleMode === 'custom' }}
+                style={[
+                  styles.chip,
+                  scheduleMode === 'custom' ? styles.chipSelected : styles.chipUnselected,
+                ]}
+              >
+                <Text
+                  style={
+                    scheduleMode === 'custom'
+                      ? styles.chipLabelSelected
+                      : styles.chipLabelUnselected
+                  }
+                >
+                  {t('createRoom.scheduleModeCustom', 'Pick date & time')}
+                </Text>
+              </Pressable>
+            </View>
+
+            {scheduleMode === 'preset' ? (
+              <View className="flex-row flex-wrap gap-sm" accessibilityRole="radiogroup">
+                {SCHEDULE_PRESETS.map(preset => {
+                  const selected = schedulePreset === preset.id;
+                  return (
+                    <Pressable
+                      key={preset.id}
+                      onPress={() => setSchedulePreset(preset.id)}
+                      accessibilityRole="radio"
+                      accessibilityLabel={`Schedule ${preset.label}`}
+                      accessibilityState={{ selected }}
+                      style={[styles.chip, selected ? styles.chipSelected : styles.chipUnselected]}
+                    >
+                      <Text
+                        style={selected ? styles.chipLabelSelected : styles.chipLabelUnselected}
+                      >
+                        {preset.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            ) : (
+              <DateTimePickerInline value={customScheduledFor} onChange={setCustomScheduledFor} />
+            )}
           </View>
         )}
+
+        <Pressable
+          onPress={handleToggleRecording}
+          accessibilityRole="switch"
+          accessibilityLabel={t('createRoom.recordLabel')}
+          accessibilityState={{ checked: recordingEnabled }}
+          className="flex-row items-center gap-md p-lg rounded-md bg-overlay-white-5 border border-overlay-white-10"
+        >
+          <MaterialIcons
+            name="fiber-manual-record"
+            size={24}
+            color={recordingEnabled ? colors.primary : colors.text}
+          />
+          <View className="flex-1">
+            <Text className="text-md font-body-bold text-ink">{t('createRoom.recordLabel')}</Text>
+            <Text className="text-xs font-body text-ink-muted">{t('createRoom.recordHint')}</Text>
+          </View>
+          <View
+            className={
+              recordingEnabled
+                ? 'w-[44px] h-[26px] bg-primary rounded-pill'
+                : 'w-[44px] h-[26px] bg-surface-high rounded-pill'
+            }
+          >
+            <View
+              className={
+                recordingEnabled
+                  ? 'w-[22px] h-[22px] rounded-pill bg-white mt-xxs ml-[20px]'
+                  : 'w-[22px] h-[22px] rounded-pill bg-ink-muted mt-xxs ml-xxs'
+              }
+            />
+          </View>
+        </Pressable>
 
         <Button
           label={t('createRoom.startRoom')}
