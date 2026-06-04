@@ -31,6 +31,15 @@ interface RetriableConfig extends InternalAxiosRequestConfig {
  */
 let refreshing: Promise<AuthSession | null> | null = null;
 
+// Guard so the auth teardown (clear tokens + onUnauthenticated) runs at most
+// once per session. Without it, (a) several requests that all 401 after the
+// access token expires each fire signOut → /auth/logout, and (b) the tokenless
+// /auth/logout POST itself 401s and re-enters this interceptor → another
+// teardown → another /auth/logout → unbounded recursion. The isAuthEndpoint
+// check below is the primary fix; this flag is defense-in-depth for concurrent
+// 401s.
+let teardownInProgress = false;
+
 const performRefresh = async (client: AxiosInstance): Promise<AuthSession | null> => {
   if (refreshing) return refreshing;
   refreshing = (async () => {
@@ -110,12 +119,18 @@ export const attachInterceptors = (
       const appError: AppError = toAppError(error);
 
       const isAuthFailure = appError.kind === 'auth';
-      const isRefreshCall = original?.url?.includes('/auth/refresh') ?? false;
+      const url = original?.url ?? '';
+      // Never run refresh OR teardown for the auth endpoints themselves:
+      //  - /auth/refresh: a 401 there is handled by performRefresh returning null.
+      //  - /auth/logout: it's best-effort and runs AFTER tokens are cleared, so
+      //    its tokenless 401 must NOT re-trigger teardown — that caused an
+      //    unbounded logout → 401 → logout recursion flooding the server.
+      const isAuthEndpoint = url.includes('/auth/refresh') || url.includes('/auth/logout');
       const alreadyRetried = original?._retry === true;
 
       // Try ONE silent refresh on a genuine 401, then replay the original
-      // request. Skip for the refresh call itself and for retries.
-      if (isAuthFailure && original && !alreadyRetried && !isRefreshCall) {
+      // request. Skip for the auth endpoints and for retries.
+      if (isAuthFailure && original && !alreadyRetried && !isAuthEndpoint) {
         const newSession = await performRefresh(client);
         if (newSession) {
           original._retry = true;
@@ -124,9 +139,15 @@ export const attachInterceptors = (
         }
       }
 
-      if (isAuthFailure) {
-        await tokenStorage.clear();
-        await handlers.onUnauthenticated?.();
+      // Refresh failed (or wasn't possible): tear the session down ONCE.
+      if (isAuthFailure && !isAuthEndpoint && !teardownInProgress) {
+        teardownInProgress = true;
+        try {
+          await tokenStorage.clear();
+          await handlers.onUnauthenticated?.();
+        } finally {
+          teardownInProgress = false;
+        }
       }
       return Promise.reject(appError);
     },

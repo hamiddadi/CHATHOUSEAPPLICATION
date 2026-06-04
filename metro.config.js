@@ -18,7 +18,7 @@ config.resolver.unstable_enablePackageExports = false;
 // a guard and treat a stub as "unavailable". This replaces the old runtime
 // `import('expo-contacts')` which broke the release Hermes compile (hermesc
 // rejects dynamic `import()` — "Invalid expression encountered").
-const OPTIONAL_NATIVE_MODULES = ['expo-contacts'];
+const OPTIONAL_NATIVE_MODULES = ['expo-contacts', 'expo-device'];
 const defaultResolveRequest = config.resolver.resolveRequest;
 config.resolver.resolveRequest = (context, moduleName, platform) => {
   if (OPTIONAL_NATIVE_MODULES.includes(moduleName)) {
