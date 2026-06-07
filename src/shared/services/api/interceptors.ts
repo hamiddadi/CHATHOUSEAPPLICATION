@@ -65,7 +65,17 @@ const performRefresh = async (client: AxiosInstance): Promise<AuthSession | null
       };
       await tokenStorage.set(next);
       return next;
-    } catch {
+    } catch (err) {
+      // Only surrender the session when the refresh is genuinely REJECTED
+      // (invalid/expired refresh token → 401 → kind 'auth'). A transient
+      // network/timeout failure must NOT log the user out — re-throw so the
+      // caller fails the original request with a network error and keeps the
+      // (still-valid) session for a later retry. This was the root cause of
+      // spurious logouts on flaky connections: a blip during the refresh used
+      // to be swallowed into `null`, which the interceptor read as "session
+      // gone" and tore everything down.
+      const ae = toAppError(err);
+      if (ae.kind === 'network' || ae.kind === 'timeout') throw ae;
       return null;
     } finally {
       refreshing = null;
@@ -131,7 +141,15 @@ export const attachInterceptors = (
       // Try ONE silent refresh on a genuine 401, then replay the original
       // request. Skip for the auth endpoints and for retries.
       if (isAuthFailure && original && !alreadyRetried && !isAuthEndpoint) {
-        const newSession = await performRefresh(client);
+        let newSession: AuthSession | null = null;
+        try {
+          newSession = await performRefresh(client);
+        } catch (refreshErr) {
+          // Refresh couldn't REACH the server (network/timeout). Keep the
+          // session and surface the network error so a retry can recover —
+          // do NOT fall through to teardown / sign-out.
+          return Promise.reject(refreshErr as AppError);
+        }
         if (newSession) {
           original._retry = true;
           original.headers.set('Authorization', `Bearer ${newSession.accessToken}`);
