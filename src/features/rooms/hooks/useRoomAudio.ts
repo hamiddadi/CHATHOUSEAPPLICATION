@@ -122,13 +122,20 @@ export const useRoomAudio = ({
       } catch (err) {
         if (cancelled) return;
         const msg = errorMessage(err, 'unknown');
-        // The "native module missing" sentinel — surfaces as
-        // `unsupported` so the UI can show a "audio à venir — installer
-        // @livekit/react-native" banner instead of a hard error toast.
-        if (msg.includes('@livekit/react-native not installed')) {
+        const lower = msg.toLowerCase();
+        // Treat "native audio unavailable" as `unsupported` so the UI shows the
+        // friendly "audio requires a dev-client" banner instead of a hard error.
+        // Two signatures mean the same thing — native WebRTC isn't usable here:
+        //  - the explicit sentinel from LiveKitEngine, and
+        //  - the opaque "cannot read property 'prototype' of undefined" /
+        //    RTCPeerConnection errors thrown when registerGlobals couldn't
+        //    install the WebRTC globals (defense-in-depth if one slips through).
+        if (
+          msg.includes('@livekit/react-native not installed') ||
+          lower.includes('prototype') ||
+          lower.includes('rtcpeerconnection')
+        ) {
           setStatus('unsupported');
-        } else if (msg.includes('mic permission denied')) {
-          setStatus('error');
         } else {
           setStatus('error');
         }

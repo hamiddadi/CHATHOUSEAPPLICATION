@@ -105,16 +105,27 @@ const ensureSdk = (): LiveKitSdk => {
   if (sdk) return sdk;
   const loaded = loadSdk();
   if (!loaded) throw new Error(LIVEKIT_UNAVAILABLE_SENTINEL);
-  sdk = loaded;
-  // Register globals once — required by @livekit/react-native for WebRTC
+  // Register globals once — required by @livekit/react-native for WebRTC.
   if (!globalsRegistered) {
     try {
-      sdk.registerGlobals();
+      loaded.registerGlobals();
     } catch {
-      /* noop — may already be registered */
+      /* fall through to the RTCPeerConnection check below */
     }
     globalsRegistered = true;
   }
+  // registerGlobals installs the WebRTC globals (RTCPeerConnection, …) from
+  // @livekit/react-native-webrtc. If the native WebRTC module isn't actually
+  // linked in this build (e.g. a local APK without the dev-client native
+  // bits), registerGlobals fails and those globals stay undefined — and any
+  // later `new Room()` / `room.connect()` blows up with an opaque
+  // "cannot read property 'prototype' of undefined". Detect that here and
+  // surface the UNAVAILABLE sentinel so the app degrades gracefully to the
+  // "audio unavailable" banner instead of a hard error in the room.
+  if (typeof (globalThis as { RTCPeerConnection?: unknown }).RTCPeerConnection === 'undefined') {
+    throw new Error(LIVEKIT_UNAVAILABLE_SENTINEL);
+  }
+  sdk = loaded;
   return loaded;
 };
 
