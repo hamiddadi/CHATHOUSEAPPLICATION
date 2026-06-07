@@ -12,6 +12,7 @@ import { EmptyState } from '../../../../shared/components/EmptyState';
 import { useAnimatedPress } from '../../../../shared/hooks/useAnimatedPress';
 import { colors, layout, spacing } from '../../../../shared/constants/theme';
 import type { RoomStackParamList } from '../../../../core/navigation/types';
+import { FEATURES } from '../../../../config/features';
 import type { RoomSummary, UserSummary } from '../../../../shared/types/domain';
 import { useRooms, roomKeys } from '../../hooks/useRooms';
 import { roomService } from '../../services/roomService';
@@ -322,11 +323,14 @@ const Header: React.FC<HeaderProps> = memo(
         <View className="flex-row items-center gap-sm">
           <HeaderIcon name="search" label={t('feed.exploreA11y', 'Explore')} onPress={onSearch} />
           <HeaderIcon name="event" label={t('feed.eventsA11y', 'Events')} onPress={onEvents} />
-          <HeaderIcon
-            name="play-circle-outline"
-            label={t('replays.title', 'Replays')}
-            onPress={onReplays}
-          />
+          {/* Replays entry hidden for now (FEATURES.replays). */}
+          {FEATURES.replays && (
+            <HeaderIcon
+              name="play-circle-outline"
+              label={t('replays.title', 'Replays')}
+              onPress={onReplays}
+            />
+          )}
           <HeaderIcon
             name="notifications"
             label={t('feed.notificationsA11y', 'Notifications')}

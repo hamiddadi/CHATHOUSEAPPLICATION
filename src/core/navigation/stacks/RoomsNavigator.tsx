@@ -2,6 +2,7 @@ import React from 'react';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import type { RoomStackParamList } from '../types';
 import { colors } from '../../../shared/constants/theme';
+import { FEATURES } from '../../../config/features';
 import { RoomFeedScreen } from '../../../features/rooms/screens/RoomFeedScreen';
 import { RoomScreen } from '../../../features/rooms/screens/RoomScreen';
 import { CreateRoomScreen } from '../../../features/rooms/screens/CreateRoomScreen';
@@ -60,6 +61,7 @@ export const RoomsNavigator: React.FC = () => (
     <Stack.Screen name="Explore" component={ExploreScreen} />
     <Stack.Screen name="Events" component={EventsScreen} />
     <Stack.Screen name="Notifications" component={NotificationsScreen} />
-    <Stack.Screen name="Replays" component={ReplaysScreen} />
+    {/* Replays hidden for now (FEATURES.replays) — no entry point while off. */}
+    {FEATURES.replays && <Stack.Screen name="Replays" component={ReplaysScreen} />}
   </Stack.Navigator>
 );

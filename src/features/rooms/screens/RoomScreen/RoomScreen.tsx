@@ -10,6 +10,7 @@ import { Loader } from '../../../../shared/components/Loader';
 import { EmptyState } from '../../../../shared/components/EmptyState';
 import { colors, layout, spacing } from '../../../../shared/constants/theme';
 import type { RoomStackParamList } from '../../../../core/navigation/types';
+import { FEATURES } from '../../../../config/features';
 import type { RoomParticipant, UserSummary } from '../../../../shared/types/domain';
 import {
   useEndRoom,
@@ -680,7 +681,8 @@ export const RoomScreen: React.FC = () => {
                     </View>
                   )}
                 </View>
-                {room.isRecording && (
+                {/* REC badge hidden for now (FEATURES.roomRecording). */}
+                {FEATURES.roomRecording && room.isRecording && (
                   <View className="flex-row items-center gap-xs bg-danger/20 px-sm py-xxs rounded-sm">
                     <View className="w-xs h-xs rounded-pill bg-danger" />
                     <Text className="text-[10px] font-body-bold text-danger tracking-widest">

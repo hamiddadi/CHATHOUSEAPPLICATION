@@ -10,6 +10,7 @@ import { Button } from '../../../../shared/components/Button';
 import { Input } from '../../../../shared/components/Input';
 import { colors, radii, spacing } from '../../../../shared/constants/theme';
 import type { RoomStackParamList } from '../../../../core/navigation/types';
+import { FEATURES } from '../../../../config/features';
 import { errorMessage } from '../../../../shared/utils/errorMessage';
 import { useCreateRoom } from '../../hooks/useRooms';
 import { DateTimePickerInline } from '../../components/DateTimePickerInline';
@@ -258,7 +259,9 @@ export const CreateRoomScreen: React.FC = () => {
         topics: [...topics],
         coHostIds: coHosts.map(u => u.id),
         scheduledFor,
-        recordingEnabled,
+        // Recording is hidden for now — never create a recorded room while the
+        // flag is off, regardless of any stale toggle state.
+        recordingEnabled: FEATURES.roomRecording ? recordingEnabled : false,
       });
       navigation.goBack();
     } catch (err) {
@@ -520,38 +523,41 @@ export const CreateRoomScreen: React.FC = () => {
           </View>
         )}
 
-        <Pressable
-          onPress={handleToggleRecording}
-          accessibilityRole="switch"
-          accessibilityLabel={t('createRoom.recordLabel')}
-          accessibilityState={{ checked: recordingEnabled }}
-          className="flex-row items-center gap-md p-lg rounded-md bg-overlay-white-5 border border-overlay-white-10"
-        >
-          <MaterialIcons
-            name="fiber-manual-record"
-            size={24}
-            color={recordingEnabled ? colors.primary : colors.text}
-          />
-          <View className="flex-1">
-            <Text className="text-md font-body-bold text-ink">{t('createRoom.recordLabel')}</Text>
-            <Text className="text-xs font-body text-ink-muted">{t('createRoom.recordHint')}</Text>
-          </View>
-          <View
-            className={
-              recordingEnabled
-                ? 'w-[44px] h-[26px] bg-primary rounded-pill'
-                : 'w-[44px] h-[26px] bg-surface-high rounded-pill'
-            }
+        {/* Recording toggle hidden for now (FEATURES.roomRecording). */}
+        {FEATURES.roomRecording && (
+          <Pressable
+            onPress={handleToggleRecording}
+            accessibilityRole="switch"
+            accessibilityLabel={t('createRoom.recordLabel')}
+            accessibilityState={{ checked: recordingEnabled }}
+            className="flex-row items-center gap-md p-lg rounded-md bg-overlay-white-5 border border-overlay-white-10"
           >
+            <MaterialIcons
+              name="fiber-manual-record"
+              size={24}
+              color={recordingEnabled ? colors.primary : colors.text}
+            />
+            <View className="flex-1">
+              <Text className="text-md font-body-bold text-ink">{t('createRoom.recordLabel')}</Text>
+              <Text className="text-xs font-body text-ink-muted">{t('createRoom.recordHint')}</Text>
+            </View>
             <View
               className={
                 recordingEnabled
-                  ? 'w-[22px] h-[22px] rounded-pill bg-white mt-xxs ml-[20px]'
-                  : 'w-[22px] h-[22px] rounded-pill bg-ink-muted mt-xxs ml-xxs'
+                  ? 'w-[44px] h-[26px] bg-primary rounded-pill'
+                  : 'w-[44px] h-[26px] bg-surface-high rounded-pill'
               }
-            />
-          </View>
-        </Pressable>
+            >
+              <View
+                className={
+                  recordingEnabled
+                    ? 'w-[22px] h-[22px] rounded-pill bg-white mt-xxs ml-[20px]'
+                    : 'w-[22px] h-[22px] rounded-pill bg-ink-muted mt-xxs ml-xxs'
+                }
+              />
+            </View>
+          </Pressable>
+        )}
 
         <Button
           label={t('createRoom.startRoom')}
