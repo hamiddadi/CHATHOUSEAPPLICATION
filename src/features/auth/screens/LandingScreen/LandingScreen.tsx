@@ -414,5 +414,9 @@ const styles = StyleSheet.create({
   devSkipButton: {
     height: 36,
     marginTop: spacing.xs,
+    // TEMP test build: large bottom margin lifts the (visible) dev-skip link
+    // well above the oversized ColorOS 3-button nav-bar touch region so it's
+    // reliably tappable by both finger and adb.
+    marginBottom: 260,
   },
 });
