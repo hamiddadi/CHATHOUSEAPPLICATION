@@ -12,7 +12,7 @@ import type { FollowerOnMap } from '../../../../shared/types/domain';
 import type { RootStackParamList } from '../../../../core/navigation/types';
 import { DEFAULT_MAP_CENTER } from '../../../../shared/mocks/followersOnMap.mock';
 import { useCurrentLocation } from '../../hooks/useCurrentLocation';
-import { useFollowersOnMap } from '../../hooks/useFollowersOnMap';
+import { useNearbyOnMap } from '../../hooks/useNearbyOnMap';
 import { useLocationBroadcast } from '../../hooks/useLocationBroadcast';
 import { GOOGLE_MAPS_COLORS } from '../../constants/mapColors'; // Google Maps color style
 import { ACTIVE_TILE_PROVIDER } from '../../constants/tileProviders'; // OSM Migration — Voyager tiles mimic Google Maps
@@ -60,7 +60,9 @@ export const MapsScreen: React.FC = () => {
   const navigation = useNavigation<NavigationProp<RootStackParamList>>();
   const { permission, coords, requestAgain, ready } = useCurrentLocation();
   useLocationBroadcast(coords);
-  const followers = useFollowersOnMap();
+  // Nearby people on the map: everyone visible + online + recently located
+  // around the viewer (not just the people they follow).
+  const followers = useNearbyOnMap();
 
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<FollowerOnMap | null>(null);
@@ -87,7 +89,7 @@ export const MapsScreen: React.FC = () => {
   const filteredFollowers = useMemo(
     // Ghost Mode + offline users are already dropped upstream (backend roster +
     // the maps:user-offline socket event), so the roster only ever holds
-    // online/recently-active followers — we just apply the search filter here.
+    // online/recently-active nearby people — we just apply the search filter here.
     () => followers.filter(f => matches(f, search)),
     [followers, search],
   );

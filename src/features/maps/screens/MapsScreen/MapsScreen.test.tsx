@@ -1,15 +1,15 @@
 import React from 'react';
 import { renderScreen, screen, fireEvent } from '../../../../test-utils/renderScreen';
 import { useCurrentLocation } from '../../hooks/useCurrentLocation';
-import { useFollowersOnMap } from '../../hooks/useFollowersOnMap';
+import { useNearbyOnMap } from '../../hooks/useNearbyOnMap';
 import { MapsScreen } from './MapsScreen';
 
 jest.mock('../../hooks/useCurrentLocation', () => ({ useCurrentLocation: jest.fn() }));
-jest.mock('../../hooks/useFollowersOnMap', () => ({ useFollowersOnMap: jest.fn(() => []) }));
+jest.mock('../../hooks/useNearbyOnMap', () => ({ useNearbyOnMap: jest.fn(() => []) }));
 jest.mock('../../hooks/useLocationBroadcast', () => ({ useLocationBroadcast: jest.fn() }));
 
 const mockLocation = useCurrentLocation as jest.Mock;
-const mockFollowers = useFollowersOnMap as jest.Mock;
+const mockFollowers = useNearbyOnMap as jest.Mock;
 
 describe('MapsScreen', () => {
   beforeEach(() => {

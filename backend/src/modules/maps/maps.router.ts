@@ -42,7 +42,13 @@ mapsRouter.get(
   '/users',
   asyncHandler(async (req: Request, res: Response) => {
     const userId = authedUserId(req);
-    const rows = await usersService.getOnlineLocations(userId);
+    // "Nearby" roster: every visible + online + recently-located user within
+    // `radiusKm` of the caller (NOT just people they follow). Default 25 km
+    // (metro-area scale), hard-capped at 500 km; a non-numeric/<=0 value falls
+    // back to the default.
+    const raw = Number(req.query.radiusKm);
+    const radiusKm = Number.isFinite(raw) && raw > 0 ? Math.min(raw, 500) : 25;
+    const rows = await usersService.getOnlineLocations(userId, { radiusKm });
     sendOk(res, rows);
   }),
 );

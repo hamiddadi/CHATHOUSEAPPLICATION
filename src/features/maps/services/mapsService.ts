@@ -51,4 +51,18 @@ export const mapsService = {
     const res = await apiClient.get<Envelope<RawFollowerOnMap[]>>('/maps/followers');
     return res.data.data.map(toFollowerOnMap).filter((f): f is FollowerOnMap => f !== null);
   },
+
+  /**
+   * Initial roster of EVERY user on the map near the caller — not just people
+   * they follow. The backend (GET /maps/users) returns visible + online +
+   * recently-located users within `radiusKm` (default 25 km) of the caller's
+   * own position, minus blocked / ghost-mode / soft-deleted. Same row shape as
+   * `/maps/followers`, so it reuses `toFollowerOnMap`. The socket streams
+   * coordinate deltas afterwards (see useNearbyOnMap).
+   */
+  async nearbyOnMap(radiusKm?: number): Promise<FollowerOnMap[]> {
+    const qs = radiusKm && radiusKm > 0 ? `?radiusKm=${radiusKm}` : '';
+    const res = await apiClient.get<Envelope<RawFollowerOnMap[]>>(`/maps/users${qs}`);
+    return res.data.data.map(toFollowerOnMap).filter((f): f is FollowerOnMap => f !== null);
+  },
 };

@@ -223,7 +223,7 @@ export const usersService = {
     });
   },
 
-  async getOnlineLocations(viewerId: string) {
+  async getOnlineLocations(viewerId: string, opts: { radiusKm?: number } = {}) {
     // Exclude ghost-mode users and the viewer themself. Only users with
     // recorded coordinates and seen in the last 30 min are surfaced.
     // CRITICAL: also exclude blocked/blocking users — the map is the most
@@ -231,14 +231,44 @@ export const usersService = {
     // able to locate (or be located by) the viewer. And hide soft-deleted.
     const thirtyMinAgo = new Date(Date.now() - ONLINE_WINDOW_MS);
     const blocked = await getBlockedIdSet(viewerId);
+
+    // "Nearby" filter: when a radius is requested, restrict the result to a
+    // lat/long bounding box centred on the viewer's OWN last known location.
+    // A bounding box (not a precise haversine distance) keeps the query
+    // index-friendly on the (latitude, longitude) columns. If the viewer has
+    // no recorded location we can't compute a centre, so we fall back to the
+    // global online set (still capped) rather than returning an empty map.
+    let geoBounds:
+      | { latitude: { gte: number; lte: number }; longitude: { gte: number; lte: number } }
+      | undefined;
+    if (opts.radiusKm && opts.radiusKm > 0) {
+      const me = await prisma.user.findUnique({
+        where: { id: viewerId },
+        select: { latitude: true, longitude: true },
+      });
+      if (me?.latitude != null && me?.longitude != null) {
+        // ~111.045 km per degree of latitude; longitude degrees shrink toward
+        // the poles by cos(latitude). Clamp cos so we never divide by ~0.
+        const latDelta = opts.radiusKm / 111.045;
+        const cosLat = Math.max(Math.abs(Math.cos((me.latitude * Math.PI) / 180)), 1e-6);
+        const lonDelta = opts.radiusKm / (111.045 * cosLat);
+        geoBounds = {
+          latitude: { gte: me.latitude - latDelta, lte: me.latitude + latDelta },
+          longitude: { gte: me.longitude - lonDelta, lte: me.longitude + lonDelta },
+        };
+      }
+    }
+
     return prisma.user.findMany({
       where: {
         isVisible: true,
         isOnline: true,
         deletedAt: null,
         id: { notIn: [viewerId, ...blocked] },
-        latitude: { not: null },
-        longitude: { not: null },
+        // A gte/lte range already excludes nulls; the `not: null` guard only
+        // applies on the global (no-radius) path.
+        latitude: geoBounds ? geoBounds.latitude : { not: null },
+        longitude: geoBounds ? geoBounds.longitude : { not: null },
         lastSeenAt: { gte: thirtyMinAgo },
       },
       select: {
@@ -250,6 +280,8 @@ export const usersService = {
         longitude: true,
         lastSeenAt: true,
         currentRoomId: true,
+        // Live-room badge on the pin (only meaningful while the room is live).
+        currentRoom: { select: { id: true, title: true, isLive: true } },
       },
       take: ONLINE_MAP_LIMIT,
     });
