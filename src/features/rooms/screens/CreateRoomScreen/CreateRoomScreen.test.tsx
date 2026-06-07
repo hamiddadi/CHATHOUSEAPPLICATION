@@ -39,7 +39,7 @@ interface MutationStub {
 
 const mutationStub = (over: Partial<MutationStub> = {}): MutationStub => ({
   mutate: jest.fn(),
-  mutateAsync: jest.fn().mockResolvedValue(undefined),
+  mutateAsync: jest.fn().mockResolvedValue({ id: 'room-1' }),
   isPending: false,
   isError: false,
   reset: jest.fn(),
@@ -75,8 +75,8 @@ describe('CreateRoomScreen', () => {
     expect(startButton.props.accessibilityState?.disabled).toBe(false);
   });
 
-  it('creates the room and navigates back on a successful submit', async () => {
-    const mutateAsync = jest.fn().mockResolvedValue(undefined);
+  it('creates the room and enters it on a successful (instant) submit', async () => {
+    const mutateAsync = jest.fn().mockResolvedValue({ id: 'room-1' });
     mockUseCreateRoom.mockReturnValue(mutationStub({ mutateAsync }));
     const { navigation } = renderScreen(<CreateRoomScreen />);
 
@@ -94,7 +94,11 @@ describe('CreateRoomScreen', () => {
         recordingEnabled: false,
       }),
     );
-    await waitFor(() => expect(navigation.goBack).toHaveBeenCalled());
+    // An instant room is live now → we replace the create modal with the room.
+    await waitFor(() =>
+      expect(navigation.replace).toHaveBeenCalledWith('Room', { roomId: 'room-1' }),
+    );
+    expect(navigation.goBack).not.toHaveBeenCalled();
   });
 
   it('alerts and stays on screen when creation fails', async () => {

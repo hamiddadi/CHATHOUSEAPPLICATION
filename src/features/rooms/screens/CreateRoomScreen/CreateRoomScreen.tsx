@@ -252,7 +252,7 @@ export const CreateRoomScreen: React.FC = () => {
       }
     }
     try {
-      await createRoom.mutateAsync({
+      const room = await createRoom.mutateAsync({
         title,
         description: description.trim() || undefined,
         visibility,
@@ -263,7 +263,14 @@ export const CreateRoomScreen: React.FC = () => {
         // flag is off, regardless of any stale toggle state.
         recordingEnabled: FEATURES.roomRecording ? recordingEnabled : false,
       });
-      navigation.goBack();
+      // A scheduled room isn't live yet → just return to the feed. An instant
+      // room is live now → drop the create modal and enter it directly (matches
+      // the expectation that "Démarrer" takes you into your new room).
+      if (scheduledFor) {
+        navigation.goBack();
+      } else {
+        navigation.replace('Room', { roomId: room.id });
+      }
     } catch (err) {
       Alert.alert(
         t('createRoom.errorTitle', 'Création impossible'),
