@@ -29,7 +29,7 @@ export const createSocketServer = async (httpServer: HttpServer): Promise<Server
       },
       credentials: true,
     },
-    transports: ['websocket'],
+    transports: ['polling', 'websocket'],
     pingInterval: 25_000,
     pingTimeout: 20_000,
   });

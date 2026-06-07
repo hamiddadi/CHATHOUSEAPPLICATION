@@ -76,7 +76,11 @@ export const getSocket = async (): Promise<Socket | null> => {
 
   connecting = (async () => {
     const s = io(env.WS_BASE_URL, {
-      transports: ['websocket'],
+      // Polling FIRST, then upgrade to websocket. Some networks (enterprise /
+      // clinic WiFi with DPI/proxies) silently kill long-lived WebSockets after
+      // a few seconds while plain HTTP works fine — polling keeps realtime alive
+      // there, and socket.io still upgrades to WS when the network allows it.
+      transports: ['polling', 'websocket'],
       // Callback form: socket.io re-invokes this on EVERY (re)connection, so
       // the freshest access token from tokenStorage is used each time. An
       // object literal here would freeze the token for the socket's lifetime
