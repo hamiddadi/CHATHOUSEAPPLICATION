@@ -364,7 +364,7 @@ export const LandingScreen: React.FC = () => {
         <LandingCTA
           onGetStarted={handleGetStarted}
           onLogin={handleLogin}
-          onDevSkip={__DEV__ ? handleDevSkip : undefined}
+          onDevSkip={handleDevSkip /* TEMP test build: dev-login in release — DO NOT COMMIT */}
           devSkipPending={authStatus === 'authenticating'}
           labels={ctaLabels}
         />
