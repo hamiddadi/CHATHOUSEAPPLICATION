@@ -761,22 +761,23 @@ export const RoomScreen: React.FC = () => {
         columnWrapperStyle={styles.othersColumnWrapper}
       />
 
-      {/* Floating reactions bar — sits just above the action pill so the
-          float-up emojis fly in front of the controls. pointerEvents
-          'box-none' on the wrapper lets taps on the action pill pass
-          through the float layer. */}
+      {/* Bottom stack — a single flex-column anchored just above the battle
+          nav-bar (the tab bar). Children stack top→bottom: reactions on top,
+          control bar below. Using ONE bottom-anchored column (instead of two
+          separately-offset absolute layers + a magic +60) keeps the two bars
+          cleanly stacked and evenly spaced at ANY window height, and they can
+          never overlap each other. `box-none` lets taps fall through the empty
+          float area to the room content behind. */}
       <View
-        style={[styles.reactionsWrapper, { bottom: insets.bottom + ACTION_BAR_BOTTOM_OFFSET + 60 }]}
-        pointerEvents="box-none"
-      >
-        <ReactionsBar roomId={room.id} viewerId={viewerId} />
-      </View>
-
-      <View
-        className="absolute left-0 right-0 px-xxl"
+        className="absolute left-0 right-0 items-center px-xxl"
         style={{ bottom: insets.bottom + ACTION_BAR_BOTTOM_OFFSET }}
         pointerEvents="box-none"
       >
+        {/* Reactions (top of the stack) — `mb-md` is the gap to the control bar. */}
+        <View className="mb-md items-center" pointerEvents="box-none">
+          <ReactionsBar roomId={room.id} viewerId={viewerId} />
+        </View>
+        {/* Control bar (below reactions, above the battle nav-bar). */}
         <RoomActionBar
           viewerCanSpeak={viewerCanSpeak}
           isMuted={isMuted}
@@ -840,12 +841,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.xxl,
     paddingBottom: spacing.sm,
     backgroundColor: 'rgba(7,11,40,0.35)',
-  },
-  reactionsWrapper: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    alignItems: 'center',
   },
   othersColumnWrapper: {
     marginBottom: spacing.md,
