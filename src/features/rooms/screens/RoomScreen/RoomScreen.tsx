@@ -69,7 +69,9 @@ const OTHERS_DISPLAY_CAP = 50;
 
 // Pure layout constant (depends only on imported theme tokens) — hoisted so
 // it isn't recomputed every render and can be shared by the inline styles.
-const ACTION_BAR_BOTTOM_OFFSET = layout.tabBarHeight + layout.tabBarBottomOffset + spacing.xxl;
+// The trailing `spacing.sm` is the gap left between the control bar and the
+// battle nav-bar (tab bar) below it — kept small so they sit close together.
+const ACTION_BAR_BOTTOM_OFFSET = layout.tabBarHeight + layout.tabBarBottomOffset + spacing.sm;
 
 export const RoomScreen: React.FC = () => {
   const navigation = useNavigation<Nav>();
@@ -770,7 +772,11 @@ export const RoomScreen: React.FC = () => {
           float area to the room content behind. */}
       <View
         className="absolute left-0 right-0 items-center px-xxl"
-        style={{ bottom: insets.bottom + ACTION_BAR_BOTTOM_OFFSET }}
+        // No `insets.bottom` here: the battle nav-bar (tab bar) is positioned
+        // with a FIXED `bottom: tabBarBottomOffset` (no safe-area added), so the
+        // stack must use the same fixed reference to sit just above it. Adding
+        // insets.bottom double-counted the safe area and left a big gap.
+        style={{ bottom: ACTION_BAR_BOTTOM_OFFSET }}
         pointerEvents="box-none"
       >
         {/* Reactions (top of the stack) — `mb-md` is the gap to the control bar. */}
