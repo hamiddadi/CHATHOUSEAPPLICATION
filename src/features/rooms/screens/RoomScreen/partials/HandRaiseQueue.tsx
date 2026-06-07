@@ -30,6 +30,7 @@ const HandRaiseQueue: React.FC<HandRaiseQueueProps> = memo(
                   ? t('room.promoteA11y', 'Invite {{name}} to speak', { name: l.displayName })
                   : t('room.profileA11y', 'Profile of {{name}}', { name: l.displayName })
               }
+              style={styles.cell}
             >
               <HandRaisedCell listener={l} />
             </Pressable>
@@ -46,6 +47,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     rowGap: spacing.lg,
+  },
+  // 5-column grid, like the SCÈNE stage grid.
+  cell: {
+    width: '20%',
   },
 });
 

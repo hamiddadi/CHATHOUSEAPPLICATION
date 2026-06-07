@@ -58,7 +58,9 @@ type Route = RouteProp<RoomStackParamList, 'Room'>;
 
 const HEADER_ICON_SIZE = 22;
 const FOLLOWED_COUNT = 5;
-const OTHERS_GRID_COLUMNS = 5;
+// "Others" grid is denser (6 columns); MAIN LEVÉE / SUIVI rows use 5 columns
+// (handled in their own partials, mirroring the SCÈNE stage grid).
+const OTHERS_GRID_COLUMNS = 6;
 const OTHER_AVATAR = 40;
 // Cap how many "Others" avatars we render; the rest collapse into a trailing
 // "+N" cell. The backend returns the full participant list, so without a cap a

@@ -46,7 +46,10 @@ OtherCell.displayName = 'OtherCell';
 
 const styles = StyleSheet.create({
   gridCell: {
-    width: '20%',
+    // Fills its column — the column width is set by the parent wrapper
+    // (Pressable width: 20% for the 5-col MAIN LEVÉE / SUIVI rows, or the
+    // FlatList cell for the 6-col AUTRES grid), mirroring the SCÈNE grid.
+    width: '100%',
     alignItems: 'center',
   },
   otherCell: {

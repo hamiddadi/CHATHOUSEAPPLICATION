@@ -29,6 +29,7 @@ const FollowedByListeners: React.FC<FollowedByListenersProps> = memo(
               onPress={() => onTap(l)}
               accessibilityRole="button"
               accessibilityLabel={`Profil de ${l.displayName ?? l.username}`}
+              style={styles.cell}
             >
               <FollowedCell listener={l} />
             </Pressable>
@@ -45,6 +46,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     rowGap: spacing.md,
+  },
+  // 5-column grid, like the SCÈNE stage grid.
+  cell: {
+    width: '20%',
   },
 });
 
