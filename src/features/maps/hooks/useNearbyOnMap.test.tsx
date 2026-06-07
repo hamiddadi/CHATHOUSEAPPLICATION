@@ -49,7 +49,7 @@ describe('useNearbyOnMap', () => {
     mockGetSocket.mockResolvedValue(null);
     const { result } = renderHook(() => useNearbyOnMap());
     await waitFor(() => expect(result.current).toHaveLength(1));
-    expect(result.current[0].id).toBe('a');
+    expect(result.current[0]?.id).toBe('a');
   });
 
   it('H-U2 relocates a known user on maps:user-moved', async () => {
@@ -62,8 +62,8 @@ describe('useNearbyOnMap', () => {
       expect(socket.on).toHaveBeenCalledWith('maps:user-moved', expect.any(Function)),
     );
     act(() => socket.emit('maps:user-moved', { userId: 'a', latitude: 9, longitude: 8 }));
-    expect(result.current[0].location).toMatchObject({ latitude: 9, longitude: 8 });
-    expect(result.current[0].lastSeenMinutesAgo).toBe(0);
+    expect(result.current[0]?.location).toMatchObject({ latitude: 9, longitude: 8 });
+    expect(result.current[0]?.lastSeenMinutesAgo).toBe(0);
   });
 
   it('H-U3 removes a user on maps:user-offline', async () => {
@@ -90,6 +90,6 @@ describe('useNearbyOnMap', () => {
     );
     act(() => socket.emit('maps:user-moved', { userId: 'zzz', latitude: 0, longitude: 0 }));
     expect(result.current).toHaveLength(1);
-    expect(result.current[0].id).toBe('a');
+    expect(result.current[0]?.id).toBe('a');
   });
 });

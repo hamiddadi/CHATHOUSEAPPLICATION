@@ -67,6 +67,6 @@ describe('mapsService.nearbyOnMap', () => {
       },
     });
     const [u] = await mapsService.nearbyOnMap(25);
-    expect(u.liveRoomId).toBeNull();
+    expect(u?.liveRoomId).toBeNull();
   });
 });
