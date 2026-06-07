@@ -773,7 +773,7 @@ export const RoomScreen: React.FC = () => {
       </View>
 
       <View
-        className="absolute left-0 right-0 items-center"
+        className="absolute left-0 right-0 px-xxl"
         style={{ bottom: insets.bottom + ACTION_BAR_BOTTOM_OFFSET }}
         pointerEvents="box-none"
       >
