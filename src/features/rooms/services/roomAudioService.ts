@@ -292,6 +292,13 @@ export const startRoomAudio = async ({
         }
       }
     }
+
+    // Reset the SELF indicator when we drop out of the active-speaker set —
+    // otherwise the local "speaking" ring stays lit forever after we go quiet,
+    // because the local branch above only ever pushes a non-zero level (#8).
+    if (!speakerIdentities.has(me.id)) {
+      onLocalScore?.(0);
+    }
   };
 
   const handleConnectionStateChanged = (state: string): void => {

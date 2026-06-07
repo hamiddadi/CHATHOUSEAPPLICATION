@@ -4,7 +4,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { Avatar } from '../../../../shared/components/Avatar';
 import { colors, spacing } from '../../../../shared/constants/theme';
 import type { RoomParticipant } from '../../../../shared/types/domain';
-import { useKickFromRoom, useSetMute, useSetRole } from '../../hooks/useRooms';
+import { useDismissHand, useKickFromRoom, useSetMute, useSetRole } from '../../hooks/useRooms';
 
 interface HostActionsSheetProps {
   /** Visible only when a target participant is selected. `null` = closed. */
@@ -26,6 +26,12 @@ export const HostActionsSheet: React.FC<HostActionsSheetProps> = memo(
     const setMute = useSetMute();
     const setRole = useSetRole();
     const kick = useKickFromRoom();
+    const dismissHand = useDismissHand();
+
+    const handleDismissHand = useCallback(() => {
+      if (!target) return;
+      dismissHand.mutate({ roomId, userId: target.id }, { onSettled: onClose });
+    }, [dismissHand, onClose, roomId, target]);
 
     const handleMute = useCallback(() => {
       if (!target) return;
@@ -111,6 +117,13 @@ export const HostActionsSheet: React.FC<HostActionsSheetProps> = memo(
                 icon="mic"
                 label="Inviter à parler"
                 onPress={() => handlePromote('SPEAKER')}
+              />
+            )}
+            {!isOnStage && target.handRaised && (
+              <ActionRow
+                icon="do-not-disturb-on"
+                label="Refuser la main"
+                onPress={handleDismissHand}
               />
             )}
             {isOnStage && (

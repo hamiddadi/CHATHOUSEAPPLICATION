@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, FlatList, Pressable, Share, StyleSheet, Text, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
@@ -36,6 +36,7 @@ import { RoomControlsSheet } from '../../components/RoomControlsSheet';
 import { TitleEditModal } from '../../components/TitleEditModal';
 import { RoomTimer } from '../../components/RoomTimer';
 import { useAuthStore } from '../../../auth/store/authStore';
+import { useCurrentRoomStore } from '../../store/currentRoomStore';
 import { getSocket } from '../../../../shared/services/realtime/socketClient';
 import { formatScheduled } from '../../../../shared/utils/formatScheduled';
 import StageGrid from './partials/StageGrid';
@@ -59,6 +60,10 @@ const HEADER_ICON_SIZE = 22;
 const FOLLOWED_COUNT = 5;
 const OTHERS_GRID_COLUMNS = 5;
 const OTHER_AVATAR = 40;
+// Cap how many "Others" avatars we render; the rest collapse into a trailing
+// "+N" cell. The backend returns the full participant list, so without a cap a
+// huge room would mount hundreds of cells (and the "+N" chip was dead UI).
+const OTHERS_DISPLAY_CAP = 50;
 
 // Pure layout constant (depends only on imported theme tokens) — hoisted so
 // it isn't recomputed every render and can be shared by the inline styles.
@@ -71,6 +76,11 @@ export const RoomScreen: React.FC = () => {
   const { t } = useTranslation();
   const [isMuted, setIsMuted] = useState(false);
   const [isHandRaised, setIsHandRaised] = useState(false);
+  // Optimistically reveal the mic the instant the viewer is promoted, before
+  // the room detail refetch flips their derived role (#19). Reset on demotion.
+  const [forceSpeaker, setForceSpeaker] = useState(false);
+  // Seed `isMuted` exactly once per room entry from the server snapshot (#1/#3).
+  const seededRoomRef = useRef<string | null>(null);
 
   const { data: room, isLoading, isError } = useRoom(route.params.roomId);
   const leaveRoom = useLeaveRoom();
@@ -103,12 +113,49 @@ export const RoomScreen: React.FC = () => {
   }, [room, viewerId]);
   const viewerIsHost = Boolean(room && viewerId && room.hostId === viewerId);
   const viewerCanModerate = viewerIsHost || viewerRole === 'moderator';
+  // Kept in a ref so the socket effect's `endedHandler` can tell whether the
+  // viewer is the host WITHOUT adding `viewerIsHost` to the effect deps (which
+  // would re-subscribe every room refetch). The host already navigates via the
+  // end-room mutation's onSettled, so they must NOT also run the "closed by the
+  // host" alert + a second goBack (#4).
+  const viewerIsHostRef = useRef(viewerIsHost);
+  viewerIsHostRef.current = viewerIsHost;
   // The mic button only makes sense for users with publishing rights
   // (LiveKit "canPublish"). Listeners have canPublish=false and silently
   // produce nothing — showing a Mute button to them would be a dead control.
-  const viewerCanSpeak = Boolean(
-    viewerRole && (viewerRole === 'host' || viewerRole === 'moderator' || viewerRole === 'speaker'),
+  // `forceSpeaker` reveals it immediately on promotion, before the refetch.
+  const viewerCanSpeak =
+    forceSpeaker ||
+    Boolean(
+      viewerRole &&
+      (viewerRole === 'host' || viewerRole === 'moderator' || viewerRole === 'speaker'),
+    );
+
+  // ─── Seed & reconcile local mirror-state from server truth ──────────
+  // Seed `isMuted` once per room entry from the server snapshot, and keep the
+  // currentRoomStore (the source of truth the audio engine reads when it
+  // restores mute after a token renewal / reconnect) in sync — otherwise a
+  // muted user is silently hot-unmuted on (re)entry or reconnect (#1/#2/#3/#12).
+  useEffect(() => {
+    if (!room || !viewerId) return;
+    if (seededRoomRef.current === room.id) return;
+    seededRoomRef.current = room.id;
+    const mutedOnServer = room.speakers.find(s => s.id === viewerId)?.audio === 'muted';
+    setIsMuted(mutedOnServer);
+    useCurrentRoomStore.getState().setMuted(mutedOnServer);
+  }, [room, viewerId]);
+
+  // Reconcile the raise-hand button with the server queue so it never sticks
+  // raised after a remount or after a moderator promotes/lowers the hand
+  // (#11/#15). Optimistic toggles flip it instantly; this snaps it back to the
+  // truth whenever the (socket-invalidated) queue actually changes.
+  const serverHandRaised = useMemo(
+    () => handRaises.some(h => h.id === viewerId),
+    [handRaises, viewerId],
   );
+  useEffect(() => {
+    setIsHandRaised(serverHandRaised);
+  }, [serverHandRaised]);
 
   // Subscribe to room broadcasts (user-joined, hand_raised, role_changed,
   // mute-changed, kicked, ended). Without this, the screen is static and
@@ -145,9 +192,16 @@ export const RoomScreen: React.FC = () => {
         if (payload.userId !== viewerId) return;
         if (payload.roomId && payload.roomId !== roomId) return;
         setIsMuted(payload.isMuted);
+        // Keep the audio-engine source of truth in sync so a later reconnect
+        // restores the correct mute state (#2).
+        useCurrentRoomStore.getState().setMuted(payload.isMuted);
       };
-      const kickHandler = (payload: { userId: string; roomId?: string }): void => {
-        if (payload.userId !== viewerId) return;
+      const kickHandler = (payload: { userId?: string; roomId?: string }): void => {
+        // `room:user_kicked` is room-channel-broadcast (carries userId, filter
+        // to self); `room:you_were_kicked` is the personal-channel fallback
+        // delivered straight to the evicted socket (no userId needed). Both
+        // land here.
+        if (payload.userId && payload.userId !== viewerId) return;
         if (payload.roomId && payload.roomId !== roomId) return;
         // Pop the screen first so the user lands somewhere safe even if
         // they dismiss the alert. The 30-min RoomBan installed by the
@@ -166,6 +220,10 @@ export const RoomScreen: React.FC = () => {
       // we're viewing. Pop the screen and tell the user it's over.
       const endedHandler = (payload: { roomId?: string }): void => {
         if (payload.roomId && payload.roomId !== roomId) return;
+        // The host who ended the room navigates via the end-room mutation's
+        // onSettled — they must not also see "closed by the host" nor goBack a
+        // second time (#4).
+        if (viewerIsHostRef.current) return;
         navigation.goBack();
         Alert.alert(
           t('room.alert.endedTitle', 'Room ended'),
@@ -175,9 +233,10 @@ export const RoomScreen: React.FC = () => {
       const roleHandler = (payload: { userId: string; role: string; roomId?: string }): void => {
         if (payload.userId !== viewerId) return;
         if (payload.roomId && payload.roomId !== roomId) return;
-        // Promotion to a publishing role — celebrate locally so the user
-        // notices the new mic button before they wonder where it came from.
+        // Promotion to a publishing role — reveal the mic immediately (#19)
+        // and celebrate so the user notices the new control.
         if (payload.role === 'SPEAKER' || payload.role === 'MODERATOR' || payload.role === 'HOST') {
+          setForceSpeaker(true);
           void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
           Alert.alert(
             t('room.alert.stageTitle', 'On stage 🎙️'),
@@ -190,15 +249,32 @@ export const RoomScreen: React.FC = () => {
                     'You can speak — tap Mute to toggle your microphone.',
                   ),
           );
+        } else if (payload.role === 'LISTENER') {
+          // Demotion to the audience — hide the mic and clear stale local
+          // publishing state so a later re-promotion doesn't inherit a wrong
+          // mute/hand badge (#18).
+          setForceSpeaker(false);
+          setIsMuted(false);
+          setIsHandRaised(false);
+          useCurrentRoomStore.getState().setMuted(false);
+          void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+          Alert.alert(
+            t('room.alert.audienceTitle', 'Moved to audience'),
+            t('room.alert.audienceBody', 'You are now a listener in this room.'),
+          );
         }
       };
       socket.on('room:mute-changed', muteHandler);
       socket.on('room:user_kicked', kickHandler);
+      // Personal-channel eviction fallback — delivered straight to the kicked
+      // socket so a missed room-channel broadcast can't strand them (#16).
+      socket.on('room:you_were_kicked', kickHandler);
       socket.on('room:role_changed', roleHandler);
       socket.on('room:ended', endedHandler);
       cleanup = () => {
         socket.off('room:mute-changed', muteHandler);
         socket.off('room:user_kicked', kickHandler);
+        socket.off('room:you_were_kicked', kickHandler);
         socket.off('room:role_changed', roleHandler);
         socket.off('room:ended', endedHandler);
       };
@@ -217,13 +293,15 @@ export const RoomScreen: React.FC = () => {
     // mute is fire-and-forget and not awaited because it's local — its
     // failure shouldn't drag down the API success.
     setIsMuted(next);
+    useCurrentRoomStore.getState().setMuted(next);
     void audio.setMuted(next);
     try {
       await setMute.mutateAsync({ roomId: room.id, isMuted: next });
     } catch {
-      // Backend refused — undo both the badge AND LiveKit to keep them
-      // consistent.
+      // Backend refused — undo the badge, the engine source-of-truth AND
+      // LiveKit to keep them consistent.
       setIsMuted(!next);
+      useCurrentRoomStore.getState().setMuted(!next);
       void audio.setMuted(!next);
     }
   }, [audio, isMuted, room, setMute]);
@@ -344,18 +422,21 @@ export const RoomScreen: React.FC = () => {
   }, [room]);
 
   // Real hand-raise queue from the API. We render avatars for every queued
-  // user; tapping one promotes them to SPEAKER (host/mod only).
+  // user; tapping one promotes them to SPEAKER (host/mod only). The viewer's
+  // OWN hand is excluded — it's a silent dead tap and inflated the count (#15);
+  // their own raised state is reflected by the action-bar button instead.
   const handRaisedUsers = useMemo<UserSummary[]>(
     () =>
-      handRaises.map(h => ({
-        id: h.id,
-        username: h.username,
-        displayName: h.displayName,
-        avatarUrl: h.avatarUrl,
-      })),
-    [handRaises],
+      handRaises
+        .filter(h => h.id !== viewerId)
+        .map(h => ({
+          id: h.id,
+          username: h.username,
+          displayName: h.displayName,
+          avatarUrl: h.avatarUrl,
+        })),
+    [handRaises, viewerId],
   );
-  const othersOverflow = room ? Math.max(0, room.listenersCount - room.listeners.length) : 0;
 
   // Virtualized "Others" grid helpers — hoisted above the early returns so
   // the hook call count stays stable across renders.
@@ -378,15 +459,19 @@ export const RoomScreen: React.FC = () => {
 
   // Partition listeners into "followed by you" vs "others" using the
   // backend-computed `followedByViewer` flag (carried on each listener by
-  // roomService). When NO listener is flagged — either a legacy payload
-  // without the flag, or genuinely none followed — we fall back to the
-  // previous positional behaviour (first FOLLOWED_COUNT in the followed row,
-  // the rest in the grid) so the layout never regresses.
+  // roomService). The positional fallback below applies ONLY to legacy
+  // payloads where the flag is entirely ABSENT — NOT when the flag is present
+  // but nobody is followed. Keying the fallback off `followed.length === 0`
+  // wrongly showed the first FOLLOWED_COUNT listeners under "followed by you"
+  // for any viewer who follows nobody in the room; gate on flag presence so
+  // that case correctly yields an empty "followed" section.
   const { followedListeners, otherListeners } = useMemo(() => {
     const listeners = (room?.listeners ?? []) as RoomListener[];
+    const hasFlag = listeners.some(l => l.followedByViewer !== undefined);
     const followed = listeners.filter(l => l.followedByViewer);
-    if (followed.length === 0) {
-      // No flagged followers → keep the historical positional split.
+    if (!hasFlag) {
+      // Legacy payload with no flag at all → keep the historical positional
+      // split so old room shapes don't regress.
       return {
         followedListeners: listeners.slice(0, FOLLOWED_COUNT),
         otherListeners: listeners.slice(FOLLOWED_COUNT),
@@ -404,20 +489,49 @@ export const RoomScreen: React.FC = () => {
     };
   }, [room?.listeners]);
 
+  // Bound how many "Others" we mount; the remainder collapses into a trailing
+  // "+N" cell. The backend returns the full list, so this is the ONLY source of
+  // a real overflow count (the previous `listenersCount - listeners.length` was
+  // structurally always 0 → dead "+N" chip) (#6/#23).
+  const displayedOthers = useMemo(
+    () => otherListeners.slice(0, OTHERS_DISPLAY_CAP),
+    [otherListeners],
+  );
+  const othersOverflow = Math.max(0, otherListeners.length - OTHERS_DISPLAY_CAP);
+
+  // Override the viewer's own stage cell with their optimistic local mute so
+  // the mic-off icon flips instantly on tap instead of lagging the server
+  // round-trip (#17). Everyone else keeps the server-truth audio state.
+  const speakersForStage = useMemo<RoomParticipant[]>(() => {
+    if (!room) return [];
+    if (!viewerId) return room.speakers;
+    return room.speakers.map(s =>
+      s.id === viewerId
+        ? {
+            ...s,
+            audio: (isMuted
+              ? 'muted'
+              : s.audio === 'muted'
+                ? 'idle'
+                : s.audio) as RoomParticipant['audio'],
+          }
+        : s,
+    );
+  }, [room, viewerId, isMuted]);
+
   // Live "is speaking" per speaker, keyed by speaker id. The score map
   // keys the local user under SPEAKING_SELF_KEY; everyone else is keyed by
   // their user id. Computed here so the score graph stays in the orchestrator
   // and StageGrid stays purely presentational.
   const speakingLiveByUser = useMemo(() => {
     const map = new Map<string, boolean>();
-    if (!room) return map;
-    for (const s of room.speakers) {
+    for (const s of speakersForStage) {
       const key = s.id === viewerId ? SPEAKING_SELF_KEY : s.id;
       const score = audio.scores.get(key) ?? 0;
       map.set(s.id, score >= SPEAKING_SCORE_THRESHOLD && s.audio !== 'muted');
     }
     return map;
-  }, [room, viewerId, audio.scores]);
+  }, [speakersForStage, viewerId, audio.scores]);
 
   if (isLoading) return <Loader fullscreen accessibilityLabel={t('common.loading')} />;
   if (isError || !room) {
@@ -492,7 +606,7 @@ export const RoomScreen: React.FC = () => {
 
       <FlatList
         className="flex-1"
-        data={otherListeners}
+        data={displayedOthers}
         numColumns={OTHERS_GRID_COLUMNS}
         keyExtractor={othersKeyExtractor}
         renderItem={renderOtherItem}
@@ -537,7 +651,9 @@ export const RoomScreen: React.FC = () => {
                         )
                       : audio.status === 'error'
                         ? `❌ ${audio.error ?? t('room.audioError', 'Audio error')}`
-                        : t('room.audioBanner')}
+                        : audio.status === 'reconnecting'
+                          ? t('room.audioReconnecting', '🔄 Reconnecting audio…')
+                          : t('room.audioBanner')}
                 </Text>
               </View>
             ) : null}
@@ -552,11 +668,13 @@ export const RoomScreen: React.FC = () => {
                       </Text>
                     </View>
                   )}
-                  <View className="bg-primary/10 px-sm py-xxs rounded-xs">
-                    <Text className="text-[10px] font-body-bold text-primary uppercase tracking-wider">
-                      {room.categoryEmoji} {room.category}
-                    </Text>
-                  </View>
+                  {room.category && (
+                    <View className="bg-primary/10 px-sm py-xxs rounded-xs">
+                      <Text className="text-[10px] font-body-bold text-primary uppercase tracking-wider">
+                        {room.categoryEmoji} {room.category}
+                      </Text>
+                    </View>
+                  )}
                 </View>
                 {room.isRecording && (
                   <View className="flex-row items-center gap-xs bg-danger/20 px-sm py-xxs rounded-sm">
@@ -601,7 +719,7 @@ export const RoomScreen: React.FC = () => {
             </View>
 
             <StageGrid
-              speakers={room.speakers}
+              speakers={speakersForStage}
               speakingLiveByUser={speakingLiveByUser}
               viewerCanModerate={viewerCanModerate}
               onParticipantPress={handleParticipantPress}
@@ -649,7 +767,7 @@ export const RoomScreen: React.FC = () => {
         style={[styles.reactionsWrapper, { bottom: insets.bottom + ACTION_BAR_BOTTOM_OFFSET + 60 }]}
         pointerEvents="box-none"
       >
-        <ReactionsBar roomId={room.id} />
+        <ReactionsBar roomId={room.id} viewerId={viewerId} />
       </View>
 
       <View

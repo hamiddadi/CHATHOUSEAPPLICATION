@@ -21,6 +21,11 @@ interface CurrentRoomState {
   updateSpeakers: (speakers: RoomParticipant[]) => void;
   updateListenersCount: (count: number) => void;
   toggleMute: () => void;
+  // Explicit setter so the RoomScreen can keep this store (the source of
+  // truth the audio engine reads when restoring mute after a token renewal /
+  // reconnect) in sync with the real local mute state. Without this, the
+  // store stayed at its `false` default and a reconnect hot-unmuted the user.
+  setMuted: (muted: boolean) => void;
   // Single reset action used after room:leave / disconnect. Previously this
   // store exposed identical `leave` and `clear` actions; `clear` is kept as
   // the canonical name (its only consumer is useCurrentRoom) and the `leave`
@@ -40,6 +45,8 @@ export const useCurrentRoomStore = create<CurrentRoomState>(set => ({
     set(s => (s.room ? { room: { ...s.room, listenersCount: count } } : {})),
 
   toggleMute: () => set(s => ({ isMuted: !s.isMuted })),
+
+  setMuted: muted => set({ isMuted: muted }),
 
   clear: () => set({ room: null, isMuted: false }),
 }));

@@ -37,7 +37,11 @@ const RoomActionBar: React.FC<RoomActionBarProps> = memo(
               onPressIn={muteBtn.onPressIn}
               onPressOut={muteBtn.onPressOut}
               accessibilityRole="button"
-              accessibilityLabel={isMuted ? 'Unmute microphone' : 'Mute microphone'}
+              accessibilityLabel={
+                isMuted
+                  ? t('room.unmuteA11y', 'Unmute microphone')
+                  : t('room.muteA11y', 'Mute microphone')
+              }
               accessibilityState={{ selected: isMuted }}
               className="flex-row items-center gap-sm bg-danger rounded-pill py-sm px-xl"
             >
@@ -59,7 +63,9 @@ const RoomActionBar: React.FC<RoomActionBarProps> = memo(
             onPressIn={raiseBtn.onPressIn}
             onPressOut={raiseBtn.onPressOut}
             accessibilityRole="button"
-            accessibilityLabel={isHandRaised ? 'Lower hand' : 'Raise hand'}
+            accessibilityLabel={
+              isHandRaised ? t('room.lowerA11y', 'Lower hand') : t('room.raiseA11y', 'Raise hand')
+            }
             accessibilityState={{ selected: isHandRaised }}
             className="flex-row items-center gap-sm bg-primary/20 rounded-pill py-sm px-lg"
           >

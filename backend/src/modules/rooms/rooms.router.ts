@@ -38,6 +38,8 @@ roomsRouter.get('/:id/rsvps', asyncHandler(roomsController.listRsvps));
 roomsRouter.post('/:id/raise-hand', asyncHandler(roomsController.raiseHand));
 roomsRouter.delete('/:id/raise-hand', asyncHandler(roomsController.lowerHand));
 roomsRouter.get('/:id/hand-raises', asyncHandler(roomsController.listHandRaises));
+// Host/moderator dismisses another user's raised hand.
+roomsRouter.delete('/:id/hand-raises/:userId', asyncHandler(roomsController.dismissHand));
 
 // In-room text chat (distinct from DMs under /api/chat).
 roomsRouter.post('/:id/messages', asyncHandler(roomsController.sendMessage));

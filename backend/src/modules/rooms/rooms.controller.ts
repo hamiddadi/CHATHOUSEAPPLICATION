@@ -157,6 +157,16 @@ export const roomsController = {
     sendOk(res, rows);
   },
 
+  // Host/moderator dismisses another user's raised hand.
+  async dismissHand(req: Request, res: Response) {
+    const result = await roomsService.dismissHand(
+      paramId(req, 'id'),
+      requireUserId(req),
+      paramId(req, 'userId'),
+    );
+    sendOk(res, result);
+  },
+
   async sendMessage(req: Request, res: Response) {
     const input = sendRoomMessageSchema.parse(req.body);
     const msg = await roomsService.sendRoomMessage(paramId(req, 'id'), requireUserId(req), input);

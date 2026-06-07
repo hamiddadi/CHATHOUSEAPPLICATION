@@ -282,6 +282,11 @@ model Room {
   participantCount Int   @default(0) // Denormalized for feed perf
   scheduledFor DateTime?
   createdAt    DateTime  @default(now())
+  // When the room actually went LIVE (immediate rooms: at creation; scheduled
+  // rooms: when the go-live worker flips isLive). The in-room timer counts from
+  // here, not createdAt, so a scheduled room doesn't read hours/days elapsed.
+  // Null on legacy rows / pre-go-live scheduled rooms (clients fall back to createdAt).
+  liveAt       DateTime?
   endedAt      DateTime?
 
   host             User              @relation("RoomHost", fields: [hostId], references: [id], onDelete: Cascade)

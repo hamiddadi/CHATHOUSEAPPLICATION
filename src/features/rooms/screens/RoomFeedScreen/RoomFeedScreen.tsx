@@ -139,18 +139,22 @@ const RoomCard: React.FC<RoomCardProps> = memo(({ room, onJoin }) => {
   const { t } = useTranslation();
   const { animatedStyle, onPressIn, onPressOut } = useAnimatedPress({ scaleTo: 0.96 });
   const handleJoin = useCallback(() => onJoin(room.id), [onJoin, room.id]);
-  const colorClass = CATEGORY_COLOR_CLASS[room.category] ?? 'text-primary';
+  const colorClass = (room.category && CATEGORY_COLOR_CLASS[room.category]) ?? 'text-primary';
 
   return (
     <View className="rounded-md bg-overlay-white-5 border border-overlay-white-10 overflow-hidden">
       <View className="p-xxl gap-lg">
         <View className="gap-xs">
           <View className="flex-row items-center gap-sm">
-            <View className="bg-surface-highest px-sm py-xxs rounded-xs">
-              <Text className={`text-xxs font-body-bold uppercase tracking-tighter ${colorClass}`}>
-                {room.categoryEmoji} {room.category}
-              </Text>
-            </View>
+            {room.category && (
+              <View className="bg-surface-highest px-sm py-xxs rounded-xs">
+                <Text
+                  className={`text-xxs font-body-bold uppercase tracking-tighter ${colorClass}`}
+                >
+                  {room.categoryEmoji} {room.category}
+                </Text>
+              </View>
+            )}
             {room.houseName && (
               <Text className="text-xs font-body-medium text-ink-muted" numberOfLines={1}>
                 {t('feed.insideHouse', 'Inside {{houseName}}', { houseName: room.houseName })}

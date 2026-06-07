@@ -49,7 +49,9 @@ export interface Room {
   id: string;
   title: string;
   description: string | null;
-  category: RoomCategory;
+  // `null` when the room's tags match no known category — the UI hides the
+  // chip rather than mislabelling it (previously silently defaulted to 'tech').
+  category: RoomCategory | null;
   categoryEmoji: string;
   visibility: RoomVisibility;
   houseId: string | null;

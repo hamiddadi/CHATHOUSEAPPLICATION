@@ -126,7 +126,9 @@ const openScheduledRoom = async (roomId: string): Promise<void> => {
 
   await prisma.room.update({
     where: { id: room.id },
-    data: { isLive: true },
+    // Stamp the real go-live time so the in-room timer counts from here, not
+    // the (earlier) createdAt (#9).
+    data: { isLive: true, liveAt: new Date() },
   });
   // Add host as first participant
   await prisma.participant.upsert({

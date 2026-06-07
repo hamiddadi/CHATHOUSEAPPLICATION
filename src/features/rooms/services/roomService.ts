@@ -37,10 +37,6 @@ interface RawUser {
   username: string | null;
   displayName: string | null;
   avatarUrl: string | null;
-  // Backend-computed: is this listener followed by the current viewer?
-  // Absent on legacy payloads — treated as `undefined` (see RoomScreen
-  // fallback that keeps the previous positional split when no flag exists).
-  followedByViewer?: boolean;
 }
 
 /**
@@ -56,6 +52,12 @@ interface RawParticipant {
   role: 'HOST' | 'MODERATOR' | 'SPEAKER' | 'LISTENER';
   isMuted: boolean;
   user: RawUser;
+  // Backend-computed and carried on the PARTICIPANT (not the nested user):
+  // is this LISTENER followed by the current viewer? The `rooms.get`
+  // serializer spreads it onto each listener participant as
+  // `{ ...participant, followedByViewer }`. Absent on speakers / legacy
+  // payloads — treated as `undefined` (see RoomScreen fallback).
+  followedByViewer?: boolean;
 }
 
 interface RawRoom {
@@ -77,6 +79,9 @@ interface RawRoom {
   topics?: string[];
   scheduledFor: string | null;
   createdAt: string;
+  // Real go-live time (set when the room becomes live). Falls back to
+  // createdAt when absent (legacy rows / pre-go-live scheduled rooms).
+  liveAt?: string | null;
   endedAt: string | null;
   host?: RawUser;
   participants?: RawParticipant[];
@@ -114,20 +119,22 @@ const toSummaryUser = (u: RawUser | undefined): UserSummary => ({
 // the room view can split listeners into "followed by you" vs "others". The
 // flag is only forwarded when present (truthy or explicit boolean); legacy
 // payloads leave it `undefined`.
-const toListener = (u: RawUser | undefined): RoomListener => {
-  const base = toSummaryUser(u);
-  return u?.followedByViewer === undefined
+const toListener = (p: RawParticipant): RoomListener => {
+  const base = toSummaryUser(p.user);
+  return p.followedByViewer === undefined
     ? base
-    : { ...base, followedByViewer: u.followedByViewer };
+    : { ...base, followedByViewer: p.followedByViewer };
 };
 
-const pickCategory = (raw: RawRoom): RoomCategory => {
+const pickCategory = (raw: RawRoom): RoomCategory | null => {
   const tags = [...(raw.topics ?? []), raw.topic ?? ''];
   for (const t of tags) {
     const lower = t.trim().toLowerCase();
     if (lower in CATEGORY_EMOJI) return lower as RoomCategory;
   }
-  return 'tech';
+  // No known tag → uncategorised. Return null so the UI hides the chip
+  // instead of mislabelling every untagged room as 'tech' (#20).
+  return null;
 };
 
 const pickVisibility = (raw: RawRoom): RoomVisibility => {
@@ -149,7 +156,7 @@ const toParticipant = (p: RawParticipant): RoomParticipant => ({
 const toRoom = (raw: RawRoom): Room => {
   const participants = raw.participants ?? [];
   const speakers = participants.filter(p => p.role !== 'LISTENER').map(toParticipant);
-  const listeners = participants.filter(p => p.role === 'LISTENER').map(p => toListener(p.user));
+  const listeners = participants.filter(p => p.role === 'LISTENER').map(toListener);
 
   const category = pickCategory(raw);
   return {
@@ -157,7 +164,7 @@ const toRoom = (raw: RawRoom): Room => {
     title: raw.title,
     description: raw.description,
     category,
-    categoryEmoji: CATEGORY_EMOJI[category],
+    categoryEmoji: category ? CATEGORY_EMOJI[category] : '',
     visibility: pickVisibility(raw),
     houseId: raw.clubId,
     // The backend now embeds the club (id/name/iconUrl) in the room
@@ -174,7 +181,7 @@ const toRoom = (raw: RawRoom): Room => {
     isRecording: raw.recordingEnabled ?? false,
     chatEnabled: raw.chatEnabled ?? true,
     chatVisibility: raw.chatVisibility ?? 'ALL',
-    startedAt: raw.createdAt,
+    startedAt: raw.liveAt ?? raw.createdAt,
     scheduledFor: raw.scheduledFor,
   };
 };
@@ -188,7 +195,7 @@ const toSummary = (raw: RawRoom): RoomSummary => {
     id: raw.id,
     title: raw.title,
     category,
-    categoryEmoji: CATEGORY_EMOJI[category],
+    categoryEmoji: category ? CATEGORY_EMOJI[category] : '',
     houseName: raw.club?.name ?? null,
     houseIcon: raw.club?.iconUrl ?? null,
     speakersCount: speakers.length,
@@ -298,6 +305,12 @@ export const roomService = {
 
   async lowerHand(roomId: string): Promise<{ lowered: true }> {
     await apiClient.delete(`/rooms/${roomId}/raise-hand`);
+    return { lowered: true };
+  },
+
+  // Host/moderator dismisses another user's raised hand.
+  async dismissHand(roomId: string, userId: string): Promise<{ lowered: true }> {
+    await apiClient.delete(`/rooms/${roomId}/hand-raises/${userId}`);
     return { lowered: true };
   },
 

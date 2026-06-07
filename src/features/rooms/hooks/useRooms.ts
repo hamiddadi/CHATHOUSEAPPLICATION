@@ -68,6 +68,19 @@ export const useRaiseHand = () =>
 export const useLowerHand = () =>
   useMutation({ mutationFn: (roomId: string) => roomService.lowerHand(roomId) });
 
+// Host/moderator dismisses another user's raised hand. Invalidates the queue
+// so the dismissed user disappears immediately (realtime also broadcasts it).
+export const useDismissHand = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ roomId, userId }: { roomId: string; userId: string }) =>
+      roomService.dismissHand(roomId, userId),
+    onSuccess: (_data, vars) => {
+      void qc.invalidateQueries({ queryKey: roomKeys.handRaises(vars.roomId) });
+    },
+  });
+};
+
 export const useSetMute = () => {
   const qc = useQueryClient();
   return useMutation({

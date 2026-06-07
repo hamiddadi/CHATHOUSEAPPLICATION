@@ -16,6 +16,11 @@ type Emoji = (typeof EMOJIS)[number];
 
 const FLY_DURATION_MS = 1800;
 const HORIZONTAL_JITTER = 30;
+// Cap concurrent floats so a viral room can't grow the Reanimated tree
+// unbounded, and throttle taps so a rapid tapper can't spam the POST endpoint
+// (#13).
+const MAX_FLOATS = 24;
+const TAP_THROTTLE_MS = 250;
 
 interface FloatingEmoji {
   id: string;
@@ -25,6 +30,9 @@ interface FloatingEmoji {
 
 interface ReactionsBarProps {
   roomId: string;
+  /** Used to drop the server echo of our OWN reaction (we already spawned it
+   *  optimistically on tap) so the sender doesn't see it twice (#7). */
+  viewerId: string | null;
 }
 
 interface IncomingReaction {
@@ -39,13 +47,15 @@ interface IncomingReaction {
  * over the same area. The animation queue auto-clears so a viral room
  * doesn't blow up the React tree with 100s of orphan emojis.
  */
-export const ReactionsBar: React.FC<ReactionsBarProps> = memo(({ roomId }) => {
+export const ReactionsBar: React.FC<ReactionsBarProps> = memo(({ roomId, viewerId }) => {
   const sendReaction = useSendReaction();
   const [floats, setFloats] = useState<FloatingEmoji[]>([]);
   // Track in-flight cleanup timers so they can be purged on unmount —
   // otherwise a room that's left mid-animation leaves orphan timers that
   // fire setState on an unmounted component.
   const timers = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
+  // Timestamp of the last accepted tap — drives the send throttle (#13).
+  const lastTapRef = useRef(0);
 
   const removeFloat = useCallback((id: string) => {
     setFloats(prev => prev.filter(f => f.id !== id));
@@ -55,7 +65,9 @@ export const ReactionsBar: React.FC<ReactionsBarProps> = memo(({ roomId }) => {
     (emoji: string) => {
       const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
       const startX = (Math.random() - 0.5) * HORIZONTAL_JITTER;
-      setFloats(prev => [...prev, { id, emoji, startX }]);
+      // Keep only the most recent MAX_FLOATS so a flood can't grow the tree
+      // without bound (older ones are about to fade out anyway).
+      setFloats(prev => [...prev, { id, emoji, startX }].slice(-MAX_FLOATS));
       // Cleanup matches the animation duration exactly so we never leave
       // a ghost mounted after the fade-out finishes.
       const t = setTimeout(() => {
@@ -78,6 +90,11 @@ export const ReactionsBar: React.FC<ReactionsBarProps> = memo(({ roomId }) => {
 
   const handleTap = useCallback(
     (emoji: Emoji) => {
+      // Throttle: ignore taps that arrive faster than TAP_THROTTLE_MS so a
+      // rapid tapper can't spam the reaction POST endpoint (#13).
+      const now = Date.now();
+      if (now - lastTapRef.current < TAP_THROTTLE_MS) return;
+      lastTapRef.current = now;
       void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       spawnFloat(emoji);
       sendReaction.mutate({ roomId, emoji });
@@ -97,6 +114,8 @@ export const ReactionsBar: React.FC<ReactionsBarProps> = memo(({ roomId }) => {
       if (cancelled || !socket) return;
       const handler = (payload: IncomingReaction): void => {
         if (payload.roomId !== roomId) return;
+        // Skip the echo of our own reaction — we already spawned it on tap (#7).
+        if (viewerId && payload.userId === viewerId) return;
         spawnFloat(payload.emoji);
       };
       socket.on('room:reaction', handler);
@@ -106,7 +125,7 @@ export const ReactionsBar: React.FC<ReactionsBarProps> = memo(({ roomId }) => {
       cancelled = true;
       cleanup?.();
     };
-  }, [roomId, spawnFloat]);
+  }, [roomId, viewerId, spawnFloat]);
 
   return (
     <View style={styles.wrap} pointerEvents="box-none">

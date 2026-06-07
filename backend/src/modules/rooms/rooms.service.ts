@@ -174,6 +174,9 @@ export const roomsService = {
         clubId: input.clubId ?? null,
         scheduledFor,
         isLive,
+        // Immediate rooms go live now; scheduled rooms get liveAt set by the
+        // go-live worker when isLive flips (#9).
+        liveAt: isLive ? new Date() : null,
         participantCount: isLive ? 1 + coHostIds.length : 0,
       },
     });
@@ -833,6 +836,16 @@ export const roomsService = {
   async lowerHand(roomId: string, userId: string) {
     await prisma.roomHandRaise.deleteMany({ where: { roomId, userId } });
     emitRoomHandLowered(roomId, userId);
+    return { lowered: true as const };
+  },
+
+  // Host/moderator dismisses ANOTHER user's raised hand (declines the request
+  // to speak) — same deletion as `lowerHand` but permission-gated to mods so a
+  // listener can't clear someone else's hand.
+  async dismissHand(roomId: string, actorId: string, targetUserId: string) {
+    await requireHostOrMod(roomId, actorId);
+    await prisma.roomHandRaise.deleteMany({ where: { roomId, userId: targetUserId } });
+    emitRoomHandLowered(roomId, targetUserId);
     return { lowered: true as const };
   },
 
