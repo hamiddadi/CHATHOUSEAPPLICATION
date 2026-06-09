@@ -19,8 +19,39 @@ config.resolver.unstable_enablePackageExports = false;
 // `import('expo-contacts')` which broke the release Hermes compile (hermesc
 // rejects dynamic `import()` — "Invalid expression encountered").
 const OPTIONAL_NATIVE_MODULES = ['expo-contacts', 'expo-device'];
+
+// Force `livekit-client` to its ESM build. With package exports disabled
+// (above), Metro otherwise resolves it via `main` → the UMD build
+// (`livekit-client.umd.js`). That UMD wrapper detects its global via
+// `(function (global) { … })(this)`, but under Hermes in a release bundle the
+// module runs in strict mode where `this` is `undefined` → the wrapper can't
+// install its internals → the inlined `events` module's `EventEmitter` ends up
+// undefined → `class Room extends eventsExports.EventEmitter` throws
+// "Cannot read property 'prototype' of undefined" the moment you join a room
+// (audio never starts). The ESM build has no `this`-based UMD wrapper and runs
+// fine under Hermes. Resolve the path lazily so a missing dep can't break boot.
+// NOTE: livekit-client's `exports` map blocks deep subpaths, so `require.resolve`
+// can't reach the build file. Point at it directly under node_modules instead
+// (this project hoists livekit-client to the root). Guarded by existsSync so a
+// move/upgrade can't break bundling.
+const path = require('path');
+const fs = require('fs');
+const LIVEKIT_CLIENT_ESM_CANDIDATE = path.join(
+  __dirname,
+  'node_modules',
+  'livekit-client',
+  'dist',
+  'livekit-client.esm.mjs',
+);
+const LIVEKIT_CLIENT_ESM = fs.existsSync(LIVEKIT_CLIENT_ESM_CANDIDATE)
+  ? LIVEKIT_CLIENT_ESM_CANDIDATE
+  : undefined;
+
 const defaultResolveRequest = config.resolver.resolveRequest;
 config.resolver.resolveRequest = (context, moduleName, platform) => {
+  if (moduleName === 'livekit-client' && LIVEKIT_CLIENT_ESM) {
+    return { type: 'sourceFile', filePath: LIVEKIT_CLIENT_ESM };
+  }
   if (OPTIONAL_NATIVE_MODULES.includes(moduleName)) {
     try {
       const resolver = defaultResolveRequest ?? context.resolveRequest;

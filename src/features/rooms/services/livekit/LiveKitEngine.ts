@@ -92,7 +92,27 @@ export const mapLiveKitConnectionState = (state: string): LiveKitSemanticState =
 
 const loadSdk = (): LiveKitSdk | null => {
   try {
-    return require('@livekit/react-native') as LiveKitSdk;
+    // The core room API (Room / RoomEvent / ConnectionState) is exported by
+    // `livekit-client`. `@livekit/react-native` only adds the React Native
+    // bits (registerGlobals for native WebRTC, AudioSession, …) and does NOT
+    // re-export Room. Pulling everything from `@livekit/react-native` left
+    // `sdk.Room` undefined, so `new sdk.Room()` threw "cannot read property
+    // 'prototype' of undefined" on every room join. Source each symbol from
+    // the package that actually exports it.
+    const core = require('livekit-client') as {
+      Room: LiveKitSdk['Room'];
+      RoomEvent: LiveKitSdk['RoomEvent'];
+      ConnectionState: LiveKitSdk['ConnectionState'];
+    };
+    const rn = require('@livekit/react-native') as {
+      registerGlobals: LiveKitSdk['registerGlobals'];
+    };
+    return {
+      Room: core.Room,
+      RoomEvent: core.RoomEvent,
+      ConnectionState: core.ConnectionState,
+      registerGlobals: rn.registerGlobals,
+    };
   } catch {
     return null;
   }
