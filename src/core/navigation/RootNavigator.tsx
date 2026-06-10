@@ -3,6 +3,7 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { StatusBar } from 'expo-status-bar';
 import { useAuthStore } from '../../features/auth/store/authStore';
+import { useExtColorScheme } from '../../features/extensions';
 import { Loader } from '../../shared/components/Loader';
 import { AnimatedSplashScreen } from '../../shared/components/AnimatedSplashScreen';
 import { colors } from '../../shared/constants/theme';
@@ -31,6 +32,7 @@ export const RootNavigator: React.FC<RootNavigatorProps> = ({ onReady }) => {
   const status = useAuthStore(s => s.status);
   const isHydrating = useAuthStore(s => s.isHydrating);
   const user = useAuthStore(s => s.user);
+  const colorScheme = useExtColorScheme();
 
   if (isHydrating) {
     return <AnimatedSplashScreen />;
@@ -47,7 +49,10 @@ export const RootNavigator: React.FC<RootNavigatorProps> = ({ onReady }) => {
 
   return (
     <NavigationContainer linking={linking} onReady={onReady} fallback={<Loader fullscreen />}>
-      <StatusBar style="dark" backgroundColor={colors.background} />
+      <StatusBar
+        style={colorScheme === 'dark' ? 'light' : 'dark'}
+        backgroundColor={colors.background}
+      />
       <RootStack.Navigator
         screenOptions={{
           headerShown: false,

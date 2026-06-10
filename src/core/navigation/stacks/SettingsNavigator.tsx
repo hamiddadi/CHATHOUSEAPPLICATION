@@ -21,6 +21,7 @@ import {
   PrivacyPolicyScreen,
   TermsScreen,
 } from '../../../features/privacy';
+import { ExtSettingsScreen } from '../../../features/extensions';
 
 const Stack = createNativeStackNavigator<SettingsStackParamList>();
 
@@ -52,5 +53,8 @@ export const SettingsNavigator: React.FC = () => (
     <Stack.Screen name="Terms" component={TermsScreen} />
     <Stack.Screen name="DataExport" component={DataExportScreen} />
     <Stack.Screen name="DeleteAccount" component={DeleteAccountScreen} />
+
+    {/* Extension settings (Phase 1) */}
+    <Stack.Screen name="ExtSettings" component={ExtSettingsScreen} />
   </Stack.Navigator>
 );

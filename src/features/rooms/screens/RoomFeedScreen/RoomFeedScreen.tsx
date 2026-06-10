@@ -18,6 +18,7 @@ import { roomService } from '../../services/roomService';
 import { useHallwaySocket } from '../../hooks/useHallwaySocket';
 import { useUnreadNotificationCount } from '../../../notifications/hooks/useNotifications';
 import { formatScheduled } from '../../../../shared/utils/formatScheduled';
+import { ExtAvailablePeopleStrip, ExtUpcomingForYouStrip, useExtWave } from '../../../extensions';
 import { RoomFeedSkeleton } from './RoomFeedSkeleton';
 
 type Nav = NativeStackNavigationProp<RoomStackParamList, 'RoomFeed'>;
@@ -368,6 +369,20 @@ export const RoomFeedScreen: React.FC = () => {
   const handleReplays = useCallback(() => navigation.navigate('Replays'), [navigation]);
   const handleNotifications = useCallback(() => navigation.navigate('Notifications'), [navigation]);
 
+  // Extension: wave to a user from the available-people strip
+  const { wave } = useExtWave();
+  const handleWaveUser = useCallback(
+    (user: { id: string }) => {
+      void wave(user.id);
+    },
+    [wave],
+  );
+  // Extension: open an upcoming event's room
+  const handleUpcomingSelect = useCallback(
+    (event: { id: string }) => navigation.navigate('Room', { roomId: event.id }),
+    [navigation],
+  );
+
   const renderItem = useCallback(
     ({ item }: { item: RoomSummary }) => <RoomCard room={item} onJoin={handleJoin} />,
     [handleJoin],
@@ -416,6 +431,8 @@ export const RoomFeedScreen: React.FC = () => {
                   />
                 ))}
               </View>
+              <ExtAvailablePeopleStrip onWaveUser={handleWaveUser} />
+              <ExtUpcomingForYouStrip onSelect={handleUpcomingSelect} />
               <UpcomingRow rooms={upcoming} onOpen={handleJoin} />
               <Text className="text-xl font-headline text-ink tracking-tight">
                 {t('feed.liveNow', 'Live Now')}

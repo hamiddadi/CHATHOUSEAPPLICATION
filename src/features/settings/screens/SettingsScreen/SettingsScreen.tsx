@@ -10,6 +10,7 @@ import { useTranslation } from 'react-i18next';
 import { useQuery } from '@tanstack/react-query';
 import { invitesApi } from '../../../extensions/api/invitesApi';
 import { ExtPremiumRow } from '../../../extensions/components/ExtPremiumRow';
+import { ExtThemeToggle } from '../../../extensions/components/ExtThemeToggle';
 import { useAuthStore } from '../../../auth/store/authStore';
 import { useMe } from '../../../profile/hooks/useProfile';
 import { useHouses } from '../../../houses/hooks/useHouses';
@@ -471,6 +472,16 @@ export const SettingsScreen: React.FC = () => {
             hint={t('settings.gdprArticle20')}
             onPress={goDataExport}
           />
+
+          {/* Theme toggle — dark / light / auto */}
+          <View style={styles.privacyRow}>
+            <View style={styles.privacyIcon}>
+              <MaterialIcons name="palette" size={18} color={colors.primary} />
+            </View>
+            <View style={styles.flex1}>
+              <ExtThemeToggle />
+            </View>
+          </View>
         </View>
 
         {/* Account — sign out + delete sit at the bottom, danger color
@@ -496,6 +507,12 @@ export const SettingsScreen: React.FC = () => {
             icon="notifications"
             label={t('settings.notifications')}
             onPress={goNotificationSettings}
+          />
+          <SettingsRow
+            icon="extension"
+            label={t('settings.extensions', 'Extensions')}
+            hint={t('settings.extensionsHint', 'Thème, police, recherche et plus')}
+            onPress={() => navigation.navigate('ExtSettings')}
           />
           <SettingsRow
             icon="delete-forever"

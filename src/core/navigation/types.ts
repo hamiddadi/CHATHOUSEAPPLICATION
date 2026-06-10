@@ -66,6 +66,10 @@ export type RoomStackParamList = {
 
   // In-room: invite multiple followers/contacts to join the current room.
   InviteToRoom: { roomId: string };
+
+  // Extension screens (wired in Phase 1)
+  TopicExplorer: undefined;
+  ActivityFeed: undefined;
 };
 
 export type MessageStackParamList = {
@@ -102,6 +106,9 @@ export type SettingsStackParamList = {
   Terms: undefined;
   DataExport: undefined;
   DeleteAccount: undefined;
+
+  // Extension settings (Phase 1)
+  ExtSettings: undefined;
 };
 
 /* ============================================================

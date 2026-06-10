@@ -6,9 +6,22 @@ import { ErrorBoundary } from '../../shared/components/ErrorBoundary';
 import { ToastPortal } from '../../shared/components/Toast';
 import { OfflineBanner } from '../../shared/components/OfflineBanner';
 import { reportException } from '../observability/reporter';
+import { ExtensionsProvider } from '../../features/extensions';
+import { useAuthStore } from '../../features/auth/store/authStore';
 import { ThemeProvider } from './ThemeProvider';
 import { QueryProvider } from './QueryProvider';
 import { AuthProvider } from './AuthProvider';
+
+/**
+ * Inner gate that reads auth status and forwards it to ExtensionsProvider.
+ * Lives inside AuthProvider so the Zustand store is already hydrated.
+ */
+const ExtensionsProviderGate: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const status = useAuthStore(s => s.status);
+  return (
+    <ExtensionsProvider authenticated={status === 'authenticated'}>{children}</ExtensionsProvider>
+  );
+};
 
 export const AppProviders: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const handleBoundaryError = useCallback((error: Error, info: React.ErrorInfo) => {
@@ -21,7 +34,9 @@ export const AppProviders: React.FC<{ children: React.ReactNode }> = ({ children
         <SafeAreaProvider>
           <ThemeProvider>
             <QueryProvider>
-              <AuthProvider>{children}</AuthProvider>
+              <AuthProvider>
+                <ExtensionsProviderGate>{children}</ExtensionsProviderGate>
+              </AuthProvider>
             </QueryProvider>
           </ThemeProvider>
           {/* Global overlays rendered last so they z-index above app content.

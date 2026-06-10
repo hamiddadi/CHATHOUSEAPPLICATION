@@ -16,6 +16,7 @@ import { ExploreScreen } from '../../../features/search/screens/ExploreScreen';
 import { EventsScreen } from '../../../features/events/screens/EventsScreen';
 import { NotificationsScreen } from '../../../features/notifications/screens/NotificationsScreen';
 import { ReplaysScreen } from '../../../features/rooms/screens/ReplaysScreen';
+import { ExtTopicExplorerScreen, ExtActivityFeedScreen } from '../../../features/extensions';
 
 const Stack = createNativeStackNavigator<RoomStackParamList>();
 
@@ -61,5 +62,9 @@ export const RoomsNavigator: React.FC = () => (
     <Stack.Screen name="Events" component={EventsScreen} />
     <Stack.Screen name="Notifications" component={NotificationsScreen} />
     <Stack.Screen name="Replays" component={ReplaysScreen} />
+
+    {/* Extension screens (Phase 1) */}
+    <Stack.Screen name="TopicExplorer" component={ExtTopicExplorerScreen} />
+    <Stack.Screen name="ActivityFeed" component={ExtActivityFeedScreen} />
   </Stack.Navigator>
 );
