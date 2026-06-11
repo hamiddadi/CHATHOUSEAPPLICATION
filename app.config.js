@@ -17,6 +17,25 @@ module.exports = ({ config: _config }) => {
   const realtimeEnabled = process.env.REALTIME_ENABLED === 'true';
   const sentryDsn = process.env.SENTRY_DSN;
 
+  // Sentry source-map upload (so production crash stacks are symbolicated, not
+  // raw minified offsets). The `@sentry/react-native/expo` plugin uploads maps
+  // during the EAS build when SENTRY_ORG + SENTRY_PROJECT are set here and the
+  // SENTRY_AUTH_TOKEN EAS secret is present at build time. Falls back to the
+  // bare native-only plugin in dev (no org/project ⇒ no upload, no error).
+  const sentryOrg = process.env.SENTRY_ORG;
+  const sentryProject = process.env.SENTRY_PROJECT;
+  const sentryPlugin =
+    sentryOrg && sentryProject
+      ? [
+          '@sentry/react-native/expo',
+          {
+            organization: sentryOrg,
+            project: sentryProject,
+            url: process.env.SENTRY_URL ?? 'https://sentry.io/',
+          },
+        ]
+      : '@sentry/react-native';
+
   // LiveKit — URL is the WebSocket endpoint of the LiveKit server.
   // No client-side secrets needed — the backend signs JWT tokens.
   const livekitUrl = process.env.LIVEKIT_URL ?? 'ws://localhost:7880';
@@ -45,7 +64,10 @@ module.exports = ({ config: _config }) => {
     // them in app.json because plugin paths in JSON have to be package
     // names; relative file paths only work via app.config.js.
     plugins: [
-      ...(base.expo.plugins ?? []),
+      // Drop the static bare Sentry plugin from app.json and re-add it here
+      // (configured for source-map upload when org/project are set).
+      ...(base.expo.plugins ?? []).filter(p => p !== '@sentry/react-native'),
+      sentryPlugin,
       // LiveKit live audio: the expo plugin wires the LiveKit native config
       // (audio session, Android foreground-service type), and the webrtc plugin
       // registers the @livekit/react-native-webrtc native module + mic
@@ -82,7 +104,12 @@ module.exports = ({ config: _config }) => {
       },
     },
     // Override a few fields that should vary per env. Keep name/slug stable.
+    // Spread the static `extra` FIRST so anything `eas init` writes into
+    // app.json (notably `extra.eas.projectId`, which EAS Build/Update and
+    // expo-notifications' getExpoPushTokenAsync require) survives — building
+    // a fresh object here used to drop it.
     extra: {
+      ...(base.expo.extra ?? {}),
       API_BASE_URL: apiBaseUrl,
       WS_BASE_URL: wsBaseUrl,
       REALTIME_ENABLED: realtimeEnabled,

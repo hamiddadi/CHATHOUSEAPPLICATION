@@ -48,5 +48,11 @@ USER node
 
 EXPOSE 4000
 
+# Apply pending Prisma migrations BEFORE starting the API, every boot. This is
+# idempotent (`migrate deploy` only applies un-applied migrations) and is what
+# guarantees a fresh production DB actually has tables — the previous CMD started
+# the server against a schemaless DB. The `prisma` CLI ships in the prod image
+# because it is a runtime dependency (see package.json), so it survives
+# `npm prune --omit=dev`. tini (entrypoint) reaps the node process on shutdown.
 ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["node", "dist/app.js"]
+CMD ["sh", "-c", "npx prisma migrate deploy && node dist/app.js"]

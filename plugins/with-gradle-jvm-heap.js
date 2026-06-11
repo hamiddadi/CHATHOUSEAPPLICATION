@@ -33,8 +33,33 @@ const { withGradleProperties } = require('@expo/config-plugins');
  *
  * On a machine with 16+ GB free you can raise -Xmx to 4g, flip parallel back to
  * true and workers.max to 3-4, and restore the full ABI list for a fat APK.
+ *
+ * IMPORTANT: the RAM-constrained / single-ABI settings are LOCAL ONLY. On EAS
+ * Build (or CI) the runner has plenty of RAM, so we use the parallel, full-ABI
+ * profile — otherwise every cloud production `.aab` would ship arm64-v8a only,
+ * dropping 32-bit ARM + x86_64 device coverage on the Play Store. Detected via
+ * EAS_BUILD / CI, which EAS and GitHub Actions set in the build environment.
  */
-const PROPERTIES = [
+const isCloudBuild = process.env.EAS_BUILD === 'true' || process.env.CI === 'true';
+
+// Cloud/CI: parallel build, generous heaps, all shippable ABIs.
+const CLOUD_PROPERTIES = [
+  {
+    key: 'org.gradle.jvmargs',
+    value: '-Xmx4096m -XX:MaxMetaspaceSize=1024m -Dfile.encoding=UTF-8',
+  },
+  { key: 'org.gradle.parallel', value: 'true' },
+  { key: 'org.gradle.caching', value: 'true' },
+  { key: 'org.gradle.daemon', value: 'true' },
+  { key: 'org.gradle.workers.max', value: '4' },
+  { key: 'kotlin.daemon.jvmargs', value: '-Xmx2048m' },
+  // arm64-v8a (modern phones) + armeabi-v7a (older 32-bit ARM) + x86_64
+  // (emulators / ChromeOS). The Play App Bundle splits these per-device.
+  { key: 'reactNativeArchitectures', value: 'arm64-v8a,armeabi-v7a,x86_64' },
+];
+
+// Local low-memory machine: serial build, bounded heaps, single ABI.
+const LOWMEM_PROPERTIES = [
   {
     key: 'org.gradle.jvmargs',
     value: '-Xmx2048m -XX:MaxMetaspaceSize=512m -Dfile.encoding=UTF-8',
@@ -46,6 +71,8 @@ const PROPERTIES = [
   { key: 'kotlin.daemon.jvmargs', value: '-Xmx1280m' },
   { key: 'reactNativeArchitectures', value: 'arm64-v8a' },
 ];
+
+const PROPERTIES = isCloudBuild ? CLOUD_PROPERTIES : LOWMEM_PROPERTIES;
 
 const withGradleJvmHeap = config =>
   withGradleProperties(config, mod => {

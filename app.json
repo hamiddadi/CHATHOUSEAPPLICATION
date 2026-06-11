@@ -2,7 +2,7 @@
   "expo": {
     "name": "Chathouse",
     "slug": "chathouse",
-    "version": "0.1.0",
+    "version": "1.0.0",
     "runtimeVersion": { "policy": "appVersion" },
     "orientation": "portrait",
     "scheme": "chathouse",
@@ -17,12 +17,12 @@
       "supportsTablet": false,
       "bundleIdentifier": "com.chathouse.app",
       "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
         "NSMicrophoneUsageDescription": "Chathouse uses your microphone so you can speak in audio rooms and record voice messages.",
         "NSCameraUsageDescription": "Chathouse uses the camera so you can update your profile photo.",
         "NSPhotoLibraryUsageDescription": "Chathouse needs access to your photos so you can update your profile photo.",
         "NSLocationWhenInUseUsageDescription": "Chathouse shows friends and rooms on the map when you allow location access.",
-        "NSLocationAlwaysAndWhenInUseUsageDescription": "Chathouse keeps your location updated so friends can find you when you're active.",
-        "UIBackgroundModes": ["location", "fetch", "audio", "voip"]
+        "UIBackgroundModes": ["audio"]
       }
     },
     "android": {
@@ -37,12 +37,12 @@
         "CAMERA",
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
-        "ACCESS_BACKGROUND_LOCATION",
         "MODIFY_AUDIO_SETTINGS",
         "ACCESS_NETWORK_STATE",
         "BLUETOOTH",
         "BLUETOOTH_CONNECT"
-      ]
+      ],
+      "blockedPermissions": ["android.permission.SYSTEM_ALERT_WINDOW"]
     },
     "web": {
       "bundler": "metro",
@@ -64,7 +64,9 @@
       [
         "expo-location",
         {
-          "locationAlwaysAndWhenInUsePermission": "Chathouse shows nearby rooms on the map when you allow location access."
+          "locationWhenInUsePermission": "Chathouse shows nearby rooms on the map when you allow location access.",
+          "isAndroidBackgroundLocationEnabled": false,
+          "isAndroidForegroundServiceEnabled": false
         }
       ],
       [

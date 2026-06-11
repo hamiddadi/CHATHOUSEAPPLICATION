@@ -1,0 +1,154 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Chathouse — PRODUCTION compose (deployed to /opt/chathouse/backend on the host).
+#
+# This is the file the CD pipeline (.github/workflows/cd-production.yml) drives:
+# it sets CHATHOUSE_API_IMAGE to the freshly-built GHCR image and runs
+#   docker compose -f docker-compose.prod.yml up -d --no-deps --pull always api
+#
+# Unlike the dev `docker-compose.yml`, this file:
+#   • pulls a built image instead of `build: .`
+#   • REQUIRES every secret via ${VAR:?required} so boot fails loudly if a
+#     secret is missing (no silent fallback to dev defaults)
+#   • enables Redis AUTH and does NOT publish Postgres/Redis to the public NIC
+#   • applies DB migrations automatically (the api image entrypoint runs
+#     `prisma migrate deploy` before starting — see backend/Dockerfile)
+#
+# TLS: the api listens on 127.0.0.1:4000 only — put a TLS-terminating reverse
+# proxy (Caddy/nginx/Traefik) in front for https://api.chathouse.app +
+# wss://api.chathouse.app. Never expose :4000 directly to the internet.
+#
+# Provide secrets via a host-side `.env` next to this file (chmod 600) or your
+# orchestrator's secret store. See `.env.prod.example`.
+# ─────────────────────────────────────────────────────────────────────────────
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: chathouse-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-chathouse}
+    # Bind to loopback only — the API reaches it over the compose network.
+    ports:
+      - '127.0.0.1:5433:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER}']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: chathouse-redis
+    restart: unless-stopped
+    # AUTH on (no anonymous access) + AOF persistence.
+    command:
+      [
+        'redis-server',
+        '--appendonly',
+        'yes',
+        '--requirepass',
+        '${REDIS_PASSWORD:?REDIS_PASSWORD is required}',
+      ]
+    ports:
+      - '127.0.0.1:6379:6379'
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD-SHELL', 'redis-cli -a "$$REDIS_PASSWORD" ping | grep -q PONG']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+
+  api:
+    image: ${CHATHOUSE_API_IMAGE:?CHATHOUSE_API_IMAGE is required (set by the CD pipeline)}
+    container_name: chathouse-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      HOST: 0.0.0.0
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-chathouse}?schema=public
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?JWT_ACCESS_SECRET is required}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET is required}
+      CORS_ORIGINS: ${CORS_ORIGINS:?CORS_ORIGINS is required (e.g. https://app.chathouse.app)}
+      # ─── LiveKit (live audio) — REQUIRED, or every room join returns 503 ───
+      # Point at LiveKit Cloud (wss://<your-project>.livekit.cloud) OR the
+      # self-hosted `livekit` service below (behind your TLS proxy as
+      # wss://livekit.chathouse.app). This URL is handed to clients, so it MUST
+      # be the PUBLIC wss endpoint, not the internal container address.
+      LIVEKIT_URL: ${LIVEKIT_URL:?LIVEKIT_URL is required (wss://...)}
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?LIVEKIT_API_KEY is required}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?LIVEKIT_API_SECRET is required}
+      LIVEKIT_TOKEN_TTL_SECONDS: ${LIVEKIT_TOKEN_TTL_SECONDS:-3600}
+      # mediasoup is the abandoned legacy SFU — keep it OFF in production.
+      MEDIASOUP_ENABLED: 'false'
+      # Observability (optional but recommended).
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      METRICS_TOKEN: ${METRICS_TOKEN:-}
+    # Loopback only — the reverse proxy terminates TLS and forwards here.
+    ports:
+      - '127.0.0.1:4000:4000'
+
+  # ─── TLS-terminating reverse proxy (Caddy, automatic HTTPS) ──────────────
+  # Serves https://api.chathouse.app + wss://api.chathouse.app (and LiveKit
+  # signalling) with auto-provisioned Let's Encrypt certs. This is what makes
+  # the production endpoints HTTPS/WSS — without it the shipped app cannot
+  # connect (iOS ATS / Android cleartext / the env-guard all require TLS).
+  caddy:
+    image: caddy:2-alpine
+    container_name: chathouse-caddy
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      ACME_EMAIL: ${ACME_EMAIL:-admin@chathouse.app}
+    ports:
+      - '80:80'
+      - '443:443'
+      - '443:443/udp'
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+  # ─── Self-hosted LiveKit (OPTIONAL) ──────────────────────────────────────
+  # Default recommendation is LiveKit Cloud (zero ops, global TURN). To
+  # self-host instead, run:  docker compose -f docker-compose.prod.yml --profile selfhost up -d
+  # and point LIVEKIT_URL at wss://livekit.chathouse.app (proxied to :7880).
+  # Production-grade self-hosting also needs a TURN server for clients behind
+  # symmetric NAT — see https://docs.livekit.io/home/self-hosting/.
+  livekit:
+    image: livekit/livekit-server:v1.8
+    container_name: chathouse-livekit
+    profiles: ['selfhost']
+    restart: unless-stopped
+    command: ['--config', '/etc/livekit.yaml']
+    environment:
+      # `key: secret` — must match LIVEKIT_API_KEY / LIVEKIT_API_SECRET above.
+      LIVEKIT_KEYS: '${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}'
+    volumes:
+      - ./livekit/livekit.yaml:/etc/livekit.yaml:ro
+    # LiveKit needs the signalling port + a UDP range for media. Put :7880
+    # behind the TLS proxy as wss; open the UDP range on the firewall.
+    ports:
+      - '7880:7880'
+      - '7881:7881'
+      - '50000-50100:50000-50100/udp'
+
+volumes:
+  postgres-data:
+  redis-data:
+  caddy-data:
+  caddy-config:

@@ -125,9 +125,9 @@ jobs:
             docker pull "$NEW_IMAGE"
 
             export CHATHOUSE_API_IMAGE="$NEW_IMAGE"
-            log "Recreating api service"
-            docker compose up -d --no-deps --pull always api || \
-              docker compose up -d --no-deps api
+            log "Recreating api service (migrations run automatically via the image entrypoint)"
+            docker compose -f docker-compose.prod.yml up -d --no-deps --pull always api || \
+              docker compose -f docker-compose.prod.yml up -d --no-deps api
 
             BASE_URL="${BASE_URL:-http://localhost:4000}"
 
@@ -159,7 +159,7 @@ jobs:
               if [ -n "$PREV_IMAGE" ]; then
                 export CHATHOUSE_API_IMAGE="$PREV_IMAGE"
                 docker pull "$PREV_IMAGE" || true
-                docker compose up -d --no-deps api
+                docker compose -f docker-compose.prod.yml up -d --no-deps api
                 log "Rolled back to ${PREV_IMAGE}"
               else
                 log "No previous image recorded — cannot auto-rollback"
