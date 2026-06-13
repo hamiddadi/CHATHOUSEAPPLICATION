@@ -9,7 +9,7 @@ import {
   View,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import * as ImagePicker from 'expo-image-picker';
+import { launchImageLibrary } from 'react-native-image-picker';
 import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
@@ -60,19 +60,20 @@ export const EditProfileScreen: React.FC = () => {
   }, [me]);
 
   const handlePickImage = async () => {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      allowsEditing: true,
-      aspect: [1, 1],
+    const result = await launchImageLibrary({
+      mediaType: 'photo',
+      includeBase64: true,
       quality: 0.8,
-      base64: true,
+      maxWidth: 1024,
+      maxHeight: 1024,
+      selectionLimit: 1,
     });
-
-    const asset = result.canceled ? undefined : result.assets[0];
-    if (asset) {
+    if (result.didCancel) return;
+    const asset = result.assets?.[0];
+    if (asset?.uri) {
       setAvatarUri(asset.uri);
       setAvatarBase64(asset.base64 ?? null);
-      setAvatarMime(asset.mimeType);
+      setAvatarMime(asset.type);
       impactLight();
     }
   };

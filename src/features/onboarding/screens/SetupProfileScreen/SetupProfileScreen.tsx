@@ -9,7 +9,7 @@ import {
   Text,
   View,
 } from 'react-native';
-import * as ImagePicker from 'expo-image-picker';
+import { launchImageLibrary } from 'react-native-image-picker';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -45,30 +45,20 @@ export const SetupProfileScreen: React.FC = () => {
 
   const pickImage = async () => {
     try {
-      // Request media-library permission first; on some OSes launching the
-      // picker without it rejects with an unhandled promise.
-      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!perm.granted) {
-        Alert.alert(
-          t('common.permissionDenied', 'Permission required'),
-          t('onboarding.setupProfile.photoPermission', 'Allow photo access to choose a picture.'),
-        );
-        return;
-      }
-
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images'],
-        allowsEditing: true,
-        aspect: [1, 1], // For circular crop
+      const result = await launchImageLibrary({
+        mediaType: 'photo',
+        includeBase64: true,
         quality: 0.8,
-        base64: true,
+        maxWidth: 1024,
+        maxHeight: 1024,
+        selectionLimit: 1,
       });
-
-      const asset = result.canceled ? undefined : result.assets[0];
-      if (asset) {
+      if (result.didCancel) return;
+      const asset = result.assets?.[0];
+      if (asset?.uri) {
         setAvatarUri(asset.uri);
         setAvatarBase64(asset.base64 ?? null);
-        setAvatarMime(asset.mimeType);
+        setAvatarMime(asset.type);
         impactLight();
       }
     } catch {

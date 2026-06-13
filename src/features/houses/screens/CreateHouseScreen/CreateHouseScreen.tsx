@@ -10,7 +10,7 @@ import {
   View,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import * as ImagePicker from 'expo-image-picker';
+import { launchImageLibrary } from 'react-native-image-picker';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -120,35 +120,22 @@ export const CreateHouseScreen: React.FC = () => {
 
   const handleClose = useCallback(() => navigation.goBack(), [navigation]);
   const handlePickIcon = useCallback(async () => {
-    // Request gallery permission lazily — Expo prompts the user the first
-    // time the picker is opened. The descriptions in app.json drive the
-    // text shown in the system dialog.
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (perm.status !== 'granted') {
-      Alert.alert(
-        t('houses.create.errorAccessTitle', 'Accès refusé'),
-        t(
-          'houses.create.errorAccessBody',
-          "Autorisez l'accès à vos photos pour ajouter une icône.",
-        ),
-      );
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
+    const result = await launchImageLibrary({
+      mediaType: 'photo',
+      includeBase64: true,
       quality: 0.8,
-      allowsEditing: true,
-      aspect: [1, 1],
-      base64: true,
+      maxWidth: 1024,
+      maxHeight: 1024,
+      selectionLimit: 1,
     });
-    if (result.canceled) return;
-    const asset = result.assets[0];
-    if (asset) {
+    if (result.didCancel) return;
+    const asset = result.assets?.[0];
+    if (asset?.uri) {
       setIconUri(asset.uri);
       setIconBase64(asset.base64 ?? null);
-      setIconMime(asset.mimeType);
+      setIconMime(asset.type);
     }
-  }, [t]);
+  }, []);
 
   const handleCreate = useCallback(async () => {
     try {

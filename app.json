@@ -54,12 +54,6 @@
       "expo-localization",
       "@sentry/react-native",
       [
-        "expo-image-picker",
-        {
-          "photosPermission": "Chathouse needs photo access to update your profile photo."
-        }
-      ],
-      [
         "expo-location",
         {
           "locationWhenInUsePermission": "Chathouse shows nearby rooms on the map when you allow location access.",
