@@ -49,16 +49,7 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-localization",
       "@sentry/react-native",
-      [
-        "expo-location",
-        {
-          "locationWhenInUsePermission": "Chathouse shows nearby rooms on the map when you allow location access.",
-          "isAndroidBackgroundLocationEnabled": false,
-          "isAndroidForegroundServiceEnabled": false
-        }
-      ],
       [
         "expo-build-properties",
         {

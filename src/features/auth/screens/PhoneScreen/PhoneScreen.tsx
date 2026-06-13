@@ -7,7 +7,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Controller, useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useTranslation } from 'react-i18next';
-import * as Localization from 'expo-localization';
+import { getLocales } from 'react-native-localize';
 import { AsYouType, type CountryCode } from 'libphonenumber-js';
 import { Button } from '../../../../shared/components/Button';
 import { Input } from '../../../../shared/components/Input';
@@ -32,7 +32,7 @@ export const PhoneScreen: React.FC = () => {
 
   const [countryPickerVisible, setCountryPickerVisible] = useState(false);
 
-  const initialCountryCode = (Localization.getLocales()[0]?.regionCode as CountryCode) || 'US';
+  const initialCountryCode = (getLocales()[0]?.countryCode as CountryCode) || 'US';
   const detectedCountry = (COUNTRIES.find(c => c.cca2 === initialCountryCode) ??
     COUNTRIES.find(c => c.cca2 === 'US') ??
     COUNTRIES[0]) as Country;

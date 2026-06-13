@@ -1,18 +1,32 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert } from 'react-native';
-import * as Location from 'expo-location';
+import { Alert, PermissionsAndroid } from 'react-native';
+import Geolocation from '@react-native-community/geolocation';
 
 const UPDATE_INTERVAL_MS = 30_000;
 const UPDATE_DISTANCE_M = 25;
-// Guard against devices with no GPS fix: getCurrentPositionAsync can otherwise
-// stay pending indefinitely, leaving the user stuck on the "Locating you" loader.
+// Guard against devices with no GPS fix: getCurrentPosition can otherwise stay
+// pending indefinitely, leaving the user stuck on the "Locating you" loader.
 const INITIAL_FIX_TIMEOUT_MS = 8_000;
 
 export type LocationPermission = 'unknown' | 'granted' | 'denied' | 'disabled';
 
+/**
+ * Minimal coords shape used across the maps feature (de-Expo: replaces
+ * expo-location's LocationObjectCoords). Structurally compatible with
+ * @react-native-community/geolocation's `position.coords`.
+ */
+export interface GeoCoords {
+  latitude: number;
+  longitude: number;
+  accuracy: number | null;
+  altitude: number | null;
+  heading: number | null;
+  speed: number | null;
+}
+
 interface UseCurrentLocationReturn {
   permission: LocationPermission;
-  coords: Location.LocationObjectCoords | null;
+  coords: GeoCoords | null;
   error: string | null;
   requestAgain: () => Promise<void>;
   /**
@@ -24,28 +38,33 @@ interface UseCurrentLocationReturn {
 }
 
 /**
- * Subscribes to foreground location updates at most every 30s / 25m.
- * The hook does NOT push to the backend — that's `useLocationBroadcast`'s job.
+ * Subscribes to foreground location updates at most every 30s / 25m
+ * (de-Expo: was expo-location; now @react-native-community/geolocation +
+ * PermissionsAndroid). Does NOT push to the backend — that's
+ * `useLocationBroadcast`'s job.
  */
 export const useCurrentLocation = (): UseCurrentLocationReturn => {
   const [permission, setPermission] = useState<LocationPermission>('unknown');
-  const [coords, setCoords] = useState<Location.LocationObjectCoords | null>(null);
+  const [coords, setCoords] = useState<GeoCoords | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
-  const subRef = useRef<Location.LocationSubscription | null>(null);
+  const watchIdRef = useRef<number | null>(null);
+
+  const clearWatch = useCallback(() => {
+    if (watchIdRef.current !== null) {
+      Geolocation.clearWatch(watchIdRef.current);
+      watchIdRef.current = null;
+    }
+  }, []);
 
   const start = useCallback(async () => {
     try {
-      const enabled = await Location.hasServicesEnabledAsync();
-      if (!enabled) {
-        setPermission('disabled');
-        return;
-      }
+      const already = await PermissionsAndroid.check(
+        PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+      );
 
-      const currentStatus = await Location.getForegroundPermissionsAsync();
-
-      if (currentStatus.status !== 'granted' && currentStatus.canAskAgain) {
-        // GDPR Consent Pre-prompt
+      if (!already) {
+        // GDPR consent pre-prompt before the OS dialog.
         const userConsented = await new Promise<boolean>(resolve => {
           Alert.alert(
             'Location Consent',
@@ -56,55 +75,63 @@ export const useCurrentLocation = (): UseCurrentLocationReturn => {
             ],
           );
         });
-
         if (!userConsented) {
           setPermission('denied');
           return;
         }
-      }
 
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        setPermission('denied');
-        return;
+        const result = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+        );
+        if (result !== PermissionsAndroid.RESULTS.GRANTED) {
+          setPermission('denied');
+          return;
+        }
       }
       setPermission('granted');
 
       // Race the first fix against a timeout so a missing GPS fix can't hang
-      // the promise forever. If it times out we leave `coords` null and rely on
-      // watchPositionAsync below to deliver the position when it becomes available.
-      const initial = await Promise.race([
-        Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
+      // forever. On timeout we leave `coords` null and rely on watchPosition
+      // below to deliver the position when it becomes available.
+      const initial = await Promise.race<{ coords: GeoCoords } | null>([
+        new Promise<{ coords: GeoCoords } | null>(resolve => {
+          Geolocation.getCurrentPosition(
+            pos => resolve({ coords: pos.coords }),
+            err => {
+              // code 2 = POSITION_UNAVAILABLE (device location services off).
+              if (err.code === 2) setPermission('disabled');
+              resolve(null);
+            },
+            { enableHighAccuracy: false, timeout: INITIAL_FIX_TIMEOUT_MS, maximumAge: 10_000 },
+          );
+        }),
         new Promise<null>(resolve => setTimeout(() => resolve(null), INITIAL_FIX_TIMEOUT_MS)),
       ]);
       if (initial) setCoords(initial.coords);
       setReady(true);
 
       // Defensive: drop any prior watcher before creating a new one, so a rapid
-      // re-invocation of start() (e.g. double-tap "Grant access") can't leak the
-      // previous subscription.
-      subRef.current?.remove();
-      subRef.current = await Location.watchPositionAsync(
-        {
-          accuracy: Location.Accuracy.Balanced,
-          timeInterval: UPDATE_INTERVAL_MS,
-          distanceInterval: UPDATE_DISTANCE_M,
-        },
+      // re-invocation of start() (e.g. double-tap "Grant access") can't leak it.
+      clearWatch();
+      watchIdRef.current = Geolocation.watchPosition(
         pos => setCoords(pos.coords),
+        () => undefined,
+        {
+          enableHighAccuracy: false,
+          distanceFilter: UPDATE_DISTANCE_M,
+          interval: UPDATE_INTERVAL_MS,
+        },
       );
     } catch (e) {
       setError((e as Error).message);
       setReady(true);
     }
-  }, []);
+  }, [clearWatch]);
 
   useEffect(() => {
     void start();
-    return () => {
-      subRef.current?.remove();
-      subRef.current = null;
-    };
-  }, [start]);
+    return () => clearWatch();
+  }, [start, clearWatch]);
 
   return { permission, coords, error, requestAgain: start, ready };
 };

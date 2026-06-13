@@ -1,14 +1,14 @@
 import { useEffect } from 'react';
-import type { LocationObjectCoords } from 'expo-location';
 import { getSocket } from '../../../shared/services/realtime/socketClient';
 import { useGhostModeStore } from '../store/ghostModeStore';
+import type { GeoCoords } from './useCurrentLocation';
 
 /**
  * Pushes the user's location to the realtime server as it changes.
  * Respects Ghost Mode: when ON the coords are discarded client-side — the
  * server never learns the position.
  */
-export const useLocationBroadcast = (coords: LocationObjectCoords | null): void => {
+export const useLocationBroadcast = (coords: GeoCoords | null): void => {
   const isGhost = useGhostModeStore(s => s.isGhost);
 
   useEffect(() => {

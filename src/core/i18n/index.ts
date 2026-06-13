@@ -1,7 +1,7 @@
 // eslint-disable-next-line import/no-named-as-default
 import i18next from 'i18next';
 import { initReactI18next } from 'react-i18next';
-import { getLocales } from 'expo-localization';
+import { getLocales } from 'react-native-localize';
 import en from './locales/en.json';
 import fr from './locales/fr.json';
 
