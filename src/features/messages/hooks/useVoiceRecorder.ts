@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { PermissionsAndroid } from 'react-native';
-import AudioRecorderPlayer, {
+import {
   AudioEncoderAndroidType,
   AudioSourceAndroidType,
   OutputFormatAndroidType,
 } from 'react-native-audio-recorder-player';
-import { useVoicePlayback } from '../../../shared/services/audio/voicePlayback';
+import {
+  audioRecorderPlayer,
+  useVoicePlayback,
+} from '../../../shared/services/audio/voicePlayback';
 
 // Clamp the captured length so the backend (durationMs ≤ 5 min) never rejects a
 // send on duration, and ignore taps so short they produce no real audio.
@@ -40,7 +43,8 @@ export interface VoiceRecorder {
 
 /**
  * Thin wrapper around react-native-audio-recorder-player's recorder for async
- * voice messages (de-Expo: was expo-audio). Owns the permission prompt and an
+ * voice messages (de-Expo: was expo-audio). Shares the single recorder+player
+ * instance with the playback store. Owns the permission prompt and an
  * elapsed-time read-out, and hands back the recorded file URI + length.
  * Recording uses a native module, so it only works in a dev/EAS build (not Expo
  * Go) — the same constraint LiveKit already imposes on this app.
@@ -54,9 +58,9 @@ export const useVoiceRecorder = (): VoiceRecorder => {
   const uriRef = useRef<string | null>(null);
 
   const teardownRecorder = useCallback(async (): Promise<string | null> => {
-    AudioRecorderPlayer.removeRecordBackListener();
+    audioRecorderPlayer.removeRecordBackListener();
     try {
-      const result = await AudioRecorderPlayer.stopRecorder();
+      const result = await audioRecorderPlayer.stopRecorder();
       return result || uriRef.current;
     } catch (err) {
       console.warn('[voice] recorder stop failed', err);
@@ -78,9 +82,9 @@ export const useVoiceRecorder = (): VoiceRecorder => {
       await useVoicePlayback.getState().stop();
 
       lastPosRef.current = 0;
-      const uri = await AudioRecorderPlayer.startRecorder(undefined, AUDIO_SET);
+      const uri = await audioRecorderPlayer.startRecorder(undefined, AUDIO_SET);
       uriRef.current = uri;
-      AudioRecorderPlayer.addRecordBackListener(e => {
+      audioRecorderPlayer.addRecordBackListener(e => {
         lastPosRef.current = e.currentPosition;
         setElapsedMs(e.currentPosition);
       });
@@ -125,8 +129,8 @@ export const useVoiceRecorder = (): VoiceRecorder => {
     () => () => {
       if (activeRef.current) {
         activeRef.current = false;
-        AudioRecorderPlayer.removeRecordBackListener();
-        void AudioRecorderPlayer.stopRecorder().catch(() => undefined);
+        audioRecorderPlayer.removeRecordBackListener();
+        void audioRecorderPlayer.stopRecorder().catch(() => undefined);
       }
     },
     [],

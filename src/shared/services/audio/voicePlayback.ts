@@ -2,38 +2,35 @@ import AudioRecorderPlayer from 'react-native-audio-recorder-player';
 import { create } from 'zustand';
 
 /**
- * Shared voice-note playback (de-Expo: replaces the per-component expo-audio
- * `useAudioPlayer` hooks). react-native-audio-recorder-player exposes a SINGLE
- * global player, so playback must be coordinated centrally instead of one
- * player per rendered row. This store owns that single player; the chat
- * `VoiceMessageBubble` and room `ReplayPlayer` rows are thin consumers that
- * derive their own play/progress state only when `activeUrl === their url`.
- *
- * Only the active row re-renders on the per-tick position updates (the others
- * select stable values), so an N-row FlatList stays cheap.
+ * Shared single recorder+player instance (de-Expo: replaces the per-component
+ * expo-audio `useAudioPlayer` hooks). react-native-audio-recorder-player 3.x is
+ * a class, but the native side is a singleton — one instance backs both playback
+ * (this store) and recording (useVoiceRecorder), which lets us coordinate the
+ * single player across the N chat/replay rows. (4.x's Nitro C++ build fails the
+ * ninja/CMake step on Windows, so we stay on the classic-native 3.x line.)
+ */
+export const audioRecorderPlayer = new AudioRecorderPlayer();
+
+/**
+ * Voice-note playback state. The chat `VoiceMessageBubble` and room
+ * `ReplayPlayer` rows are thin consumers that derive their own play/progress
+ * only when `activeUrl === their url`; selective subscriptions keep inactive
+ * rows from re-rendering on the active clip's per-tick updates.
  */
 interface VoicePlaybackState {
-  /** URL of the clip currently loaded into the single player (null = idle). */
   activeUrl: string | null;
   playing: boolean;
   positionMs: number;
   durationMs: number;
-  /** Play / pause / resume / restart the given clip on the shared player. */
   toggle: (url: string, fallbackDurationMs?: number | null) => Promise<void>;
-  /** Stop and release the active clip (e.g. before recording). */
   stop: () => Promise<void>;
 }
 
 export const useVoicePlayback = create<VoicePlaybackState>((set, get) => {
-  const detach = (): void => {
-    AudioRecorderPlayer.removePlayBackListener();
-    AudioRecorderPlayer.removePlaybackEndListener();
-  };
-
   const stopActive = async (): Promise<void> => {
-    detach();
+    audioRecorderPlayer.removePlayBackListener();
     try {
-      await AudioRecorderPlayer.stopPlayer();
+      await audioRecorderPlayer.stopPlayer();
     } catch {
       /* already stopped / nothing loaded — ignore */
     }
@@ -50,17 +47,16 @@ export const useVoicePlayback = create<VoicePlaybackState>((set, get) => {
       if (s.activeUrl === url) {
         if (s.playing) {
           try {
-            await AudioRecorderPlayer.pausePlayer();
+            await audioRecorderPlayer.pausePlayer();
           } catch {
             /* ignore */
           }
           set({ playing: false });
           return;
         }
-        // Paused mid-clip → resume; finished/at-start → fall through to restart.
         if (s.positionMs > 0 && s.positionMs < s.durationMs) {
           try {
-            await AudioRecorderPlayer.resumePlayer();
+            await audioRecorderPlayer.resumePlayer();
             set({ playing: true });
             return;
           } catch {
@@ -76,20 +72,22 @@ export const useVoicePlayback = create<VoicePlaybackState>((set, get) => {
         positionMs: 0,
         durationMs: fallbackDurationMs ?? 0,
       });
-      AudioRecorderPlayer.addPlayBackListener(e => {
+      audioRecorderPlayer.addPlayBackListener(e => {
+        // 3.x has no playback-end listener — detect completion via position.
+        if (e.duration > 0 && e.currentPosition >= e.duration) {
+          audioRecorderPlayer.removePlayBackListener();
+          void audioRecorderPlayer.stopPlayer().catch(() => undefined);
+          // Keep activeUrl so the finished row stays selected; the next tap
+          // restarts from 0 (falls through the resume guard above).
+          set({ playing: false, positionMs: 0 });
+          return;
+        }
         set({ positionMs: e.currentPosition, durationMs: e.duration || get().durationMs });
       });
-      AudioRecorderPlayer.addPlaybackEndListener(() => {
-        detach();
-        void AudioRecorderPlayer.stopPlayer().catch(() => undefined);
-        // Keep activeUrl so the finished row still shows itself selected; the
-        // next tap on it restarts from 0 (falls through the resume guard above).
-        set({ playing: false, positionMs: 0 });
-      });
       try {
-        await AudioRecorderPlayer.startPlayer(url);
+        await audioRecorderPlayer.startPlayer(url);
       } catch {
-        detach();
+        audioRecorderPlayer.removePlayBackListener();
         set({ activeUrl: null, playing: false, positionMs: 0, durationMs: 0 });
       }
     },
