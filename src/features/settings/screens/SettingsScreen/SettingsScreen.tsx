@@ -1,12 +1,12 @@
 import React, { memo, useCallback, useMemo, useState } from 'react';
 import { Alert, Image, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import Animated, { useAnimatedStyle, withTiming } from 'react-native-reanimated';
-import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { useQuery } from '@tanstack/react-query';
+import { GradientView } from '../../../../shared/components/GradientView';
 import { invitesApi } from '../../../extensions/api/invitesApi';
 import { ExtPremiumRow } from '../../../extensions/components/ExtPremiumRow';
 import { ExtThemeToggle } from '../../../extensions/components/ExtThemeToggle';
@@ -250,7 +250,7 @@ export const SettingsScreen: React.FC = () => {
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.hero}>
-          <LinearGradient
+          <GradientView
             colors={HERO_GRADIENT}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
@@ -324,7 +324,7 @@ export const SettingsScreen: React.FC = () => {
               accessibilityLabel={t('settings.editProfile')}
               className="rounded-pill overflow-hidden active:opacity-90"
             >
-              <LinearGradient
+              <GradientView
                 colors={PRIMARY_GRADIENT}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}
@@ -333,7 +333,7 @@ export const SettingsScreen: React.FC = () => {
                 <Text className="text-sm font-body-bold text-on-primary-container">
                   {t('settings.editProfile')}
                 </Text>
-              </LinearGradient>
+              </GradientView>
             </Pressable>
             <Pressable
               onPress={handleWave}
@@ -361,7 +361,7 @@ export const SettingsScreen: React.FC = () => {
             accessibilityLabel={t('settings.createHouseA11y', 'Create a new house')}
             className="rounded-pill overflow-hidden active:opacity-90"
           >
-            <LinearGradient
+            <GradientView
               colors={ACCENT_GRADIENT}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 0 }}
@@ -371,7 +371,7 @@ export const SettingsScreen: React.FC = () => {
               <Text className="text-sm font-body-bold text-white ml-sm">
                 {t('settings.createHouse')}
               </Text>
-            </LinearGradient>
+            </GradientView>
           </Pressable>
         </View>
 

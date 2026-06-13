@@ -1,7 +1,7 @@
 import React, { memo } from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialIcons } from '@expo/vector-icons';
+import { GradientView } from '../../../../../shared/components/GradientView';
 import { colors, spacing } from '../../../../../shared/constants/theme';
 import { DEFAULTS } from '../../../../../shared/constants/images';
 import type { Message } from '../../../../../shared/types/domain';
@@ -32,7 +32,7 @@ const Bubble: React.FC<BubbleProps> = memo(({ message, otherAvatar, showAvatar }
   if (message.isMine) {
     return (
       <View style={styles.sentRow}>
-        <LinearGradient
+        <GradientView
           colors={SENT_GRADIENT}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
@@ -47,7 +47,7 @@ const Bubble: React.FC<BubbleProps> = memo(({ message, otherAvatar, showAvatar }
           ) : (
             <Text className="text-sm font-body text-white leading-relaxed">{message.text}</Text>
           )}
-        </LinearGradient>
+        </GradientView>
         <View style={styles.metaRowRight}>
           <Text className="text-[10px] text-ink-muted">{formatTime(message.sentAt)}</Text>
           <MaterialIcons name="done-all" size={12} color={colors.primary} />

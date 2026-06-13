@@ -1,6 +1,6 @@
 import React, { memo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
+import { GradientView } from '../../../../../shared/components/GradientView';
 
 interface SectionLabelProps {
   label: string;
@@ -19,7 +19,7 @@ const SectionLabel: React.FC<SectionLabelProps> = memo(({ label, emphasis = fals
       {label}
     </Text>
     {emphasis && (
-      <LinearGradient
+      <GradientView
         colors={['rgba(0,228,117,0.2)', 'rgba(0,228,117,0)']}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 0 }}

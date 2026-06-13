@@ -1,8 +1,8 @@
 import React, { memo } from 'react';
 import { Pressable, StyleSheet, TextInput, View } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
+import { GradientView } from '../../../../../shared/components/GradientView';
 import { colors, spacing } from '../../../../../shared/constants/theme';
 
 const INPUT_ICON_SIZE = 22;
@@ -87,14 +87,14 @@ const ChatInputBar: React.FC<ChatInputBarProps> = memo(
             disabled={!canSend}
             className="rounded-pill overflow-hidden active:opacity-90"
           >
-            <LinearGradient
+            <GradientView
               colors={SEND_GRADIENT}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
               style={styles.sendBtn}
             >
               <MaterialIcons name="send" size={INPUT_ICON_SIZE} color={colors.onPrimary} />
-            </LinearGradient>
+            </GradientView>
           </Pressable>
         ) : (
           <Pressable

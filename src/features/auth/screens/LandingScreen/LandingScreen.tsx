@@ -1,7 +1,6 @@
 import React, { memo, useCallback, useMemo } from 'react';
 import { Platform, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
@@ -11,6 +10,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { useTranslation } from 'react-i18next';
+import { GradientView } from '../../../../shared/components/GradientView';
 import { Avatar } from '../../../../shared/components/Avatar';
 import { useAnimatedPress } from '../../../../shared/hooks/useAnimatedPress';
 import { useOnMount } from '../../../../shared/hooks/useOnMount';
@@ -315,7 +315,7 @@ export const LandingScreen: React.FC = () => {
   );
 
   return (
-    <LinearGradient
+    <GradientView
       colors={GRADIENT_COLORS}
       start={{ x: 0, y: 0 }}
       end={{ x: 1, y: 1 }}
@@ -369,7 +369,7 @@ export const LandingScreen: React.FC = () => {
           labels={ctaLabels}
         />
       </Animated.View>
-    </LinearGradient>
+    </GradientView>
   );
 };
 
