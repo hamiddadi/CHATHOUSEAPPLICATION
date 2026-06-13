@@ -17,12 +17,12 @@ import androidx.core.app.NotificationCompat
  *
  * Declared in AndroidManifest.xml with `foregroundServiceType="mediaPlayback"`
  * (and `stopWithTask="true"`). The manifest entry + the FOREGROUND_SERVICE /
- * FOREGROUND_SERVICE_MEDIA_PLAYBACK / POST_NOTIFICATIONS permissions were
- * previously injected by the `with-audio-background` Expo config plugin, but the
- * service had NO implementation — the plugin only patched the manifest. This
- * class is authored here as part of committing the bare `android/` project to
- * git (de-Expo migration): a manifest <service> with no backing class is a
- * latent ClassNotFoundException the moment anything tries to start it.
+ * FOREGROUND_SERVICE_MEDIA_PLAYBACK / POST_NOTIFICATIONS permissions are injected
+ * by the `with-audio-background` Expo config plugin, but the plugin only patches
+ * the manifest -- the service had NO implementation. This class is authored as
+ * part of committing the bare `android/` project to git (de-Expo migration): a
+ * manifest <service> with no backing class is a latent ClassNotFoundException the
+ * moment anything tries to start it.
  *
  * Lifecycle: started with ACTION_START when a room becomes active and stopped
  * with ACTION_STOP (or automatically when the task is removed). Wiring a JS
