@@ -1,16 +1,21 @@
-const { getDefaultConfig } = require('expo/metro-config');
+const { getDefaultConfig, mergeConfig } = require('@react-native/metro-config');
 const { withNativeWind } = require('nativewind/metro');
 
-/** @type {import('expo/metro-config').MetroConfig} */
-const config = getDefaultConfig(__dirname);
+/** @type {import('@react-native/metro-config').MetroConfig} */
+const defaultConfig = getDefaultConfig(__dirname);
 
-// Disable strict package.json `exports` resolution. Some native deps (notably
-// `react-native-webrtc`'s nested `event-target-shim`) declare an `exports`
-// field that omits subpaths their internal code still imports — Metro's
-// strict mode warns on every bundle and falls back anyway. Turning this off
-// silences the noise and keeps the legacy resolution that Expo SDK <= 52
-// used. Re-enable once upstream packages catch up.
-config.resolver.unstable_enablePackageExports = false;
+const config = {
+  resolver: {
+    // Disable strict package.json `exports` resolution. Some native deps (notably
+    // `react-native-webrtc`'s nested `event-target-shim`) declare an `exports`
+    // field that omits subpaths their internal code still imports — Metro's
+    // strict mode warns on every bundle and falls back anyway. Turning this off
+    // silences the noise and keeps the legacy resolution that previous SDKs used.
+    unstable_enablePackageExports: false,
+  },
+};
+
+const mergedConfig = mergeConfig(defaultConfig, config);
 
 // Optional native modules that may not be installed (e.g. `expo-contacts` is
 // only needed for the contacts-sync extension). Resolve them to an empty module
@@ -19,8 +24,8 @@ config.resolver.unstable_enablePackageExports = false;
 // `import('expo-contacts')` which broke the release Hermes compile (hermesc
 // rejects dynamic `import()` — "Invalid expression encountered").
 const OPTIONAL_NATIVE_MODULES = ['expo-contacts', 'expo-device'];
-const defaultResolveRequest = config.resolver.resolveRequest;
-config.resolver.resolveRequest = (context, moduleName, platform) => {
+const defaultResolveRequest = mergedConfig.resolver.resolveRequest;
+mergedConfig.resolver.resolveRequest = (context, moduleName, platform) => {
   if (OPTIONAL_NATIVE_MODULES.includes(moduleName)) {
     try {
       const resolver = defaultResolveRequest ?? context.resolveRequest;
@@ -33,4 +38,4 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
   return resolver(context, moduleName, platform);
 };
 
-module.exports = withNativeWind(config, { input: './global.css' });
+module.exports = withNativeWind(mergedConfig, { input: './global.css' });

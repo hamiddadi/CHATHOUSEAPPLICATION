@@ -17,7 +17,9 @@ expo-env.d.ts
 
 # Native
 ios/
-android/
+# android/ is now a committed, hand-maintained bare React Native project (de-Expo
+# migration). Build artifacts under it stay ignored via android/.gitignore and the
+# generic `build/` rule below. Only source + gradle wrapper + debug.keystore commit.
 *.jks
 *.p8
 *.p12
