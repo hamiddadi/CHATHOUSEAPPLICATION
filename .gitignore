@@ -51,3 +51,6 @@ build/
 # the files are environment-specific and must not be versioned. The directory
 # is mkdir'd on first write (backend/src/modules/upload/upload.service.ts).
 backend/uploads/
+
+# Firebase (carries project API key) — provided locally / via CI secret, not committed
+android/app/google-services.json
