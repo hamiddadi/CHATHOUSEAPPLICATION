@@ -14,9 +14,9 @@ interface VoiceUploadEnvelope {
   url?: string;
 }
 
-// Recorded file extension → audio MIME the backend whitelists. expo-audio's
-// HIGH_QUALITY preset yields .m4a on both iOS and Android; the rest are
-// tolerated so a different codec still uploads.
+// Recorded file extension → audio MIME the backend whitelists. The recorder
+// (react-native-audio-recorder-player, MPEG-4/AAC) yields a .mp4 file on
+// Android; the rest are tolerated so a different codec still uploads.
 const EXT_MIME: Record<string, string> = {
   m4a: 'audio/m4a',
   mp4: 'audio/mp4',

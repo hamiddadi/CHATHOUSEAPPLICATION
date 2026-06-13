@@ -1,9 +1,9 @@
 import React, { useCallback } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { setAudioModeAsync, useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 import { useTranslation } from 'react-i18next';
 import { colors, spacing } from '../../../shared/constants/theme';
+import { useVoicePlayback } from '../../../shared/services/audio/voicePlayback';
 
 interface VoiceMessageBubbleProps {
   audioUrl: string;
@@ -23,8 +23,10 @@ const formatClock = (seconds: number): string => {
 /**
  * Inline player for an async voice note. Rendered inside the caller's message
  * bubble (which supplies the background), so it only paints the play control,
- * a progress track, and the time. Each instance owns one expo-audio player;
- * FlatList virtualization keeps only on-screen bubbles mounted.
+ * a progress track, and the time. Playback runs on the app-wide single player
+ * (de-Expo: react-native-audio-recorder-player via the useVoicePlayback store),
+ * so only one note plays at a time. Selective store subscriptions keep inactive
+ * rows from re-rendering on the active clip's per-tick position updates.
  */
 const VoiceMessageBubble: React.FC<VoiceMessageBubbleProps> = ({
   audioUrl,
@@ -32,26 +34,20 @@ const VoiceMessageBubble: React.FC<VoiceMessageBubbleProps> = ({
   isMine,
 }) => {
   const { t } = useTranslation();
-  const player = useAudioPlayer(audioUrl);
-  const status = useAudioPlayerStatus(player);
+  const playing = useVoicePlayback(s => s.activeUrl === audioUrl && s.playing);
+  const positionMs = useVoicePlayback(s => (s.activeUrl === audioUrl ? s.positionMs : 0));
+  const activeDurationMs = useVoicePlayback(s => (s.activeUrl === audioUrl ? s.durationMs : 0));
+  const toggle = useVoicePlayback(s => s.toggle);
 
-  const totalSec = durationMs != null ? durationMs / 1000 : status.duration || 0;
-  const progress = totalSec > 0 ? Math.min(1, status.currentTime / totalSec) : 0;
-  const showElapsed = status.playing || status.currentTime > 0;
-  const clock = formatClock(showElapsed ? status.currentTime : totalSec);
+  const totalSec = durationMs != null ? durationMs / 1000 : activeDurationMs / 1000 || 0;
+  const currentSec = positionMs / 1000;
+  const progress = totalSec > 0 ? Math.min(1, currentSec / totalSec) : 0;
+  const showElapsed = positionMs > 0;
+  const clock = formatClock(showElapsed ? currentSec : totalSec);
 
   const onToggle = useCallback(() => {
-    if (status.playing) {
-      player.pause();
-      return;
-    }
-    // Make sure a muted/silent device still plays the note back.
-    void setAudioModeAsync({ playsInSilentMode: true });
-    if (status.didJustFinish || (totalSec > 0 && status.currentTime >= totalSec)) {
-      player.seekTo(0);
-    }
-    player.play();
-  }, [player, status.playing, status.didJustFinish, status.currentTime, totalSec]);
+    void toggle(audioUrl, durationMs);
+  }, [toggle, audioUrl, durationMs]);
 
   const fg = isMine ? '#FFFFFF' : colors.text;
   const trackBg = isMine ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.12)';
@@ -61,11 +57,11 @@ const VoiceMessageBubble: React.FC<VoiceMessageBubbleProps> = ({
       <Pressable
         onPress={onToggle}
         accessibilityRole="button"
-        accessibilityLabel={status.playing ? t('voice.pauseA11y') : t('voice.playA11y')}
+        accessibilityLabel={playing ? t('voice.pauseA11y') : t('voice.playA11y')}
         hitSlop={8}
         style={[styles.playBtn, { borderColor: fg }]}
       >
-        <MaterialIcons name={status.playing ? 'pause' : 'play-arrow'} size={20} color={fg} />
+        <MaterialIcons name={playing ? 'pause' : 'play-arrow'} size={20} color={fg} />
       </Pressable>
       <View style={styles.body}>
         <View style={[styles.track, { backgroundColor: trackBg }]}>

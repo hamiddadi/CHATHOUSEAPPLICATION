@@ -57,6 +57,9 @@ module.exports = {
     'react-native/sort-styles': 'off',
     'react-native/no-inline-styles': 'warn',
     'react-native/no-unused-styles': 'warn',
+    // Android-only app (no ios/): importing PermissionsAndroid etc. directly is
+    // correct; the .android/.ios split this rule enforces doesn't apply.
+    'react-native/split-platform-components': 'off',
 
     // ---- Imports hygiene ----
     'import/order': [

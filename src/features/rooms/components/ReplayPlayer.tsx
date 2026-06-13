@@ -1,9 +1,9 @@
 import React, { useCallback } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { setAudioModeAsync, useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 import { useTranslation } from 'react-i18next';
 import { colors, spacing } from '../../../shared/constants/theme';
+import { useVoicePlayback } from '../../../shared/services/audio/voicePlayback';
 
 interface ReplayPlayerProps {
   url: string;
@@ -19,45 +19,37 @@ const formatClock = (seconds: number): string => {
 
 /**
  * Inline audio player for a room Replay. Streams the stored recording over its
- * public URL via expo-audio (same engine as the chat voice notes). One player
- * per mounted row; the Replays list virtualizes so only visible rows hold one.
+ * public URL on the app-wide single player (de-Expo: react-native-audio-recorder-player
+ * via the useVoicePlayback store — same engine the chat voice notes use), so a
+ * Replay and a chat note never play over each other.
  */
 const ReplayPlayer: React.FC<ReplayPlayerProps> = ({ url, durationMs }) => {
   const { t } = useTranslation();
-  const player = useAudioPlayer(url);
-  const status = useAudioPlayerStatus(player);
+  const playing = useVoicePlayback(s => s.activeUrl === url && s.playing);
+  const positionMs = useVoicePlayback(s => (s.activeUrl === url ? s.positionMs : 0));
+  const activeDurationMs = useVoicePlayback(s => (s.activeUrl === url ? s.durationMs : 0));
+  const toggle = useVoicePlayback(s => s.toggle);
 
-  const totalSec = durationMs != null ? durationMs / 1000 : status.duration || 0;
-  const progress = totalSec > 0 ? Math.min(1, status.currentTime / totalSec) : 0;
-  const showElapsed = status.playing || status.currentTime > 0;
-  const clock = formatClock(showElapsed ? status.currentTime : totalSec);
+  const totalSec = durationMs != null ? durationMs / 1000 : activeDurationMs / 1000 || 0;
+  const currentSec = positionMs / 1000;
+  const progress = totalSec > 0 ? Math.min(1, currentSec / totalSec) : 0;
+  const showElapsed = positionMs > 0;
+  const clock = formatClock(showElapsed ? currentSec : totalSec);
 
   const onToggle = useCallback(() => {
-    if (status.playing) {
-      player.pause();
-      return;
-    }
-    void setAudioModeAsync({ playsInSilentMode: true });
-    if (status.didJustFinish || (totalSec > 0 && status.currentTime >= totalSec)) {
-      player.seekTo(0);
-    }
-    player.play();
-  }, [player, status.playing, status.didJustFinish, status.currentTime, totalSec]);
+    void toggle(url, durationMs);
+  }, [toggle, url, durationMs]);
 
   return (
     <View style={styles.row}>
       <Pressable
         onPress={onToggle}
         accessibilityRole="button"
-        accessibilityLabel={status.playing ? t('voice.pauseA11y') : t('replays.playA11y')}
+        accessibilityLabel={playing ? t('voice.pauseA11y') : t('replays.playA11y')}
         hitSlop={8}
         style={styles.playBtn}
       >
-        <MaterialIcons
-          name={status.playing ? 'pause' : 'play-arrow'}
-          size={22}
-          color={colors.onPrimary}
-        />
+        <MaterialIcons name={playing ? 'pause' : 'play-arrow'} size={22} color={colors.onPrimary} />
       </Pressable>
       <View style={styles.body}>
         <View style={styles.track}>
