@@ -1,6 +1,7 @@
 import React, { memo, useCallback, useState } from 'react';
 import {
   Alert,
+  Image,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -10,7 +11,6 @@ import {
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import { Image } from 'expo-image';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -225,8 +225,7 @@ export const CreateHouseScreen: React.FC = () => {
               <Image
                 source={{ uri: iconUri }}
                 style={{ width: ICON_UPLOAD_SIZE, height: ICON_UPLOAD_SIZE }}
-                contentFit="cover"
-                cachePolicy="memory-disk"
+                resizeMode="cover"
               />
             ) : (
               <MaterialIcons name="add-a-photo" size={28} color={colors.text} />

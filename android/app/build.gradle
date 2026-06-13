@@ -167,6 +167,12 @@ dependencies {
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")
 
+    // Splash-screen theme attrs (Theme.SplashScreen + windowSplashScreen*) used by
+    // res/values/styles.xml (MainActivity launch theme). Previously pulled in
+    // transitively by expo-splash-screen; added explicitly after that package was
+    // removed in the de-Expo migration, or AAPT resource linking fails.
+    implementation("androidx.core:core-splashscreen:1.0.1")
+
     def isGifEnabled = (findProperty('expo.gif.enabled') ?: "") == "true";
     def isWebpEnabled = (findProperty('expo.webp.enabled') ?: "") == "true";
     def isWebpAnimatedEnabled = (findProperty('expo.webp.animated') ?: "") == "true";

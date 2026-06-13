@@ -1,6 +1,7 @@
 import React, { useCallback, useState } from 'react';
 import {
   Alert,
+  Image,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -8,7 +9,6 @@ import {
   Text,
   View,
 } from 'react-native';
-import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
@@ -152,7 +152,7 @@ export const SetupProfileScreen: React.FC = () => {
               <Image
                 source={{ uri: avatarUri }}
                 style={setupStyles.avatarImage}
-                contentFit="cover"
+                resizeMode="cover"
               />
             ) : (
               <MaterialIcons name="camera-alt" size={40} color={colors.textMuted} />

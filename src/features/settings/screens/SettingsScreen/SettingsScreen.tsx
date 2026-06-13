@@ -1,6 +1,5 @@
 import React, { memo, useCallback, useMemo, useState } from 'react';
-import { Alert, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
-import { Image } from 'expo-image';
+import { Alert, Image, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import Animated, { useAnimatedStyle, withTiming } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -77,7 +76,7 @@ const HouseTile: React.FC<HouseTileProps> = memo(({ house, onPress }) => {
     >
       <View className="w-10 h-10 rounded-sm bg-primary/20 items-center justify-center overflow-hidden">
         {house.iconUrl ? (
-          <Image source={{ uri: house.iconUrl }} style={styles.houseIcon} contentFit="cover" />
+          <Image source={{ uri: house.iconUrl }} style={styles.houseIcon} resizeMode="cover" />
         ) : (
           <Text className="text-md">{house.categoryEmoji}</Text>
         )}
@@ -263,9 +262,7 @@ export const SettingsScreen: React.FC = () => {
             <Image
               source={{ uri: user?.avatarUrl ?? DEFAULTS.avatar }}
               style={styles.avatarImage}
-              contentFit="cover"
-              transition={200}
-              cachePolicy="memory-disk"
+              resizeMode="cover"
             />
           </View>
         </View>

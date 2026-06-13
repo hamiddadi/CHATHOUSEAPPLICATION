@@ -1,6 +1,5 @@
 import React, { memo } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
-import { Image } from 'expo-image';
+import { Image, StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialIcons } from '@expo/vector-icons';
 import { colors, spacing } from '../../../../../shared/constants/theme';
@@ -62,9 +61,7 @@ const Bubble: React.FC<BubbleProps> = memo(({ message, otherAvatar, showAvatar }
         <Image
           source={{ uri: otherAvatar ?? DEFAULTS.avatar }}
           style={styles.receivedAvatar}
-          contentFit="cover"
-          transition={200}
-          cachePolicy="memory-disk"
+          resizeMode="cover"
         />
       ) : (
         <View style={styles.receivedAvatarPlaceholder} />

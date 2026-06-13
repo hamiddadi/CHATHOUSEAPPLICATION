@@ -1,6 +1,5 @@
 import React, { memo, useEffect } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
-import { Image } from 'expo-image';
+import { Image, StyleSheet, Text, View } from 'react-native';
 import Animated, {
   Easing,
   cancelAnimation,
@@ -84,9 +83,7 @@ export const FollowerPin: React.FC<FollowerPinProps> = memo(({ follower }) => {
         <Image
           source={{ uri: follower.avatarUrl ?? DEFAULTS.avatar }}
           style={styles.avatar}
-          contentFit="cover"
-          transition={200}
-          cachePolicy="memory-disk"
+          resizeMode="cover"
         />
       </View>
 

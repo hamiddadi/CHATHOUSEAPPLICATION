@@ -1,6 +1,5 @@
 import React, { memo, useCallback, useEffect, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
-import { Image } from 'expo-image';
+import { Image, StyleSheet, View } from 'react-native';
 import Animated, {
   Easing,
   cancelAnimation,
@@ -94,9 +93,7 @@ export const PulsingAvatar: React.FC<PulsingAvatarProps> = memo(
           source={{ uri: failed ? DEFAULTS.avatar : avatar }}
           onError={handleError}
           style={{ width: size, height: size, borderRadius: size / 2 }}
-          contentFit="cover"
-          transition={200}
-          cachePolicy="memory-disk"
+          resizeMode="cover"
         />
         <View
           style={[

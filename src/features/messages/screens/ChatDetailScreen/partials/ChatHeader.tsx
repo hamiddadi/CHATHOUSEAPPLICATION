@@ -1,6 +1,5 @@
 import React, { memo } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { Image } from 'expo-image';
+import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import { colors, spacing } from '../../../../../shared/constants/theme';
@@ -54,9 +53,7 @@ const ChatHeader: React.FC<ChatHeaderProps> = memo(
             <Image
               source={{ uri: otherAvatar ?? DEFAULTS.avatar }}
               style={styles.headerAvatar}
-              contentFit="cover"
-              transition={200}
-              cachePolicy="memory-disk"
+              resizeMode="cover"
             />
             {isOnline && <View style={styles.headerStatusDot} />}
           </View>

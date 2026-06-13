@@ -1,6 +1,5 @@
 import React, { memo, useMemo, useState } from 'react';
-import { Pressable, Text, View } from 'react-native';
-import { Image } from 'expo-image';
+import { Image, Pressable, Text, View } from 'react-native';
 import { cn } from '../../utils/cn';
 import { colors } from '../../constants/theme';
 import {
@@ -14,7 +13,6 @@ import {
 } from './Avatar.styles';
 import type { AvatarProps } from './types';
 
-const BLURHASH_FALLBACK = 'L6PZfSi_.AyE_3t7t7R**0o#DgR4';
 /** Emerald accent ring drawn for live speakers and as the default ring tint. */
 const SPEAKING_RING_COLOR = colors.accent;
 
@@ -110,10 +108,7 @@ export const Avatar: React.FC<AvatarProps> = memo(
               onError={() => setHasError(true)}
               className="w-full h-full"
               style={[{ borderRadius: radius }, imageStyle]}
-              contentFit="cover"
-              transition={200}
-              cachePolicy="memory-disk"
-              placeholder={{ blurhash: BLURHASH_FALLBACK }}
+              resizeMode="cover"
               accessibilityIgnoresInvertColors
             />
           ) : (
