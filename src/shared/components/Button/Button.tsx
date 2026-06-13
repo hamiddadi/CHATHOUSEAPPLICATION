@@ -1,6 +1,6 @@
 import React, { useCallback } from 'react';
 import { ActivityIndicator, Pressable, Text, View } from 'react-native';
-import * as Haptics from 'expo-haptics';
+import { impactLight } from '../../utils/haptics';
 import { cn } from '../../utils/cn';
 import {
   sizeContainerClass,
@@ -44,7 +44,7 @@ export const Button: React.FC<ButtonProps> = ({
   const handlePressIn = useCallback(
     (e: Parameters<NonNullable<typeof onPressIn>>[0]) => {
       if (!isInactive) {
-        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        impactLight();
       }
       onPressIn?.(e);
     },

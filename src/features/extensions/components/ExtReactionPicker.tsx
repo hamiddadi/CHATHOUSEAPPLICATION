@@ -1,6 +1,6 @@
 import React from 'react';
 import { Modal, Pressable, StyleSheet, Text } from 'react-native';
-import * as Haptics from 'expo-haptics';
+import { selection } from '../../../shared/utils/haptics';
 import { colors } from '../../../shared/constants/theme';
 
 interface Props {
@@ -26,7 +26,7 @@ export const ExtReactionPicker: React.FC<Props> = ({ visible, onPick, onClose })
             key={em}
             style={styles.btn}
             onPress={() => {
-              void Haptics.selectionAsync().catch(() => undefined);
+              selection();
               onPick(em);
               onClose();
             }}

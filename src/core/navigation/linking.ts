@@ -1,6 +1,5 @@
 import { getStateFromPath } from '@react-navigation/native';
 import type { LinkingOptions } from '@react-navigation/native';
-import * as Linking from 'expo-linking';
 import { useInviteStore } from '../../features/extensions/store/inviteStore';
 import type { RootStackParamList } from './types';
 
@@ -38,7 +37,7 @@ const sanitizeInvitePath = (path: string): string =>
   });
 
 export const linking: LinkingOptions<RootStackParamList> = {
-  prefixes: [Linking.createURL('/'), 'chathouse://', 'https://app.chathouse.com'],
+  prefixes: ['chathouse://', 'https://app.chathouse.com'],
   // Normalize/sanitize the invite token before the navigator parses params.
   getStateFromPath: (path, options) => {
     // Referral link → stash the code for post-onboarding redemption, then fall

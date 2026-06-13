@@ -11,13 +11,13 @@ import {
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { MaterialIcons } from '@expo/vector-icons';
-import * as Haptics from 'expo-haptics';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Controller, useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useTranslation } from 'react-i18next';
+import { impactLight, notifySuccess } from '../../../../shared/utils/haptics';
 import { Button } from '../../../../shared/components/Button';
 import { Input } from '../../../../shared/components/Input';
 import { colors, spacing } from '../../../../shared/constants/theme';
@@ -69,7 +69,7 @@ export const SetupProfileScreen: React.FC = () => {
         setAvatarUri(asset.uri);
         setAvatarBase64(asset.base64 ?? null);
         setAvatarMime(asset.mimeType);
-        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        impactLight();
       }
     } catch {
       Alert.alert(t('common.error', 'Something went wrong'));
@@ -103,7 +103,7 @@ export const SetupProfileScreen: React.FC = () => {
           bio: values.bio || undefined,
           avatarUrl,
         });
-        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        notifySuccess();
         navigation.navigate('InterestSelection');
       } catch (err) {
         Alert.alert(

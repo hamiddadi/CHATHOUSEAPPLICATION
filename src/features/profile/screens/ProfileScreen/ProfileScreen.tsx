@@ -2,9 +2,9 @@ import React, { useCallback, useState } from 'react';
 import { Alert, ScrollView, Share, View } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import * as ExpoClipboard from 'expo-clipboard';
-import * as Haptics from 'expo-haptics';
+import Clipboard from '@react-native-clipboard/clipboard';
 import { useTranslation } from 'react-i18next';
+import { notifySuccess } from '../../../../shared/utils/haptics';
 import { Loader } from '../../../../shared/components/Loader';
 import { EmptyState } from '../../../../shared/components/EmptyState';
 import { spacing } from '../../../../shared/constants/theme';
@@ -75,8 +75,8 @@ export const ProfileScreen: React.FC = () => {
 
   const handleCopyUsername = useCallback(async () => {
     if (!user?.username) return;
-    await ExpoClipboard.setStringAsync(`@${user.username}`);
-    void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    await Clipboard.setString(`@${user.username}`);
+    notifySuccess();
     Alert.alert(t('profile.copied'), t('profile.usernameCopied'));
   }, [t, user?.username]);
 

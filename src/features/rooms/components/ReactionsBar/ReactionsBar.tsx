@@ -7,7 +7,7 @@ import Animated, {
   withSequence,
   withTiming,
 } from 'react-native-reanimated';
-import * as Haptics from 'expo-haptics';
+import { impactLight } from '../../../../shared/utils/haptics';
 import { getSocket } from '../../../../shared/services/realtime/socketClient';
 import { useSendReaction } from '../../hooks/useRooms';
 
@@ -78,7 +78,7 @@ export const ReactionsBar: React.FC<ReactionsBarProps> = memo(({ roomId }) => {
 
   const handleTap = useCallback(
     (emoji: Emoji) => {
-      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      impactLight();
       spawnFloat(emoji);
       sendReaction.mutate({ roomId, emoji });
     },

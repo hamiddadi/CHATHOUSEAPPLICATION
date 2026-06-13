@@ -1,11 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, FlatList, Pressable, Share, StyleSheet, Text, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import * as Haptics from 'expo-haptics';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
+import { notifySuccess } from '../../../../shared/utils/haptics';
 import { Loader } from '../../../../shared/components/Loader';
 import { EmptyState } from '../../../../shared/components/EmptyState';
 import { colors, layout, spacing } from '../../../../shared/constants/theme';
@@ -178,7 +178,7 @@ export const RoomScreen: React.FC = () => {
         // Promotion to a publishing role — celebrate locally so the user
         // notices the new mic button before they wonder where it came from.
         if (payload.role === 'SPEAKER' || payload.role === 'MODERATOR' || payload.role === 'HOST') {
-          void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          notifySuccess();
           Alert.alert(
             t('room.alert.stageTitle', 'On stage 🎙️'),
             payload.role === 'HOST'

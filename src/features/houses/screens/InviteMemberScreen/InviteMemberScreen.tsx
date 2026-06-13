@@ -1,7 +1,7 @@
 import React, { memo, useCallback, useState } from 'react';
 import { Alert, FlatList, Pressable, Share, StyleSheet, Text, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import * as Clipboard from 'expo-clipboard';
+import Clipboard from '@react-native-clipboard/clipboard';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -85,7 +85,7 @@ export const InviteMemberScreen: React.FC = () => {
   const inviteUrl = `${INVITE_BASE_URL}/${route.params.houseId}`;
   const handleCopyLink = useCallback(async () => {
     try {
-      await Clipboard.setStringAsync(inviteUrl);
+      await Clipboard.setString(inviteUrl);
       Alert.alert(
         t('houses.invite.copiedTitle', 'Copié'),
         t('houses.invite.copiedBody', "Le lien d'invitation est dans votre presse-papier."),

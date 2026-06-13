@@ -1,8 +1,7 @@
 import '../../global.css';
 import './i18n'; // Side-effect init — must run before any component mounts.
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
-import * as SplashScreen from 'expo-splash-screen';
 import { useAppFonts } from '../shared/hooks/useAppFonts';
 import { probeBackendHealth } from '../shared/services/api/healthProbe';
 import { startNetworkListener } from '../shared/services/network/networkStore';
@@ -12,9 +11,6 @@ import { useAnalyticsConsentStore } from '../features/privacy';
 import { initReporter, reportException } from './observability/reporter';
 import { AppProviders } from './providers/AppProviders';
 import { RootNavigator } from './navigation/RootNavigator';
-
-// Keep the splash screen visible while fonts and auth state load.
-void SplashScreen.preventAutoHideAsync();
 
 // Boot-time Sentry init. No-op in dev + when @sentry/react-native isn't
 // installed or SENTRY_DSN isn't set.
@@ -49,18 +45,6 @@ export const App: React.FC = () => {
   }, []);
   const ready = loaded || error !== null || fontTimeout;
 
-  // Single source of truth for hiding the NATIVE splash: the navigation
-  // container's onReady (wired below as RootNavigator onReady). Hiding it
-  // here too — on fonts-ready, before the nav is ready — would expose the
-  // AnimatedSplashScreen during the fonts-ready/nav-not-ready window and
-  // cause a transient visual flash. The AnimatedSplashScreen stays as a
-  // cover while auth hydrates (onReady doesn't fire during hydration).
-  const onLayoutRootView = useCallback(() => {
-    if (ready) {
-      void SplashScreen.hideAsync();
-    }
-  }, [ready]);
-
   useEffect(() => {
     if (__DEV__) void probeBackendHealth();
   }, []);
@@ -76,7 +60,7 @@ export const App: React.FC = () => {
             Insets are handled internally so they cohabit with status bar. */}
         <ImpersonationBanner />
         <SocketStatusBanner />
-        <RootNavigator onReady={onLayoutRootView} />
+        <RootNavigator />
       </View>
     </AppProviders>
   );

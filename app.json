@@ -53,7 +53,6 @@
       "expo-image",
       "expo-secure-store",
       "expo-localization",
-      "expo-system-ui",
       "@sentry/react-native",
       [
         "expo-image-picker",

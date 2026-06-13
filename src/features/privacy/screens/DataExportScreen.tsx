@@ -1,6 +1,6 @@
 import React, { useCallback, useRef, useState } from 'react';
 import { Alert, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
-import * as Clipboard from 'expo-clipboard';
+import Clipboard from '@react-native-clipboard/clipboard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { Button } from '../../../shared/components/Button';
@@ -49,7 +49,7 @@ export const DataExportScreen: React.FC = () => {
   const handleCopy = useCallback(async () => {
     if (!archiveRef.current) return;
     try {
-      await Clipboard.setStringAsync(archiveRef.current);
+      await Clipboard.setString(archiveRef.current);
       setCopied(true);
     } catch (e) {
       Alert.alert(
@@ -61,7 +61,7 @@ export const DataExportScreen: React.FC = () => {
 
   const handleClearClipboard = useCallback(async () => {
     try {
-      await Clipboard.setStringAsync('');
+      await Clipboard.setString('');
     } catch {
       /* best-effort */
     }

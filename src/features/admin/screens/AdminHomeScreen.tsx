@@ -1,7 +1,7 @@
 import React, { useCallback, useState } from 'react';
 import { Alert, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import * as Clipboard from 'expo-clipboard';
+import Clipboard from '@react-native-clipboard/clipboard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { Loader } from '../../../shared/components/Loader';
@@ -99,7 +99,7 @@ export const AdminHomeScreen: React.FC<SettingsStackScreenProps<'AdminHome'>> = 
         // operators who want to forward the dump out of the device. For a
         // future iteration: write via expo-file-system + expo-sharing for
         // an actual file attachment.
-        await Clipboard.setStringAsync(csv);
+        await Clipboard.setString(csv);
         await Share.share({
           message:
             csv.length > 50_000

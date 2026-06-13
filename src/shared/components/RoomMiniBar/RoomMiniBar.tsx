@@ -2,7 +2,6 @@ import React, { memo, useCallback } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import Animated, { FadeInDown, FadeOutDown } from 'react-native-reanimated';
-import { BlurView } from 'expo-blur';
 import { useNavigation } from '@react-navigation/native';
 import { Avatar } from '../Avatar';
 import { colors, layout, radii, shadows, spacing } from '../../constants/theme';
@@ -52,7 +51,7 @@ export const RoomMiniBar: React.FC = memo(() => {
         accessibilityLabel={`Return to room: ${room.title}`}
         style={styles.bar}
       >
-        <BlurView intensity={60} tint="dark" style={StyleSheet.absoluteFill} />
+        <View style={[StyleSheet.absoluteFill, styles.glassBg]} />
         <View style={styles.content}>
           {/* Speaker avatars */}
           <View style={styles.avatarStack}>
@@ -128,6 +127,12 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(255,255,255,0.1)',
     ...shadows.md,
+  },
+  // Opaque navy glass background — replaces the former expo-blur BlurView
+  // (de-Expo migration). Matches the bottom tab bar's Android treatment for a
+  // cohesive, readable floating surface (no real blur without the native module).
+  glassBg: {
+    backgroundColor: 'rgba(7,11,40,0.92)',
   },
   content: {
     flexDirection: 'row',

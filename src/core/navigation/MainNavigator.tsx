@@ -1,9 +1,8 @@
 import React from 'react';
-import { Platform, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
+import { StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { getFocusedRouteNameFromRoute, type RouteProp } from '@react-navigation/native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { BlurView } from 'expo-blur';
 import { colors, layout, radii, shadows, spacing } from '../../shared/constants/theme';
 import { useUnreadMessageCount } from '../../features/messages/hooks/useMessages';
 import { useChatSocket } from '../../features/messages/hooks/useChatSocket';
@@ -20,17 +19,12 @@ const Tab = createBottomTabNavigator<MainTabParamList>();
 
 /**
  * Floating bottom tab bar — matches the reference mocks (4 tabs: mic/map/chat/settings).
- * BlurView sits behind to produce the glass effect; the wrapping View floats above the content
- * with a rounded pill container.
+ * An opaque navy View sits behind for the glass effect; the wrapping View floats above the
+ * content with a rounded pill container. (Was an expo-blur BlurView on iOS — removed in the
+ * de-Expo migration; the app is Android-only and Android always used this opaque View.)
  */
 const renderTabBarBackground = () => (
-  <View pointerEvents="none" style={StyleSheet.absoluteFill}>
-    {Platform.OS === 'ios' ? (
-      <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} />
-    ) : (
-      <View style={[StyleSheet.absoluteFill, styles.androidTabBg]} />
-    )}
-  </View>
+  <View pointerEvents="none" style={[StyleSheet.absoluteFill, styles.androidTabBg]} />
 );
 
 type IconName = React.ComponentProps<typeof MaterialIcons>['name'];

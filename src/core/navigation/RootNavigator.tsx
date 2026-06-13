@@ -1,7 +1,7 @@
 import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { StatusBar } from 'expo-status-bar';
+import { StatusBar } from 'react-native';
 import { useAuthStore } from '../../features/auth/store/authStore';
 import { useExtColorScheme } from '../../features/extensions';
 import { Loader } from '../../shared/components/Loader';
@@ -50,7 +50,7 @@ export const RootNavigator: React.FC<RootNavigatorProps> = ({ onReady }) => {
   return (
     <NavigationContainer linking={linking} onReady={onReady} fallback={<Loader fullscreen />}>
       <StatusBar
-        style={colorScheme === 'dark' ? 'light' : 'dark'}
+        barStyle={colorScheme === 'dark' ? 'light-content' : 'dark-content'}
         backgroundColor={colors.background}
       />
       <RootStack.Navigator

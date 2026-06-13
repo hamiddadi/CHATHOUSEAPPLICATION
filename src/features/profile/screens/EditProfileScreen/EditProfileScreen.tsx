@@ -10,10 +10,10 @@ import {
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import * as Haptics from 'expo-haptics';
 import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
+import { impactLight, notifySuccess } from '../../../../shared/utils/haptics';
 import { Avatar } from '../../../../shared/components/Avatar';
 import { Button } from '../../../../shared/components/Button';
 import { Input } from '../../../../shared/components/Input';
@@ -73,7 +73,7 @@ export const EditProfileScreen: React.FC = () => {
       setAvatarUri(asset.uri);
       setAvatarBase64(asset.base64 ?? null);
       setAvatarMime(asset.mimeType);
-      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      impactLight();
     }
   };
 
@@ -98,7 +98,7 @@ export const EditProfileScreen: React.FC = () => {
         bio,
         avatarUrl,
       });
-      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      notifySuccess();
       navigation.goBack();
     } catch (err) {
       Alert.alert(
