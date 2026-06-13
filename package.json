@@ -35,8 +35,6 @@
   },
   "dependencies": {
     "@config-plugins/react-native-webrtc": "^14.0.0",
-    "@expo-google-fonts/inter": "^0.3.0",
-    "@expo-google-fonts/manrope": "^0.3.0",
     "@hookform/resolvers": "^3.9.1",
     "@livekit/react-native": "^2.11.0",
     "@livekit/react-native-expo-plugin": "^1.0.2",
@@ -58,7 +56,6 @@
     "expo": "~55.0.26",
     "expo-asset": "~55.0.17",
     "expo-constants": "~55.0.16",
-    "expo-font": "~55.0.8",
     "expo-localization": "~55.0.15",
     "expo-location": "~55.1.10",
     "expo-modules-core": "55.0.25",

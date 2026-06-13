@@ -49,7 +49,6 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-font",
       "expo-localization",
       "@sentry/react-native",
       [
