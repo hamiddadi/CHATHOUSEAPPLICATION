@@ -1,5 +1,5 @@
 package com.chathouse.app
-import expo.modules.splashscreen.SplashScreenManager
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 
 import android.os.Build
 import android.os.Bundle
@@ -13,13 +13,10 @@ import expo.modules.ReactActivityDelegateWrapper
 
 class MainActivity : ReactActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
-    // Set the theme to AppTheme BEFORE onCreate to support
-    // coloring the background, status bar, and navigation bar.
-    // This is required for expo-splash-screen.
-    // setTheme(R.style.AppTheme);
-    // @generated begin expo-splashscreen - expo prebuild (DO NOT MODIFY) sync-f3ff59a738c56c9a6119210cb55f0b613eb8b6af
-    SplashScreenManager.registerOnActivity(this)
-    // @generated end expo-splashscreen
+    // Install the AndroidX core-splashscreen (Theme.App.SplashScreen) and let it
+    // hand off to AppTheme via postSplashScreenTheme. Replaces the expo-splashscreen
+    // SplashScreenManager.registerOnActivity(this) removed in the de-Expo migration.
+    installSplashScreen()
     super.onCreate(null)
   }
 
