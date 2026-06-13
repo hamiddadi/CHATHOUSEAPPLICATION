@@ -29,11 +29,10 @@ apply plugin: "com.facebook.react.rootproject"
 // ndkVersion and otherwise fall back to AGP's default NDK (27.0.12077973), which
 // is not installed here, failing C++ configuration. (de-Expo migration.)
 subprojects { subproject ->
-  afterEvaluate {
-    if (subproject.plugins.hasPlugin("com.android.library")
-        || subproject.plugins.hasPlugin("com.android.application")) {
+  ["com.android.library", "com.android.application"].each { pluginId ->
+    subproject.plugins.withId(pluginId) {
       subproject.android {
-        ndkVersion rootProject.ext.ndkVersion
+        ndkVersion = rootProject.ext.has('ndkVersion') ? rootProject.ext.ndkVersion : '27.1.12297006'
       }
     }
   }
