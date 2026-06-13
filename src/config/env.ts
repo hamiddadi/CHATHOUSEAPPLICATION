@@ -1,13 +1,13 @@
-import * as ExpoConstants from 'expo-constants';
 import { z } from 'zod';
-
-const Constants = ExpoConstants.default;
+import { API_BASE_URL, WS_BASE_URL, REALTIME_ENABLED, ENV, SENTRY_DSN, LIVEKIT_URL } from '@env';
 
 /**
- * Runtime env — sourced from `app.config.js → extra`. Zod validates on boot
- * and throws at startup if anything is malformed, so we never race on undefined
- * `env.API_BASE_URL` at runtime. EAS Build injects `process.env.*` into the
- * config at bundle time; dev with Expo Go falls back to the defaults.
+ * Runtime env — inlined at bundle time by react-native-dotenv from the root
+ * `.env` (de-Expo: was `app.config.js → extra` read via expo-constants). Zod
+ * validates on boot and throws at startup if anything is malformed, so we never
+ * race on undefined `env.API_BASE_URL` at runtime. Keys missing from `.env`
+ * resolve to `undefined` and fall back to the defaults below; CI must write the
+ * correct `.env` before bundling a release.
  */
 const envSchema = z.object({
   API_BASE_URL: z.string().url().default('http://localhost:4000/api'),
@@ -27,7 +27,14 @@ const envSchema = z.object({
   LIVEKIT_URL: z.string().min(1).optional(),
 });
 
-const extra = Constants.expoConfig?.extra ?? {};
+const extra = {
+  API_BASE_URL,
+  WS_BASE_URL,
+  REALTIME_ENABLED,
+  ENV,
+  SENTRY_DSN,
+  LIVEKIT_URL,
+};
 const parsed = envSchema.safeParse(extra);
 
 if (!parsed.success) {

@@ -31,6 +31,17 @@ module.exports = function (api) {
           },
         },
       ],
+      // Inline `import { X } from '@env'` from the root .env at bundle time
+      // (de-Expo: replaces expo-constants `Constants.expoConfig.extra`).
+      [
+        'module:react-native-dotenv',
+        {
+          moduleName: '@env',
+          path: '.env',
+          allowUndefined: true,
+          safe: false,
+        },
+      ],
       // Worklets plugin MUST be last (replaces `react-native-reanimated/plugin` in Reanimated v4).
       'react-native-worklets/plugin',
     ],

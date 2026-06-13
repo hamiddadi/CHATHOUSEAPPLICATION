@@ -114,6 +114,7 @@
     "jest-expo": "~55.0.18",
     "lint-staged": "^15.2.11",
     "prettier": "^3.4.2",
+    "react-native-dotenv": "^3.4.11",
     "react-test-renderer": "19.2.0",
     "stylelint": "^16.12.0",
     "stylelint-config-standard": "^36.0.1",

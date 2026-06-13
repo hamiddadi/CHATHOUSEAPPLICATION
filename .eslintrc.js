@@ -31,6 +31,10 @@ module.exports = {
       typescript: { project: './tsconfig.json' },
       node: { extensions: ['.js', '.jsx', '.ts', '.tsx'] },
     },
+    // `@env` is a virtual module provided by react-native-dotenv at babel time
+    // (de-Expo migration). It has no file on disk, so tell eslint-plugin-import
+    // it is always resolvable — otherwise import/no-unresolved flags it.
+    'import/core-modules': ['@env'],
     react: { version: 'detect' },
   },
   rules: {
