@@ -1,6 +1,6 @@
 import React, { memo } from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
-import { MaterialIcons } from '@expo/vector-icons';
+import MaterialIcons from '@react-native-vector-icons/material-icons';
 import { GradientView } from '../../../../../shared/components/GradientView';
 import { colors, spacing } from '../../../../../shared/constants/theme';
 import { DEFAULTS } from '../../../../../shared/constants/images';

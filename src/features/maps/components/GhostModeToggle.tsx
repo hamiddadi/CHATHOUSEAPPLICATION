@@ -1,6 +1,6 @@
 import React, { useCallback } from 'react';
 import { Pressable, StyleSheet, Text } from 'react-native';
-import { MaterialIcons } from '@expo/vector-icons';
+import MaterialIcons from '@react-native-vector-icons/material-icons';
 import Animated from 'react-native-reanimated';
 import { useAnimatedPress } from '../../../shared/hooks/useAnimatedPress';
 import { useGhostModeStore } from '../store/ghostModeStore';

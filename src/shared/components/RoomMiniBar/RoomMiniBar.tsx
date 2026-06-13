@@ -1,6 +1,6 @@
 import React, { memo, useCallback } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { MaterialIcons } from '@expo/vector-icons';
+import MaterialIcons from '@react-native-vector-icons/material-icons';
 import Animated, { FadeInDown, FadeOutDown } from 'react-native-reanimated';
 import { useNavigation } from '@react-navigation/native';
 import { Avatar } from '../Avatar';

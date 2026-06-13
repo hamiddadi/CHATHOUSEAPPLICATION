@@ -1,6 +1,6 @@
 import React from 'react';
 import { StyleSheet, TextInput, View } from 'react-native';
-import { MaterialIcons } from '@expo/vector-icons';
+import MaterialIcons from '@react-native-vector-icons/material-icons';
 
 const BRAND_NAVY = '#1E3A8A';
 const PLACEHOLDER_COLOR = 'rgba(30,58,138,0.55)';

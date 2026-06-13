@@ -11,7 +11,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { MaterialIcons } from '@expo/vector-icons';
+import MaterialIcons from '@react-native-vector-icons/material-icons';
 import { useQueryClient } from '@tanstack/react-query';
 import { Avatar } from '../../../../shared/components/Avatar';
 import { colors, spacing } from '../../../../shared/constants/theme';

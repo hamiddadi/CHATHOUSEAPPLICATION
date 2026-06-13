@@ -1,6 +1,6 @@
 import React, { memo, useCallback, useState } from 'react';
 import { Alert, FlatList, Pressable, Share, StyleSheet, Text, View } from 'react-native';
-import { MaterialIcons } from '@expo/vector-icons';
+import MaterialIcons from '@react-native-vector-icons/material-icons';
 import Clipboard from '@react-native-clipboard/clipboard';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';

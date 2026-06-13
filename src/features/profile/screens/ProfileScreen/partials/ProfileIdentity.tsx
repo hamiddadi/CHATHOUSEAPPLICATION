@@ -1,6 +1,6 @@
 import React, { memo } from 'react';
 import { Pressable, Text, View } from 'react-native';
-import { FontAwesome } from '@expo/vector-icons';
+import FontAwesome from '@react-native-vector-icons/fontawesome';
 import { useTranslation } from 'react-i18next';
 import { Avatar } from '../../../../../shared/components/Avatar';
 import { colors } from '../../../../../shared/constants/theme';

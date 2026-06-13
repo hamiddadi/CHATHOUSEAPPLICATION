@@ -1,6 +1,6 @@
 import React, { memo, useCallback } from 'react';
 import { Alert, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
-import { MaterialIcons } from '@expo/vector-icons';
+import MaterialIcons from '@react-native-vector-icons/material-icons';
 import { useTranslation } from 'react-i18next';
 import { colors, spacing } from '../../../../shared/constants/theme';
 import { errorMessage } from '../../../../shared/utils/errorMessage';

@@ -2,7 +2,7 @@ import React from 'react';
 import { StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { getFocusedRouteNameFromRoute, type RouteProp } from '@react-navigation/native';
-import { MaterialIcons } from '@expo/vector-icons';
+import MaterialIcons from '@react-native-vector-icons/material-icons';
 import { colors, layout, radii, shadows, spacing } from '../../shared/constants/theme';
 import { useUnreadMessageCount } from '../../features/messages/hooks/useMessages';
 import { useChatSocket } from '../../features/messages/hooks/useChatSocket';

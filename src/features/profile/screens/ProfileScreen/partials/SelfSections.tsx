@@ -1,6 +1,6 @@
 import React, { memo, useCallback } from 'react';
 import { Pressable, Text, View } from 'react-native';
-import { MaterialIcons } from '@expo/vector-icons';
+import MaterialIcons from '@react-native-vector-icons/material-icons';
 import { useTranslation } from 'react-i18next';
 import { colors } from '../../../../../shared/constants/theme';
 import type { HouseSummary, RoomSummary } from '../../../../../shared/types/domain';

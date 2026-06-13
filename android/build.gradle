@@ -22,3 +22,19 @@ allprojects {
 
 apply plugin: "expo-root-project"
 apply plugin: "com.facebook.react.rootproject"
+
+// Force every native-module subproject onto the project's installed NDK
+// (rootProject.ext.ndkVersion = 27.1.12297006). Some libraries — notably
+// react-native-audio-recorder-player / react-native-nitro-modules — don't set
+// ndkVersion and otherwise fall back to AGP's default NDK (27.0.12077973), which
+// is not installed here, failing C++ configuration. (de-Expo migration.)
+subprojects { subproject ->
+  afterEvaluate {
+    if (subproject.plugins.hasPlugin("com.android.library")
+        || subproject.plugins.hasPlugin("com.android.application")) {
+      subproject.android {
+        ndkVersion rootProject.ext.ndkVersion
+      }
+    }
+  }
+}

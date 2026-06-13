@@ -1,6 +1,6 @@
 import React, { memo } from 'react';
 import { Pressable, Text, View } from 'react-native';
-import { MaterialIcons } from '@expo/vector-icons';
+import MaterialIcons from '@react-native-vector-icons/material-icons';
 import { Avatar } from '../../../../../shared/components/Avatar';
 import { colors } from '../../../../../shared/constants/theme';
 import type { SearchRoomHit } from '../../../services/searchService';

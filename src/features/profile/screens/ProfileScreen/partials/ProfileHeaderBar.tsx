@@ -1,6 +1,6 @@
 import React, { memo } from 'react';
 import { Pressable, View } from 'react-native';
-import { MaterialIcons } from '@expo/vector-icons';
+import MaterialIcons from '@react-native-vector-icons/material-icons';
 import { useTranslation } from 'react-i18next';
 import { colors } from '../../../../../shared/constants/theme';
 

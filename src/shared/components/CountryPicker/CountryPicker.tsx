@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { FlatList, Modal, Pressable, SafeAreaView, Text, TextInput, View } from 'react-native';
-import { MaterialIcons } from '@expo/vector-icons';
+import MaterialIcons from '@react-native-vector-icons/material-icons';
 import type { CountryCode } from 'libphonenumber-js';
 import { useTranslation } from 'react-i18next';
 import { colors } from '../../constants/theme';

@@ -1,6 +1,6 @@
 import React, { memo } from 'react';
 import { Pressable, StyleSheet } from 'react-native';
-import { MaterialIcons } from '@expo/vector-icons';
+import MaterialIcons from '@react-native-vector-icons/material-icons';
 import Animated from 'react-native-reanimated';
 import { useAnimatedPress } from '../../../shared/hooks/useAnimatedPress';
 import { GOOGLE_MAPS_COLORS } from '../constants/mapColors';

@@ -1,6 +1,6 @@
 import React, { useCallback, useState } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, Text, View, Keyboard } from 'react-native';
-import { MaterialIcons } from '@expo/vector-icons';
+import MaterialIcons from '@react-native-vector-icons/material-icons';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
