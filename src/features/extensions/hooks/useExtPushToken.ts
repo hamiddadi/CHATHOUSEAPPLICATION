@@ -1,22 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
+import messaging from '@react-native-firebase/messaging';
 import { Platform } from 'react-native';
+import { requestNotificationPermission } from '../../notifications/services/pushService';
 import { apiClient } from '../../../shared/services/api/apiClient';
 
 /**
- * Expo / FCM / APNs push token registration (Module 10 / NOTIF-016).
- *
- * Lazy-loads `expo-notifications` to keep the hook importable on web. On
- * permission grant + token fetch, POSTs to the existing `/api/push/tokens`
- * route (with fallback paths). Idempotent: re-registers only when the
- * device token changes.
+ * FCM push-token registration (Module 10 / NOTIF-016) — de-Expo: replaces the
+ * `expo-notifications` token fetch with Firebase Cloud Messaging
+ * (`@react-native-firebase/messaging`). On permission grant + token fetch,
+ * POSTs to the existing push-token route (with fallback paths). Idempotent:
+ * re-registers only when the device token changes.
  */
-
-interface NotificationsModule {
-  getPermissionsAsync: () => Promise<{ status: string }>;
-  requestPermissionsAsync: () => Promise<{ status: string }>;
-  getExpoPushTokenAsync: () => Promise<{ data: string }>;
-  setNotificationHandler?: (h: unknown) => void;
-}
 
 const PATHS = ['/push/tokens', '/users/me/push-tokens', '/ext/push/tokens'];
 
@@ -52,43 +46,25 @@ export const useExtPushToken = (enabled = true) => {
     void (async () => {
       try {
         setStatus('asking');
-        // Synchronous `require` (NOT dynamic `import()`, which hermesc rejects
-        // in release builds — "Invalid expression encountered"). expo-notifications
-        // is installed, so this resolves normally; the guard keeps it safe on
-        // web/tests where the native module is absent.
-        let Notifications: NotificationsModule | null = null;
-        try {
-          // eslint-disable-next-line @typescript-eslint/no-require-imports, global-require
-          Notifications = require('expo-notifications') as NotificationsModule;
-        } catch {
-          Notifications = null;
-        }
-        if (!Notifications?.getPermissionsAsync) {
-          if (!cancelled) setStatus('error');
+        const granted = await requestNotificationPermission();
+        if (cancelled) return;
+        if (!granted) {
+          setStatus('denied');
           return;
         }
 
-        let perm = await Notifications.getPermissionsAsync();
-        if (perm.status !== 'granted') {
-          perm = await Notifications.requestPermissionsAsync();
-        }
-        if (perm.status !== 'granted') {
-          if (!cancelled) setStatus('denied');
-          return;
-        }
+        const fetched = await messaging().getToken();
+        if (cancelled || !fetched) return;
+        setToken(fetched);
 
-        const fetched = await Notifications.getExpoPushTokenAsync();
-        if (cancelled || !fetched?.data) return;
-        setToken(fetched.data);
-
-        if (lastSentRef.current === fetched.data) {
+        if (lastSentRef.current === fetched) {
           setStatus('registered');
           return;
         }
-        const ok = await postToken(fetched.data, Platform.OS);
+        const ok = await postToken(fetched, Platform.OS);
         if (!cancelled) {
           if (ok) {
-            lastSentRef.current = fetched.data;
+            lastSentRef.current = fetched;
             setStatus('registered');
           } else {
             setStatus('error');

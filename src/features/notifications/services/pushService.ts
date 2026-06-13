@@ -1,145 +1,85 @@
-import { Platform } from 'react-native';
+import messaging from '@react-native-firebase/messaging';
+import { PermissionsAndroid, Platform } from 'react-native';
 import { apiClient } from '../../../shared/services/api/apiClient';
 
 /**
- * Device push registration. Lazy-imports `expo-notifications` +
- * `expo-device` (+ `expo-constants`) so the app still boots when those
- * packages aren't installed (bare Expo, unit tests, web preview).
+ * Device push registration via Firebase Cloud Messaging (de-Expo: replaces
+ * `expo-notifications` + Expo's hosted push proxy). `google-services.json`
+ * (android/app/) wires the FCM project; the native SDK mints a registration
+ * token we POST to the backend, which fans out through firebase-admin.
  *
- * Metro's static analyser rejects `require(variable)` — each
- * `require()` call below therefore uses a string literal and is wrapped
- * in its own try/catch. The cost is a slightly repetitive helper, but
- * the runtime is a no-op when modules are missing and the tree-shaker
- * can still drop them at build time.
+ * Push needs a native module, so it only works in a real build (not unit
+ * tests / web) — `@react-native-firebase/messaging` is mocked under jest.
  */
-
-interface ExpoNotificationsModule {
-  getPermissionsAsync: () => Promise<{ status: string }>;
-  requestPermissionsAsync: () => Promise<{ status: string }>;
-  getExpoPushTokenAsync: (opts?: { projectId?: string }) => Promise<{ data: string }>;
-  setNotificationHandler: (h: {
-    handleNotification: () => Promise<{
-      shouldShowAlert: boolean;
-      shouldPlaySound: boolean;
-      shouldSetBadge: boolean;
-    }>;
-  }) => void;
-}
-
-interface ExpoDeviceModule {
-  isDevice: boolean;
-}
-
-interface ExpoConstantsModule {
-  expoConfig?: { extra?: { eas?: { projectId?: string } } };
-  easConfig?: { projectId?: string };
-  // 'storeClient' = Expo Go on iOS/Android (no remote push since SDK 53).
-  // 'standalone'  = production / TestFlight build.
-  // 'bare'        = bare workflow / EAS dev-client.
-  appOwnership?: 'expo' | 'guest' | 'standalone' | null;
-  executionEnvironment?: 'storeClient' | 'standalone' | 'bare';
-}
-
-/* eslint-disable @typescript-eslint/no-require-imports */
-const loadNotifications = (): ExpoNotificationsModule | null => {
-  try {
-    return require('expo-notifications') as ExpoNotificationsModule;
-  } catch {
-    return null;
-  }
-};
-
-const loadDevice = (): ExpoDeviceModule | null => {
-  try {
-    return require('expo-device') as ExpoDeviceModule;
-  } catch {
-    return null;
-  }
-};
-
-const loadConstants = (): ExpoConstantsModule | null => {
-  try {
-    return require('expo-constants') as ExpoConstantsModule;
-  } catch {
-    return null;
-  }
-};
-/* eslint-enable @typescript-eslint/no-require-imports */
 
 let cachedToken: string | null = null;
 
+/**
+ * Ask the OS for notification permission. Android 13+ (API 33) gates
+ * notifications behind the runtime POST_NOTIFICATIONS permission; older Android
+ * grants implicitly. iOS goes through the APNs authorisation prompt. Shared
+ * with `useExtPushToken` so both token paths use one permission flow.
+ */
+export const requestNotificationPermission = async (): Promise<boolean> => {
+  if (Platform.OS === 'android') {
+    if (Platform.Version >= 33) {
+      const granted = await PermissionsAndroid.request(
+        PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS,
+      );
+      return granted === PermissionsAndroid.RESULTS.GRANTED;
+    }
+    return true;
+  }
+  const authStatus = await messaging().requestPermission();
+  return (
+    authStatus === messaging.AuthorizationStatus.AUTHORIZED ||
+    authStatus === messaging.AuthorizationStatus.PROVISIONAL
+  );
+};
+
 export const pushService = {
   /**
-   * Ask the OS for permission and grab an Expo push token. Returns the
-   * token string or null when (a) modules are missing, (b) the user
-   * denied permission, (c) we're on simulator/web, or (d) Expo Go on
-   * SDK 53+ (which dropped remote push support — needs a dev client).
+   * Ask for permission and grab the FCM registration token. Returns the token
+   * string, or null when permission is denied or the native module/token is
+   * unavailable (emulator without Play Services, tests, web).
    */
   async getOrRequestToken(): Promise<string | null> {
     if (cachedToken) return cachedToken;
-
-    // STEP 1 — detect Expo Go BEFORE touching expo-notifications. The
-    // notifications module emits a noisy "not supported in Expo Go"
-    // warning the moment its API is called, so we have to bail early.
-    // expo-constants is always-on and free to load.
-    const Constants = loadConstants();
-    const inExpoGo =
-      Constants?.appOwnership === 'expo' || Constants?.executionEnvironment === 'storeClient';
-    if (inExpoGo) {
+    try {
+      if (!(await requestNotificationPermission())) return null;
+      const token = await messaging().getToken();
+      cachedToken = token || null;
+      return cachedToken;
+    } catch (err) {
       if (__DEV__) {
-        // eslint-disable-next-line no-console
-        console.info('[push] skipped — Expo Go detected (use a dev client for remote push)');
+        console.warn('[push] FCM token fetch failed', err);
       }
       return null;
     }
-
-    const Notifications = loadNotifications();
-    const Device = loadDevice();
-    if (!Notifications || !Device) return null;
-    if (!Device.isDevice) return null;
-
-    const existing = await Notifications.getPermissionsAsync();
-    let status = existing.status;
-    if (status !== 'granted') {
-      const req = await Notifications.requestPermissionsAsync();
-      status = req.status;
-    }
-    if (status !== 'granted') return null;
-
-    const projectId =
-      Constants?.expoConfig?.extra?.eas?.projectId ?? Constants?.easConfig?.projectId;
-    const token = await Notifications.getExpoPushTokenAsync(projectId ? { projectId } : undefined);
-    cachedToken = token.data;
-    return cachedToken;
   },
 
   /**
-   * Clear the in-memory device-token cache. The token itself is bound to the
-   * physical device (not the account), but the cache must be dropped on a user
-   * switch so a stale association can't be re-used. `signOut()` already calls
-   * `unregisterCurrentDevice()` (which clears the cache); expose this as an
-   * explicit, side-effect-free reset for any auth flow that swaps users without
-   * a full sign-out round-trip.
+   * Clear the in-memory token cache. The token is bound to the device (not the
+   * account), but the cache must drop on a user switch so a stale association
+   * can't be reused. `signOut()` already calls `unregisterCurrentDevice()`
+   * (which clears the cache); this is the side-effect-free reset for any auth
+   * flow that swaps users without a full sign-out round-trip.
    */
   resetTokenCache(): void {
     cachedToken = null;
   },
 
   /**
-   * Register the current device's push token with the backend. Idempotent
-   * (backend upserts on `token`). Always re-POSTs — even when the token is
-   * cached — so calling it on every login re-associates the device with the
-   * current account. Invoke after each successful authentication, not only on
-   * first boot.
+   * Register the device's FCM token with the backend. Idempotent (backend
+   * upserts on `token`). Always re-POSTs — even when cached — so calling it on
+   * every login re-associates the device with the current account. Invoke after
+   * each successful authentication, not only on first boot.
    */
   async registerWithBackend(): Promise<void> {
     const token = await this.getOrRequestToken();
     if (!token) return;
     await apiClient
-      .post('/push/register', {
-        token,
-        platform: Platform.OS === 'ios' || Platform.OS === 'android' ? Platform.OS : 'expo',
-      })
+      .post('/push/register', { token, platform: Platform.OS === 'ios' ? 'ios' : 'android' })
       .catch(() => undefined);
   },
 

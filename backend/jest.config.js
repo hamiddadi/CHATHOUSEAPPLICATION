@@ -6,6 +6,9 @@ module.exports = {
   testMatch: ['**/*.test.ts'],
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/src/$1',
+    // firebase-admin v14 exposes /messaging only via the package `exports` map;
+    // pin it to the on-disk entry so jest's resolver finds it (see tsconfig).
+    '^firebase-admin/messaging$': '<rootDir>/node_modules/firebase-admin/lib/messaging',
   },
   setupFiles: ['<rootDir>/tests/setup.env.ts'],
   collectCoverageFrom: ['src/**/*.ts', '!src/**/*.d.ts', '!src/app.ts'],

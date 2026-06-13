@@ -8,6 +8,7 @@ import { startNetworkListener } from '../shared/services/network/networkStore';
 import { ImpersonationBanner } from '../features/admin/components/ImpersonationBanner';
 import { SocketStatusBanner } from '../features/rooms/components/SocketStatusBanner';
 import { useAnalyticsConsentStore } from '../features/privacy';
+import { setupForegroundPush } from '../features/notifications/services/pushNotifications';
 import { initReporter, reportException } from './observability/reporter';
 import { AppProviders } from './providers/AppProviders';
 import { RootNavigator } from './navigation/RootNavigator';
@@ -48,6 +49,10 @@ export const App: React.FC = () => {
   useEffect(() => {
     if (__DEV__) void probeBackendHealth();
   }, []);
+
+  // Surface foreground FCM messages via notifee (de-Expo: replaces
+  // expo-notifications' foreground handler). Returns the unsubscribe fn.
+  useEffect(() => setupForegroundPush(), []);
 
   if (!ready) return null;
 

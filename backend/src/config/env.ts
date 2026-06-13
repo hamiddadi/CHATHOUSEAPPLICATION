@@ -173,15 +173,16 @@ const envSchema = z.object({
   TWILIO_AUTH_TOKEN: z.string().optional(),
   TWILIO_FROM_NUMBER: z.string().optional(),
 
-  // ─── Push (Module 6) ─────────────────────────────────
-  // Expo's push endpoint. Override for self-hosted receivers or when
-  // using a custom FCM proxy. No access token required for basic use;
-  // set EXPO_ACCESS_TOKEN when you need higher rate limits.
-  EXPO_PUSH_URL: z.string().url().default('https://exp.host/--/api/v2/push/send'),
-  EXPO_ACCESS_TOKEN: z.string().optional(),
-  // When false (the default outside production), sendToExpo logs the
-  // payload instead of calling the HTTP endpoint. Flip on in prod so
-  // push actually reaches devices.
+  // ─── Push (Module 6) — Firebase Cloud Messaging via firebase-admin ───
+  // Service-account credentials for firebase-admin (de-Expo: replaced the Expo
+  // push proxy with direct FCM). Provide the full service-account JSON (Firebase
+  // console → Project settings → Service accounts → Generate new private key) as
+  // a single-line string in FIREBASE_SERVICE_ACCOUNT, or point
+  // GOOGLE_APPLICATION_CREDENTIALS at a JSON file path (admin SDK default). With
+  // neither set, dispatch warns + skips (see PUSH_DISPATCH_ENABLED).
+  FIREBASE_SERVICE_ACCOUNT: z.string().optional(),
+  // When false (the default outside production), dispatchToUser logs the
+  // payload instead of calling FCM. Flip on in prod so push reaches devices.
   PUSH_DISPATCH_ENABLED: boolFromString(false),
 
   // ICE servers — JSON array string sent to clients for NAT traversal.

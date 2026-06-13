@@ -52,5 +52,6 @@ build/
 # is mkdir'd on first write (backend/src/modules/upload/upload.service.ts).
 backend/uploads/
 
-# Firebase (carries project API key) — provided locally / via CI secret, not committed
-android/app/google-services.json
+# Firebase (carries project API key) — provided locally / via CI secret, not
+# committed. Match any location so a stray copy can't slip in.
+google-services.json

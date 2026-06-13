@@ -29,7 +29,8 @@
       "@webrtc/*": ["src/webrtc/*"],
       "@queues/*": ["src/queues/*"],
       "@utils/*": ["src/utils/*"],
-      "@extensions/*": ["src/extensions/*"]
+      "@extensions/*": ["src/extensions/*"],
+      "firebase-admin/messaging": ["node_modules/firebase-admin/lib/messaging"]
     }
   },
   "include": ["src/**/*.ts", "tests/**/*.ts"],
