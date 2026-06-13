@@ -1,12 +1,13 @@
-import * as SecureStore from 'expo-secure-store';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
 import { setReporterEnabled } from '../../../core/observability/reporter';
 
 const KEY = 'chathouse.consent.analytics.v1';
 
 /**
- * Opt-in consent for crash + telemetry reporting. Persisted in SecureStore
- * so it survives reinstalls and restarts. Default: disabled — the user
+ * Opt-in consent for crash + telemetry reporting. Persisted in AsyncStorage
+ * so it survives restarts (non-sensitive boolean — moved off expo-secure-store
+ * in the de-Expo migration). Default: disabled — the user
  * must actively turn it on (GDPR consent must be unambiguous).
  *
  * The reporter (Sentry) is gated by `setReporterEnabled` so disabling the
@@ -26,7 +27,7 @@ export const useAnalyticsConsentStore = create<AnalyticsConsentState>((set, get)
   hydrate: async () => {
     if (get().isHydrated) return;
     try {
-      const raw = await SecureStore.getItemAsync(KEY);
+      const raw = await AsyncStorage.getItem(KEY);
       const enabled = raw === '1';
       set({ enabled, isHydrated: true });
       setReporterEnabled(enabled);
@@ -37,7 +38,7 @@ export const useAnalyticsConsentStore = create<AnalyticsConsentState>((set, get)
   },
 
   setEnabled: async next => {
-    await SecureStore.setItemAsync(KEY, next ? '1' : '0');
+    await AsyncStorage.setItem(KEY, next ? '1' : '0');
     set({ enabled: next });
     setReporterEnabled(next);
   },

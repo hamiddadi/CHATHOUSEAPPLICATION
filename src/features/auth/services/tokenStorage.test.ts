@@ -1,14 +1,19 @@
+import * as Keychain from 'react-native-keychain';
 import { tokenStorage } from './tokenStorage';
 
-jest.mock('expo-secure-store', () => {
-  const store: Record<string, string> = {};
+jest.mock('react-native-keychain', () => {
+  let stored: string | null = null;
   return {
-    getItemAsync: jest.fn(async (k: string) => store[k] ?? null),
-    setItemAsync: jest.fn(async (k: string, v: string) => {
-      store[k] = v;
+    getGenericPassword: jest.fn(async () =>
+      stored === null ? false : { username: 'chathouse', password: stored },
+    ),
+    setGenericPassword: jest.fn(async (_username: string, password: string) => {
+      stored = password;
+      return { service: 'chathouse.auth.session.v1', storage: 'keychain' };
     }),
-    deleteItemAsync: jest.fn(async (k: string) => {
-      delete store[k];
+    resetGenericPassword: jest.fn(async () => {
+      stored = null;
+      return true;
     }),
   };
 });
@@ -35,19 +40,17 @@ describe('tokenStorage', () => {
     expect(await tokenStorage.get()).toEqual(session);
   });
 
-  it('clear removes the key', async () => {
+  it('clear removes the entry', async () => {
     await tokenStorage.set(session);
     await tokenStorage.clear();
     expect(await tokenStorage.get()).toBeNull();
   });
 
   it('returns null on malformed JSON (does not throw)', async () => {
-    /* eslint-disable @typescript-eslint/no-require-imports */
-    const mocked = require('expo-secure-store') as {
-      getItemAsync: jest.Mock;
-    };
-    /* eslint-enable @typescript-eslint/no-require-imports */
-    mocked.getItemAsync.mockResolvedValueOnce('not-json');
+    (Keychain.getGenericPassword as jest.Mock).mockResolvedValueOnce({
+      username: 'chathouse',
+      password: 'not-json',
+    });
     expect(await tokenStorage.get()).toBeNull();
   });
 });

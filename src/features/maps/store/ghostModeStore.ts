@@ -1,4 +1,4 @@
-import * as SecureStore from 'expo-secure-store';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
 import { apiClient } from '../../../shared/services/api/apiClient';
 import { getSocket } from '../../../shared/services/realtime/socketClient';
@@ -15,8 +15,9 @@ interface GhostModeState {
 }
 
 /**
- * Ghost Mode is persisted locally via SecureStore so the user's preference
- * survives app restarts even before the network sync succeeds.
+ * Ghost Mode is persisted locally via AsyncStorage so the user's preference
+ * survives app restarts even before the network sync succeeds. (Non-sensitive
+ * boolean flag — moved off expo-secure-store in the de-Expo migration.)
  * When the backend is wired, `setGhost` should also POST /me/presence/ghost.
  */
 export const useGhostModeStore = create<GhostModeState>((set, get) => ({
@@ -26,7 +27,7 @@ export const useGhostModeStore = create<GhostModeState>((set, get) => ({
 
   hydrate: async () => {
     try {
-      const raw = await SecureStore.getItemAsync(KEY);
+      const raw = await AsyncStorage.getItem(KEY);
       set({ isGhost: raw === '1', isHydrated: true });
     } catch {
       set({ isHydrated: true });
@@ -34,9 +35,9 @@ export const useGhostModeStore = create<GhostModeState>((set, get) => ({
   },
 
   setGhost: async next => {
-    // Persist optimistically — the SecureStore value is the source of truth
+    // Persist optimistically — the local value is the source of truth
     // when the user opens the app offline. Backend sync is best-effort.
-    await SecureStore.setItemAsync(KEY, next ? '1' : '0');
+    await AsyncStorage.setItem(KEY, next ? '1' : '0');
     set({ isGhost: next });
 
     // CRITICAL: tell the realtime server NOW so our last broadcast position is
