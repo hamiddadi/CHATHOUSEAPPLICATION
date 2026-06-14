@@ -119,13 +119,28 @@ module.exports = {
         '@typescript-eslint/no-non-null-assertion': 'off',
         'import/no-named-as-default-member': 'off',
         'react-native/no-inline-styles': 'off',
+        // jest.mock() factories are hoisted above imports and may only reference
+        // `mock`-prefixed vars, so seeding a mock from a fixture module must use
+        // require() inside the factory — the idiomatic jest pattern.
+        '@typescript-eslint/no-require-imports': 'off',
       },
     },
     {
-      // Config / mocks — no TS strict checks.
-      files: ['**/*.config.js', '**/*.config.ts', '**/mocks/**'],
+      // Config / mocks / test harness — no TS strict checks. The `__mocks__/`
+      // stubs and the screen render-test harness (jest-setup.ts, test-utils/)
+      // are CommonJS-flavoured jest infra: `require()` is the idiomatic form for
+      // manual mocks, and `any` is fine for loosely-typed test plumbing.
+      files: [
+        '**/*.config.js',
+        '**/*.config.ts',
+        '**/mocks/**',
+        '**/__mocks__/**',
+        'jest-setup.ts',
+        '**/test-utils/**',
+      ],
       rules: {
         '@typescript-eslint/no-explicit-any': 'off',
+        '@typescript-eslint/no-require-imports': 'off',
         'no-console': 'off',
       },
     },

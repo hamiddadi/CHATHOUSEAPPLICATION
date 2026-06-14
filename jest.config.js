@@ -2,6 +2,9 @@ module.exports = {
   // de-Expo: was `jest-expo`. The bare React Native preset wires the RN module
   // mocks + babel transform (babel.config.js already uses @react-native/babel-preset).
   preset: 'react-native',
+  // Screen render-test harness: mocks every native module + boots i18n so any
+  // screen can mount under jest (no emulator). See jest-setup.ts.
+  setupFilesAfterEnv: ['<rootDir>/jest-setup.ts'],
   transformIgnorePatterns: [
     'node_modules/(?!(?:jest-)?react-native|@react-native|@react-navigation|' +
       '@react-native-community|@react-native-vector-icons|@react-native-firebase|' +
