@@ -25,11 +25,11 @@ import { mediaService } from '../../../../shared/services/api/mediaService';
 import { useCreateHouse } from '../../hooks/useHouses';
 
 type Nav = NativeStackNavigationProp<RoomStackParamList, 'CreateHouse'>;
-type Privacy = 'open' | 'private';
+type Privacy = 'open' | 'private' | 'social';
 
 interface PrivacyOption {
   id: Privacy;
-  icon: 'public' | 'lock';
+  icon: 'public' | 'lock' | 'groups';
   label: string;
   description: string;
 }
@@ -40,6 +40,12 @@ const getPrivacyOptions = (t: TFunction): PrivacyOption[] => [
     icon: 'public',
     label: t('houses.create.privacyOpen', 'Open'),
     description: t('houses.create.privacyOpenDesc', 'Anyone can join and start rooms'),
+  },
+  {
+    id: 'social',
+    icon: 'groups',
+    label: t('houses.create.privacySocial', 'Social'),
+    description: t('houses.create.privacySocialDesc', 'Anyone can request to join; admins approve'),
   },
   {
     id: 'private',

@@ -85,7 +85,7 @@ export type RoomSummary = Pick<
 /* ============================================================
  * House (community)
  * ========================================================== */
-export type HousePrivacy = 'open' | 'private';
+export type HousePrivacy = 'open' | 'private' | 'social';
 
 export interface HouseMember extends UserSummary {
   role: 'admin' | 'moderator' | 'member';

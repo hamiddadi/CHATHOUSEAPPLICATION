@@ -730,12 +730,27 @@
       "confirm": "Confirm"
     }
   },
+  "house": {
+    "requestToJoin": "Request to join",
+    "requestSent": "Request sent",
+    "requests": {
+      "title": "Pending requests",
+      "loading": "Loading join requests",
+      "approve": "Approve",
+      "decline": "Decline",
+      "errorTitle": "Action failed",
+      "approveError": "Couldn't approve this request.",
+      "declineError": "Couldn't decline this request."
+    }
+  },
   "houses": {
     "create": {
       "title": "Create House",
       "namePlaceholder": "House Name",
       "descPlaceholder": "Description",
-      "submit": "Create"
+      "submit": "Create",
+      "privacySocial": "Social",
+      "privacySocialDesc": "Anyone can request to join; admins approve"
     },
     "invite": {
       "title": "Invite Member",

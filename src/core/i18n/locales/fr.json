@@ -730,12 +730,27 @@
       "confirm": "Confirmer"
     }
   },
+  "house": {
+    "requestToJoin": "Demander à rejoindre",
+    "requestSent": "Demande envoyée",
+    "requests": {
+      "title": "Demandes en attente",
+      "loading": "Chargement des demandes",
+      "approve": "Approuver",
+      "decline": "Refuser",
+      "errorTitle": "Action impossible",
+      "approveError": "Impossible d'approuver cette demande.",
+      "declineError": "Impossible de refuser cette demande."
+    }
+  },
   "houses": {
     "create": {
       "title": "Créer une House",
       "namePlaceholder": "Nom de la House",
       "descPlaceholder": "Description",
-      "submit": "Créer"
+      "submit": "Créer",
+      "privacySocial": "Social",
+      "privacySocialDesc": "Tout le monde peut demander à rejoindre ; les admins approuvent"
     },
     "invite": {
       "title": "Inviter un membre",

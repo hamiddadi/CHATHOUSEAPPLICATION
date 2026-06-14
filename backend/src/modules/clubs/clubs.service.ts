@@ -30,7 +30,10 @@ export const clubsService = {
       input.filter === 'mine'
         ? { members: { some: { userId: viewerId } } }
         : {
-            privacy: 'OPEN',
+            // SOCIAL clubs are request-to-join; they must still be discoverable
+            // (the FE routes the join through the clubreq request flow). Only
+            // PRIVATE clubs and clubs the viewer already belongs to are hidden.
+            privacy: { in: ['OPEN', 'SOCIAL'] },
             members: { none: { userId: viewerId } },
           };
 

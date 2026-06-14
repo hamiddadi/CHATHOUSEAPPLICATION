@@ -5,6 +5,8 @@ import { useNavigation, useRoute, type RouteProp } from '@react-navigation/nativ
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useExtJoinHouse, clubReqApi, type ClubJoinRequest } from '@/features/extensions';
 import { Avatar } from '../../../../shared/components/Avatar';
 import { Button } from '../../../../shared/components/Button';
 import { Loader } from '../../../../shared/components/Loader';
@@ -15,7 +17,13 @@ import { errorMessage } from '../../../../shared/utils/errorMessage';
 import { useAuthStore } from '../../../auth/store/authStore';
 import type { HouseMember } from '../../../../shared/types/domain';
 import type { HouseMemberRole, HouseRoom } from '../../services/houseService';
-import { useHouse, useHouseRooms, useJoinHouse, useSetMemberRole } from '../../hooks/useHouses';
+import {
+  houseKeys,
+  useHouse,
+  useHouseRooms,
+  useJoinHouse,
+  useSetMemberRole,
+} from '../../hooks/useHouses';
 
 type Nav = NativeStackNavigationProp<RoomStackParamList, 'HouseDetail'>;
 type Route = RouteProp<RoomStackParamList, 'HouseDetail'>;
@@ -37,6 +45,7 @@ export const HouseDetailScreen: React.FC = () => {
   const { data: upcomingRooms } = useHouseRooms(houseId, 'upcoming');
   const setMemberRole = useSetMemberRole();
   const joinHouse = useJoinHouse();
+  const queryClient = useQueryClient();
 
   const viewerId = useAuthStore(s => s.user?.id ?? null);
 
@@ -47,6 +56,60 @@ export const HouseDetailScreen: React.FC = () => {
       !!viewerId && (house?.members.some(m => m.id === viewerId && m.role === 'admin') ?? false),
     [house?.members, viewerId],
   );
+
+  // The viewer (OWNER/ADMIN of a SOCIAL house) sees a pending-requests inbox.
+  const isSocial = house?.privacy === 'social';
+  const showRequestInbox = canManageRoles && isSocial;
+
+  // SOCIAL request-to-join CTA. The clubreq flow returns 'joined' for OPEN
+  // clubs (not used here) and 'pending' for SOCIAL; on 'joined' we refetch the
+  // house so the membership-aware section flips to "Invite members".
+  const refreshHouse = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: houseKeys.detail(houseId) });
+  }, [queryClient, houseId]);
+  const joinFlow = useExtJoinHouse({ onJoined: refreshHouse });
+  const handleRequestToJoin = useCallback(() => {
+    void joinFlow.join(houseId);
+  }, [joinFlow, houseId]);
+
+  // Pending join requests for the admin inbox (SOCIAL houses only). Skipped
+  // entirely when the viewer can't manage the house or it isn't SOCIAL.
+  const {
+    data: joinRequests,
+    isLoading: requestsLoading,
+    refetch: refetchRequests,
+  } = useQuery<ClubJoinRequest[]>({
+    queryKey: [...houseKeys.detail(houseId), 'joinRequests'],
+    queryFn: () => clubReqApi.list(houseId),
+    enabled: showRequestInbox,
+  });
+
+  // After approve/decline: drop the handled request, refresh the house so the
+  // members list / count reflect the new member, and re-pull the inbox.
+  const onRequestSettled = useCallback(() => {
+    void refetchRequests();
+    void queryClient.invalidateQueries({ queryKey: houseKeys.detail(houseId) });
+  }, [refetchRequests, queryClient, houseId]);
+
+  const approveRequest = useMutation({
+    mutationFn: (userId: string) => clubReqApi.approve(houseId, userId),
+    onSuccess: onRequestSettled,
+    onError: e =>
+      Alert.alert(
+        t('house.requests.errorTitle', 'Action impossible'),
+        errorMessage(e, t('house.requests.approveError', "Impossible d'approuver cette demande.")),
+      ),
+  });
+  const declineRequest = useMutation({
+    mutationFn: (userId: string) => clubReqApi.decline(houseId, userId),
+    onSuccess: onRequestSettled,
+    onError: e =>
+      Alert.alert(
+        t('house.requests.errorTitle', 'Action impossible'),
+        errorMessage(e, t('house.requests.declineError', 'Impossible de refuser cette demande.')),
+      ),
+  });
+  const requestPending = approveRequest.isPending || declineRequest.isPending;
 
   const handleBack = useCallback(() => navigation.goBack(), [navigation]);
   const handleInvite = useCallback(
@@ -201,6 +264,61 @@ export const HouseDetailScreen: React.FC = () => {
     );
   };
 
+  // Admin inbox: pending join requests for a SOCIAL house. Only rendered when
+  // the viewer can manage the house and there is something to act on / load.
+  const renderRequestInbox = () => {
+    if (!showRequestInbox) return null;
+    if (requestsLoading && !joinRequests) {
+      return (
+        <View className="gap-md">
+          <Text className="text-xxs font-body-bold text-ink-muted tracking-widest uppercase">
+            {t('house.requests.title', 'Pending requests')}
+          </Text>
+          <Loader accessibilityLabel={t('house.requests.loading', 'Loading join requests')} />
+        </View>
+      );
+    }
+    if (!joinRequests || joinRequests.length === 0) return null;
+    return (
+      <View className="gap-md">
+        <Text className="text-xxs font-body-bold text-ink-muted tracking-widest uppercase">
+          {t('house.requests.title', 'Pending requests')}
+        </Text>
+        {joinRequests.map(req => (
+          <View
+            key={req.userId}
+            className="flex-row items-center gap-md p-md rounded-md bg-overlay-white-5"
+          >
+            <View className="flex-1">
+              <Text className="text-md font-body-bold text-ink" numberOfLines={1}>
+                {req.userId}
+              </Text>
+              {req.message ? (
+                <Text className="text-xs font-body text-ink-muted" numberOfLines={2}>
+                  {req.message}
+                </Text>
+              ) : null}
+            </View>
+            <Button
+              label={t('house.requests.approve', 'Approve')}
+              variant="primary"
+              size="sm"
+              disabled={requestPending}
+              onPress={() => approveRequest.mutate(req.userId)}
+            />
+            <Button
+              label={t('house.requests.decline', 'Decline')}
+              variant="ghost"
+              size="sm"
+              disabled={requestPending}
+              onPress={() => declineRequest.mutate(req.userId)}
+            />
+          </View>
+        ))}
+      </View>
+    );
+  };
+
   return (
     <View className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
       <View className="flex-row items-center justify-between px-xxl py-lg">
@@ -276,6 +394,22 @@ export const HouseDetailScreen: React.FC = () => {
                 <Text className="text-xs font-body text-ink-muted">
                   {t('house.inviteOnly', 'Sur invitation uniquement')}
                 </Text>
+              ) : house.privacy === 'social' ? (
+                // SOCIAL houses are approval-gated: the legacy direct join now
+                // rejects them (CLUB-01), so route through the clubreq request
+                // flow. The CTA flips to "Request sent" once a request is queued.
+                <Button
+                  label={
+                    joinFlow.isPending
+                      ? t('house.requestSent', 'Request sent')
+                      : t('house.requestToJoin', 'Request to join')
+                  }
+                  variant="primary"
+                  size="md"
+                  loading={joinFlow.isSubmitting}
+                  disabled={joinFlow.isSubmitting || joinFlow.isPending}
+                  onPress={handleRequestToJoin}
+                />
               ) : (
                 <Button
                   label={t('house.join', 'Rejoindre')}
@@ -287,6 +421,8 @@ export const HouseDetailScreen: React.FC = () => {
                 />
               )}
             </View>
+
+            {renderRequestInbox()}
 
             {renderRoomSection(t('house.liveRooms', 'En direct'), liveRooms, true)}
             {renderRoomSection(t('house.upcomingRooms', 'Planifiées'), upcomingRooms, false)}

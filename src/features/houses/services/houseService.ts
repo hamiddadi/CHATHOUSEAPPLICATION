@@ -2,6 +2,15 @@ import { apiClient } from '../../../shared/services/api/apiClient';
 import type { Envelope } from '../../../shared/types/api';
 import type { House, HouseMember, HousePrivacy, HouseSummary } from '../../../shared/types/domain';
 
+// Backend club privacy enum (uppercase). The FE uses lowercase `HousePrivacy`;
+// this maps each value 1:1 so a SOCIAL house is created as SOCIAL rather than
+// silently downgraded to OPEN.
+const PRIVACY_TO_DB: Record<HousePrivacy, 'OPEN' | 'PRIVATE' | 'SOCIAL'> = {
+  open: 'OPEN',
+  private: 'PRIVATE',
+  social: 'SOCIAL',
+};
+
 export interface CreateHouseInput {
   name: string;
   description: string;
@@ -62,7 +71,7 @@ export const houseService = {
     const res = await apiClient.post<Envelope<House>>('/clubs', {
       name: input.name.trim(),
       description: input.description.trim() || undefined,
-      privacy: input.privacy === 'private' ? 'PRIVATE' : 'OPEN',
+      privacy: PRIVACY_TO_DB[input.privacy],
       iconUrl: input.iconUrl ?? undefined,
     });
     return res.data.data;
