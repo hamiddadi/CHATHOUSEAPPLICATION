@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { upcomingApi, type UpcomingEvent } from '../api/upcomingApi';
 import { privacyApi, type PrivacySettings } from '../api/privacyApi';
+import { recentlyPlayedApi, type RecentRoom } from '../api/recentlyPlayedApi';
 import { searchExtApi, type RoomSearchResult, type RoomSearchFilter } from '../api/searchExtApi';
 
 export const extUpcomingKey = ['ext', 'upcoming', 'mine'] as const;
@@ -10,6 +11,14 @@ export const useExtUpcoming = () =>
     queryFn: () => upcomingApi.listMine(),
     staleTime: 30_000,
     refetchInterval: 60_000,
+  });
+
+export const extRecentlyPlayedKey = ['ext', 'recentlyPlayed'] as const;
+export const useExtRecentlyPlayed = () =>
+  useQuery<RecentRoom[]>({
+    queryKey: extRecentlyPlayedKey,
+    queryFn: () => recentlyPlayedApi.list(),
+    staleTime: 30_000,
   });
 
 export const extPrivacyKey = ['ext', 'privacy'] as const;

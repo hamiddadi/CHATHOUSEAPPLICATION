@@ -37,6 +37,7 @@ import { TitleEditModal } from '../../components/TitleEditModal';
 import { RoomTimer } from '../../components/RoomTimer';
 import { useAuthStore } from '../../../auth/store/authStore';
 import { useCurrentRoomStore } from '../../store/currentRoomStore';
+import { recentlyPlayedApi } from '../../../extensions';
 import { getSocket } from '../../../../shared/services/realtime/socketClient';
 import { formatScheduled } from '../../../../shared/utils/formatScheduled';
 import StageGrid from './partials/StageGrid';
@@ -141,6 +142,9 @@ export const RoomScreen: React.FC = () => {
       speakers: room.speakers,
       listenersCount: room.listenersCount,
     });
+    // Record this room in the viewer's "recently played" zset (resume parity).
+    // Fire-and-forget: the touch is best-effort and must never block the join.
+    void recentlyPlayedApi.touch(room.id).catch(() => undefined);
   }, [room]);
 
   // Capture mic + start producing once we're in the room. The LiveKit

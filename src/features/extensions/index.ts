@@ -123,6 +123,8 @@ export { chatReactionsApi } from './api/chatReactionsApi';
 export type { ReactionsByEmoji } from './api/chatReactionsApi';
 export { recentlyPlayedApi } from './api/recentlyPlayedApi';
 export type { RecentRoom } from './api/recentlyPlayedApi';
+export { ExtRecentlyPlayedStrip } from './components/ExtRecentlyPlayedStrip';
+export { useExtRecentlyPlayed } from './hooks/useUpcoming';
 export { roomSettingsExtApi } from './api/roomSettingsExtApi';
 export type { HandRaiseRestriction, ExtRoomSettings } from './api/roomSettingsExtApi';
 export { badgesApi, BADGE_META } from './api/badgesApi';

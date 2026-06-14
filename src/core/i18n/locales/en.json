@@ -259,6 +259,9 @@
     "listenersCount": "{{count}} listeners",
     "inRoom": "{{count}} in room",
     "upcoming": "Upcoming",
+    "recentlyPlayed": "Recently played",
+    "ended": "Ended",
+    "resumeRoomA11y": "Resume room {{title}}",
     "exploreA11y": "Explore",
     "eventsA11y": "Events",
     "notificationsA11y": "Notifications"

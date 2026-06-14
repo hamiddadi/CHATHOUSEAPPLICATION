@@ -259,6 +259,9 @@
     "listenersCount": "{{count}} auditeurs",
     "inRoom": "{{count}} dans la room",
     "upcoming": "À venir",
+    "recentlyPlayed": "Écoutés récemment",
+    "ended": "Terminé",
+    "resumeRoomA11y": "Reprendre la room {{title}}",
     "exploreA11y": "Découvrir",
     "eventsA11y": "Événements",
     "notificationsA11y": "Notifications"

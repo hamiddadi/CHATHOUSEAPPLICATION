@@ -18,7 +18,12 @@ import { roomService } from '../../services/roomService';
 import { useHallwaySocket } from '../../hooks/useHallwaySocket';
 import { useUnreadNotificationCount } from '../../../notifications/hooks/useNotifications';
 import { formatScheduled } from '../../../../shared/utils/formatScheduled';
-import { ExtAvailablePeopleStrip, ExtUpcomingForYouStrip, useExtWave } from '../../../extensions';
+import {
+  ExtAvailablePeopleStrip,
+  ExtRecentlyPlayedStrip,
+  ExtUpcomingForYouStrip,
+  useExtWave,
+} from '../../../extensions';
 import { RoomFeedSkeleton } from './RoomFeedSkeleton';
 
 type Nav = NativeStackNavigationProp<RoomStackParamList, 'RoomFeed'>;
@@ -382,6 +387,11 @@ export const RoomFeedScreen: React.FC = () => {
     (event: { id: string }) => navigation.navigate('Room', { roomId: event.id }),
     [navigation],
   );
+  // Extension: resume a recently-played room (resume parity strip)
+  const handleResumeSelect = useCallback(
+    (roomId: string) => navigation.navigate('Room', { roomId }),
+    [navigation],
+  );
 
   const renderItem = useCallback(
     ({ item }: { item: RoomSummary }) => <RoomCard room={item} onJoin={handleJoin} />,
@@ -433,6 +443,7 @@ export const RoomFeedScreen: React.FC = () => {
               </View>
               <ExtAvailablePeopleStrip onWaveUser={handleWaveUser} />
               <ExtUpcomingForYouStrip onSelect={handleUpcomingSelect} />
+              <ExtRecentlyPlayedStrip onSelect={handleResumeSelect} />
               <UpcomingRow rooms={upcoming} onOpen={handleJoin} />
               <Text className="text-xl font-headline text-ink tracking-tight">
                 {t('feed.liveNow', 'Live Now')}
