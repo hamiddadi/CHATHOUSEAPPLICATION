@@ -4,13 +4,14 @@ Ces suites encodent les scénarios de l'audit des **machines à états** de Chat
 (voir [docs/qa/RAPPORT-AUDIT-WORKFLOWS.md](../../../docs/qa/RAPPORT-AUDIT-WORKFLOWS.md)).
 Elles sont **additives** : aucun test existant de `backend/tests/` n'est modifié.
 
-## Convention `it.failing` (bugs connus)
+## Statut : toutes les anomalies couvertes sont CORRIGÉES ✅
 
-Les anomalies **confirmées** par l'audit sont écrites avec `it.failing(...)` :
-
-- Le test **PASSE tant que le bug existe** (il documente l'écart attendu/obtenu).
-- Le test **devient ROUGE quand le bug est corrigé** → signal automatique pour
-  basculer le `it.failing` en `it()` normal une fois le correctif livré.
+Ces suites ont été écrites avec la convention `it.failing(...)` (le test passe tant
+que le bug existe, devient rouge quand il est corrigé). **Tous les correctifs ont
+été livrés et vérifiés contre la stack docker (Postgres:5433 + Redis)**, donc tous
+les `it.failing` ont été basculés en `it()` normal — ce sont désormais des
+**tests de non-régression** verts (ROOM-01/PART-01, FOLL-01, FOLL-02, CLUB-01,
+CLUB-03, AUTH-01, AUTH-05).
 
 Les transitions correctes (chemin nominal, transitions invalides déjà bloquées,
 RBAC déjà appliqué) sont écrites en `it()` normal — couverture positive.

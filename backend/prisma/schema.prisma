@@ -37,6 +37,15 @@ enum NotificationType {
   NEW_MESSAGE
   ROOM_CANCELED
   ROOM_ENDED_BY_ADMIN
+  FOLLOW_REQUEST
+}
+
+// FOLL-01: a Follow is PENDING when it targets a private account (awaiting the
+// target's approval) and ACCEPTED otherwise. Default ACCEPTED so every existing
+// edge (public follows) stays a real follow with no backfill.
+enum FollowStatus {
+  PENDING
+  ACCEPTED
 }
 
 enum ReportReason {
@@ -542,10 +551,12 @@ model GroupMessage {
 
 // ─── Follow ─────────────────────────────────────────────
 model Follow {
-  id          String   @id @default(cuid())
+  id          String       @id @default(cuid())
   followerId  String
   followingId String
-  createdAt   DateTime @default(now())
+  // FOLL-01: PENDING for a request to a private account, ACCEPTED otherwise.
+  status      FollowStatus @default(ACCEPTED)
+  createdAt   DateTime     @default(now())
 
   follower  User @relation("Follower", fields: [followerId], references: [id], onDelete: Cascade)
   following User @relation("Following", fields: [followingId], references: [id], onDelete: Cascade)
@@ -553,6 +564,8 @@ model Follow {
   @@unique([followerId, followingId])
   @@index([followerId])
   @@index([followingId])
+  // Pending requests TO a user are listed/paginated by (followingId, status).
+  @@index([followingId, status])
 }
 
 // ─── Notification ───────────────────────────────────────

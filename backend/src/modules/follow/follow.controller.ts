@@ -32,6 +32,25 @@ export const followController = {
     sendOk(res, result);
   },
 
+  // FOLL-01: private-account follow-request inbox + accept/reject. `:userId` on
+  // accept/reject is the REQUESTER (the person who asked to follow me).
+  async requests(req: Request, res: Response) {
+    const me = requireUserId(req);
+    const { limit, cursor } = listQuerySchema.parse(req.query);
+    const result = await followService.listFollowRequests(me, limit, cursor);
+    sendOk(res, result);
+  },
+
+  async acceptRequest(req: Request, res: Response) {
+    const result = await followService.acceptFollowRequest(requireUserId(req), targetId(req));
+    sendOk(res, result);
+  },
+
+  async rejectRequest(req: Request, res: Response) {
+    const result = await followService.rejectFollowRequest(requireUserId(req), targetId(req));
+    sendOk(res, result);
+  },
+
   async followers(req: Request, res: Response) {
     const viewerId = requireUserId(req);
     const { limit, cursor } = listQuerySchema.parse(req.query);

@@ -80,23 +80,20 @@ describe('Workflow — follow', () => {
   // Suivre un compte PRIVÉ devrait créer une demande PENDING (en attente
   // d'approbation), pas une relation FOLLOWING immédiate. Aujourd'hui
   // follow() ne lit jamais isPrivateAccount → suivi instantané.
-  it.failing(
-    'FOLL-01 : suivre un compte PRIVÉ ne devrait PAS établir FOLLOWING immédiatement',
-    async () => {
-      const a = await registerUser(app);
-      const b = await registerUser(app);
-      createdUserIds.push(a.id, b.id);
-      // B passe son compte en privé (écrit en base, sans dépendre de l'extension).
-      await prisma.user.update({ where: { id: b.id }, data: { isPrivateAccount: true } });
+  it('FOLL-01 : suivre un compte PRIVÉ ne devrait PAS établir FOLLOWING immédiatement', async () => {
+    const a = await registerUser(app);
+    const b = await registerUser(app);
+    createdUserIds.push(a.id, b.id);
+    // B passe son compte en privé (écrit en base, sans dépendre de l'extension).
+    await prisma.user.update({ where: { id: b.id }, data: { isPrivateAccount: true } });
 
-      const follow = await request(app)
-        .post(`/api/follow/${b.id}`)
-        .set('Authorization', `Bearer ${a.token}`);
+    const follow = await request(app)
+      .post(`/api/follow/${b.id}`)
+      .set('Authorization', `Bearer ${a.token}`);
 
-      // Comportement attendu : pas de relation effective avant approbation.
-      expect(follow.body.data.following).toBe(false);
-    },
-  );
+    // Comportement attendu : pas de relation effective avant approbation.
+    expect(follow.body.data.following).toBe(false);
+  });
 
   // ── ANOMALIE FOLL-02 (majeure) ────────────────────────────────────────
   // Un utilisateur bloqué ne devrait pas pouvoir (re)créer un edge Follow.
