@@ -2,11 +2,26 @@ import React, { memo, useCallback } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import MaterialIcons from '@react-native-vector-icons/material-icons';
 import Animated, { FadeInDown, FadeOutDown } from 'react-native-reanimated';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useNavigationState } from '@react-navigation/native';
+import type { NavigationState, PartialState } from '@react-navigation/native';
 import { Avatar } from '../Avatar';
 import { colors, layout, radii, shadows, spacing } from '../../constants/theme';
 import { useCurrentRoom } from '../../../features/rooms/hooks/useRooms';
 import type { RoomParticipant } from '../../types/domain';
+
+// Walk the nested navigator state down to the focused leaf route name, so the
+// mini-bar can hide itself while the Room screen is actually open (it's mounted
+// above the tab navigator and Room lives inside RoomsTab, so without this it
+// would stack on top of the live room).
+const activeLeafName = (
+  state: NavigationState | PartialState<NavigationState> | undefined,
+): string | undefined => {
+  if (!state || state.routes.length === 0) return undefined;
+  const idx = state.index ?? state.routes.length - 1;
+  const route = state.routes[idx];
+  if (!route) return undefined;
+  return route.state ? activeLeafName(route.state) : route.name;
+};
 
 /**
  * Persistent mini-bar that floats above the bottom tab bar whenever the
@@ -19,6 +34,7 @@ import type { RoomParticipant } from '../../types/domain';
 export const RoomMiniBar: React.FC = memo(() => {
   const navigation = useNavigation();
   const { room, isMuted, toggleMute, leave } = useCurrentRoom();
+  const activeRoute = useNavigationState(activeLeafName);
 
   const handleTap = useCallback(() => {
     if (room) {
@@ -34,7 +50,10 @@ export const RoomMiniBar: React.FC = memo(() => {
     leave();
   }, [leave]);
 
-  if (!room) return null;
+  // Hidden when not in a room, and while the Room screen itself is focused
+  // (the live room already shows full controls — the mini-bar is the
+  // navigated-away "resume" affordance).
+  if (!room || activeRoute === 'Room') return null;
 
   const bottomOffset = layout.tabBarHeight + layout.tabBarBottomOffset + spacing.sm;
 

@@ -36,6 +36,7 @@ import { RoomControlsSheet } from '../../components/RoomControlsSheet';
 import { TitleEditModal } from '../../components/TitleEditModal';
 import { RoomTimer } from '../../components/RoomTimer';
 import { useAuthStore } from '../../../auth/store/authStore';
+import { useCurrentRoomStore } from '../../store/currentRoomStore';
 import { getSocket } from '../../../../shared/services/realtime/socketClient';
 import { formatScheduled } from '../../../../shared/utils/formatScheduled';
 import StageGrid from './partials/StageGrid';
@@ -114,6 +115,7 @@ export const RoomScreen: React.FC = () => {
   // / RoomBan / ended room) instead of leaving the user stranded on the screen
   // with no Participant row and therefore no audio (livekit-token → ROOM_005).
   const handleJoinDenied = useCallback(() => {
+    useCurrentRoomStore.getState().clear(); // denied → not in the room, no mini-bar
     navigation.goBack();
     Alert.alert(
       t('room.alert.joinDeniedTitle', 'Unable to join'),
@@ -126,6 +128,20 @@ export const RoomScreen: React.FC = () => {
   // never reflects what other participants do. The second arg backs out on a
   // gated/denied join (see handleJoinDenied).
   useRoomSocket(room?.id ?? null, handleJoinDenied);
+
+  // Mini-bar (resume): mirror the room we're in into the global store so
+  // RoomMiniBar (mounted in MainNavigator) shows a "resume" pill after we
+  // navigate away. Refreshed on every room change; cleared only on explicit
+  // leave / kick / room-end — a plain back minimises to the mini-bar.
+  useEffect(() => {
+    if (!room) return;
+    useCurrentRoomStore.getState().setRoom({
+      id: room.id,
+      title: room.title,
+      speakers: room.speakers,
+      listenersCount: room.listenersCount,
+    });
+  }, [room]);
 
   // Capture mic + start producing once we're in the room. The LiveKit
   // engine auto-activates if `@livekit/react-native` is installed; in Expo
@@ -164,6 +180,7 @@ export const RoomScreen: React.FC = () => {
         // Pop the screen first so the user lands somewhere safe even if
         // they dismiss the alert. The 30-min RoomBan installed by the
         // backend prevents an immediate re-join.
+        useCurrentRoomStore.getState().clear();
         navigation.goBack();
         Alert.alert(
           t('room.alert.removedTitle', 'You have been removed'),
@@ -178,6 +195,7 @@ export const RoomScreen: React.FC = () => {
       // we're viewing. Pop the screen and tell the user it's over.
       const endedHandler = (payload: { roomId?: string }): void => {
         if (payload.roomId && payload.roomId !== roomId) return;
+        useCurrentRoomStore.getState().clear();
         navigation.goBack();
         Alert.alert(
           t('room.alert.endedTitle', 'Room ended'),
@@ -249,6 +267,8 @@ export const RoomScreen: React.FC = () => {
     });
   }, [isHandRaised, lowerHand, raiseHand, room]);
   const handleLeave = useCallback(async () => {
+    // "Leave quietly" = fully leave → drop the mini-bar (unlike a plain back).
+    useCurrentRoomStore.getState().clear();
     if (room) {
       try {
         await leaveRoom.mutateAsync(room.id);
@@ -271,7 +291,13 @@ export const RoomScreen: React.FC = () => {
         {
           text: t('room.closeRoom', 'End Room'),
           style: 'destructive',
-          onPress: () => endRoom.mutate(room.id, { onSettled: () => navigation.goBack() }),
+          onPress: () =>
+            endRoom.mutate(room.id, {
+              onSettled: () => {
+                useCurrentRoomStore.getState().clear();
+                navigation.goBack();
+              },
+            }),
         },
       ],
     );
