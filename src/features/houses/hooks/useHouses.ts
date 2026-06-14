@@ -4,6 +4,7 @@ import {
   type CreateHouseInput,
   type HouseMemberRole,
   type HouseRoom,
+  type UpdateHouseInput,
 } from '../services/houseService';
 import type { House, HouseSummary } from '../../../shared/types/domain';
 
@@ -33,6 +34,31 @@ export const useCreateHouse = () => {
   return useMutation({
     mutationFn: (input: CreateHouseInput) => houseService.create(input),
     onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: houseKeys.all });
+    },
+  });
+};
+
+export const useUpdateHouse = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ houseId, input }: { houseId: string; input: UpdateHouseInput }) =>
+      houseService.update(houseId, input),
+    onSuccess: updated => {
+      // Seed the detail cache with the refreshed club and invalidate the
+      // lists/membership-derived views so they refetch.
+      qc.setQueryData(houseKeys.detail(updated.id), updated);
+      void qc.invalidateQueries({ queryKey: houseKeys.all });
+    },
+  });
+};
+
+export const useDeleteHouse = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (houseId: string) => houseService.remove(houseId),
+    onSuccess: (_result, houseId) => {
+      qc.removeQueries({ queryKey: houseKeys.detail(houseId) });
       void qc.invalidateQueries({ queryKey: houseKeys.all });
     },
   });

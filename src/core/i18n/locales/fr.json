@@ -464,6 +464,9 @@
     "coHostsLabel": "Co-hosts",
     "coHostsHint": "Invite jusqu'à 5 personnes à co-animer.",
     "coHostsSearchPlaceholder": "Rechercher par pseudo",
+    "houseLabel": "Maison",
+    "houseHint": "Rattache éventuellement cette room à l'une de tes maisons.",
+    "houseNone": "Aucune",
     "startRoom": "Démarrer",
     "closeA11y": "Fermer sans démarrer",
     "errorTitle": "Création impossible",
@@ -567,7 +570,22 @@
     "eventReminder": "Rappels de rooms planifiées",
     "newMessage": "Nouveaux messages",
     "handAccepted": "On t'invite à parler",
-    "mention": "Mentions"
+    "mention": "Mentions",
+    "frequency": {
+      "heading": "Fréquence des push",
+      "subtitle": "À quelle fréquence on envoie des push pour des alertes similaires. La cloche dans l'app n'est jamais affectée.",
+      "infrequent": "Rare",
+      "normal": "Normale",
+      "frequent": "Fréquente"
+    },
+    "mutedClubs": {
+      "heading": "Clubs en sourdine",
+      "subtitle": "Coupe les notifications push d'un club. Tu vois toujours son activité dans l'app."
+    },
+    "mutedUsers": {
+      "heading": "Personnes en sourdine",
+      "subtitle": "Désactive pour ne plus mettre en sourdine les push de cette personne."
+    }
   },
   "admin": {
     "home": {
@@ -731,6 +749,7 @@
     }
   },
   "house": {
+    "manageA11y": "Gérer la house",
     "requestToJoin": "Demander à rejoindre",
     "requestSent": "Demande envoyée",
     "requests": {
@@ -751,6 +770,23 @@
       "submit": "Créer",
       "privacySocial": "Social",
       "privacySocialDesc": "Tout le monde peut demander à rejoindre ; les admins approuvent"
+    },
+    "manage": {
+      "title": "Gérer la House",
+      "loading": "Chargement de la house",
+      "closeA11y": "Fermer sans enregistrer",
+      "save": "Enregistrer",
+      "saveError": "Impossible d'enregistrer les modifications.",
+      "errorTitle": "Erreur",
+      "unavailableTitle": "House indisponible",
+      "unavailableBody": "Cette house a peut-être été supprimée.",
+      "dangerZone": "Zone de danger",
+      "delete": "Supprimer la house",
+      "deleteConfirmTitle": "Supprimer la house ?",
+      "deleteConfirmBody": "Cette action supprime définitivement la house pour tous les membres.",
+      "deleteConfirm": "Supprimer",
+      "deleteError": "Impossible de supprimer cette house.",
+      "cancel": "Annuler"
     },
     "invite": {
       "title": "Inviter un membre",

@@ -15,6 +15,7 @@ import { useCreateRoom } from '../../hooks/useRooms';
 import { DateTimePickerInline } from '../../components/DateTimePickerInline';
 import { searchService } from '../../../search/services/searchService';
 import { INTEREST_CATEGORIES } from '../../../onboarding/schemas';
+import { useHouses } from '../../../houses/hooks/useHouses';
 
 type Nav = NativeStackNavigationProp<RoomStackParamList, 'CreateRoom'>;
 
@@ -130,6 +131,32 @@ const TopicChip: React.FC<TopicChipProps> = memo(({ topic, selected, onPress }) 
 });
 TopicChip.displayName = 'TopicChip';
 
+interface HouseChipProps {
+  // null id renders the "None" (standalone room) option.
+  id: string | null;
+  label: string;
+  emoji?: string;
+  selected: boolean;
+  onPress: (id: string | null) => void;
+}
+
+const HouseChip: React.FC<HouseChipProps> = memo(({ id, label, emoji, selected, onPress }) => {
+  const handlePress = useCallback(() => onPress(id), [id, onPress]);
+  return (
+    <Pressable
+      onPress={handlePress}
+      accessibilityRole="radio"
+      accessibilityState={{ selected }}
+      style={[styles.chip, selected ? styles.chipSelected : styles.chipUnselected]}
+    >
+      <Text style={selected ? styles.chipLabelSelected : styles.chipLabelUnselected}>
+        {emoji ? `${emoji} ${label}` : label}
+      </Text>
+    </Pressable>
+  );
+});
+HouseChip.displayName = 'HouseChip';
+
 interface CoHostSlotProps {
   user: { id: string; username: string; displayName: string; avatarUrl: string | null };
   onRemove: (id: string) => void;
@@ -172,6 +199,10 @@ export const CreateRoomScreen: React.FC = () => {
   const [topics, setTopics] = useState<Set<string>>(new Set());
   const [coHosts, setCoHosts] = useState<SearchHit[]>([]);
   const [recordingEnabled, setRecordingEnabled] = useState(false);
+  // Optional: attach the room to one of the user's houses (clubId). Default
+  // null = a standalone room. Houses are membership-gated server-side, so we
+  // only ever offer the user's own ('mine') houses here.
+  const [houseId, setHouseId] = useState<string | null>(null);
 
   const [query, setQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
@@ -212,8 +243,15 @@ export const CreateRoomScreen: React.FC = () => {
   }, [debouncedQuery]);
 
   const createRoom = useCreateRoom();
+  const { data: houses } = useHouses('mine');
 
   const handleClose = useCallback(() => navigation.goBack(), [navigation]);
+
+  // Toggle the selected house: tapping the active one clears it back to None.
+  const selectHouse = useCallback(
+    (id: string | null) => setHouseId(prev => (prev === id ? null : id)),
+    [],
+  );
 
   const toggleTopic = useCallback((topic: string) => {
     setTopics(prev => {
@@ -259,6 +297,7 @@ export const CreateRoomScreen: React.FC = () => {
         coHostIds: coHosts.map(u => u.id),
         scheduledFor,
         recordingEnabled,
+        houseId,
       });
       navigation.goBack();
     } catch (err) {
@@ -280,6 +319,7 @@ export const CreateRoomScreen: React.FC = () => {
     schedulePreset,
     customScheduledFor,
     recordingEnabled,
+    houseId,
     t,
   ]);
   const handleToggleSchedule = useCallback(() => setIsScheduled(prev => !prev), []);
@@ -353,6 +393,35 @@ export const CreateRoomScreen: React.FC = () => {
             ))}
           </View>
         </View>
+
+        {houses && houses.length > 0 && (
+          <View className="gap-sm">
+            <Text className="text-xs font-body-medium text-ink-muted ml-xs">
+              {t('createRoom.houseLabel', 'House')}
+            </Text>
+            <Text className="text-xs font-body text-ink-dim ml-xs">
+              {t('createRoom.houseHint', 'Optionally attach this room to one of your houses.')}
+            </Text>
+            <View className="flex-row flex-wrap gap-sm pt-xs" accessibilityRole="radiogroup">
+              <HouseChip
+                id={null}
+                label={t('createRoom.houseNone', 'None')}
+                selected={houseId === null}
+                onPress={selectHouse}
+              />
+              {houses.map(house => (
+                <HouseChip
+                  key={house.id}
+                  id={house.id}
+                  label={house.name}
+                  emoji={house.categoryEmoji}
+                  selected={houseId === house.id}
+                  onPress={selectHouse}
+                />
+              ))}
+            </View>
+          </View>
+        )}
 
         <View className="gap-sm">
           <Text className="text-xs font-body-medium text-ink-muted ml-xs">

@@ -116,6 +116,10 @@ export const HouseDetailScreen: React.FC = () => {
     () => navigation.navigate('InviteMember', { houseId }),
     [navigation, houseId],
   );
+  const handleManageHouse = useCallback(
+    () => navigation.navigate('ManageHouse', { houseId }),
+    [navigation, houseId],
+  );
   const handleJoin = useCallback(() => {
     joinHouse.mutate(houseId, {
       onError: e => Alert.alert('Erreur', errorMessage(e, 'Impossible de rejoindre cette house.')),
@@ -330,14 +334,26 @@ export const HouseDetailScreen: React.FC = () => {
         >
           <MaterialIcons name="arrow-back" size={24} color={colors.text} />
         </Pressable>
-        <Pressable
-          onPress={handleOptions}
-          accessibilityRole="button"
-          accessibilityLabel="House options"
-          hitSlop={8}
-        >
-          <MaterialIcons name="more-vert" size={24} color={colors.text} />
-        </Pressable>
+        <View className="flex-row items-center gap-lg">
+          {canManageRoles && (
+            <Pressable
+              onPress={handleManageHouse}
+              accessibilityRole="button"
+              accessibilityLabel={t('house.manageA11y', 'Manage house')}
+              hitSlop={8}
+            >
+              <MaterialIcons name="settings" size={24} color={colors.text} />
+            </Pressable>
+          )}
+          <Pressable
+            onPress={handleOptions}
+            accessibilityRole="button"
+            accessibilityLabel="House options"
+            hitSlop={8}
+          >
+            <MaterialIcons name="more-vert" size={24} color={colors.text} />
+          </Pressable>
+        </View>
       </View>
 
       <FlatList

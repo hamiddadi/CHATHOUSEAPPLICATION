@@ -464,6 +464,9 @@
     "coHostsLabel": "Co-hosts",
     "coHostsHint": "Invite up to 5 people to co-host.",
     "coHostsSearchPlaceholder": "Search by username",
+    "houseLabel": "House",
+    "houseHint": "Optionally attach this room to one of your houses.",
+    "houseNone": "None",
     "startRoom": "Start Room",
     "closeA11y": "Close without starting",
     "errorTitle": "Couldn't start the room",
@@ -567,7 +570,22 @@
     "eventReminder": "Scheduled room reminders",
     "newMessage": "New messages",
     "handAccepted": "You're invited to speak",
-    "mention": "Mentions"
+    "mention": "Mentions",
+    "frequency": {
+      "heading": "Push frequency",
+      "subtitle": "How often we send pushes for similar alerts. The in-app bell is never affected.",
+      "infrequent": "Infrequent",
+      "normal": "Normal",
+      "frequent": "Frequent"
+    },
+    "mutedClubs": {
+      "heading": "Muted clubs",
+      "subtitle": "Silence push notifications from a club. You still see its activity in-app."
+    },
+    "mutedUsers": {
+      "heading": "Muted people",
+      "subtitle": "Turn off to stop muting this person's push notifications."
+    }
   },
   "admin": {
     "home": {
@@ -731,6 +749,7 @@
     }
   },
   "house": {
+    "manageA11y": "Manage house",
     "requestToJoin": "Request to join",
     "requestSent": "Request sent",
     "requests": {
@@ -751,6 +770,23 @@
       "submit": "Create",
       "privacySocial": "Social",
       "privacySocialDesc": "Anyone can request to join; admins approve"
+    },
+    "manage": {
+      "title": "Manage House",
+      "loading": "Loading house",
+      "closeA11y": "Close without saving",
+      "save": "Save changes",
+      "saveError": "Couldn't save the changes.",
+      "errorTitle": "Error",
+      "unavailableTitle": "House unavailable",
+      "unavailableBody": "This house may have been deleted.",
+      "dangerZone": "Danger zone",
+      "delete": "Delete house",
+      "deleteConfirmTitle": "Delete house?",
+      "deleteConfirmBody": "This permanently removes the house for all members.",
+      "deleteConfirm": "Delete",
+      "deleteError": "Couldn't delete this house.",
+      "cancel": "Cancel"
     },
     "invite": {
       "title": "Invite Member",

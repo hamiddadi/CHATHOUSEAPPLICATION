@@ -59,11 +59,34 @@ export const notifPrefsExtService = {
   },
 
   /**
-   * Returns true if the user is allowed to receive a push of the given
-   * `kind` right now under their frequency tier. Use from fan-out workers
-   * to throttle without removing the in-app notification.
+   * Returns true if the user is allowed to receive a *push* for the given
+   * `kind` right now. Three axes are consulted, cheapest first:
+   *   1. **Per-user mute** — the actor is muted ⇒ never push.
+   *   2. **Per-club mute** — the originating club is muted ⇒ never push.
+   *   3. **Frequency tier** — throttles same-`kind` fan-out pushes.
+   *
+   * Only the PUSH is gated; callers must still persist the in-app row +
+   * realtime emit so the bell stays accurate. Mute is a hard gate (no
+   * throttle bookkeeping happens once muted). The throttle "spends" a slot
+   * only when it would otherwise allow the push, so a muted club/user never
+   * resets a user's quiet window.
    */
-  async canDeliver(userId: string, kind: string): Promise<boolean> {
+  async canDeliver(
+    userId: string,
+    kind: string,
+    opts: { clubId?: string | null; actorId?: string | null } = {},
+  ): Promise<boolean> {
+    const { clubId, actorId } = opts;
+
+    if (actorId) {
+      const userMuted = await redis.sIsMember(userMuteKey(userId), actorId);
+      if (userMuted) return false;
+    }
+    if (clubId) {
+      const clubMuted = await redis.sIsMember(clubMuteKey(userId), clubId);
+      if (clubMuted) return false;
+    }
+
     const tier = await this.getFrequency(userId);
     const throttle = FREQ_THROTTLE_MS[tier];
     if (throttle === 0) return true;

@@ -5,6 +5,7 @@ import { logger } from '../../config/logger';
 import { AppError } from '../../middlewares/error.middleware';
 import { pushService } from '../push/push.service';
 import { emitNotification, emitNotificationCount } from '../../socket/realtime';
+import { notifPrefsExtService } from '../../extensions/modules/notifPrefsExt/notifPrefsExt.service';
 
 /**
  * Maps a NotificationType to the matching boolean field on
@@ -39,6 +40,17 @@ const isOwnClubRequestOutcome = (type: NotificationType, data?: Prisma.InputJson
   if (!data || typeof data !== 'object' || Array.isArray(data)) return false;
   const kind = (data as Record<string, unknown>).kind;
   return kind === 'join_approved' || kind === 'join_declined';
+};
+
+/**
+ * Pulls the originating Club id out of a notification's data payload so the
+ * notifPrefsExt per-club mute can be consulted. Producers stash it as
+ * `data.clubId` (see clubs.service). Returns null when absent or non-string.
+ */
+const extractClubId = (data?: Prisma.InputJsonValue): string | null => {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return null;
+  const clubId = (data as Record<string, unknown>).clubId;
+  return typeof clubId === 'string' ? clubId : null;
 };
 
 const isPushAllowed = async (
@@ -229,6 +241,24 @@ export const notificationsService = {
     // count stays accurate even when push is silenced.
     void (async () => {
       if (!(await isPushAllowed(input.userId, input.type, input.data))) return;
+      // Extension gate (notifPrefsExt): frequency-tier throttle + per-club /
+      // per-user mute. Only the push is suppressed; the in-app row + realtime
+      // emit above already happened. Fail-open: a thrown check (Redis down,
+      // etc.) must never swallow a push, so we default to allow on error. No
+      // ext prefs ⇒ canDeliver returns true (defaults), so this is a no-op.
+      let extAllows = true;
+      try {
+        extAllows = await notifPrefsExtService.canDeliver(input.userId, input.type, {
+          clubId: extractClubId(input.data),
+          actorId: input.actorId,
+        });
+      } catch (err) {
+        logger.warn('notifPrefsExt canDeliver failed; pushing anyway', {
+          err,
+          userId: input.userId,
+        });
+      }
+      if (!extAllows) return;
       await pushService.dispatchToUser(input.userId, {
         title: input.title,
         body: input.body,

@@ -12,6 +12,7 @@ import { HouseDetailScreen } from '../../../features/houses/screens/HouseDetailS
 import { CreateHouseScreen } from '../../../features/houses/screens/CreateHouseScreen';
 import { HouseInvitationScreen } from '../../../features/houses/screens/HouseInvitationScreen';
 import { InviteMemberScreen } from '../../../features/houses/screens/InviteMemberScreen';
+import { ManageHouseScreen } from '../../../features/houses/screens/ManageHouseScreen';
 import { ExploreScreen } from '../../../features/search/screens/ExploreScreen';
 import { EventsScreen } from '../../../features/events/screens/EventsScreen';
 import { NotificationsScreen } from '../../../features/notifications/screens/NotificationsScreen';
@@ -54,6 +55,11 @@ export const RoomsNavigator: React.FC = () => (
     <Stack.Screen
       name="InviteMember"
       component={InviteMemberScreen}
+      options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
+    />
+    <Stack.Screen
+      name="ManageHouse"
+      component={ManageHouseScreen}
       options={{ presentation: 'modal', animation: 'slide_from_bottom' }}
     />
 

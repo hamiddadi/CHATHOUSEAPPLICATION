@@ -18,6 +18,13 @@ export interface CreateHouseInput {
   iconUrl?: string | null;
 }
 
+export interface UpdateHouseInput {
+  name?: string;
+  description?: string;
+  privacy?: HousePrivacy;
+  iconUrl?: string | null;
+}
+
 export type HouseMemberRole = HouseMember['role'];
 
 /**
@@ -74,6 +81,21 @@ export const houseService = {
       privacy: PRIVACY_TO_DB[input.privacy],
       iconUrl: input.iconUrl ?? undefined,
     });
+    return res.data.data;
+  },
+
+  async update(id: string, input: UpdateHouseInput): Promise<House> {
+    const res = await apiClient.patch<Envelope<House>>(`/clubs/${id}`, {
+      name: input.name !== undefined ? input.name.trim() : undefined,
+      description: input.description !== undefined ? input.description.trim() : undefined,
+      privacy: input.privacy !== undefined ? PRIVACY_TO_DB[input.privacy] : undefined,
+      iconUrl: input.iconUrl ?? undefined,
+    });
+    return res.data.data;
+  },
+
+  async remove(id: string): Promise<{ deleted: true }> {
+    const res = await apiClient.delete<Envelope<{ deleted: true }>>(`/clubs/${id}`);
     return res.data.data;
   },
 

@@ -1,0 +1,1 @@
+export { ManageHouseScreen } from './ManageHouseScreen';

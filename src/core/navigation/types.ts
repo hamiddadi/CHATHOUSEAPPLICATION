@@ -56,6 +56,7 @@ export type RoomStackParamList = {
   CreateHouse: undefined;
   HouseInvitation: { houseId: string; inviteToken?: string };
   InviteMember: { houseId: string };
+  ManageHouse: { houseId: string };
 
   // Module-follow-up screens (Module 3/4/6 surfaces).
   Explore: undefined;
