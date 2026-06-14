@@ -110,10 +110,22 @@ export const RoomScreen: React.FC = () => {
     viewerRole && (viewerRole === 'host' || viewerRole === 'moderator' || viewerRole === 'speaker'),
   );
 
+  // Back out cleanly if the server GATES our join (private / CLOSED invite-only
+  // / RoomBan / ended room) instead of leaving the user stranded on the screen
+  // with no Participant row and therefore no audio (livekit-token → ROOM_005).
+  const handleJoinDenied = useCallback(() => {
+    navigation.goBack();
+    Alert.alert(
+      t('room.alert.joinDeniedTitle', 'Unable to join'),
+      t('room.alert.joinDeniedBody', "You don't have access to this room."),
+    );
+  }, [navigation, t]);
+
   // Subscribe to room broadcasts (user-joined, hand_raised, role_changed,
   // mute-changed, kicked, ended). Without this, the screen is static and
-  // never reflects what other participants do.
-  useRoomSocket(room?.id ?? null);
+  // never reflects what other participants do. The second arg backs out on a
+  // gated/denied join (see handleJoinDenied).
+  useRoomSocket(room?.id ?? null, handleJoinDenied);
 
   // Capture mic + start producing once we're in the room. The LiveKit
   // engine auto-activates if `@livekit/react-native` is installed; in Expo

@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { getSocket } from '../../../shared/services/realtime/socketClient';
 import { roomKeys } from './useRooms';
@@ -13,9 +13,20 @@ interface RoomEventPayload {
  * polling. Without this hook, the backend's `room:*` and `rtc:*` broadcasts
  * never reach the client because room.handler only joins the channel on
  * receipt of `room:join`.
+ *
+ * `onJoinDenied` fires when the server's `room:join` ack reports failure — i.e.
+ * the join was GATED (SOCIAL follow-gate, CLOSED invite-only, RoomBan, or an
+ * ended room). Previously the emit had no ack callback, so a denied join was
+ * swallowed: the user stayed on the (un-gated GET) room screen with no
+ * Participant row, and the next livekit-token request failed with ROOM_005 —
+ * "no audio, no explanation". The caller uses this to back out with a message.
  */
-export const useRoomSocket = (roomId: string | null): void => {
+export const useRoomSocket = (roomId: string | null, onJoinDenied?: () => void): void => {
   const qc = useQueryClient();
+  // Keep the latest callback in a ref so changing it doesn't re-run the effect
+  // (which would re-emit room:join / re-subscribe every render).
+  const onJoinDeniedRef = useRef(onJoinDenied);
+  onJoinDeniedRef.current = onJoinDenied;
 
   useEffect(() => {
     if (!roomId) return;
@@ -26,7 +37,9 @@ export const useRoomSocket = (roomId: string | null): void => {
       const socket = await getSocket();
       if (!socket || cancelled) return;
 
-      socket.emit('room:join', { roomId });
+      socket.emit('room:join', { roomId }, (ok: boolean) => {
+        if (!ok && !cancelled) onJoinDeniedRef.current?.();
+      });
 
       const refreshDetail = (): void => {
         void qc.invalidateQueries({ queryKey: roomKeys.detail(roomId) });
