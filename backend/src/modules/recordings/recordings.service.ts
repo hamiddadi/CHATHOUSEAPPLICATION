@@ -40,7 +40,11 @@ const isConfigured = (): boolean =>
     env.LIVEKIT_API_SECRET &&
     env.RECORDING_S3_BUCKET &&
     env.RECORDING_S3_ACCESS_KEY &&
-    env.RECORDING_S3_SECRET,
+    env.RECORDING_S3_SECRET &&
+    // RECO-05: without a public base URL the only `fileUrl` we can surface is
+    // the raw `s3://` location, which isn't browser-playable. Require it so we
+    // never start a recording whose replay we can't actually serve.
+    env.RECORDING_PUBLIC_BASE_URL,
   );
 
 // WebhookReceiver only needs the LiveKit API key/secret (not S3), so it's
@@ -112,7 +116,13 @@ const applyEgressInfo = async (info: EgressInfo): Promise<void> => {
     if (file.location || file.filename) data.fileUrl = playbackUrl(file);
     if (file.duration > 0n) data.durationMs = nsToMs(file.duration);
   }
-  await prisma.recording.updateMany({ where: { egressId: info.egressId }, data });
+  // RECO-04: only write while the row is still non-terminal. A replayed webhook
+  // (or a late reconcile) must never move a COMPLETED/FAILED/ABORTED recording
+  // back to an earlier state.
+  await prisma.recording.updateMany({
+    where: { egressId: info.egressId, status: { in: ACTIVE_STATUSES } },
+    data,
+  });
 };
 
 // Webhook-less safety net: pull live egresses' current state from LiveKit so a
@@ -238,7 +248,10 @@ export const recordingsService = {
   async listForRoom(roomId: string) {
     await reconcileRoom(roomId);
     const rows = await prisma.recording.findMany({
-      where: { roomId, status: 'COMPLETED', fileUrl: { not: null } },
+      // RECO-02: gate by room privacy like `listRecent`. Without this any
+      // authenticated user could enumerate roomIds and pull the public CDN
+      // `fileUrl` of private rooms' replays (IDOR).
+      where: { roomId, status: 'COMPLETED', fileUrl: { not: null }, room: { isPrivate: false } },
       orderBy: { createdAt: 'desc' },
     });
     return rows.map(serialize);

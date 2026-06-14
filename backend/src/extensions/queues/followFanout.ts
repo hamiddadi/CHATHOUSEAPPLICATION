@@ -2,6 +2,7 @@ import { prisma } from '../../config/database';
 import { redis } from '../../config/redis';
 import { logger } from '../../config/logger';
 import { notificationsService } from '../../modules/notifications/notifications.service';
+import { getBlockedIdSet } from '../../modules/social/blocks';
 
 /**
  * "Follow started a room" fan-out (Module 12.1 / NOTIF-001).
@@ -48,10 +49,10 @@ export const fanoutOne = async (roomId: string): Promise<number> => {
     // Don't fan out private rooms.
     if (room.isPrivate || room.roomType === 'CLOSED') return 0;
 
-    // Pull followers of the host + (if clubbed) the club members concurrently —
-    // the club query depends only on room.clubId, not on the followers result.
-    // Both are capped to avoid runaway scans on viral hosts/clubs.
-    const [followers, clubMembers] = await Promise.all([
+    // Pull followers of the host + (if clubbed) the club members + the host's
+    // block set concurrently — none depend on each other. Both lists are capped
+    // to avoid runaway scans on viral hosts/clubs.
+    const [followers, clubMembers, blocked] = await Promise.all([
       prisma.follow.findMany({
         where: { followingId: room.hostId },
         select: { followerId: true },
@@ -64,6 +65,9 @@ export const fanoutOne = async (roomId: string): Promise<number> => {
             take: CLUB_MEMBER_CAP,
           })
         : Promise.resolve<{ userId: string }[]>([]),
+      // Symmetric block graph of the host — these users must never receive the
+      // host's room-started fan-out (in either direction of the block).
+      getBlockedIdSet(room.hostId),
     ]);
 
     const title = room.host.displayName ?? room.host.username ?? 'Someone you follow';
@@ -71,8 +75,9 @@ export const fanoutOne = async (roomId: string): Promise<number> => {
 
     // Track every recipient we've already queued so a user who both follows the
     // host AND belongs to the room's club is only notified once. Seed it with the
-    // host so they never get a "you started a room" ping about their own room.
-    const notified = new Set<string>([room.hostId]);
+    // host so they never get a "you started a room" ping about their own room,
+    // and with the host's block set so blocked users are excluded from dispatch.
+    const notified = new Set<string>([room.hostId, ...blocked]);
 
     // Build the ordered recipient list: followers first, then any club members
     // (NOTIF: notify CLUB members on a direct live room). De-dupe via `notified`.

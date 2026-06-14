@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../../config/database';
 import { AppError } from '../../middlewares/error.middleware';
 import { notificationsService } from '../notifications/notifications.service';
+import { getBlockedIdSet } from '../social/blocks';
 import { emitUserFollowerCount } from '../../socket/realtime';
 import { cursorPage } from '../../utils/paginate';
 
@@ -30,25 +31,25 @@ export const followService = {
     const target = await prisma.user.findUnique({ where: { id: followingId } });
     if (!target) throw new AppError('USER_001');
 
-    let isNewFollow = true;
-    try {
-      await prisma.follow.create({
-        data: { followerId, followingId },
-      });
-    } catch (err) {
-      // Already following — treat as idempotent success and skip the
-      // notification so we don't spam the target on duplicate calls.
-      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
-        isNewFollow = false;
-      } else {
-        throw err;
-      }
-    }
+    // Respect the block graph (symmetric, both directions) before any write —
+    // a blocked user must not be able to recreate the edge that block() wiped
+    // or push a NEW_FOLLOWER notification at someone who blocked them. Mirrors
+    // wave()'s USER_004 gate.
+    const blocked = await getBlockedIdSet(followerId);
+    if (blocked.has(followingId)) throw new AppError('USER_004');
 
-    if (isNewFollow) {
-      // Update denormalized counts; capture the new follower count so we
-      // can broadcast it without a follow-up read.
-      const [, updatedTarget] = await prisma.$transaction([
+    // Create the edge AND bump both denormalized counts in a single
+    // transaction so the relation and the counters can never drift (no
+    // window where the edge exists but a count increment was lost). The
+    // counter updates RETURN the new follower count so we broadcast the
+    // committed value without a follow-up read.
+    let isNewFollow = true;
+    let newFollowerCount = 0;
+    try {
+      const [, , updatedTarget] = await prisma.$transaction([
+        prisma.follow.create({
+          data: { followerId, followingId },
+        }),
         prisma.user.update({
           where: { id: followerId },
           data: { followingCount: { increment: 1 } },
@@ -59,7 +60,21 @@ export const followService = {
           select: { followerCount: true },
         }),
       ]);
-      emitUserFollowerCount(followingId, updatedTarget.followerCount);
+      newFollowerCount = updatedTarget.followerCount;
+    } catch (err) {
+      // Already following — treat as idempotent success and skip the counter
+      // bumps + notification so we don't spam the target on duplicate calls.
+      // The unique-constraint failure aborts the whole transaction, so no
+      // partial counter increment leaks.
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        isNewFollow = false;
+      } else {
+        throw err;
+      }
+    }
+
+    if (isNewFollow) {
+      emitUserFollowerCount(followingId, newFollowerCount);
 
       // Look up the follower's display info for the notification body.
       const follower = await prisma.user.findUnique({
@@ -85,18 +100,24 @@ export const followService = {
   async unfollow(followerId: string, followingId: string) {
     const res = await prisma.follow.deleteMany({ where: { followerId, followingId } });
     if (res.count > 0) {
-      const [, updatedTarget] = await prisma.$transaction([
-        prisma.user.update({
-          where: { id: followerId },
-          data: { followingCount: { decrement: 1 } },
-        }),
-        prisma.user.update({
-          where: { id: followingId },
-          data: { followerCount: { decrement: 1 } },
-          select: { followerCount: true },
-        }),
+      // Decrement BOTH denormalized counts atomically in a single transaction
+      // (GREATEST floors them at 0 against concurrent unfollows / data drift).
+      // The second statement RETURNs the new follower count so we broadcast the
+      // committed value without an extra read.
+      const [, rows] = await prisma.$transaction([
+        prisma.$executeRaw`UPDATE "User" SET "followingCount" = GREATEST("followingCount" - 1, 0), "updatedAt" = NOW() WHERE id = ${followerId}`,
+        prisma.$queryRaw<
+          { followerCount: number }[]
+        >`UPDATE "User" SET "followerCount" = GREATEST("followerCount" - 1, 0), "updatedAt" = NOW() WHERE id = ${followingId} RETURNING "followerCount"`,
       ]);
-      emitUserFollowerCount(followingId, updatedTarget.followerCount);
+      emitUserFollowerCount(followingId, rows[0]?.followerCount ?? 0);
+
+      // Retract the NEW_FOLLOWER notification this follower generated so a
+      // follow → unfollow → re-follow cycle can't be used to spam the target,
+      // and a stale "X started following you" doesn't linger after unfollow.
+      await prisma.notification.deleteMany({
+        where: { userId: followingId, actorId: followerId, type: 'NEW_FOLLOWER' },
+      });
     }
     return { following: false };
   },

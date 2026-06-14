@@ -28,7 +28,28 @@ const PREF_FIELD_BY_TYPE: Partial<Record<NotificationType, keyof NotificationPre
   SPEAKER_REQUEST: 'roomInvite',
 };
 
-const isPushAllowed = async (userId: string, type: NotificationType): Promise<boolean> => {
+/**
+ * Detects CLUB_INVITE notifications that are actually the *outcome of the
+ * recipient's own join request* (approved / declined) rather than an
+ * inbound invitation. These are reused under the CLUB_INVITE type by the
+ * clubreq extension but carry a `kind` discriminator in their data payload.
+ */
+const isOwnClubRequestOutcome = (type: NotificationType, data?: Prisma.InputJsonValue): boolean => {
+  if (type !== 'CLUB_INVITE') return false;
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return false;
+  const kind = (data as Record<string, unknown>).kind;
+  return kind === 'join_approved' || kind === 'join_declined';
+};
+
+const isPushAllowed = async (
+  userId: string,
+  type: NotificationType,
+  data?: Prisma.InputJsonValue,
+): Promise<boolean> => {
+  // CLUB-08: the result of one's own join request is not an "invitation" —
+  // it must not be silenced by the clubInvite push preference. Treat it as a
+  // mandatory bucket so the requester always learns the outcome.
+  if (isOwnClubRequestOutcome(type, data)) return true;
   const field = PREF_FIELD_BY_TYPE[type];
   if (!field) return true; // Mandatory category
   const prefs = await prisma.notificationPreference.findUnique({
@@ -207,7 +228,7 @@ export const notificationsService = {
     // preference. The in-app row above is always created so the bell
     // count stays accurate even when push is silenced.
     void (async () => {
-      if (!(await isPushAllowed(input.userId, input.type))) return;
+      if (!(await isPushAllowed(input.userId, input.type, input.data))) return;
       await pushService.dispatchToUser(input.userId, {
         title: input.title,
         body: input.body,

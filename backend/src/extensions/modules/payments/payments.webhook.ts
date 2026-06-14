@@ -1,5 +1,6 @@
 import { Router, raw } from 'express';
 import type { Request, Response } from 'express';
+import { Prisma } from '@prisma/client';
 import { env } from '../../../config/env';
 import { redis } from '../../../config/redis';
 import { logger } from '../../../config/logger';
@@ -16,34 +17,72 @@ import {
   type StripeSubscriptionObject,
 } from './stripe.client';
 
+/**
+ * PAYM-03: a tip whose recipient was hard-deleted (GDPR) after the Checkout but
+ * before the webhook lands violates the Tip→User FK on recordTip. The money has
+ * already moved, so the event is NOT replayable — re-raising would 500 and loop
+ * Stripe's retries forever. We detect the FK violation (P2003) / missing record
+ * (P2025), log for manual reconciliation, and ACK (200) to break the loop.
+ */
+const isUnrecoverableFkViolation = (err: unknown): boolean =>
+  err instanceof Prisma.PrismaClientKnownRequestError &&
+  (err.code === 'P2003' || err.code === 'P2025');
+
 export const stripeWebhookRouter: Router = Router();
 
 const evtKey = (id: string) => `ext:stripe:evt:${id}`;
 const DEDUPE_TTL_S = 24 * 3600;
 
 const dispatch = async (event: StripeEvent): Promise<void> => {
-  switch (event.type) {
-    case 'payment_intent.succeeded':
-      await paymentsService.recordTip(event.data.object as unknown as StripePaymentIntentObject);
-      break;
-    case 'account.updated':
-      await paymentsService.syncAccount(event.data.object as unknown as StripeAccountObject);
-      break;
-    case 'checkout.session.completed':
-      await premiumService.syncFromCheckout(
-        event.data.object as unknown as StripeCheckoutSessionObject,
-      );
-      break;
-    case 'customer.subscription.created':
-    case 'customer.subscription.updated':
-    case 'customer.subscription.deleted':
-      await premiumService.syncSubscription(
-        event.data.object as unknown as StripeSubscriptionObject,
-      );
-      break;
-    default:
-      // Unhandled event type — acknowledge so Stripe stops retrying.
-      break;
+  try {
+    switch (event.type) {
+      case 'payment_intent.succeeded':
+        await paymentsService.recordTip(event.data.object as unknown as StripePaymentIntentObject);
+        break;
+      case 'payment_intent.payment_failed':
+        // PAYM-01: surface failed tips instead of silently dropping them.
+        await paymentsService.recordFailedTip(
+          event.data.object as unknown as StripePaymentIntentObject,
+        );
+        break;
+      case 'charge.refunded':
+        // PAYM-02: SUCCEEDED → REFUNDED on a refund.
+        await paymentsService.recordRefundedTip(
+          event.data.object as unknown as Parameters<typeof paymentsService.recordRefundedTip>[0],
+        );
+        break;
+      case 'account.updated':
+        await paymentsService.syncAccount(event.data.object as unknown as StripeAccountObject);
+        break;
+      case 'checkout.session.completed':
+        await premiumService.syncFromCheckout(
+          event.data.object as unknown as StripeCheckoutSessionObject,
+        );
+        break;
+      case 'customer.subscription.created':
+      case 'customer.subscription.updated':
+      case 'customer.subscription.deleted':
+        await premiumService.syncSubscription(
+          event.data.object as unknown as StripeSubscriptionObject,
+        );
+        break;
+      default:
+        // Unhandled event type — acknowledge so Stripe stops retrying.
+        break;
+    }
+  } catch (err) {
+    // PAYM-03/04/01: the referenced user was hard-deleted (GDPR) between the
+    // Stripe action and this webhook landing → FK (P2003) / missing record
+    // (P2025) on the tip/subscription write. Such events are NOT replayable
+    // (re-raising would 500 and loop Stripe's retries forever, with money
+    // already moved for a succeeded tip), so ACK and flag for manual
+    // reconciliation. Every other error propagates (→ 500 → Stripe retries).
+    if (!isUnrecoverableFkViolation(err)) throw err;
+    logger.error('ext.payments: webhook references a purged user — ACKing for reconciliation', {
+      type: event.type,
+      id: event.id,
+      err: err instanceof Error ? err.message : err,
+    });
   }
 };
 

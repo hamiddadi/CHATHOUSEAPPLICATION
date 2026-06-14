@@ -122,6 +122,16 @@ export const roomsService = {
   },
 
   async create(hostId: string, input: CreateRoomInput) {
+    // ANO-14 fix: defence-in-depth — reject room creation by suspended users
+    // even if their auth token is still cached (up to SUSPENSION_CACHE_TTL_SEC).
+    const host = await prisma.user.findUnique({
+      where: { id: hostId },
+      select: { suspendedUntil: true },
+    });
+    if (host?.suspendedUntil && host.suspendedUntil > new Date()) {
+      throw new AppError('AUTH_007');
+    }
+
     // If the room is attached to a club, the host must be a member.
     if (input.clubId) {
       const membership = await prisma.clubMember.findUnique({
@@ -150,6 +160,13 @@ export const roomsService = {
         select: { id: true },
       });
       coHostIds = found.map(u => u.id);
+    }
+    // PART-06 fix: co-hosts are seated as SPEAKER, so the same maxSpeakers cap
+    // that setRole enforces must apply here — otherwise a host can overshoot
+    // the speaker limit at creation time. Trim the surplus (the host holds the
+    // HOST role and isn't counted against the SPEAKER cap).
+    if (coHostIds.length > input.maxSpeakers) {
+      coHostIds = coHostIds.slice(0, input.maxSpeakers);
     }
 
     // No transaction: the host-participant insert is a best-effort follow-up
@@ -340,6 +357,17 @@ export const roomsService = {
     if (ban && (ban.expiresAt === null || ban.expiresAt > new Date())) {
       throw new AppError('ROOM_008');
     }
+    // ROOM-04 fix: re-guard immediately before writing the participant. The
+    // initial endedAt check happens before the ban/follow lookups; in that
+    // window an auto-close (last participant leaving) could have ended the
+    // room. Without this re-read a racing join would resurrect an ENDED room
+    // with a live participant and a bumped count.
+    const fresh = await prisma.room.findUnique({
+      where: { id: roomId },
+      select: { endedAt: true },
+    });
+    if (!fresh || fresh.endedAt) throw new AppError('ROOM_004');
+
     let wasAlreadyActive = false;
     if (existing) {
       if (existing.leftAt) {
@@ -417,30 +445,68 @@ export const roomsService = {
       data: { leftAt: new Date() },
     });
     if (res.count > 0) {
-      // Clear currentRoomId + decrement participant count
+      // ANO-09 fix: floor participantCount at 0 to prevent negative values
+      // from concurrent leave/kick races.
       await prisma.$transaction([
         prisma.user.update({ where: { id: userId }, data: { currentRoomId: null } }),
-        prisma.room.update({ where: { id: roomId }, data: { participantCount: { decrement: 1 } } }),
+        prisma.$executeRaw`UPDATE "Room" SET "participantCount" = GREATEST("participantCount" - 1, 0) WHERE id = ${roomId}`,
       ]);
+
+      // HAND-05 fix: purge any pending hand-raise on leave so the FIFO queue
+      // can't surface a user who already left (the head of the queue would
+      // otherwise be unpromotable → USER_001). Only kick/lowerHand/setRole
+      // cleared it before, never a plain leave.
+      await prisma.roomHandRaise.deleteMany({ where: { roomId, userId } });
 
       // ── Auto-promote: if the leaving user is the host, hand off ──
       const room = await prisma.room.findUnique({ where: { id: roomId } });
       if (room && !room.endedAt && room.hostId === userId) {
-        // Pick next host: prefer MODERATOR, then SPEAKER, by joinedAt
+        // ANO-01 fix: exclude platform-suspended users from the successor pool
+        // so a sanctioned participant never inherits the host role.
         const successor = await prisma.participant.findFirst({
           where: {
             roomId,
             leftAt: null,
             userId: { not: userId },
             role: { in: ['MODERATOR', 'SPEAKER'] },
+            user: {
+              OR: [{ suspendedUntil: null }, { suspendedUntil: { lt: new Date() } }],
+            },
           },
           orderBy: [{ role: 'asc' }, { joinedAt: 'asc' }],
         });
-        if (successor) {
-          await prisma.$transaction([
-            prisma.room.update({ where: { id: roomId }, data: { hostId: successor.userId } }),
-            prisma.participant.update({ where: { id: successor.id }, data: { role: 'HOST' } }),
-          ]);
+        // ROOM-05/PART-10 fix: promote atomically with compare-and-swap guards
+        // that must BOTH match, or the whole promotion rolls back. The room
+        // update only matches while Room.hostId still equals the departing host
+        // (so two concurrent host-leaves can't both promote / overwrite hostId);
+        // the participant update only matches while the successor is still
+        // active (leftAt:null) so we never crown a user who left in the race
+        // window. Gating both in one interactive transaction (throw → rollback
+        // on either miss) prevents the split where hostId moves to a departed
+        // successor with no active HOST participant. The new host is unmuted.
+        const HOST_CAS_MISS = 'HOST_CAS_MISS';
+        const promoted = successor
+          ? await prisma
+              .$transaction(async tx => {
+                const hostSwap = await tx.room.updateMany({
+                  where: { id: roomId, hostId: userId, endedAt: null },
+                  data: { hostId: successor.userId },
+                });
+                const partSwap = await tx.participant.updateMany({
+                  where: { id: successor.id, leftAt: null },
+                  data: { role: 'HOST', isMuted: false },
+                });
+                if (hostSwap.count !== 1 || partSwap.count !== 1) {
+                  throw new Error(HOST_CAS_MISS);
+                }
+                return true;
+              })
+              .catch((err: unknown) => {
+                if (err instanceof Error && err.message === HOST_CAS_MISS) return false;
+                throw err;
+              })
+          : false;
+        if (promoted && successor) {
           emitRoomRoleChanged(roomId, { userId: successor.userId, role: 'HOST' });
         } else {
           // No eligible successor → check if any participant remains
@@ -448,17 +514,31 @@ export const roomsService = {
             where: { roomId, leftAt: null, userId: { not: userId } },
           });
           if (anyRemaining === 0) {
-            // Auto-close empty room
-            await prisma.room.update({
-              where: { id: roomId },
+            // ROOM-04 fix: auto-close conditionally (WHERE endedAt IS NULL) so a
+            // concurrent join that re-populated the room — or a parallel
+            // close — doesn't leave the room ENDED with live participants. We
+            // only run the teardown side effects when this call actually closed
+            // the room (count === 1).
+            const closed = await prisma.room.updateMany({
+              where: { id: roomId, endedAt: null },
               data: { isLive: false, endedAt: new Date() },
             });
-            await cancelEventReminder(roomId);
-            emitHallwayRoomClosed(roomId);
-            // Finalize the Replay when an empty room auto-closes (gated/no-op).
-            void recordingsService
-              .stopForRoom(roomId)
-              .catch(err => logger.warn('rooms.leave: recording stop failed', { err, roomId }));
+            if (closed.count === 1) {
+              // Best-effort: a Redis/BullMQ hiccup must not skip the room:ended
+              // emit + teardown below for a room that already closed.
+              await cancelEventReminder(roomId).catch(err =>
+                logger.warn('rooms.leave: cancel reminder failed', { err, roomId }),
+              );
+              emitHallwayRoomClosed(roomId);
+              // ROOM-08 fix: tell any lingering clients the room is over so they
+              // tear down — auto-close previously only emitted hallway:closed,
+              // leaving ghost participants who never received room:ended.
+              emitRoomEnded(roomId);
+              // Finalize the Replay when an empty room auto-closes (gated/no-op).
+              void recordingsService
+                .stopForRoom(roomId)
+                .catch(err => logger.warn('rooms.leave: recording stop failed', { err, roomId }));
+            }
           }
         }
       }
@@ -510,9 +590,37 @@ export const roomsService = {
   async setRole(roomId: string, hostUserId: string, input: UpdateRoleInput) {
     const room = await requireHostOrMod(roomId, hostUserId);
 
+    // ROOM-01/PART-01 fix: the host can never be demoted via setRole. Without
+    // this a moderator could write role=SPEAKER/LISTENER on the host, leaving
+    // Room.hostId out of sync and (for LISTENER) cutting the host's audio.
+    // Mirrors the host protection in kick (ROOM_003) and setMute (ROOM_009).
+    if (input.userId === room.hostId && input.role !== 'HOST') {
+      throw new AppError('ROOM_003');
+    }
+
     // Only the actual host can transfer ownership.
     if (input.role === 'HOST' && room.hostId !== hostUserId) {
       throw new AppError('ROOM_003');
+    }
+
+    // ANO-02 fix: only the HOST may promote to MODERATOR. Without this guard a
+    // moderator could escalate another listener to moderator, creating an
+    // uncontrolled privilege chain.
+    if (input.role === 'MODERATOR' && room.hostId !== hostUserId) {
+      throw new AppError('ROOM_003');
+    }
+
+    // HAND-01/HAND-08 fix: short-circuit when the target's role is unchanged.
+    // Re-promoting a user who is already a SPEAKER must be a no-op — otherwise
+    // it re-fires HAND_ACCEPTED + room:hand_lowered on every double-click, and
+    // (in a full room) the capacity check below would wrongly throw ROOM_002
+    // for someone who already holds a speaker seat.
+    const current = await prisma.participant.findUnique({
+      where: { userId_roomId: { userId: input.userId, roomId } },
+      select: { role: true, leftAt: true },
+    });
+    if (current && !current.leftAt && current.role === input.role) {
+      return { userId: input.userId, role: input.role };
     }
 
     // SPEAKER promotion: the capacity check + the role write must be atomic,
@@ -591,6 +699,17 @@ export const roomsService = {
     if (targetUserId !== callerUserId) {
       const room = await requireHostOrMod(roomId, callerUserId);
       if (room.hostId === targetUserId) throw new AppError('ROOM_009');
+    } else {
+      // PART-07 fix: self-mute must also be rejected in an ended room. The
+      // host/mod path above already rejects via requireHostOrMod (ROOM_004);
+      // the self path previously skipped any room-state check, letting users
+      // toggle their mute flag in a room that no longer exists.
+      const room = await prisma.room.findUnique({
+        where: { id: roomId },
+        select: { endedAt: true, isLive: true },
+      });
+      if (!room) throw new AppError('ROOM_001');
+      if (room.endedAt || !room.isLive) throw new AppError('ROOM_004');
     }
     const updated = await prisma.participant.updateMany({
       where: { roomId, userId: targetUserId, leftAt: null },
@@ -605,9 +724,12 @@ export const roomsService = {
     const room = await prisma.room.findUnique({ where: { id: roomId } });
     if (!room) throw new AppError('ROOM_001');
     if (room.endedAt) throw new AppError('ROOM_004');
-    // RSVP only makes sense for scheduled rooms; for live rooms the user
-    // should just join. Reject to surface the confusion client-side.
-    if (!room.scheduledFor) throw new AppError('ROOM_004');
+    // RSVP only makes sense for a scheduled room that hasn't started. For a
+    // live room the user should just join.
+    // EVEN-02 fix: gate on isLive, not only `scheduledFor`. go-live never
+    // clears scheduledFor, so a started event still carries it — the old
+    // `!scheduledFor` check let users RSVP to a room that's already live.
+    if (!room.scheduledFor || room.isLive) throw new AppError('ROOM_004');
 
     await prisma.roomRsvp.upsert({
       where: { roomId_userId: { roomId, userId } },
@@ -618,8 +740,12 @@ export const roomsService = {
   },
 
   async cancelRsvp(roomId: string, userId: string) {
-    await prisma.roomRsvp.deleteMany({ where: { roomId, userId } });
-    return { cancelled: true as const };
+    // EVEN-07 fix: surface the real removed count instead of always reporting
+    // success. Cancelling an RSVP that never existed (or on a room that's
+    // gone) previously returned `cancelled:true`, masking the no-op from the
+    // client; now `cancelled` reflects whether a row was actually deleted.
+    const res = await prisma.roomRsvp.deleteMany({ where: { roomId, userId } });
+    return { cancelled: res.count > 0, removed: res.count };
   },
 
   async listRsvps(roomId: string, viewerId?: string, opts?: { limit?: number; cursor?: string }) {
@@ -831,8 +957,13 @@ export const roomsService = {
   },
 
   async lowerHand(roomId: string, userId: string) {
-    await prisma.roomHandRaise.deleteMany({ where: { roomId, userId } });
-    emitRoomHandLowered(roomId, userId);
+    // HAND-06 fix: require active membership and only broadcast when a row was
+    // actually removed. Previously any authenticated caller — even a
+    // non-participant, or a user who never raised a hand — could spam
+    // room:hand_lowered to everyone in the room.
+    await requireActiveParticipant(roomId, userId);
+    const res = await prisma.roomHandRaise.deleteMany({ where: { roomId, userId } });
+    if (res.count > 0) emitRoomHandLowered(roomId, userId);
     return { lowered: true as const };
   },
 
@@ -990,9 +1121,11 @@ export const roomsService = {
     });
     if (res.count === 0) throw new AppError('ROOM_005');
 
+    // ANO-09/ANO-10 fix: floor count at 0 and capture the post-commit value
+    // for an accurate hallway broadcast (was using a stale pre-mutation snapshot).
     await prisma.$transaction([
       prisma.user.update({ where: { id: targetUserId }, data: { currentRoomId: null } }),
-      prisma.room.update({ where: { id: roomId }, data: { participantCount: { decrement: 1 } } }),
+      prisma.$executeRaw`UPDATE "Room" SET "participantCount" = GREATEST("participantCount" - 1, 0) WHERE id = ${roomId}`,
     ]);
     // Also clear any hand-raise
     await prisma.roomHandRaise.deleteMany({ where: { roomId, userId: targetUserId } });
@@ -1022,7 +1155,12 @@ export const roomsService = {
     // the broadcast above only notifies; this enforces it server-side so a
     // client that ignores the event can't keep receiving room broadcasts.
     forceLeaveRoom(roomId, targetUserId, callerUserId);
-    emitHallwayRoomUpdated(roomId, { participantCount: Math.max(0, room.participantCount - 1) });
+    // ANO-10 fix: read the committed count rather than using a stale snapshot.
+    const updatedRoom = await prisma.room.findUnique({
+      where: { id: roomId },
+      select: { participantCount: true },
+    });
+    emitHallwayRoomUpdated(roomId, { participantCount: updatedRoom?.participantCount ?? 0 });
     return { kicked: true as const };
   },
 

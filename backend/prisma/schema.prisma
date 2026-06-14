@@ -213,10 +213,10 @@ model User {
 // server never trusts the client to confirm a payment). Unique on
 // paymentIntentId so a retried/duplicated webhook is idempotent.
 enum TipStatus {
-  PENDING
+  PENDING   // ANO-16: currently unused — tips are created SUCCEEDED directly by the webhook. Reserved for future client-initiated flows.
   SUCCEEDED
   FAILED
-  REFUNDED
+  REFUNDED  // ANO-16: currently unused — no refund path implemented yet. Reserved for future refund workflow.
 }
 
 model Tip {

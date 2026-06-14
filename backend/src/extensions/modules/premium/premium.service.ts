@@ -37,10 +37,21 @@ const getOrCreateCustomer = async (userId: string): Promise<string> => {
   if (user.stripeCustomerId) return user.stripeCustomerId;
 
   const stripe = await requireStripe();
-  const customer = await stripe.customers.create({
-    metadata: { chathouseUserId: userId },
-    ...(user.email ? { email: user.email } : {}),
-  });
+  // PAYM-06: a deterministic idempotency key means a retried create (network
+  // blip, double-tap, redelivery) returns the SAME customer instead of spawning
+  // an orphan. The StripeLike.customers.create signature omits the options arg;
+  // narrow-cast locally so we can pass it without touching the shared type.
+  const createCustomer = stripe.customers.create as (
+    params: unknown,
+    options?: { idempotencyKey?: string },
+  ) => Promise<{ id: string }>;
+  const customer = await createCustomer(
+    {
+      metadata: { chathouseUserId: userId },
+      ...(user.email ? { email: user.email } : {}),
+    },
+    { idempotencyKey: `cust:${userId}` },
+  );
   // Only claim the id if no concurrent checkout already set one (avoids
   // orphaning a customer on a double-tap). The loser re-reads the winner's id.
   const res = await prisma.user.updateMany({
@@ -66,9 +77,12 @@ export const premiumService = {
       where: { id: userId },
       select: { isPremium: true, premiumUntil: true, subscription: { select: { status: true } } },
     });
+    // PAYM-08: stay consistent with isPremium() — a lapsed period is not premium
+    // even if the webhook that flips the flag hasn't landed yet.
+    const lapsed = Boolean(user?.premiumUntil && user.premiumUntil.getTime() < Date.now());
     return {
       configured: stripeConfigured(),
-      premium: Boolean(user?.isPremium),
+      premium: Boolean(user?.isPremium) && !lapsed,
       until: user?.premiumUntil ? user.premiumUntil.toISOString() : null,
       status: user?.subscription?.status ?? null,
     };
@@ -154,6 +168,16 @@ export const premiumService = {
       userId = u?.id;
     }
     if (!userId) return;
+
+    // PAYM-04: the user may have been purged (GDPR) while the Stripe sub is still
+    // active — Stripe then emits subscription.updated/deleted. An unconditional
+    // user.update would throw P2025 → 500 → infinite Stripe retries. Confirm the
+    // user still exists and short-circuit (ACK) if not.
+    const exists = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true },
+    });
+    if (!exists) return;
 
     const active = ACTIVE_STATUSES.includes(sub.status);
     const currentPeriodEnd = sub.current_period_end

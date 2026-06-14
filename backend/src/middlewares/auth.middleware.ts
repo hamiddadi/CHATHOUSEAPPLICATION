@@ -75,12 +75,30 @@ export const requireAuth: RequestHandler = async (req, _res, next) => {
         where: { id: claims.sub },
         select: { suspendedUntil: true, appRole: true },
       });
-      const isSuspended = Boolean(user?.suspendedUntil && user.suspendedUntil > new Date());
-      // Short TTL: a 60 s window between suspension and effective lockout
-      // is acceptable, much shorter than the 15-min access-token lifetime.
-      await redis.setEx(cacheKey, SUSPENSION_CACHE_TTL_SECONDS, isSuspended ? '1' : '0');
+      // A valid JWT for a user that no longer exists (hard-purged) is
+      // unauthorized. NOTE: a soft-deleted (deletion-requested) account is
+      // deliberately NOT blocked here — it must still reach
+      // POST /me/cancel-deletion during the grace period (and GDPR export).
+      // MODE-07's "strip powers" intent is enforced in requireRole's deletedAt
+      // check; blocking all of requireAuth on bare deletedAt breaks self-cancel.
+      if (!user) return next(new AppError('AUTH_003'));
+      const now = new Date();
+      const suspendedUntil = user.suspendedUntil;
+      const isSuspended = suspendedUntil !== null && suspendedUntil > now;
+      // MODE-09: cap the cached-verdict TTL at the suspension's remaining time
+      // so the '1' marker never outlives the sanction. Otherwise a suspension
+      // that expires in 5 s would keep the user locked out for the full 60 s
+      // window. Clear ('0') verdicts keep the full short TTL.
+      const remainingSec =
+        suspendedUntil === null
+          ? SUSPENSION_CACHE_TTL_SECONDS
+          : Math.max(1, Math.ceil((suspendedUntil.getTime() - now.getTime()) / 1000));
+      const ttl = isSuspended
+        ? Math.min(SUSPENSION_CACHE_TTL_SECONDS, remainingSec)
+        : SUSPENSION_CACHE_TTL_SECONDS;
+      await redis.setEx(cacheKey, ttl, isSuspended ? '1' : '0');
       if (isSuspended) return next(new AppError('AUTH_007'));
-      if (user) req.appRole = user.appRole;
+      req.appRole = user.appRole;
     }
 
     req.userId = claims.sub;
@@ -133,9 +151,10 @@ export const requireRole = (minimum: AppRole): RequestHandler => {
       if (appRole === undefined) {
         const me = await prisma.user.findUnique({
           where: { id: req.userId },
-          select: { appRole: true, suspendedUntil: true },
+          select: { appRole: true, suspendedUntil: true, deletedAt: true },
         });
-        if (!me) return next(new AppError('AUTH_003'));
+        // MODE-07: a soft-deleted account must not retain moderation powers.
+        if (!me || me.deletedAt) return next(new AppError('AUTH_003'));
         if (me.suspendedUntil && me.suspendedUntil > new Date()) {
           return next(new AppError('AUTH_007'));
         }

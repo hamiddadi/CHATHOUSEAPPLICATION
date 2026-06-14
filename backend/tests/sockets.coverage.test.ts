@@ -201,13 +201,16 @@ describe('Socket.IO — room broadcasts + chat presence events', () => {
     await emitWithAck(hostSock, 'room:join', { roomId });
     await emitWithAck(askrSock, 'room:join', { roomId });
 
-    const incoming = waitForEvent<{ userId: string; roomId: string }>(
+    // HAND-07: room:request-speak now persists via raiseHand and broadcasts
+    // room:hand_raised ({ roomId, user }) instead of the old ephemeral
+    // room:speak-request — matching what the RN client listens for.
+    const incoming = waitForEvent<{ roomId: string; user: { id: string } }>(
       hostSock,
-      'room:speak-request',
+      'room:hand_raised',
     );
     askrSock.emit('room:request-speak', { roomId });
     const payload = await incoming;
-    expect(payload.userId).toBe(askr.id);
+    expect(payload.user.id).toBe(askr.id);
     expect(payload.roomId).toBe(roomId);
 
     hostSock.disconnect();

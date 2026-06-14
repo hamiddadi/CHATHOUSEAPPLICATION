@@ -7,6 +7,7 @@ import {
   emitRolePromotedToModerator,
 } from '../../realtime/aliases';
 import { notificationsService } from '../../../modules/notifications/notifications.service';
+import { roomsService } from '../../../modules/rooms/rooms.service';
 import { logger } from '../../../config/logger';
 
 /**
@@ -31,21 +32,37 @@ const inviteKey = (roomId: string, userId: string) => `ext:speakinv:${roomId}:${
 const isHostOrMod = async (roomId: string, userId: string): Promise<boolean> => {
   const room = await prisma.room.findUnique({
     where: { id: roomId },
-    select: { hostId: true },
+    select: { hostId: true, endedAt: true },
   });
   if (!room) return false;
+  // PART-03: an ended room has no privileged actors (mirror legacy
+  // requireHostOrMod which rejects on room.endedAt).
+  if (room.endedAt) return false;
   if (room.hostId === userId) return true;
   const part = await prisma.participant.findUnique({
     where: { userId_roomId: { userId, roomId } },
-    select: { role: true },
+    select: { role: true, leftAt: true },
   });
-  return part?.role === 'MODERATOR';
+  // PART-03: a moderator who has left the room is no longer a privileged
+  // actor (mirror legacy requireHostOrMod which filters leftAt: null).
+  if (!part || part.leftAt) return false;
+  return part.role === 'MODERATOR';
 };
 
 export const speakInviteService = {
   async invite(roomId: string, hostId: string, invitedUserId: string) {
     if (!(await isHostOrMod(roomId, hostId))) {
-      throw extError('PAY_INVALID', 'Only host or moderator can invite');
+      throw extError('SPEAK_001', 'Only host or moderator can invite');
+    }
+    // PART-09: only invite a user who is actually present in the room.
+    // Otherwise the invite (notification + socket) fires for someone who is
+    // not there, and respond() would later promote a non-participant.
+    const invitee = await prisma.participant.findUnique({
+      where: { userId_roomId: { userId: invitedUserId, roomId } },
+      select: { leftAt: true },
+    });
+    if (!invitee || invitee.leftAt) {
+      throw extError('SPEAK_002', 'User is not in the room');
     }
     const payload = JSON.stringify({ hostId, sentAt: new Date().toISOString() });
     await redis.setEx(inviteKey(roomId, invitedUserId), INVITE_TTL_S, payload);
@@ -71,9 +88,8 @@ export const speakInviteService = {
   async respond(roomId: string, userId: string, accepted: boolean): Promise<{ accepted: boolean }> {
     const raw = await redis.get(inviteKey(roomId, userId));
     if (!raw) {
-      throw extError('CLUB_REQ_NOT_FOUND', 'No active speak invite');
+      throw extError('SPEAK_002', 'No active speak invite');
     }
-    await redis.del(inviteKey(roomId, userId));
 
     if (accepted) {
       // Re-validate the inviter still holds host/mod rights. The invite key
@@ -86,20 +102,38 @@ export const speakInviteService = {
         hostId = undefined;
       }
       if (!hostId || !(await isHostOrMod(roomId, hostId))) {
-        throw extError('CLUB_REQ_NOT_FOUND', 'Invite no longer valid');
+        // ANO-03 fix: do NOT delete the Redis key here — let it expire
+        // naturally so the invite can be retried if the inviter regains
+        // their role within the TTL window.
+        throw extError('SPEAK_002', 'Invite no longer valid');
       }
-      // Mutate Participant.role to SPEAKER without touching legacy code
+      // PART-04/05, HAND-02/03/04: delegate the SPEAKER promotion to the
+      // legacy setRole(SPEAKER) instead of writing Participant.role directly.
+      // setRole enforces every guard the direct write skipped — room not
+      // ended (ROOM_004), invitee still present (leftAt: null / USER_001),
+      // maxSpeakers cap (ROOM_002, Serializable) — and fires the missing side
+      // effects (RoomHandRaise purge, room:hand_lowered, room:role_changed,
+      // HAND_ACCEPTED). The validated inviter acts as the host/mod caller.
       const part = await prisma.participant.findUnique({
         where: { userId_roomId: { userId, roomId } },
+        select: { role: true, leftAt: true },
       });
-      if (!part) throw extError('CLUB_REQ_NOT_FOUND', 'Not in room');
+      // HAND-03: a departed invitee (leftAt set, possibly with a stale SPEAKER
+      // role) is not in the room — reject rather than report a phantom accept.
+      if (!part || part.leftAt) throw extError('SPEAK_002', 'Not in room');
+      // HAND-09: already on stage → no-op. Skip setRole's side effects AND skip
+      // broadcasting a fresh promotion for someone who was already a speaker.
       if (part.role !== 'SPEAKER' && part.role !== 'HOST') {
-        await prisma.participant.update({
-          where: { userId_roomId: { userId, roomId } },
-          data: { role: 'SPEAKER' },
-        });
+        await roomsService.setRole(roomId, hostId, { userId, role: 'SPEAKER' });
+      } else {
+        await redis.del(inviteKey(roomId, userId));
+        return { accepted };
       }
     }
+    // ANO-03 fix: delete the Redis key AFTER the promotion/refusal succeeds,
+    // not before validation. This prevents silently consuming an invite when
+    // the inviter has been demoted.
+    await redis.del(inviteKey(roomId, userId));
     emitSpeakInviteResponse(roomId, { roomId, userId, accepted });
     return { accepted };
   },
@@ -109,13 +143,21 @@ export const speakInviteService = {
    * to promote a co-moderator atomically with broadcast).
    */
   async promoteToModerator(roomId: string, hostId: string, userId: string) {
-    if (!(await isHostOrMod(roomId, hostId))) {
-      throw extError('PAY_INVALID', 'Forbidden');
+    // PART-02: promotion to MODERATOR is host-only (the legacy setRole reserves
+    // MODERATOR for the host via ROOM_003). isHostOrMod would let a moderator
+    // mint other moderators — an uncontrolled privilege chain. Restrict to the
+    // strict host of a still-live room.
+    const room = await prisma.room.findUnique({
+      where: { id: roomId },
+      select: { hostId: true, endedAt: true },
+    });
+    if (!room || room.endedAt || room.hostId !== hostId) {
+      throw extError('SPEAK_001', 'Only the host can promote a moderator');
     }
     const part = await prisma.participant.findUnique({
       where: { userId_roomId: { userId, roomId } },
     });
-    if (!part) throw extError('CLUB_REQ_NOT_FOUND', 'Not in room');
+    if (!part) throw extError('SPEAK_002', 'Not in room');
     if (part.role !== 'MODERATOR' && part.role !== 'HOST') {
       await prisma.participant.update({
         where: { userId_roomId: { userId, roomId } },

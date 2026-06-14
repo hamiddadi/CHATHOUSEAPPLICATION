@@ -112,7 +112,7 @@ const connectSocket = (token, userId) =>
     s.events = { userJoined: 0, dmReceived: 0, speakReq: 0, reaction: 0 };
     s.on('room:user-joined', () => s.events.userJoined++);
     s.on('chat:message', () => s.events.dmReceived++);
-    s.on('room:speak-request', () => s.events.speakReq++);
+    s.on('room:hand_raised', () => s.events.speakReq++); // HAND-07: request-speak now broadcasts room:hand_raised
     s.on('room:reaction', () => s.events.reaction++);
     s.once('connect', () => resolve(s));
     s.once('connect_error', e => reject(e));

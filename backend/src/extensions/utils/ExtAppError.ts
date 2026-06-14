@@ -31,6 +31,9 @@ export const EXT_ERROR = {
   PREMIUM_NO_SUBSCRIPTION: { status: 404, message: 'No active subscription found' },
   CLUB_REQ_DUPLICATE: { status: 409, message: 'Already a member or pending' },
   CLUB_REQ_NOT_FOUND: { status: 404, message: 'Join request not found' },
+  // ANO-13: dedicated speak-invite error codes (previously borrowed PAY_/CLUB_REQ_ codes).
+  SPEAK_001: { status: 403, message: 'Only host or moderator can manage speak invites' },
+  SPEAK_002: { status: 404, message: 'No active speak invite' },
 } as const;
 
 export const extError = (key: keyof typeof EXT_ERROR, customMessage?: string): ExtAppError => {

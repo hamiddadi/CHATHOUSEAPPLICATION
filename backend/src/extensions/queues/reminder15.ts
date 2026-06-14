@@ -63,12 +63,26 @@ export const cancelReminder15 = async (roomId: string): Promise<void> => {
 const processReminder15 = async (job: Job<Reminder15JobData>): Promise<void> => {
   const room = await prisma.room.findUnique({
     where: { id: job.data.roomId },
-    include: { rsvps: { select: { userId: true } } },
+    // EVEN-05: honor the per-user `RoomRsvp.reminder` toggle.
+    include: { rsvps: { where: { reminder: true }, select: { userId: true } } },
   });
   if (!room) return;
   if (room.endedAt) return; // canceled or ended
 
-  const recipients = Array.from(new Set(room.rsvps.map(r => r.userId)));
+  // EVEN-06: align the T-15 audience with the T-5 reminder
+  // (`eventReminders.ts`): opted-in RSVPs + the host + (for club rooms) every
+  // active club member. The two reminders previously diverged — T-15 reached
+  // RSVPs only — so subscribers who relied on the club fan-out missed it.
+  const recipientIds = new Set<string>(room.rsvps.map(r => r.userId));
+  recipientIds.add(room.hostId);
+  if (room.clubId) {
+    const members = await prisma.clubMember.findMany({
+      where: { clubId: room.clubId },
+      select: { userId: true },
+    });
+    for (const m of members) recipientIds.add(m.userId);
+  }
+  const recipients = Array.from(recipientIds);
   const title = 'Starting soon';
   const body = `"${room.title}" starts in 15 minutes`;
 

@@ -1,6 +1,7 @@
 import { Worker } from 'bullmq';
 import { logger } from '../config/logger';
 import { prisma } from '../config/database';
+import { redis } from '../config/redis';
 import { bullConnection } from '../queues/connection';
 import {
   GDPR_PURGE_JOB_NAME,
@@ -74,6 +75,19 @@ const purgeSoftDeletedUsers = async (now: number): Promise<void> => {
           await tx.user.delete({ where: { id: v.id } });
         });
         deleted += 1;
+        // PAYM-03: the Stripe Connect mapping lives in Redis (not cascaded by the
+        // DB delete). Leaving it orphaned lets a later tip pass the in-app guards
+        // and then loop the webhook on the FK violation. Purge the mapping + its
+        // onboarding lock. Best-effort: a Redis failure must not roll back the
+        // (already committed) hard-delete, so it is logged but not rethrown.
+        try {
+          await redis.del([`ext:stripe:account:${v.id}`, `ext:stripe:account:${v.id}:lock`]);
+        } catch (redisErr) {
+          logger.error('gdpr-purge: failed to purge Stripe Redis mapping', {
+            userId: v.id,
+            err: redisErr instanceof Error ? redisErr.message : String(redisErr),
+          });
+        }
       } catch (err) {
         // A single user failing (e.g. a transient FK race) must not abort the
         // batch — log and continue with the next id.

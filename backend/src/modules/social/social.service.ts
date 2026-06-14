@@ -87,23 +87,39 @@ export const socialService = {
     const target = await prisma.user.findUnique({ where: { id: targetId } });
     if (!target) throw new AppError('USER_001');
 
-    // Blocking is a hard break — wipe the follow graph in both directions
-    // so neither side keeps a stale relationship.
-    await prisma.$transaction([
-      prisma.block.upsert({
+    // Blocking is a hard break — wipe the follow graph in both directions so
+    // neither side keeps a stale relationship. FOLL-03: do the delete with a
+    // single DELETE ... RETURNING INSIDE the transaction and decrement the
+    // denormalized counts strictly for the edges THIS call actually removed.
+    // Keying off the returned rows (not a pre-read) closes the TOCTOU where a
+    // concurrent unfollow would otherwise let us decrement a count for an edge
+    // that no longer exists. GREATEST still floors at 0.
+    await prisma.$transaction(async tx => {
+      await tx.block.upsert({
         where: { blockerId_blockedId: { blockerId, blockedId: targetId } },
         create: { blockerId, blockedId: targetId },
         update: {},
-      }),
-      prisma.follow.deleteMany({
-        where: {
-          OR: [
-            { followerId: blockerId, followingId: targetId },
-            { followerId: targetId, followingId: blockerId },
-          ],
-        },
-      }),
-    ]);
+      });
+      const removed = await tx.$queryRaw<{ followerId: string; followingId: string }[]>`
+        DELETE FROM "Follow"
+        WHERE ("followerId" = ${blockerId} AND "followingId" = ${targetId})
+           OR ("followerId" = ${targetId} AND "followingId" = ${blockerId})
+        RETURNING "followerId", "followingId"`;
+      const blockerFollowedTarget = removed.some(
+        e => e.followerId === blockerId && e.followingId === targetId,
+      );
+      const targetFollowedBlocker = removed.some(
+        e => e.followerId === targetId && e.followingId === blockerId,
+      );
+      if (blockerFollowedTarget) {
+        await tx.$executeRaw`UPDATE "User" SET "followingCount" = GREATEST("followingCount" - 1, 0), "updatedAt" = NOW() WHERE id = ${blockerId}`;
+        await tx.$executeRaw`UPDATE "User" SET "followerCount" = GREATEST("followerCount" - 1, 0), "updatedAt" = NOW() WHERE id = ${targetId}`;
+      }
+      if (targetFollowedBlocker) {
+        await tx.$executeRaw`UPDATE "User" SET "followingCount" = GREATEST("followingCount" - 1, 0), "updatedAt" = NOW() WHERE id = ${targetId}`;
+        await tx.$executeRaw`UPDATE "User" SET "followerCount" = GREATEST("followerCount" - 1, 0), "updatedAt" = NOW() WHERE id = ${blockerId}`;
+      }
+    });
 
     return { blocked: true as const };
   },
@@ -130,43 +146,59 @@ export const socialService = {
     const target = await prisma.user.findUnique({ where: { id: targetId } });
     if (!target) throw new AppError('USER_001');
 
-    const set = await redis.set(reportCooldownKey(reporterId, 'user', targetId), '1', {
+    const cooldownKey = reportCooldownKey(reporterId, 'user', targetId);
+    const set = await redis.set(cooldownKey, '1', {
       EX: REPORT_COOLDOWN_SECONDS,
       NX: true,
     });
     if (set === null) throw new AppError('RATE_LIMIT_001');
 
-    const row = await prisma.report.create({
-      data: {
-        reporterId,
-        targetKind: 'USER',
-        reportedId: targetId,
-        reason: reasonToEnum(input.reason),
-        details: input.details ?? null,
-      },
-    });
-    return { reportId: row.id };
+    try {
+      const row = await prisma.report.create({
+        data: {
+          reporterId,
+          targetKind: 'USER',
+          reportedId: targetId,
+          reason: reasonToEnum(input.reason),
+          details: input.details ?? null,
+        },
+      });
+      return { reportId: row.id };
+    } catch (err) {
+      // Don't lock the reporter out for 24h if the DB write failed — release
+      // the cooldown claim so a legitimate retry isn't blocked.
+      await redis.del(cooldownKey).catch(() => {});
+      throw err;
+    }
   },
 
   async reportRoom(reporterId: string, roomId: string, input: ReportRoomInput) {
     const room = await prisma.room.findUnique({ where: { id: roomId }, select: { id: true } });
     if (!room) throw new AppError('ROOM_001');
 
-    const set = await redis.set(reportCooldownKey(reporterId, 'room', roomId), '1', {
+    const cooldownKey = reportCooldownKey(reporterId, 'room', roomId);
+    const set = await redis.set(cooldownKey, '1', {
       EX: REPORT_COOLDOWN_SECONDS,
       NX: true,
     });
     if (set === null) throw new AppError('RATE_LIMIT_001');
 
-    const row = await prisma.report.create({
-      data: {
-        reporterId,
-        targetKind: 'ROOM',
-        reportedRoomId: roomId,
-        reason: reasonToEnum(input.reason),
-        details: input.details ?? null,
-      },
-    });
-    return { reportId: row.id };
+    try {
+      const row = await prisma.report.create({
+        data: {
+          reporterId,
+          targetKind: 'ROOM',
+          reportedRoomId: roomId,
+          reason: reasonToEnum(input.reason),
+          details: input.details ?? null,
+        },
+      });
+      return { reportId: row.id };
+    } catch (err) {
+      // Release the cooldown claim on a failed DB write so a legitimate retry
+      // isn't blocked for 24h.
+      await redis.del(cooldownKey).catch(() => {});
+      throw err;
+    }
   },
 };

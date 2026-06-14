@@ -78,6 +78,18 @@ export const scheduleEventReminder = async (roomId: string, scheduledFor: Date):
     );
   }
 
+  // ── 1b. T−15min reminder (extension queue) ──
+  // EVEN-04: arm the 15-min reminder at room-creation time instead of relying
+  // solely on the narrow per-minute cron scan in `reminder15.ts`. Best-effort
+  // and lazily imported to avoid a load-order coupling between the queues; its
+  // own `delay <= 0` guard no-ops when the room is <15min out or in the past.
+  try {
+    const { scheduleReminder15 } = await import('../extensions/queues/reminder15');
+    await scheduleReminder15(roomId, scheduledFor);
+  } catch (err) {
+    logger.warn('event-reminder: scheduleReminder15 failed', { err, roomId });
+  }
+
   // ── 2. T−0 go-live flip (decoupled from the reminder) ──
   const goLiveDelay = scheduledFor.getTime() - now;
   if (goLiveDelay <= 0) {
@@ -124,10 +136,18 @@ const openScheduledRoom = async (roomId: string): Promise<void> => {
   if (room.endedAt) return; // already cancelled or ended
   if (room.isLive) return; // already opened — keep idempotent
 
-  await prisma.room.update({
-    where: { id: room.id },
+  // EVEN-03: guard against a concurrent cancel (which sets `endedAt`) racing
+  // this go-live flip. The conditional update only matches a room that is
+  // still un-ended; if a cancel won the race (count === 0) we bail rather
+  // than re-open a room that was just torn down.
+  const flipped = await prisma.room.updateMany({
+    where: { id: room.id, endedAt: null },
     data: { isLive: true },
   });
+  if (flipped.count !== 1) {
+    logger.info('event-reminder: go-live skipped — room ended concurrently', { roomId: room.id });
+    return;
+  }
   // Add host as first participant
   await prisma.participant.upsert({
     where: { userId_roomId: { userId: room.hostId, roomId: room.id } },
@@ -182,7 +202,9 @@ const processReminder = async (job: Job<ReminderJobData>): Promise<void> => {
 
   const room = await prisma.room.findUnique({
     where: { id: job.data.roomId },
-    include: { rsvps: { select: { userId: true } } },
+    // EVEN-05: honor the per-user `RoomRsvp.reminder` toggle — only RSVPs that
+    // opted in get the reminder fan-out.
+    include: { rsvps: { where: { reminder: true }, select: { userId: true } } },
   });
   if (!room) {
     logger.warn('event-reminder: room not found', { roomId: job.data.roomId });

@@ -1,5 +1,8 @@
-import type { ClubMemberRole, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import type { ClubMemberRole } from '@prisma/client';
 import { prisma } from '../../config/database';
+import { redis } from '../../config/redis';
+import { logger } from '../../config/logger';
 import { AppError } from '../../middlewares/error.middleware';
 import { notificationsService } from '../notifications/notifications.service';
 import { clubInclude, privacyToDb, toApi, toSummary } from './clubs.mapper';
@@ -89,18 +92,34 @@ export const clubsService = {
     const club = await prisma.club.findUnique({ where: { id: clubId } });
     if (!club) throw new AppError('CLUB_001');
     if (club.privacy === 'PRIVATE') throw new AppError('CLUB_003');
+    // CLUB-01: SOCIAL clubs are gated by an approval request that lives in the
+    // clubreq extension. The core direct-join path must not fall through and
+    // grant immediate membership, or the SOCIAL approval guard is bypassed.
+    if (club.privacy === 'SOCIAL') {
+      throw new AppError('CLUB_003', 'Social club — request approval to join');
+    }
 
     const existing = await prisma.clubMember.findUnique({
       where: { clubId_userId: { clubId, userId: viewerId } },
     });
     if (existing) throw new AppError('CLUB_004');
 
-    await prisma.$transaction([
-      prisma.clubMember.create({
-        data: { clubId, userId: viewerId, role: 'MEMBER' },
-      }),
-      prisma.club.update({ where: { id: clubId }, data: { memberCount: { increment: 1 } } }),
-    ]);
+    try {
+      await prisma.$transaction([
+        prisma.clubMember.create({
+          data: { clubId, userId: viewerId, role: 'MEMBER' },
+        }),
+        prisma.club.update({ where: { id: clubId }, data: { memberCount: { increment: 1 } } }),
+      ]);
+    } catch (err) {
+      // CLUB-04: lost a race with a concurrent join/accept — the unique
+      // (clubId,userId) constraint fired. Surface as CLUB_004 instead of a
+      // raw 500, mirroring the existing-member guard above.
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        throw new AppError('CLUB_004');
+      }
+      throw err;
+    }
     return { joined: true as const };
   },
 
@@ -137,6 +156,14 @@ export const clubsService = {
       where: { clubId_userId: { clubId, userId: inviterId } },
     });
     if (!inviterMember) throw new AppError('CLUB_002');
+    // CLUB-03: invites gatekeep entry into PRIVATE clubs (the only way in), so
+    // they must be reserved to OWNER/ADMIN/MODERATOR — a plain MEMBER must not
+    // be able to pull arbitrary users into a club.
+    const inviterIsPrivileged =
+      club.ownerId === inviterId ||
+      inviterMember.role === 'ADMIN' ||
+      inviterMember.role === 'MODERATOR';
+    if (!inviterIsPrivileged) throw new AppError('CLUB_002');
 
     // Skip users that are already members — no point inviting them.
     const existingMembers = await prisma.clubMember.findMany({
@@ -178,14 +205,26 @@ export const clubsService = {
     // club. Without this check any authenticated user could POST
     // /clubs/:id/accept and join ANY club — including PRIVATE ones — bypassing
     // the join() guard (CLUB_003). invite() materialises the invitation as a
-    // CLUB_INVITE notification carrying { clubId } in its data payload.
-    const invite = await prisma.notification.findFirst({
+    // CLUB_INVITE notification carrying { clubId, inviterId } in its payload.
+    //
+    // CLUB-02: the CLUB_INVITE type is reused by the clubreq extension for the
+    // request lifecycle (join_request / join_approved / join_declined). Those
+    // carry a `kind` discriminator and must NOT be accepted as an invitation —
+    // otherwise a *declined* user could later join a (newly) PRIVATE club.
+    // A real invite has `inviterId` present and `kind` absent.
+    const candidates = await prisma.notification.findMany({
       where: {
         userId: viewerId,
         type: 'CLUB_INVITE',
         data: { path: ['clubId'], equals: clubId },
       },
-      select: { id: true },
+      select: { data: true },
+    });
+    const invite = candidates.find(n => {
+      const d = n.data;
+      if (!d || typeof d !== 'object' || Array.isArray(d)) return false;
+      const payload = d as Record<string, unknown>;
+      return payload.kind === undefined && payload.inviterId !== undefined;
     });
     if (!invite) throw new AppError('CLUB_007');
 
@@ -274,6 +313,25 @@ export const clubsService = {
       prisma.clubMember.deleteMany({ where: { clubId } }),
       prisma.club.delete({ where: { id: clubId } }),
     ]);
+
+    // CLUB-07: the clubreq + clubMeta extensions keep state in Redis keyed by
+    // clubId. Purge those keys so a deleted club leaves no orphaned join
+    // requests / metadata behind. Best-effort: a Redis hiccup must not fail an
+    // otherwise-successful deletion.
+    try {
+      const reqIndexKey = `ext:clubreq:club:${clubId}`;
+      const pendingUserIds = await redis.sMembers(reqIndexKey);
+      const keysToDelete = [
+        reqIndexKey,
+        ...pendingUserIds.map(uid => `ext:clubreq:${clubId}:${uid}`),
+        `ext:clubmeta:${clubId}`,
+        `ext:clubmeta:featured:${clubId}`,
+      ];
+      await redis.del(keysToDelete);
+    } catch (err) {
+      logger.warn('clubs.remove: extension key purge failed', { err, clubId });
+    }
+
     return { deleted: true as const };
   },
 };

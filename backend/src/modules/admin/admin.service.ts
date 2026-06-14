@@ -6,6 +6,8 @@ import { AppError } from '../../middlewares/error.middleware';
 import { closeRoom as closeSfuRoom } from '../../webrtc/mediasoup.manager';
 import { emitHallwayRoomClosed, emitNotification } from '../../socket/realtime';
 import { signImpersonationToken } from '../../utils/jwt';
+import { cancelEventReminder } from '../../queues/eventReminders';
+import { recordingsService } from '../recordings/recordings.service';
 import { auditLogService } from './auditLog.service';
 import type {
   ForceEndRoomInput,
@@ -392,10 +394,15 @@ export const adminService = {
     if (!report) throw new AppError('NOT_FOUND_001');
     if (report.resolvedAt) return { ok: true as const };
 
-    await prisma.report.update({
-      where: { id: reportId },
+    // MODE-05: resolve conditionally (WHERE resolvedAt IS NULL) so two
+    // concurrent resolutions can't both pass the read-then-write check above
+    // and each write a duplicate AuditLog line. Only the call that actually
+    // flipped the row (count === 1) records the audit entry.
+    const resolved = await prisma.report.updateMany({
+      where: { id: reportId, resolvedAt: null },
       data: { resolvedAt: new Date() },
     });
+    if (resolved.count !== 1) return { ok: true as const };
 
     await auditLogService.record({
       actorId,
@@ -443,14 +450,24 @@ export const adminService = {
       select: { userId: true },
     });
     const userIds = active.map(p => p.userId);
+    // ROOM-07: notify RSVPs (typically the SCHEDULED case where there are no
+    // active participants yet) that the event was cancelled by moderation.
+    const rsvps = await prisma.roomRsvp.findMany({
+      where: { roomId },
+      select: { userId: true },
+    });
 
-    await prisma.$transaction([
+    // MODE-04: close the room conditionally (WHERE endedAt IS NULL) and only run
+    // the side effects when this call actually closed it. Two concurrent
+    // force-ends would otherwise both pass the read-then-write check above and
+    // duplicate the teardown/notifications/audit-log.
+    const [, closed] = await prisma.$transaction([
       prisma.participant.updateMany({
         where: { roomId, leftAt: null },
         data: { leftAt: new Date() },
       }),
-      prisma.room.update({
-        where: { id: roomId },
+      prisma.room.updateMany({
+        where: { id: roomId, endedAt: null },
         data: { isLive: false, endedAt: new Date(), participantCount: 0 },
       }),
       ...(userIds.length > 0
@@ -462,10 +479,25 @@ export const adminService = {
           ]
         : []),
     ]);
+    if (closed.count !== 1) return { ended: true as const };
 
+    // ROOM-03: drop the room's pending BullMQ jobs (reminder + go-live) so a
+    // force-ended scheduled room doesn't auto-open / fire a reminder later.
+    // Best-effort: a Redis/BullMQ hiccup must NOT abort the teardown + audit
+    // below for a force-end that already committed to Postgres.
+    await cancelEventReminder(roomId).catch(err =>
+      logger.warn('admin.forceEndRoom: cancel reminder failed', { err, roomId }),
+    );
     await closeSfuRoom(roomId);
+    // RECO-01: finalize any running Replay egress (gated/no-op when egress is
+    // off). Without this the LiveKit egress keeps billing/uploading until a
+    // spontaneous webhook — and for a private room it could stay orphaned.
+    void recordingsService
+      .stopForRoom(roomId)
+      .catch(err => logger.warn('admin.forceEndRoom: recording stop failed', { err, roomId }));
     emitHallwayRoomClosed(roomId);
-    for (const userId of userIds) {
+    const recipientIds = new Set<string>([...userIds, ...rsvps.map(r => r.userId)]);
+    for (const userId of recipientIds) {
       emitNotification(userId, {
         id: `room-force-ended-${roomId}-${Date.now()}`,
         type: 'ROOM_ENDED_BY_ADMIN',

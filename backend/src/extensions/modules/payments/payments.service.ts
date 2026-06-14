@@ -30,6 +30,12 @@ interface StripeAccountMapping {
   createdAt: string;
 }
 
+/** Minimal shape of a Stripe Charge object (charge.refunded webhook, PAYM-02). */
+interface StripeChargeObject {
+  id: string;
+  payment_intent?: string | null;
+}
+
 const accountKey = (userId: string) => `ext:stripe:account:${userId}`;
 
 /** Window over which identical tip retries collapse onto the same session (1 min). */
@@ -140,6 +146,16 @@ export const paymentsService = {
     if (fromUserId === toUserId) throw extError('PAY_INVALID', 'Cannot tip yourself');
     const currency = assertCurrency(currencyInput);
 
+    // PAYM-03: validate the recipient in the DB BEFORE charging. The Redis
+    // account mapping survives a GDPR purge, so a tip could otherwise be
+    // captured + transferred and then fail the FK on recordTip (boucle de
+    // retry). Reject if the user no longer exists or is soft-deleted.
+    const toUser = await prisma.user.findUnique({
+      where: { id: toUserId },
+      select: { deletedAt: true },
+    });
+    if (!toUser || toUser.deletedAt) throw extError('PAY_RECIPIENT_NOT_CONFIGURED');
+
     const recipient = await redis.get(accountKey(toUserId));
     if (!recipient) throw extError('PAY_RECIPIENT_NOT_CONFIGURED');
     const mapping = JSON.parse(recipient) as StripeAccountMapping;
@@ -191,6 +207,11 @@ export const paymentsService = {
     const fromUserId = md['fromUserId'];
     const toUserId = md['toUserId'];
     if (!fromUserId || !toUserId) return;
+    // PAYM-02: do NOT clobber the status on conflict. The row is born SUCCEEDED
+    // here; a later charge.refunded flips it to REFUNDED. Stripe can redeliver
+    // payment_intent.succeeded for up to ~3 days (past the 24h dedupe window),
+    // so an unconditional `update: { status: 'SUCCEEDED' }` would silently
+    // reopen a refunded tip. An empty update keeps the first terminal status.
     await prisma.tip.upsert({
       where: { paymentIntentId: intent.id },
       create: {
@@ -201,7 +222,53 @@ export const paymentsService = {
         currency: intent.currency ?? defaultCurrency(),
         status: 'SUCCEEDED',
       },
-      update: { status: 'SUCCEEDED' },
+      update: {},
+    });
+  },
+
+  /**
+   * Webhook helper — mark a tip FAILED on payment_intent.payment_failed (PAYM-01).
+   * The intent never succeeded so no money moved; we only trace the failure if a
+   * row exists (or create a FAILED row so the failure is visible). Idempotent on
+   * paymentIntentId; never overwrites a SUCCEEDED/REFUNDED terminal row.
+   */
+  async recordFailedTip(intent: StripePaymentIntentObject): Promise<void> {
+    const md = intent.metadata ?? {};
+    if (md['kind'] !== 'tip') return;
+    const fromUserId = md['fromUserId'];
+    const toUserId = md['toUserId'];
+    if (!fromUserId || !toUserId) return;
+    await prisma.tip.upsert({
+      where: { paymentIntentId: intent.id },
+      create: {
+        paymentIntentId: intent.id,
+        fromUserId,
+        toUserId,
+        amount: intent.amount ?? 0,
+        currency: intent.currency ?? defaultCurrency(),
+        status: 'FAILED',
+      },
+      // Only a still-pending tip flips to FAILED; a SUCCEEDED/REFUNDED row is
+      // terminal and must not be reopened by a stale failure event.
+      update: {},
+    });
+    await prisma.tip.updateMany({
+      where: { paymentIntentId: intent.id, status: 'PENDING' },
+      data: { status: 'FAILED' },
+    });
+  },
+
+  /**
+   * Webhook helper — mark a tip REFUNDED on charge.refunded (PAYM-02). The charge
+   * carries the originating paymentIntentId; we flip the matching SUCCEEDED tip
+   * to REFUNDED. Idempotent and a no-op for non-tip / unknown charges.
+   */
+  async recordRefundedTip(charge: StripeChargeObject): Promise<void> {
+    const paymentIntentId = charge.payment_intent;
+    if (!paymentIntentId) return;
+    await prisma.tip.updateMany({
+      where: { paymentIntentId, status: 'SUCCEEDED' },
+      data: { status: 'REFUNDED' },
     });
   },
 

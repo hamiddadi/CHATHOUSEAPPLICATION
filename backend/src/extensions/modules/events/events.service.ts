@@ -26,6 +26,12 @@ export const extEventsService = {
     if (room.hostId !== userId) throw new AppError('AUTH_008'); // forbidden
     if (room.endedAt) throw new AppError('ROOM_002', 'Already ended');
     if (!room.scheduledFor) throw new AppError('ROOM_002', 'Room is not a scheduled event');
+    // EVEN-01: `go-live` never clears `scheduledFor`, so a room already flipped
+    // live still passes the `scheduledFor` check. Cancel is reserved for events
+    // that haven't started — reject a live room rather than leave participants
+    // and the SFU session orphaned by the partial soft-close below.
+    if (room.isLive)
+      throw new AppError('ROOM_002', 'Room is already live — end it instead of canceling');
 
     // 1. Soft close via endedAt (existing field — read-only schema use)
     await prisma.room.update({

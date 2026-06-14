@@ -41,11 +41,14 @@ export const authService = {
   async register(input: RegisterInput) {
     // Defensive normalization: the Zod schema already lowercases email, but
     // normalize here too so the uniqueness check and the stored value stay
-    // consistent even if a future caller bypasses the schema.
+    // consistent even if a future caller bypasses the schema. Username is
+    // case-insensitive (AUTH-05): lowercase it the same way so 'JohnDoe' and
+    // 'johndoe' can't both exist and username login stays deterministic.
     const email = input.email.toLowerCase();
+    const username = input.username.toLowerCase();
     const [emailTaken, usernameTaken] = await Promise.all([
       prisma.user.findUnique({ where: { email } }),
-      prisma.user.findUnique({ where: { username: input.username } }),
+      prisma.user.findUnique({ where: { username } }),
     ]);
     if (emailTaken) throw new AppError('AUTH_005');
     if (usernameTaken) throw new AppError('AUTH_006');
@@ -53,7 +56,7 @@ export const authService = {
     const passwordHash = await hash(input.password, SALT_ROUNDS);
     const user = await prisma.user.create({
       data: {
-        username: input.username,
+        username,
         email,
         passwordHash,
         displayName: input.displayName ?? input.username,
@@ -73,9 +76,15 @@ export const authService = {
   },
 
   async login(input: LoginInput) {
+    // Both email and username are stored lowercase (AUTH-05), so lowercase the
+    // identifier on both branches to keep login deterministic regardless of the
+    // case the user typed.
     const user = await prisma.user.findFirst({
       where: {
-        OR: [{ email: input.identifier.toLowerCase() }, { username: input.identifier }],
+        OR: [
+          { email: input.identifier.toLowerCase() },
+          { username: input.identifier.toLowerCase() },
+        ],
       },
     });
     if (!user || !user.passwordHash) throw new AppError('AUTH_001');
@@ -92,17 +101,48 @@ export const authService = {
 
   async refresh(refreshToken: string) {
     const claims = verifyRefreshToken(refreshToken);
+
+    // Reject expired tokens up front (the conditional revoke below can't see
+    // expiry). A non-existent jti also lands here as AUTH_004.
     const record = await prisma.refreshToken.findUnique({ where: { token: claims.jti } });
-    if (!record || record.revokedAt || record.expiresAt < new Date()) {
+    if (!record || record.expiresAt < new Date()) {
       throw new AppError('AUTH_004');
     }
 
-    // Rotate: revoke the old jti, issue a new one. Classic refresh-token rotation.
-    await prisma.refreshToken.update({
-      where: { token: claims.jti },
+    // AUTH-02: replay of an already-rotated jti is a token-theft signal —
+    // revoke the whole family for that user so neither side keeps a live pair.
+    if (record.revokedAt) {
+      await prisma.refreshToken.updateMany({
+        where: { userId: record.userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+      throw new AppError('AUTH_004');
+    }
+
+    // AUTH-01: a suspended or soft-deleted (or vanished) account must not be
+    // able to extend its session via refresh, even though its JWT still
+    // verifies. Mirror requireAuth's verdicts (AUTH_007 suspended, AUTH_003
+    // absent/deleted).
+    const user = await prisma.user.findUnique({
+      where: { id: record.userId },
+      select: { suspendedUntil: true, deletedAt: true },
+    });
+    if (!user || user.deletedAt) throw new AppError('AUTH_003');
+    if (user.suspendedUntil && user.suspendedUntil > new Date()) {
+      throw new AppError('AUTH_007');
+    }
+
+    // AUTH-02: atomic conditional rotation. Two concurrent refreshes with the
+    // same jti both reach here, but only one wins the conditional update
+    // (revokedAt: null guard) — the loser sees count===0 and is rejected, so a
+    // single jti never yields two live token families.
+    const rotated = await prisma.refreshToken.updateMany({
+      where: { token: claims.jti, revokedAt: null },
       data: { revokedAt: new Date() },
     });
-    return issueTokenPair(claims.sub);
+    if (rotated.count !== 1) throw new AppError('AUTH_004');
+
+    return issueTokenPair(record.userId);
   },
 
   async logout(userId: string, accessToken: string) {
@@ -128,7 +168,12 @@ export const authService = {
     const user = await prisma.user.findUnique({ where: { email: input.email.toLowerCase() } });
     // Phone-only users (no email) can't use password reset either.
     if (!user || !user.email) {
-      // Same response whether or not the user exists (anti-enumeration).
+      // AUTH-06: equalize the cost of the two paths so response timing doesn't
+      // leak whether the address exists. The existent path generates a token
+      // and hashes it before any I/O; do the same throwaway work here so this
+      // branch's synchronous cost mirrors it. Same response either way
+      // (anti-enumeration).
+      hashResetToken(randomBytes(RESET_TOKEN_BYTES).toString('hex'));
       return { ok: true };
     }
 

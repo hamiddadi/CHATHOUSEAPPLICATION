@@ -31,9 +31,13 @@ export const chatmodService = {
       if (!canModerate) {
         const participant = await prisma.participant.findUnique({
           where: { userId_roomId: { userId: callerId, roomId: msg.roomId } },
-          select: { role: true },
+          select: { role: true, leftAt: true },
         });
-        if (participant && participant.role === 'MODERATOR') canModerate = true;
+        // Mirror the legacy `requireHostOrMod`: a moderator who has left the
+        // room (leftAt set) no longer holds moderation powers.
+        if (participant && !participant.leftAt && participant.role === 'MODERATOR') {
+          canModerate = true;
+        }
       }
     }
 

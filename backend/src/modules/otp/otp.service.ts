@@ -29,26 +29,32 @@ export const otpService = {
     const within = await checkAndBumpRateLimit(input.phoneNumber);
     if (!within) throw new AppError('RATE_LIMIT_001');
 
-    // Invalidate any previous unused codes for this phone — only the latest
-    // emitted code is valid.
-    await prisma.otpCode.updateMany({
-      where: { phoneNumber: input.phoneNumber, isUsed: false },
-      data: { isUsed: true },
-    });
-
     const code = randomInt(0, 1_000_000).toString().padStart(6, '0');
     const codeHash = await hash(code, SALT_ROUNDS);
     const expiresAt = new Date(Date.now() + env.OTP_TTL_MINUTES * 60 * 1000);
 
-    await prisma.otpCode.create({
-      data: { phoneNumber: input.phoneNumber, codeHash, expiresAt },
-    });
-
+    // OTP-03: send the SMS BEFORE touching the DB. If delivery fails we throw
+    // here, leaving previously-issued codes intact — the user isn't locked out
+    // by a phantom unsent code. Only on confirmed delivery do we atomically
+    // invalidate old codes and commit the new one (one transaction so a
+    // partial state — old codes voided but new code missing — can't happen).
     await sendSms(
       { to: input.phoneNumber, body: `Your Chathouse code: ${code}` },
       // Dev hint: the raw code is also logged so you can test without SMS.
       env.NODE_ENV === 'production' ? undefined : { code },
     );
+
+    await prisma.$transaction([
+      // Invalidate any previous unused codes for this phone — only the latest
+      // emitted code is valid.
+      prisma.otpCode.updateMany({
+        where: { phoneNumber: input.phoneNumber, isUsed: false },
+        data: { isUsed: true },
+      }),
+      prisma.otpCode.create({
+        data: { phoneNumber: input.phoneNumber, codeHash, expiresAt },
+      }),
+    ]);
     if (env.NODE_ENV !== 'production') {
       logger.info(`[otp] issued ${code} for ${input.phoneNumber} (ttl ${env.OTP_TTL_MINUTES}m)`);
     }
@@ -79,26 +85,43 @@ export const otpService = {
 
     const ok = await compare(input.code, record.codeHash);
     if (!ok) {
-      await prisma.otpCode.update({
-        where: { id: record.id },
+      // OTP-02: atomically increment only while still under the cap and unused.
+      // Concurrent wrong guesses can't all read the same stale `attempts` and
+      // slip past the ceiling — the `attempts < MAX` guard is evaluated by the
+      // DB, so the counter is authoritative under concurrency.
+      await prisma.otpCode.updateMany({
+        where: { id: record.id, isUsed: false, attempts: { lt: env.OTP_MAX_ATTEMPTS } },
         data: { attempts: { increment: 1 } },
       });
       throw new AppError('AUTH_001', 'Invalid code');
     }
 
-    // One-shot: mark consumed before issuing tokens.
-    await prisma.otpCode.update({ where: { id: record.id }, data: { isUsed: true } });
-
-    // Find-or-create. New users get a placeholder username they must replace
-    // on SetupProfile; frontend routes them there via `isNewUser`.
-    let user = await prisma.user.findUnique({ where: { phoneNumber: input.phoneNumber } });
-    let isNewUser = false;
-    if (!user) {
-      user = await prisma.user.create({
-        data: { phoneNumber: input.phoneNumber },
-      });
-      isNewUser = true;
+    // OTP-01: atomic one-shot consumption. Two concurrent verifies with the
+    // same valid code both reach here, but only one wins the conditional
+    // update (isUsed:false guard) — the loser sees count===0 and is rejected,
+    // so a single code never mints two sessions.
+    const consumed = await prisma.otpCode.updateMany({
+      where: { id: record.id, isUsed: false },
+      data: { isUsed: true },
+    });
+    if (consumed.count !== 1) {
+      throw new AppError('AUTH_002', 'OTP code expired or not found');
     }
+
+    // OTP-01: find-or-create via upsert so two requests racing on a brand-new
+    // phone number can't both INSERT and collide on the @unique phoneNumber
+    // (which would surface as a 500). New users get a placeholder username they
+    // must replace on SetupProfile; frontend routes them there via `isNewUser`.
+    const existing = await prisma.user.findUnique({
+      where: { phoneNumber: input.phoneNumber },
+      select: { id: true },
+    });
+    const isNewUser = existing === null;
+    const user = await prisma.user.upsert({
+      where: { phoneNumber: input.phoneNumber },
+      create: { phoneNumber: input.phoneNumber },
+      update: {},
+    });
 
     const tokens = await issueTokenPair(user.id);
     return {

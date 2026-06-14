@@ -1,6 +1,6 @@
 import { redis } from '../../../config/redis';
 import { prisma } from '../../../config/database';
-import { extError } from '../../utils/ExtAppError';
+import { ExtAppError, extError } from '../../utils/ExtAppError';
 
 /**
  * Club extended metadata (Module 10.7 / CLUB-004) — cover photo +
@@ -32,7 +32,10 @@ const requireClubAdmin = async (clubId: string, userId: string): Promise<void> =
     select: { role: true },
   });
   if (m?.role !== 'ADMIN' && m?.role !== 'MODERATOR') {
-    throw extError('PAY_INVALID', 'Not allowed');
+    // CLUB-05: an authorization failure is a 403, not a 400 PAY_INVALID
+    // (which mislabels an RBAC refusal as a bad payment request). Reuse the
+    // core AUTH_008 "insufficient privileges" code at its canonical 403.
+    throw new ExtAppError('AUTH_008', 'Not allowed', 403);
   }
 };
 

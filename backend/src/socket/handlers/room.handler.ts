@@ -5,7 +5,6 @@ import {
   closeRoom as closeSfuRoom,
   closeProducersForUserInRoom,
 } from '../../webrtc/mediasoup.manager';
-import { isActiveRoomParticipant } from '../../webrtc/roomAuthz';
 import { roomChannel } from '../channels';
 import { getUserId } from '../socket.middleware';
 
@@ -87,18 +86,13 @@ export const registerRoomHandlers = (io: Server, socket: Socket): void => {
     'room:request-speak',
     async (payload: SpeakRequestPayload, ack?: (ok: boolean) => void) => {
       try {
-        // Only an active participant of the room may raise a speak request —
-        // mirrors the REST `raiseHand` path which calls requireActiveParticipant.
-        // Without this any authenticated socket could spam hosts / the speak
-        // queue of rooms it never joined.
-        if (!(await isActiveRoomParticipant(payload.roomId, userId()))) {
-          ack?.(false);
-          return;
-        }
-        io.to(roomChannel(payload.roomId)).emit('room:speak-request', {
-          userId: userId(),
-          roomId: payload.roomId,
-        });
+        // HAND-07 fix: delegate to the REST `raiseHand` path so the request is
+        // actually persisted in the RoomHandRaise FIFO queue (and the host's
+        // hand-raise list). Previously this socket only broadcast an ephemeral
+        // `room:speak-request` and persisted nothing, diverging from REST.
+        // `raiseHand` enforces room-state + active-participant guards and emits
+        // `room:hand_raised` itself.
+        await roomsService.raiseHand(payload.roomId, userId());
         ack?.(true);
       } catch (err) {
         logger.warn('room:request-speak failed', { err });
@@ -113,7 +107,9 @@ export const registerRoomHandlers = (io: Server, socket: Socket): void => {
       // Release the SFU router + all producers for this room. `closeSfuRoom`
       // is idempotent so it's safe if RTC wasn't in use for this room.
       await closeSfuRoom(payload.roomId);
-      io.to(roomChannel(payload.roomId)).emit('room:ended', { roomId: payload.roomId });
+      // ROOM-06 fix: do NOT emit `room:ended` here — `roomsService.end()`
+      // already broadcasts it via `emitRoomEnded`. Emitting again duplicated
+      // the event for every client in the room.
       ack?.(true);
     } catch (err) {
       logger.warn('room:end failed', { err });

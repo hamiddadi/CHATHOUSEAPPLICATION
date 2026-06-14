@@ -318,8 +318,29 @@ export const usersService = {
   },
 
   async cancelDeletion(userId: string) {
-    await prisma.user.update({
+    // MODE-08: only reactivate accounts the USER themselves scheduled for
+    // deletion. An admin soft-delete (admin.deleteUser) sets `deletedAt`
+    // alongside a permanent `suspendedUntil` ban; a self-requested deletion
+    // (requestDeletion) sets `deletedAt` only. So an active suspension marks an
+    // admin-origin deletion that this self-service endpoint must not lift —
+    // otherwise a user could undo a moderator's ban by cancelling "deletion".
+    const user = await prisma.user.findUnique({
       where: { id: userId },
+      select: { suspendedUntil: true },
+    });
+    if (!user) throw new AppError('USER_001');
+    if (user.suspendedUntil && user.suspendedUntil > new Date()) {
+      throw new AppError('AUTH_007');
+    }
+    // Restore only from a self-requested deletion. The updateMany guard keeps
+    // this atomic against a concurrent admin ban landing between the read and
+    // the write (the active-suspension condition is re-checked by the DB).
+    const now = new Date();
+    await prisma.user.updateMany({
+      where: {
+        id: userId,
+        OR: [{ suspendedUntil: null }, { suspendedUntil: { lt: now } }],
+      },
       data: { deletedAt: null },
     });
     return { cancelled: true };
