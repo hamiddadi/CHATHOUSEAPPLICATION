@@ -116,15 +116,44 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        // Real upload/release signing (de-Expo: EAS used to own this). The
+        // keystore + passwords are NEVER committed — supply them out-of-band via
+        // ~/.gradle/gradle.properties, -P flags, or ORG_GRADLE_PROJECT_* env vars
+        // (CI secrets):
+        //   CHATHOUSE_UPLOAD_STORE_FILE=chathouse-upload.jks   (path under android/app/)
+        //   CHATHOUSE_UPLOAD_STORE_PASSWORD=…
+        //   CHATHOUSE_UPLOAD_KEY_ALIAS=chathouse
+        //   CHATHOUSE_UPLOAD_KEY_PASSWORD=…
+        // See docs/RELEASE-SIGNING.md for the keytool generation command.
+        release {
+            if (project.hasProperty('CHATHOUSE_UPLOAD_STORE_FILE')) {
+                // All four props are companions: fail fast with a clear message
+                // if STORE_FILE is set but a password/alias is missing (otherwise
+                // Gradle throws an opaque MissingPropertyException).
+                ['CHATHOUSE_UPLOAD_STORE_PASSWORD', 'CHATHOUSE_UPLOAD_KEY_ALIAS', 'CHATHOUSE_UPLOAD_KEY_PASSWORD'].each { prop ->
+                    if (!project.hasProperty(prop)) {
+                        throw new GradleException("$prop must be set alongside CHATHOUSE_UPLOAD_STORE_FILE for release signing (see docs/RELEASE-SIGNING.md)")
+                    }
+                }
+                // CHATHOUSE_UPLOAD_STORE_FILE is resolved relative to this module
+                // dir (android/app/); use an absolute path in CI if the keystore
+                // lives elsewhere.
+                storeFile file(CHATHOUSE_UPLOAD_STORE_FILE)
+                storePassword CHATHOUSE_UPLOAD_STORE_PASSWORD
+                keyAlias CHATHOUSE_UPLOAD_KEY_ALIAS
+                keyPassword CHATHOUSE_UPLOAD_KEY_PASSWORD
+            }
+        }
     }
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
         }
         release {
-            // Caution! In production, you need to generate your own keystore file.
-            // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.debug
+            // Use the real release keystore when the CHATHOUSE_UPLOAD_* properties
+            // are provided; otherwise fall back to debug signing so a local
+            // `assembleRelease` still produces an installable (NON-shippable) APK.
+            signingConfig project.hasProperty('CHATHOUSE_UPLOAD_STORE_FILE') ? signingConfigs.release : signingConfigs.debug
             def enableShrinkResources = findProperty('android.enableShrinkResourcesInReleaseBuilds') ?: 'false'
             shrinkResources enableShrinkResources.toBoolean()
             minifyEnabled enableMinifyInReleaseBuilds

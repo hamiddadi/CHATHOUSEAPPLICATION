@@ -1,51 +1,56 @@
-# Build & submit — required EAS secrets and steps
+# Build & submit — bare React Native Android
 
-The mobile app reads production values from EAS secrets at build time (injected
-into `app.config.js`). Nothing sensitive is committed. Set these once with
-`eas secret:create` (or in the EAS dashboard) before a production build.
+> **Updated for the de-Expo migration.** No EAS, no `eas.json`/`app.json`/
+> `app.config.js`. The app is built locally / in CI with Gradle and submitted to
+> Google Play manually (or via gradle-play-publisher). Signing, keystore, ABIs,
+> Maps/Firebase SHA-1 and Play App Signing all live in
+> [`docs/RELEASE-SIGNING.md`](../RELEASE-SIGNING.md) — read it first. **Android-only**
+> (no iOS target in this repo).
 
-## Required EAS secrets (client build)
+## Build-time configuration (nothing sensitive committed)
 
-| Secret                | Example                                            | Why                                                                  |
-| --------------------- | -------------------------------------------------- | -------------------------------------------------------------------- |
-| `API_BASE_URL`        | `https://api.chathouse.app/api`                    | REST base (must be https — env-guard rejects http/localhost in prod) |
-| `WS_BASE_URL`         | `wss://api.chathouse.app`                          | Socket.IO (must be wss)                                              |
-| `LIVEKIT_URL`         | `wss://livekit.chathouse.app` or LiveKit Cloud wss | Live audio (must be wss)                                             |
-| `GOOGLE_MAPS_API_KEY` | `AIza…`                                            | Android Maps SDK (restrict by package + signing SHA-1)               |
-| `SENTRY_DSN`          | `https://…@…ingest.sentry.io/…`                    | Crash reporting                                                      |
-| `SENTRY_ORG`          | `your-org`                                         | Source-map upload (build)                                            |
-| `SENTRY_PROJECT`      | `chathouse`                                        | Source-map upload (build)                                            |
-| `SENTRY_AUTH_TOKEN`   | `sntrys_…`                                         | Auth for source-map upload — **secret**                              |
-| `APP_ENV`             | `production`                                       | Set by the `production` build profile in `eas.json`                  |
+Production values are baked in **at build time** — there is no runtime secret
+store. Provide them via the channel each one uses:
 
-Optional (Module 13 cert-pinning): `PIN_DOMAIN_API`, `PIN_API_PRIMARY`, `PIN_API_BACKUP`.
+| Value                                                 | How it's injected (bare RN)                                                     | Why                                                                  |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| `API_BASE_URL`                                        | root `.env` → `react-native-dotenv` (`@env`), read by `src/config/env.ts`       | REST base (must be https — env-guard rejects http/localhost in prod) |
+| `WS_BASE_URL`                                         | root `.env`                                                                     | Socket.IO (must be wss)                                              |
+| `LIVEKIT_URL`                                         | root `.env`                                                                     | Live audio (must be wss)                                             |
+| `REALTIME_ENABLED`                                    | root `.env`                                                                     | Feature flag                                                         |
+| `SENTRY_DSN`                                          | root `.env`                                                                     | Crash reporting (runtime)                                            |
+| `GOOGLE_MAPS_API_KEY`                                 | env var / Gradle property → `manifestPlaceholders` (`android/app/build.gradle`) | Android Maps SDK (restrict by package + SHA-1 — see RELEASE-SIGNING) |
+| `SENTRY_ORG` / `SENTRY_PROJECT` / `SENTRY_AUTH_TOKEN` | env vars / `android/sentry.properties` read by `sentry.gradle` at build         | Source-map upload during the release build                           |
 
-```bash
-eas secret:create --name API_BASE_URL --value "https://api.chathouse.app/api"
-eas secret:create --name WS_BASE_URL  --value "wss://api.chathouse.app"
-eas secret:create --name LIVEKIT_URL  --value "wss://livekit.chathouse.app"
-eas secret:create --name SENTRY_DSN   --value "https://...ingest.sentry.io/..."
-eas secret:create --name SENTRY_ORG   --value "your-org"
-eas secret:create --name SENTRY_PROJECT --value "chathouse"
-eas secret:create --name SENTRY_AUTH_TOKEN --value "sntrys_..." --type string
-eas secret:create --name GOOGLE_MAPS_API_KEY --value "AIza..."
-```
+The root `.env` is **gitignored**. For a production build, populate it with prod
+values (or have CI write it from secrets) **before** bundling — metro bakes
+`@env` into the JS bundle at `bundleRelease` time. `src/config/env.ts` enforces
+https/wss in production.
+
+> **Cert pinning changed.** The old `PIN_DOMAIN_API` / `PIN_API_*` env vars drove
+> the `with-cert-pinning` Expo config plugin, which is gone. Pinning is now static
+> in [`android/app/src/main/res/xml/network_security_config.xml`](../../android/app/src/main/res/xml/network_security_config.xml)
+> — edit that file directly to add `<pin-set>` entries for prod domains.
 
 ## Steps
 
-1. `npm i -g eas-cli && eas login`
-2. `eas init` — links the project, writes `extra.eas.projectId` into app.json
-   (preserved by app.config.js). Add `owner` if building under an org.
-3. Set the secrets above.
-4. First builds:
-   - Android: `eas build -p android --profile production` → `.aab` (multi-ABI on EAS).
-   - iOS: `eas build -p ios --profile production` (needs an Apple Developer account;
-     EAS auto-provisions the distribution cert + profile and surfaces any native
-     LiveKit/WebRTC pod issues on the first run).
-5. Validate on internal track / TestFlight — confirm live audio end-to-end on real
-   devices (LiveKit reachable over wss).
-6. `eas submit -p android` / `eas submit -p ios` (add the Play service account +
-   ASC API key to `eas.json submit.production` for unattended submission).
+1. Set up the upload keystore + `CHATHOUSE_UPLOAD_*` Gradle properties — see
+   [`docs/RELEASE-SIGNING.md`](../RELEASE-SIGNING.md) §1–2.
+2. Put `android/app/google-services.json` in place (gitignored) and set prod
+   values in the root `.env` + `GOOGLE_MAPS_API_KEY` env var.
+3. Bump `versionCode` / `versionName` in `android/app/build.gradle`.
+4. Build the App Bundle:
+   ```bash
+   cd android && ./gradlew :app:bundleRelease
+   #   → android/app/build/outputs/bundle/release/app-release.aab
+   ```
+5. Upload `app-release.aab` to **Play Console** (Internal testing → Production),
+   or automate with [gradle-play-publisher] using a Play **service-account JSON**.
+6. **After the first upload**, register the **Play App Signing** key SHA-1 (plus
+   the upload + debug SHA-1) on Firebase and the Maps key — see RELEASE-SIGNING
+   §5 (skipping this makes FCM + Maps fail for Play users).
+7. Validate on the internal track — confirm live audio end-to-end on real devices
+   (LiveKit reachable over wss) and that push arrives.
 
 ## Backend production (separate from the app build)
 
@@ -54,3 +59,7 @@ See `backend/docker-compose.prod.yml`, `backend/Caddyfile`, and
 Caddy terminates TLS for `api.chathouse.app` + `livekit.chathouse.app`, and the
 CD pipeline (`.github/workflows/cd-production.yml`) deploys on a `v*.*.*` tag.
 LiveKit Cloud is the lowest-ops option — just set the three `LIVEKIT_*` values.
+Push send-side needs `FIREBASE_SERVICE_ACCOUNT` + `PUSH_DISPATCH_ENABLED=true`
+(see `backend/.env.example`).
+
+[gradle-play-publisher]: https://github.com/Triple-T/gradle-play-publisher

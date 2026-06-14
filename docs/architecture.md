@@ -9,13 +9,13 @@ Chathouse is a Clubhouse-style social audio platform composed of three logical t
 ```
 ┌─────────────────────┐   HTTPS / WSS    ┌──────────────────────┐
 │   React Native app  │ ───────────────► │  Backend (Fastify +  │
-│   (Expo SDK 55)     │ ◄─────────────── │  socket.io + Prisma) │
+│   (bare RN 0.83)    │ ◄─────────────── │  socket.io + Prisma) │
 └─────────┬───────────┘                  └─────────┬────────────┘
           │                                        │
           │           SRTP / DTLS                  │
-          │   (mediasoup SFU — when EAS dev-       │
-          │    client is built; disabled in        │
-          │    Expo Go)                            │
+          │   (LiveKit / WebRTC SRTP media —       │
+          │    native dev or release build,        │
+          │    not a JS-only run)                  │
           ▼                                        ▼
 ┌─────────────────────┐                  ┌──────────────────────┐
 │  Native audio stack │                  │ PostgreSQL + Redis   │
@@ -91,7 +91,9 @@ module/controller/service split without the decorator overhead.
 
 ## Build / Deploy
 
-- Frontend: Expo Go (dev) → EAS Build (prod, also unlocks native audio).
+- Frontend: bare React Native (de-Expo) — Android built with Gradle
+  (`./gradlew :app:assembleDebug` / `:app:bundleRelease`); live audio = LiveKit.
+  See [`docs/RELEASE-SIGNING.md`](./RELEASE-SIGNING.md).
 - Backend: `tsc -p tsconfig.build.json` → `node dist/app.js` or
   `dist/extensions/server.js` for the extended stack.
 - Docker compose at `backend/docker-compose.yml` for local Postgres+Redis.

@@ -21,6 +21,10 @@ ios/
 # migration). Build artifacts under it stay ignored via android/.gitignore and the
 # generic `build/` rule below. Only source + gradle wrapper + debug.keystore commit.
 *.jks
+*.keystore
+# debug.keystore is intentionally committed (shared debug signing); the rule
+# above would otherwise catch it.
+!android/app/debug.keystore
 *.p8
 *.p12
 *.key
