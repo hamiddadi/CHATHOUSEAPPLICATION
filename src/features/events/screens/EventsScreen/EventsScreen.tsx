@@ -11,6 +11,8 @@ import { Loader } from '../../../../shared/components/Loader';
 import { EmptyState } from '../../../../shared/components/EmptyState';
 import { colors, spacing } from '../../../../shared/constants/theme';
 import type { RoomStackParamList } from '../../../../core/navigation/types';
+import { useAuthStore } from '../../../auth/store/authStore';
+import { ExtCalendarExportButton, eventsApi } from '../../../extensions';
 import { useCancelRsvp, useMyEvents, useRsvp, useUpcomingEvents } from '../../hooks/useEvents';
 import type { ScheduledEvent } from '../../services/eventService';
 
@@ -33,67 +35,95 @@ const formatRelative = (iso: string, t: TFunction): string => {
 interface CardProps {
   event: ScheduledEvent;
   isMine: boolean;
+  isHost: boolean;
   onToggle: (event: ScheduledEvent, nextState: boolean) => void;
+  onCancel: (event: ScheduledEvent) => void;
   disabled?: boolean;
 }
 
-const EventCard: React.FC<CardProps> = memo(({ event, isMine, onToggle, disabled = false }) => {
-  const { t } = useTranslation();
-  const handleToggle = useCallback(() => onToggle(event, !isMine), [event, isMine, onToggle]);
+const EventCard: React.FC<CardProps> = memo(
+  ({ event, isMine, isHost, onToggle, onCancel, disabled = false }) => {
+    const { t } = useTranslation();
+    const handleToggle = useCallback(() => onToggle(event, !isMine), [event, isMine, onToggle]);
+    const handleCancel = useCallback(() => onCancel(event), [event, onCancel]);
 
-  return (
-    <View className="rounded-md bg-overlay-white-5 border border-overlay-white-10 p-xxl gap-lg">
-      <View className="flex-row items-start gap-md">
-        <Avatar
-          uri={event.host.avatarUrl ?? undefined}
-          name={event.host.displayName}
-          sizeValue={40}
-        />
-        <View className="flex-1 gap-xxs">
-          <Text className="text-md font-display text-ink" numberOfLines={2}>
-            {event.title}
+    return (
+      <View className="rounded-md bg-overlay-white-5 border border-overlay-white-10 p-xxl gap-lg">
+        <View className="flex-row items-start gap-md">
+          <Avatar
+            uri={event.host.avatarUrl ?? undefined}
+            name={event.host.displayName}
+            sizeValue={40}
+          />
+          <View className="flex-1 gap-xxs">
+            <Text className="text-md font-display text-ink" numberOfLines={2}>
+              {event.title}
+            </Text>
+            <Text className="text-xs text-ink-muted">
+              {t('events.hostBy', { handle: event.host.displayName })}
+            </Text>
+          </View>
+        </View>
+
+        <View className="flex-row items-center gap-sm">
+          <MaterialIcons name="schedule" size={16} color={colors.primary} />
+          <Text className="text-sm text-ink-muted">{formatRelative(event.scheduledFor, t)}</Text>
+          {event.rsvpCount > 0 && (
+            <>
+              <Text className="text-xs text-ink-dim">·</Text>
+              <Text className="text-sm text-ink-muted">
+                {t('events.attendeeCount', { count: event.rsvpCount })}
+              </Text>
+            </>
+          )}
+        </View>
+
+        <Pressable
+          onPress={handleToggle}
+          disabled={disabled}
+          accessibilityRole="button"
+          accessibilityState={{ selected: isMine, disabled }}
+          // Compose the a11y label from existing i18n keys + the event title so a
+          // screen reader announces which event the button acts on. (No new locale
+          // keys are added here — those files are owned elsewhere.)
+          accessibilityLabel={`${isMine ? t('events.rsvp') : t('events.notRsvp')} · ${event.title}`}
+          className={
+            isMine
+              ? 'rounded-pill bg-primary-container py-sm items-center'
+              : 'rounded-pill bg-primary py-sm items-center'
+          }
+        >
+          <Text className="text-sm font-body-bold text-primary-on-container">
+            {isMine ? t('events.rsvp') : t('events.notRsvp')}
           </Text>
-          <Text className="text-xs text-ink-muted">
-            {t('events.hostBy', { handle: event.host.displayName })}
-          </Text>
+        </Pressable>
+
+        {/* Calendar export + (host-only) cancel — surfaced from the extensions
+            module. Aligned start so the .ics button keeps its intrinsic width. */}
+        <View className="flex-row items-center gap-md flex-wrap">
+          <ExtCalendarExportButton
+            roomId={event.id}
+            label={t('extensions.events.addToCalendar', 'Add to calendar')}
+          />
+          {isHost && (
+            <Pressable
+              onPress={handleCancel}
+              disabled={disabled}
+              accessibilityRole="button"
+              accessibilityState={{ disabled }}
+              accessibilityLabel={`${t('extensions.events.cancelEvent', 'Cancel event')} · ${event.title}`}
+              className="rounded-pill bg-overlay-white-5 border border-danger px-xl py-sm items-center"
+            >
+              <Text className="text-sm font-body-bold text-danger">
+                {t('extensions.events.cancelEvent', 'Cancel event')}
+              </Text>
+            </Pressable>
+          )}
         </View>
       </View>
-
-      <View className="flex-row items-center gap-sm">
-        <MaterialIcons name="schedule" size={16} color={colors.primary} />
-        <Text className="text-sm text-ink-muted">{formatRelative(event.scheduledFor, t)}</Text>
-        {event.rsvpCount > 0 && (
-          <>
-            <Text className="text-xs text-ink-dim">·</Text>
-            <Text className="text-sm text-ink-muted">
-              {t('events.attendeeCount', { count: event.rsvpCount })}
-            </Text>
-          </>
-        )}
-      </View>
-
-      <Pressable
-        onPress={handleToggle}
-        disabled={disabled}
-        accessibilityRole="button"
-        accessibilityState={{ selected: isMine, disabled }}
-        // Compose the a11y label from existing i18n keys + the event title so a
-        // screen reader announces which event the button acts on. (No new locale
-        // keys are added here — those files are owned elsewhere.)
-        accessibilityLabel={`${isMine ? t('events.rsvp') : t('events.notRsvp')} · ${event.title}`}
-        className={
-          isMine
-            ? 'rounded-pill bg-primary-container py-sm items-center'
-            : 'rounded-pill bg-primary py-sm items-center'
-        }
-      >
-        <Text className="text-sm font-body-bold text-primary-on-container">
-          {isMine ? t('events.rsvp') : t('events.notRsvp')}
-        </Text>
-      </Pressable>
-    </View>
-  );
-});
+    );
+  },
+);
 EventCard.displayName = 'EventCard';
 
 export const EventsScreen: React.FC = () => {
@@ -102,6 +132,9 @@ export const EventsScreen: React.FC = () => {
   const { t } = useTranslation();
 
   const [tab, setTab] = useState<Tab>('upcoming');
+  const [canceling, setCanceling] = useState(false);
+
+  const viewerId = useAuthStore(s => s.user?.id ?? null);
 
   const upcoming = useUpcomingEvents();
   const mine = useMyEvents();
@@ -112,7 +145,7 @@ export const EventsScreen: React.FC = () => {
 
   const goBack = useCallback(() => navigation.goBack(), [navigation]);
 
-  const mutating = rsvp.isPending || cancelRsvp.isPending;
+  const mutating = rsvp.isPending || cancelRsvp.isPending || canceling;
 
   const onToggle = useCallback(
     (event: ScheduledEvent, next: boolean) => {
@@ -127,6 +160,41 @@ export const EventsScreen: React.FC = () => {
     [rsvp, cancelRsvp, t],
   );
 
+  // Host-only: confirm, then call the extensions cancel endpoint and refetch
+  // both lists so the canceled room disappears from "Upcoming" and "Mine".
+  const onCancel = useCallback(
+    (event: ScheduledEvent) => {
+      if (canceling) return;
+      Alert.alert(
+        t('extensions.events.cancelEvent', 'Cancel event'),
+        t('extensions.events.cancelConfirm', {
+          title: event.title,
+          defaultValue:
+            '“{{title}}” will be canceled and attendees notified. This cannot be undone.',
+        }),
+        [
+          { text: t('common.cancel'), style: 'cancel' },
+          {
+            text: t('common.continue'),
+            style: 'destructive',
+            onPress: () => {
+              setCanceling(true);
+              eventsApi
+                .cancel(event.id)
+                .then(() => {
+                  void upcoming.refetch();
+                  void mine.refetch();
+                })
+                .catch(() => Alert.alert(t('events.title'), t('common.actionFailed')))
+                .finally(() => setCanceling(false));
+            },
+          },
+        ],
+      );
+    },
+    [canceling, t, upcoming, mine],
+  );
+
   const activeList = tab === 'upcoming' ? upcoming : mine;
   const events = activeList.data ?? [];
 
@@ -136,11 +204,13 @@ export const EventsScreen: React.FC = () => {
       <EventCard
         event={item}
         isMine={mineIds.has(item.id)}
+        isHost={viewerId != null && item.hostId === viewerId}
         onToggle={onToggle}
+        onCancel={onCancel}
         disabled={mutating}
       />
     ),
-    [mineIds, onToggle, mutating],
+    [mineIds, viewerId, onToggle, onCancel, mutating],
   );
   const renderSeparator = useCallback(() => <View className="h-md" />, []);
 

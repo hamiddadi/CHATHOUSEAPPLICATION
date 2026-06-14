@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import MaterialIcons from '@react-native-vector-icons/material-icons';
 import { useQueryClient } from '@tanstack/react-query';
+import { chatmodApi } from '../../../extensions';
 import { Avatar } from '../../../../shared/components/Avatar';
 import { colors, spacing } from '../../../../shared/constants/theme';
 import { getSocket } from '../../../../shared/services/realtime/socketClient';
@@ -179,6 +180,33 @@ export const RoomChatSidebar: React.FC<RoomChatSidebarProps> = memo(
     const handleStartReply = useCallback((msg: ChatMessage) => setReplyTo(msg), []);
     const handleCancelReply = useCallback(() => setReplyTo(null), []);
 
+    // Host/mod-only: drop a message from the cache after the API confirms.
+    // Same query key the socket handler writes to, so the list stays in sync.
+    const handleDeleteMessage = useCallback(
+      (msg: ChatMessage) => {
+        Alert.alert('Supprimer le message', 'Supprimer ce message du chat ?', [
+          { text: 'Annuler', style: 'cancel' },
+          {
+            text: 'Supprimer',
+            style: 'destructive',
+            onPress: () => {
+              const key = [...roomKeys.all, 'messages', roomId] as const;
+              const previous = qc.getQueryData<ChatMessage[]>(key);
+              // Optimistic removal — re-add the cached list on failure.
+              qc.setQueryData<ChatMessage[]>(key, prev =>
+                prev ? prev.filter(m => m.id !== msg.id) : prev,
+              );
+              void chatmodApi.deleteMessage(msg.id).catch(e => {
+                if (previous) qc.setQueryData<ChatMessage[]>(key, previous);
+                Alert.alert('Erreur', errorMessage(e, 'Échec de la suppression'));
+              });
+            },
+          },
+        ]);
+      },
+      [qc, roomId],
+    );
+
     const renderItem = useCallback(
       ({ item }: { item: ChatMessage }) => (
         <Pressable
@@ -193,7 +221,20 @@ export const RoomChatSidebar: React.FC<RoomChatSidebarProps> = memo(
             sizeValue={28}
           />
           <View style={styles.bubble}>
-            <Text style={styles.author}>{item.user.displayName || item.user.username}</Text>
+            <View style={styles.bubbleHeader}>
+              <Text style={styles.author}>{item.user.displayName || item.user.username}</Text>
+              {canModerate ? (
+                <Pressable
+                  onPress={() => handleDeleteMessage(item)}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel="Supprimer le message"
+                  style={styles.deleteBtn}
+                >
+                  <MaterialIcons name="delete-outline" size={16} color={colors.textMuted} />
+                </Pressable>
+              ) : null}
+            </View>
             {item.replyTo ? (
               <View style={styles.replyQuote}>
                 <Text style={styles.replyAuthor} numberOfLines={1}>
@@ -208,7 +249,7 @@ export const RoomChatSidebar: React.FC<RoomChatSidebarProps> = memo(
           </View>
         </Pressable>
       ),
-      [handleStartReply],
+      [canModerate, handleDeleteMessage, handleStartReply],
     );
 
     return (
@@ -336,7 +377,14 @@ const styles = StyleSheet.create({
     padding: spacing.sm,
     borderRadius: 12,
   },
-  author: { color: colors.textMuted, fontSize: 11, marginBottom: 2, fontWeight: '600' },
+  bubbleHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 2,
+  },
+  author: { color: colors.textMuted, fontSize: 11, fontWeight: '600' },
+  deleteBtn: { marginLeft: spacing.sm },
   content: { color: colors.text, fontSize: 14, lineHeight: 18 },
   composer: {
     flexDirection: 'row',

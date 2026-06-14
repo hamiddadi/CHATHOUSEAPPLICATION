@@ -106,6 +106,7 @@ export type SettingsStackParamList = {
   Terms: undefined;
   DataExport: undefined;
   DeleteAccount: undefined;
+  BlockedUsers: undefined;
 
   // Extension settings (Phase 1)
   ExtSettings: undefined;

@@ -171,6 +171,8 @@
     "gdprArticle20": "Article 20 du RGPD",
     "accountSection": "Compte",
     "deleteAccount": "Supprimer mon compte",
+    "blockedAccounts": "Comptes bloqués",
+    "blockedAccountsHint": "Gérez les personnes que vous avez bloquées",
     "waveAlertTitle": "Wave 👋",
     "waveAlertBody": "Pour faire un wave à un ami, ouvre son profil depuis la liste de tes followers ou depuis une room.",
     "waveAlertButton": "Mes followers",
@@ -180,6 +182,14 @@
     "createHouseA11y": "Create a new house",
     "openGodmodeA11y": "Open Godmode",
     "anonymousErrorReportingA11y": "Autoriser le crash reporting anonyme"
+  },
+  "blockedUsers": {
+    "title": "Comptes bloqués",
+    "unblock": "Débloquer",
+    "unblockFailed": "Impossible de débloquer. Réessayez.",
+    "loadError": "Impossible de charger les comptes bloqués",
+    "empty": "Aucun compte bloqué",
+    "emptyHint": "Les personnes que vous bloquez apparaissent ici. Vous pouvez les débloquer à tout moment."
   },
   "room": {
     "stage": "SCÈNE",
@@ -341,7 +351,10 @@
     "emptyClubs": "Aucun club pour l'instant.",
     "emptyUsers": "Aucune suggestion pour l'instant.",
     "searchResults": "Résultats",
-    "searchEmpty": "Rien ne correspond à « {{q}} »."
+    "searchEmpty": "Rien ne correspond à « {{q}} ».",
+    "recentSearches": "Recherches récentes",
+    "clearHistory": "Effacer",
+    "browseTopics": "Parcourir les sujets"
   },
   "events": {
     "title": "Événements",

@@ -15,6 +15,7 @@ import { useBlock, useReport, useWave } from '../../../social/hooks/useSocial';
 import type { ReportReason } from '../../../social/services/socialService';
 import { useHouses } from '../../../houses/hooks/useHouses';
 import { useMyRoomHistory } from '../../../rooms/hooks/useRooms';
+import { ExtBadgesRow, ExtProfileLinks } from '../../../extensions';
 import ProfileHeaderBar from './partials/ProfileHeaderBar';
 import ProfileIdentity from './partials/ProfileIdentity';
 import ProfileStats from './partials/ProfileStats';
@@ -247,6 +248,10 @@ export const ProfileScreen: React.FC = () => {
             onCopyUsername={handleCopyUsername}
             onToggleBio={() => setBioExpanded(!bioExpanded)}
           />
+
+          <ExtBadgesRow userId={user.id} />
+
+          <ExtProfileLinks userId={user.id} editable={isSelf} />
 
           <ProfileStats
             followingCount={user.followingCount}

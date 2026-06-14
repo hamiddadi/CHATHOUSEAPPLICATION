@@ -123,6 +123,7 @@ export const SettingsScreen: React.FC = () => {
   const goTerms = useCallback(() => navigation.navigate('Terms'), [navigation]);
   const goDataExport = useCallback(() => navigation.navigate('DataExport'), [navigation]);
   const goDeleteAccount = useCallback(() => navigation.navigate('DeleteAccount'), [navigation]);
+  const goBlockedUsers = useCallback(() => navigation.navigate('BlockedUsers'), [navigation]);
 
   // The two "Wave" buttons on Settings sit on the user's OWN profile —
   // there's no peer to wave to from here. The action that makes sense
@@ -468,6 +469,12 @@ export const SettingsScreen: React.FC = () => {
             label={t('settings.exportData')}
             hint={t('settings.gdprArticle20')}
             onPress={goDataExport}
+          />
+          <SettingsRow
+            icon="block"
+            label={t('settings.blockedAccounts', 'Blocked accounts')}
+            hint={t('settings.blockedAccountsHint', 'Manage who you have blocked')}
+            onPress={goBlockedUsers}
           />
 
           {/* Theme toggle — dark / light / auto */}

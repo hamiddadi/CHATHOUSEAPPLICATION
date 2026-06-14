@@ -171,6 +171,8 @@
     "gdprArticle20": "Article 20 of the GDPR",
     "accountSection": "Account",
     "deleteAccount": "Delete my account",
+    "blockedAccounts": "Blocked accounts",
+    "blockedAccountsHint": "Manage who you have blocked",
     "waveAlertTitle": "Wave 👋",
     "waveAlertBody": "To wave at a friend, open their profile from your followers list or from a room.",
     "waveAlertButton": "My followers",
@@ -180,6 +182,14 @@
     "createHouseA11y": "Create a new house",
     "openGodmodeA11y": "Open Godmode",
     "anonymousErrorReportingA11y": "Allow anonymous crash reporting"
+  },
+  "blockedUsers": {
+    "title": "Blocked accounts",
+    "unblock": "Unblock",
+    "unblockFailed": "Could not unblock. Please try again.",
+    "loadError": "Couldn't load blocked accounts",
+    "empty": "No blocked accounts",
+    "emptyHint": "People you block appear here. You can unblock them at any time."
   },
   "room": {
     "stage": "STAGE",
@@ -341,7 +351,10 @@
     "emptyClubs": "No clubs yet.",
     "emptyUsers": "No suggestions yet.",
     "searchResults": "Results",
-    "searchEmpty": "Nothing matches \"{{q}}\"."
+    "searchEmpty": "Nothing matches \"{{q}}\".",
+    "recentSearches": "Recent searches",
+    "clearHistory": "Clear",
+    "browseTopics": "Browse topics"
   },
   "events": {
     "title": "Events",

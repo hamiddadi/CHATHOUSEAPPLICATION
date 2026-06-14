@@ -4,6 +4,7 @@ import type { SettingsStackParamList } from '../types';
 import { colors } from '../../../shared/constants/theme';
 import { SettingsScreen } from '../../../features/settings/screens/SettingsScreen';
 import { NotificationSettingsScreen } from '../../../features/settings/screens/NotificationSettingsScreen';
+import { BlockedUsersScreen } from '../../../features/settings/screens/BlockedUsersScreen';
 import { ProfileScreen } from '../../../features/profile/screens/ProfileScreen';
 import { EditProfileScreen } from '../../../features/profile/screens/EditProfileScreen';
 import { FollowersScreen } from '../../../features/profile/screens/FollowersScreen';
@@ -53,6 +54,7 @@ export const SettingsNavigator: React.FC = () => (
     <Stack.Screen name="Terms" component={TermsScreen} />
     <Stack.Screen name="DataExport" component={DataExportScreen} />
     <Stack.Screen name="DeleteAccount" component={DeleteAccountScreen} />
+    <Stack.Screen name="BlockedUsers" component={BlockedUsersScreen} />
 
     {/* Extension settings (Phase 1) */}
     <Stack.Screen name="ExtSettings" component={ExtSettingsScreen} />
