@@ -191,6 +191,18 @@
     "empty": "No blocked accounts",
     "emptyHint": "People you block appear here. You can unblock them at any time."
   },
+  "tipHistory": {
+    "title": "Tip history",
+    "entryHint": "Tips you have sent and received",
+    "sent": "Tip sent",
+    "received": "Tip received",
+    "counterpart": "User {{id}}",
+    "loading": "Loading tips",
+    "loadError": "Couldn't load tips",
+    "pleaseTryAgain": "Please try again.",
+    "empty": "No tips yet",
+    "emptyHint": "Tips you send and receive will show up here."
+  },
   "room": {
     "stage": "STAGE",
     "handRaised": "Hand raised",

@@ -9,6 +9,10 @@ export const updateMeSchema = z
     lastName: z.string().max(50).optional(),
     bio: z.string().max(150).optional(),
     avatarUrl: z.string().url().max(500).optional(),
+    // Social handles — plain-text, not OAuth. VarChar(50) in the schema → max
+    // 50. Allow the empty string so the user can clear a handle from the form.
+    twitter: z.string().max(50).optional(),
+    instagram: z.string().max(50).optional(),
   })
   .strict();
 

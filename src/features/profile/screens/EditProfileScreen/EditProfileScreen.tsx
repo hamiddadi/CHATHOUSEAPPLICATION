@@ -27,6 +27,7 @@ import { useMe, useUpdateProfile } from '../../hooks/useProfile';
 const DISPLAY_NAME_MAX = 40;
 const NAME_MAX = 50;
 const BIO_MAX = 150;
+const HANDLE_MAX = 50;
 const AVATAR_SIZE = 100;
 
 export const EditProfileScreen: React.FC = () => {
@@ -41,6 +42,8 @@ export const EditProfileScreen: React.FC = () => {
   const [lastName, setLastName] = useState('');
   const [username, setUsername] = useState('');
   const [bio, setBio] = useState('');
+  const [twitter, setTwitter] = useState('');
+  const [instagram, setInstagram] = useState('');
   // `avatarUri` is the local preview (file://). `avatarBase64`/`avatarMime`
   // hold the freshly-picked image so we can upload it on save and swap the
   // local URI for the remote https URL the backend returns.
@@ -56,6 +59,8 @@ export const EditProfileScreen: React.FC = () => {
       setLastName(me.lastName ?? '');
       setUsername(me.username);
       setBio(me.bio ?? '');
+      setTwitter(me.twitter ?? '');
+      setInstagram(me.instagram ?? '');
     }
   }, [me]);
 
@@ -98,6 +103,8 @@ export const EditProfileScreen: React.FC = () => {
         username,
         bio,
         avatarUrl,
+        twitter,
+        instagram,
       });
       notifySuccess();
       navigation.goBack();
@@ -119,6 +126,8 @@ export const EditProfileScreen: React.FC = () => {
     displayName,
     firstName,
     lastName,
+    twitter,
+    instagram,
     navigation,
     updateProfile,
     username,
@@ -247,6 +256,26 @@ export const EditProfileScreen: React.FC = () => {
           numberOfLines={4}
           maxLength={BIO_MAX}
           helperText={`${bio.length} / ${BIO_MAX}`}
+        />
+
+        <Input
+          label={t('profile.edit.twitter', 'Twitter / X handle')}
+          value={twitter}
+          onChangeText={setTwitter}
+          autoCapitalize="none"
+          autoCorrect={false}
+          maxLength={HANDLE_MAX}
+          leftAdornment={<Text className="text-md text-ink-muted">@</Text>}
+        />
+
+        <Input
+          label={t('profile.edit.instagram', 'Instagram handle')}
+          value={instagram}
+          onChangeText={setInstagram}
+          autoCapitalize="none"
+          autoCorrect={false}
+          maxLength={HANDLE_MAX}
+          leftAdornment={<Text className="text-md text-ink-muted">@</Text>}
         />
 
         <View className="mt-xl">

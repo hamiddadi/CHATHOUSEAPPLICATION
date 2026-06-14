@@ -191,6 +191,18 @@
     "empty": "Aucun compte bloqué",
     "emptyHint": "Les personnes que vous bloquez apparaissent ici. Vous pouvez les débloquer à tout moment."
   },
+  "tipHistory": {
+    "title": "Historique des pourboires",
+    "entryHint": "Les pourboires que vous avez envoyés et reçus",
+    "sent": "Pourboire envoyé",
+    "received": "Pourboire reçu",
+    "counterpart": "Utilisateur {{id}}",
+    "loading": "Chargement des pourboires",
+    "loadError": "Impossible de charger les pourboires",
+    "pleaseTryAgain": "Veuillez réessayer.",
+    "empty": "Aucun pourboire pour l'instant",
+    "emptyHint": "Les pourboires que vous envoyez et recevez apparaîtront ici."
+  },
   "room": {
     "stage": "SCÈNE",
     "handRaised": "Main levée",

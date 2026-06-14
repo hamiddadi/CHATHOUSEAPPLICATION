@@ -124,6 +124,7 @@ export const SettingsScreen: React.FC = () => {
   const goDataExport = useCallback(() => navigation.navigate('DataExport'), [navigation]);
   const goDeleteAccount = useCallback(() => navigation.navigate('DeleteAccount'), [navigation]);
   const goBlockedUsers = useCallback(() => navigation.navigate('BlockedUsers'), [navigation]);
+  const goTipHistory = useCallback(() => navigation.navigate('TipHistory'), [navigation]);
 
   // The two "Wave" buttons on Settings sit on the user's OWN profile —
   // there's no peer to wave to from here. The action that makes sense
@@ -398,6 +399,16 @@ export const SettingsScreen: React.FC = () => {
         {/* Premium — hidden unless Stripe/premium is configured server-side. */}
         <View className="px-xxl mt-xxl">
           <ExtPremiumRow />
+        </View>
+
+        {/* Monetization — the user's tip ledger (sent + received). */}
+        <View className="px-xxl mt-xxl">
+          <SettingsRow
+            icon="volunteer-activism"
+            label={t('tipHistory.title', 'Tip history')}
+            hint={t('tipHistory.entryHint', 'Tips you have sent and received')}
+            onPress={goTipHistory}
+          />
         </View>
 
         {showAdminEntry ? (

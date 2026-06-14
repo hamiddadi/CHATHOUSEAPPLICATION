@@ -8,6 +8,7 @@ import { BlockedUsersScreen } from '../../../features/settings/screens/BlockedUs
 import { ProfileScreen } from '../../../features/profile/screens/ProfileScreen';
 import { EditProfileScreen } from '../../../features/profile/screens/EditProfileScreen';
 import { FollowersScreen } from '../../../features/profile/screens/FollowersScreen';
+import { TipHistoryScreen } from '../../../features/profile/screens/TipHistoryScreen';
 import {
   AdminAuditLogScreen,
   AdminHomeScreen,
@@ -58,5 +59,8 @@ export const SettingsNavigator: React.FC = () => (
 
     {/* Extension settings (Phase 1) */}
     <Stack.Screen name="ExtSettings" component={ExtSettingsScreen} />
+
+    {/* Monetization — tip ledger (sent + received). */}
+    <Stack.Screen name="TipHistory" component={TipHistoryScreen} />
   </Stack.Navigator>
 );

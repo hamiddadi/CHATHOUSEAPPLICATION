@@ -110,6 +110,9 @@ export type SettingsStackParamList = {
 
   // Extension settings (Phase 1)
   ExtSettings: undefined;
+
+  // Monetization — the user's tip ledger (sent + received).
+  TipHistory: undefined;
 };
 
 /* ============================================================

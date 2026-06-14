@@ -104,10 +104,13 @@ describe('Onboarding integration — interests + completion flag', () => {
     expect(res.body.data.avatarUrl).toBe('https://example.com/avatars/casey.png');
     expect(res.body.data.interests).toEqual(['tech', 'music', 'art']);
 
-    // Survives a subsequent /me read (persisted, not just echoed).
+    // Survives a subsequent /me read (persisted, not just echoed). All three
+    // normalised interests persist — the immediate response (above) and the
+    // re-read must agree (the prior `['tech', 'music']` here dropped 'art' and
+    // contradicted line 105 — a test bug, not a cap in completeOnboarding).
     const me = await request(app).get('/api/users/me').set('Authorization', `Bearer ${u.token}`);
     expect(me.body.data.hasCompletedOnboarding).toBe(true);
-    expect(me.body.data.interests).toEqual(['tech', 'music']);
+    expect(me.body.data.interests).toEqual(['tech', 'music', 'art']);
   });
 
   it('PATCH /users/me/onboarding with empty body still flips the flag (minimum onboarding path)', async () => {

@@ -122,6 +122,8 @@ export interface UpdateProfileInput {
   username?: string;
   bio?: string;
   avatarUrl?: string | null;
+  twitter?: string;
+  instagram?: string;
 }
 
 export const profileService = {
@@ -147,11 +149,18 @@ export const profileService = {
       lastName?: string;
       bio?: string;
       avatarUrl?: string;
+      twitter?: string;
+      instagram?: string;
     } = {};
     if (input.displayName !== undefined) body.displayName = input.displayName.trim();
     if (input.firstName !== undefined) body.firstName = input.firstName.trim();
     if (input.lastName !== undefined) body.lastName = input.lastName.trim();
     if (input.bio !== undefined) body.bio = input.bio.trim();
+    // Social handles are plain text. Trim and strip a leading '@' so the stored
+    // value stays bare; an empty string clears the handle. The backend
+    // re-strips '@' defensively (max 50).
+    if (input.twitter !== undefined) body.twitter = input.twitter.trim().replace(/^@+/, '');
+    if (input.instagram !== undefined) body.instagram = input.instagram.trim().replace(/^@+/, '');
     if (typeof input.avatarUrl === 'string' && /^https?:\/\//i.test(input.avatarUrl)) {
       body.avatarUrl = input.avatarUrl;
     }

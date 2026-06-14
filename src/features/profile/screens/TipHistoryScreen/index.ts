@@ -1,0 +1,1 @@
+export { TipHistoryScreen } from './TipHistoryScreen';

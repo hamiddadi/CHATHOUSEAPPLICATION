@@ -68,7 +68,13 @@ export const usersService = {
   },
 
   async updateMe(userId: string, input: UpdateMeInput) {
-    return prisma.user.update({ where: { id: userId }, data: input, select: meSelect });
+    // Store social handles bare: strip a leading '@' so the value stays
+    // canonical (the profile UI re-adds '@' when displaying / building links).
+    // An empty string clears the handle (column is nullable VarChar(50)).
+    const data: Prisma.UserUpdateInput = { ...input };
+    if (input.twitter !== undefined) data.twitter = input.twitter.replace(/^@+/, '');
+    if (input.instagram !== undefined) data.instagram = input.instagram.replace(/^@+/, '');
+    return prisma.user.update({ where: { id: userId }, data, select: meSelect });
   },
 
   async setVisibility(userId: string, input: VisibilityInput) {
