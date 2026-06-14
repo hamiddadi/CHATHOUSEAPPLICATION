@@ -4,10 +4,11 @@ import { redis } from '../../config/redis';
 import { logger } from '../../config/logger';
 import { AppError } from '../../middlewares/error.middleware';
 import { closeRoom as closeSfuRoom } from '../../webrtc/mediasoup.manager';
-import { emitHallwayRoomClosed, emitNotification } from '../../socket/realtime';
+import { emitHallwayRoomClosed } from '../../socket/realtime';
 import { signImpersonationToken } from '../../utils/jwt';
 import { cancelEventReminder } from '../../queues/eventReminders';
 import { recordingsService } from '../recordings/recordings.service';
+import { notificationsService } from '../notifications/notifications.service';
 import { auditLogService } from './auditLog.service';
 import type {
   ForceEndRoomInput,
@@ -496,17 +497,24 @@ export const adminService = {
       .stopForRoom(roomId)
       .catch(err => logger.warn('admin.forceEndRoom: recording stop failed', { err, roomId }));
     emitHallwayRoomClosed(roomId);
+    // ROOM-07: persist the cancellation for every recipient (active
+    // participants + RSVPs, deduped). notificationsService.create also emits
+    // the realtime nudge, so offline RSVPs see it on next open instead of
+    // missing the ephemeral-only signal.
     const recipientIds = new Set<string>([...userIds, ...rsvps.map(r => r.userId)]);
-    for (const userId of recipientIds) {
-      emitNotification(userId, {
-        id: `room-force-ended-${roomId}-${Date.now()}`,
-        type: 'ROOM_ENDED_BY_ADMIN',
-        title: 'Room closed by moderation',
-        body: `"${room.title}" was closed by an administrator.`,
-        data: { roomId, reason: input.reason },
-        createdAt: new Date().toISOString(),
-      });
-    }
+    await Promise.all(
+      [...recipientIds].map(userId =>
+        notificationsService.create({
+          userId,
+          type: 'ROOM_ENDED_BY_ADMIN',
+          title: 'Room closed by moderation',
+          body: `"${room.title}" was closed by an administrator.`,
+          data: { roomId, reason: input.reason },
+          targetId: roomId,
+          targetType: 'room',
+        }),
+      ),
+    );
 
     await auditLogService.record({
       actorId,
@@ -709,7 +717,7 @@ export const adminService = {
       createdAt: r.createdAt.toISOString(),
       action: r.action,
       actorId: r.actorId,
-      actorUsername: r.actor.username,
+      actorUsername: r.actor?.username ?? null,
       targetUserId: r.targetUserId,
       targetUsername: r.targetUser?.username ?? null,
       targetRoomId: r.targetRoomId,

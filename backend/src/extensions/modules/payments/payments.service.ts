@@ -141,6 +141,7 @@ export const paymentsService = {
     toUserId: string,
     amountCents: number,
     currencyInput: string,
+    nonce?: string,
   ): Promise<{ url: string }> {
     if (amountCents <= 0) throw extError('PAY_INVALID', 'Amount must be positive');
     if (fromUserId === toUserId) throw extError('PAY_INVALID', 'Cannot tip yourself');
@@ -165,9 +166,12 @@ export const paymentsService = {
     const stripe = await requireStripe();
     // Idempotency: a double-submitted tip (network retry, double tap) within the
     // window collapses onto the same Checkout session rather than charging twice.
-    const idemKey = `tipco:${fromUserId}:${toUserId}:${amountCents}:${currency}:${Math.floor(
-      Date.now() / TIP_IDEMPOTENCY_WINDOW_MS,
-    )}`;
+    // PAYM-07: when the client supplies a nonce, it scopes the key instead of the
+    // time window, so two legitimate identical tips (distinct nonces) stay
+    // separate while a replayed nonce still de-duplicates. Falls back to the
+    // time-window key when absent (backward compatible).
+    const idemScope = nonce ?? `w${Math.floor(Date.now() / TIP_IDEMPOTENCY_WINDOW_MS)}`;
+    const idemKey = `tipco:${fromUserId}:${toUserId}:${amountCents}:${currency}:${idemScope}`;
     const session = await stripe.checkout.sessions.create(
       {
         mode: 'payment',

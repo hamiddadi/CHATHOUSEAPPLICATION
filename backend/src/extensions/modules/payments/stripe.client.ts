@@ -73,8 +73,17 @@ export interface StripeLike {
       ): Promise<StripeCheckoutSessionObject>;
     };
   };
-  customers: { create(params: unknown): Promise<{ id: string }> };
-  subscriptions: { retrieve(id: string): Promise<StripeSubscriptionObject> };
+  customers: {
+    create(params: unknown): Promise<{ id: string }>;
+    // PAYM-05: delete a customer on GDPR hard-delete so a purged user stops
+    // being billed and no PII lingers at Stripe.
+    del(id: string): Promise<{ id: string; deleted: boolean }>;
+  };
+  subscriptions: {
+    retrieve(id: string): Promise<StripeSubscriptionObject>;
+    // PAYM-05: cancel the active subscription before the customer is deleted.
+    cancel(id: string): Promise<StripeSubscriptionObject>;
+  };
   billingPortal: { sessions: { create(params: unknown): Promise<{ url: string }> } };
   webhooks: {
     constructEvent(

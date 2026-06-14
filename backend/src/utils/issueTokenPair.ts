@@ -15,7 +15,13 @@ export const issueTokenPair = async (
   userId: string,
 ): Promise<{ accessToken: string; refreshToken: string }> => {
   const jti = randomUUID();
-  const accessToken = signAccessToken(userId);
+  // AUTH-03: stamp the user's current tokenVersion into the access token so
+  // requireAuth can reject it after a cross-device logout / password reset.
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { tokenVersion: true },
+  });
+  const accessToken = signAccessToken(userId, user?.tokenVersion ?? 0);
   const refreshToken = signRefreshToken(userId, jti);
   const expiresAt = new Date(Date.now() + REFRESH_TTL_DAYS * 24 * 60 * 60 * 1000);
 

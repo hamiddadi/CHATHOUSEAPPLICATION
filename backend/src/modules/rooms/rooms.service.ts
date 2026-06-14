@@ -3,6 +3,7 @@ import { prisma } from '../../config/database';
 import { AppError } from '../../middlewares/error.middleware';
 import { notificationsService } from '../notifications/notifications.service';
 import { recordingsService } from '../recordings/recordings.service';
+import { auditLogService } from '../admin/auditLog.service';
 import { getBlockedIdSet } from '../social/blocks';
 import { cancelEventReminder, scheduleEventReminder } from '../../queues/eventReminders';
 import { fanoutOne } from '../../extensions/queues/followFanout';
@@ -1148,6 +1149,18 @@ export const roomsService = {
         reason: options.reason ?? null,
         expiresAt,
       },
+    });
+
+    // MODE-06: audit the moderation action. record() swallows persistence
+    // errors itself, so a failed write never breaks the kick.
+    await auditLogService.record({
+      actorId: callerUserId,
+      action: 'ROOM_USER_KICKED',
+      targetUserId,
+      targetRoomId: roomId,
+      targetType: 'room',
+      targetId: roomId,
+      metadata: { banMinutes: minutes, permanent: minutes === 0, reason: options.reason ?? null },
     });
 
     emitRoomUserKicked(roomId, { userId: targetUserId, kickedBy: callerUserId });

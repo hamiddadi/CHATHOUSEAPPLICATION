@@ -3,6 +3,7 @@ import { logger } from '../config/logger';
 import { prisma } from '../config/database';
 import { redis } from '../config/redis';
 import { bullConnection } from '../queues/connection';
+import { requireStripe, stripeConfigured } from '../extensions/modules/payments/stripe.client';
 import {
   GDPR_PURGE_JOB_NAME,
   GDPR_PURGE_QUEUE_NAME,
@@ -42,6 +43,65 @@ const PURGE_CRON = process.env.GDPR_PURGE_CRON ?? '0 3 * * *';
 let worker: Worker | null = null;
 
 /**
+ * PAYM-05: cancel the user's Stripe subscription + delete the Stripe customer
+ * BEFORE the prisma hard-delete (which cascade-removes the Subscription row,
+ * losing the Stripe ids). A purged premium user would otherwise keep being
+ * billed and their PII would linger at Stripe.
+ *
+ * Best-effort: no-op when Stripe isn't configured, and every Stripe call is
+ * wrapped so a failure is logged (logger.warn) but never blocks the purge —
+ * the hard-delete must proceed regardless.
+ */
+const teardownStripeForUser = async (userId: string): Promise<void> => {
+  if (!stripeConfigured()) return;
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      stripeCustomerId: true,
+      subscription: { select: { stripeSubscriptionId: true } },
+    },
+  });
+  if (!user) return;
+  const subscriptionId = user.subscription?.stripeSubscriptionId;
+  const customerId = user.stripeCustomerId;
+  if (!subscriptionId && !customerId) return;
+
+  let stripe;
+  try {
+    stripe = await requireStripe();
+  } catch (err) {
+    logger.warn('gdpr-purge: Stripe unavailable, skipping subscription/customer teardown', {
+      userId,
+      err: err instanceof Error ? err.message : String(err),
+    });
+    return;
+  }
+
+  if (subscriptionId) {
+    try {
+      await stripe.subscriptions.cancel(subscriptionId);
+    } catch (err) {
+      logger.warn('gdpr-purge: failed to cancel Stripe subscription', {
+        userId,
+        subscriptionId,
+        err: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+  if (customerId) {
+    try {
+      await stripe.customers.del(customerId);
+    } catch (err) {
+      logger.warn('gdpr-purge: failed to delete Stripe customer', {
+        userId,
+        customerId,
+        err: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+};
+
+/**
  * (a) Hard-delete users whose soft-delete grace period has elapsed.
  *
  * NOTE: there is NO `permanentDeletionAt` column in the schema. The real
@@ -71,6 +131,10 @@ const purgeSoftDeletedUsers = async (now: number): Promise<void> => {
     let deleted = 0;
     for (const v of victims) {
       try {
+        // PAYM-05: cancel the Stripe subscription + delete the customer BEFORE the
+        // cascade delete wipes the Subscription row (and its Stripe ids). Best-effort
+        // — a Stripe failure is logged inside and never blocks the purge.
+        await teardownStripeForUser(v.id);
         await prisma.$transaction(async tx => {
           await tx.user.delete({ where: { id: v.id } });
         });

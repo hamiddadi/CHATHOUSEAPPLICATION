@@ -9,12 +9,11 @@ import { logger } from '../../../config/logger';
  *
  * Pure addition — does not touch the existing rooms.service. We:
  *  1. Validate the caller is the host (no co-host shortcut for cancellation)
- *  2. Mark the room as ended (endedAt now) so feed queries hide it
+ *  2. Mark the room as ended (endedAt now) AND canceledAt so a cancellation
+ *     is distinguishable from a normal end in the feed/history
  *  3. Cancel the BullMQ reminder so the 5-min push doesn't fire
  *  4. Cancel the 15-min reminder (new worker) too
- *  5. Notify every RSVP'd user with a NEW_MESSAGE-bucket cancellation alert
- *     (we reuse ROOM_STARTED type — there's no CANCELLED type yet, and
- *     we don't want to alter the existing schema)
+ *  5. Notify every RSVP'd user with a dedicated ROOM_CANCELED notification
  */
 export const extEventsService = {
   async cancel(userId: string, roomId: string, reason?: string): Promise<{ notified: number }> {
@@ -33,10 +32,12 @@ export const extEventsService = {
     if (room.isLive)
       throw new AppError('ROOM_002', 'Room is already live — end it instead of canceling');
 
-    // 1. Soft close via endedAt (existing field — read-only schema use)
+    // 1. Soft close: set endedAt AND canceledAt so a canceled event is
+    //    distinct from a normally ended room (feed/history can tell them apart).
+    const now = new Date();
     await prisma.room.update({
       where: { id: roomId },
-      data: { endedAt: new Date(), isLive: false },
+      data: { endedAt: now, canceledAt: now, isLive: false },
     });
 
     // 2. Cancel both reminder queues. The 15-min one is best-effort.
@@ -66,7 +67,7 @@ export const extEventsService = {
         await notificationsService.create({
           userId: recipientId,
           actorId: room.hostId,
-          type: 'ROOM_STARTED', // closest existing bucket; data.eventCancel=true marks it
+          type: 'ROOM_CANCELED', // dedicated cancellation type (not the ROOM_STARTED bucket)
           title,
           body,
           data: { eventCancel: true, roomId, reason: reason ?? null },

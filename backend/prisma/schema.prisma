@@ -35,6 +35,8 @@ enum NotificationType {
   HAND_ACCEPTED
   RSVP_REMINDER
   NEW_MESSAGE
+  ROOM_CANCELED
+  ROOM_ENDED_BY_ADMIN
 }
 
 enum ReportReason {
@@ -74,6 +76,8 @@ enum AuditAction {
   GODMODE_ACCESS
   IMPERSONATION_STARTED
   IMPERSONATION_ENDED
+  ROOM_USER_KICKED
+  ROOM_MESSAGE_DELETED
 }
 
 enum ClubPrivacy {
@@ -137,6 +141,12 @@ model User {
   stripeCustomerId String?  @unique
   isPremium        Boolean  @default(false)
   premiumUntil     DateTime?
+  // ─── Session security (AUTH-03) ─────────
+  // Bumped on logout-all / password-reset to invalidate EVERY previously-issued
+  // access token cross-device. Embedded in the access JWT (`tv` claim) and
+  // compared in requireAuth — a token whose `tv` != the user's is rejected even
+  // before its 15-min expiry.
+  tokenVersion     Int       @default(0)
   // ─── Onboarding ─────────────────────────
   interests              String[]  @default([])
   hasCompletedOnboarding Boolean   @default(false)
@@ -283,6 +293,10 @@ model Room {
   scheduledFor DateTime?
   createdAt    DateTime  @default(now())
   endedAt      DateTime?
+  // EVEN-08: set when a scheduled event is CANCELED (vs a normal end), so the
+  // feed/history/notifications can distinguish a cancellation from a finished
+  // room. endedAt is still set too (the room is terminal either way).
+  canceledAt   DateTime?
 
   host             User              @relation("RoomHost", fields: [hostId], references: [id], onDelete: Cascade)
   club             Club?             @relation(fields: [clubId], references: [id], onDelete: SetNull)
@@ -740,7 +754,11 @@ model Report {
 // null when the action came from a worker (e.g. cron job).
 model AuditLog {
   id           String      @id @default(cuid())
-  actorId      String
+  // MODE-01: nullable + SetNull (was non-null Cascade). A privileged user who
+  // self-requests GDPR deletion must NOT take their audit trail with them when
+  // the purge runs — the append-only invariant outranks the FK. actorId becomes
+  // null on actor purge; readers handle the anonymised row.
+  actorId      String?
   action       AuditAction
   targetUserId String?
   targetRoomId String?
@@ -751,7 +769,7 @@ model AuditLog {
   userAgent    String?     @db.VarChar(500)
   createdAt    DateTime    @default(now())
 
-  actor      User  @relation("AuditActor", fields: [actorId], references: [id], onDelete: Cascade)
+  actor      User? @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
   targetUser User? @relation("AuditTargetUser", fields: [targetUserId], references: [id], onDelete: SetNull)
 
   @@index([actorId, createdAt])

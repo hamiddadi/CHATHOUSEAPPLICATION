@@ -67,13 +67,26 @@ export const requireAuth: RequestHandler = async (req, _res, next) => {
     const cacheKey = `user:susp:${claims.sub}`;
     const cached = await redis.get(cacheKey);
     if (cached === '1') return next(new AppError('AUTH_007'));
-    // Re-read the DB on a clean miss (null) OR any unexpected value other
-    // than the known '0' marker, so a corrupted/foreign cache entry fails
-    // safe (re-verify) instead of silently trusting it.
-    if (cached !== '0') {
+    // The clean cached verdict is `0:<tokenVersion>` so the cache-hit path can
+    // still enforce AUTH-03 (token revocation) without a DB read. A bare legacy
+    // '0' or any unexpected value is treated as a miss and re-read, so a
+    // corrupted/foreign entry fails safe.
+    const cachedTv =
+      cached && cached.startsWith('0:') && Number.isInteger(Number(cached.slice(2)))
+        ? Number(cached.slice(2))
+        : null;
+    if (cachedTv !== null) {
+      // AUTH-03: reject an access token minted before a cross-device logout /
+      // password reset (which bumps the user's tokenVersion + drops this cache).
+      if (claims.tv !== undefined && claims.tv !== cachedTv) {
+        return next(new AppError('AUTH_004'));
+      }
+      // appRole stays unset on the cache-hit path (as before); requireRole
+      // does its own DB read when it actually needs the role.
+    } else {
       const user = await prisma.user.findUnique({
         where: { id: claims.sub },
-        select: { suspendedUntil: true, appRole: true },
+        select: { suspendedUntil: true, appRole: true, tokenVersion: true },
       });
       // A valid JWT for a user that no longer exists (hard-purged) is
       // unauthorized. NOTE: a soft-deleted (deletion-requested) account is
@@ -82,13 +95,17 @@ export const requireAuth: RequestHandler = async (req, _res, next) => {
       // MODE-07's "strip powers" intent is enforced in requireRole's deletedAt
       // check; blocking all of requireAuth on bare deletedAt breaks self-cancel.
       if (!user) return next(new AppError('AUTH_003'));
+      // AUTH-03: same revocation check against the authoritative DB value.
+      if (claims.tv !== undefined && claims.tv !== user.tokenVersion) {
+        return next(new AppError('AUTH_004'));
+      }
       const now = new Date();
       const suspendedUntil = user.suspendedUntil;
       const isSuspended = suspendedUntil !== null && suspendedUntil > now;
       // MODE-09: cap the cached-verdict TTL at the suspension's remaining time
       // so the '1' marker never outlives the sanction. Otherwise a suspension
       // that expires in 5 s would keep the user locked out for the full 60 s
-      // window. Clear ('0') verdicts keep the full short TTL.
+      // window. Clear verdicts keep the full short TTL.
       const remainingSec =
         suspendedUntil === null
           ? SUSPENSION_CACHE_TTL_SECONDS
@@ -96,7 +113,7 @@ export const requireAuth: RequestHandler = async (req, _res, next) => {
       const ttl = isSuspended
         ? Math.min(SUSPENSION_CACHE_TTL_SECONDS, remainingSec)
         : SUSPENSION_CACHE_TTL_SECONDS;
-      await redis.setEx(cacheKey, ttl, isSuspended ? '1' : '0');
+      await redis.setEx(cacheKey, ttl, isSuspended ? '1' : `0:${user.tokenVersion}`);
       if (isSuspended) return next(new AppError('AUTH_007'));
       req.appRole = user.appRole;
     }
@@ -113,6 +130,13 @@ export const requireAuth: RequestHandler = async (req, _res, next) => {
 export const revokeAccessToken = async (token: string, ttlSeconds: number): Promise<void> => {
   if (ttlSeconds <= 0) return;
   await redis.setEx(blacklistKey(token), ttlSeconds, '1');
+};
+
+// AUTH-03: drop the cached suspension/tokenVersion verdict so the next
+// requireAuth for this user re-reads the DB and sees the bumped tokenVersion.
+// Called after a cross-device logout / password reset bumps User.tokenVersion.
+export const invalidateUserAuthCache = async (userId: string): Promise<void> => {
+  await redis.del(`user:susp:${userId}`);
 };
 
 export const requireUserId = (req: Request, _res: Response, next: NextFunction): void => {

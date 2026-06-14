@@ -12,6 +12,13 @@ export interface AccessTokenClaims extends JwtPayload {
   sub: string;
   typ: 'access';
   /**
+   * AUTH-03: the user's `tokenVersion` at mint time. requireAuth rejects the
+   * token when it no longer matches the user's current version (bumped on
+   * cross-device logout / password reset), so a stolen access token can be
+   * killed before its 15-min expiry. Optional: impersonation tokens omit it.
+   */
+  tv?: number;
+  /**
    * Impersonation claim — when set, `sub` is the impersonated user but
    * `act.sub` identifies the actual super-admin behind the session.
    * Mirrors RFC 8693 (token exchange) actor claim shape so downstream
@@ -29,8 +36,8 @@ export interface RefreshTokenClaims extends JwtPayload {
 const accessSignOpts: SignOptions = { expiresIn: env.JWT_ACCESS_TTL as SignOptions['expiresIn'] };
 const refreshSignOpts: SignOptions = { expiresIn: env.JWT_REFRESH_TTL as SignOptions['expiresIn'] };
 
-export const signAccessToken = (userId: string): string =>
-  sign({ sub: userId, typ: 'access' }, env.JWT_ACCESS_SECRET, accessSignOpts);
+export const signAccessToken = (userId: string, tokenVersion = 0): string =>
+  sign({ sub: userId, typ: 'access', tv: tokenVersion }, env.JWT_ACCESS_SECRET, accessSignOpts);
 
 /**
  * Issue a short-lived access token for an admin impersonating a user.

@@ -4,7 +4,7 @@ import { prisma } from '../../config/database';
 import { env } from '../../config/env';
 import { AppError } from '../../middlewares/error.middleware';
 import { verifyRefreshToken, decodeTokenTtl } from '../../utils/jwt';
-import { revokeAccessToken } from '../../middlewares/auth.middleware';
+import { revokeAccessToken, invalidateUserAuthCache } from '../../middlewares/auth.middleware';
 import { issueTokenPair } from '../../utils/issueTokenPair';
 import { sendMail } from '../../config/mailer';
 import { logger } from '../../config/logger';
@@ -146,15 +146,23 @@ export const authService = {
   },
 
   async logout(userId: string, accessToken: string) {
-    // 1. Blacklist the still-valid access token in Redis until its natural exp
+    // 1. Blacklist the caller's still-valid access token in Redis until exp.
     const ttl = decodeTokenTtl(accessToken);
     await revokeAccessToken(accessToken, ttl);
 
-    // 2. Revoke every refresh token for the user (cross-device logout)
+    // 2. Revoke every refresh token (cross-device logout) AND bump tokenVersion
+    //    so every OTHER device's still-valid access token is rejected at once
+    //    (AUTH-03) — not just the caller's blacklisted one. Drop the auth cache
+    //    so the next request re-reads the bumped version immediately.
+    await prisma.user.update({
+      where: { id: userId },
+      data: { tokenVersion: { increment: 1 } },
+    });
     await prisma.refreshToken.updateMany({
       where: { userId, revokedAt: null },
       data: { revokedAt: new Date() },
     });
+    await invalidateUserAuthCache(userId);
   },
 
   /**
@@ -215,7 +223,13 @@ export const authService = {
 
     const passwordHash = await hash(input.newPassword, SALT_ROUNDS);
     await prisma.$transaction([
-      prisma.user.update({ where: { id: record.userId }, data: { passwordHash } }),
+      // AUTH-03: bump tokenVersion in the same write so every access token
+      // issued before the reset is rejected cross-device (a reset usually means
+      // the account was compromised), not just the refresh tokens.
+      prisma.user.update({
+        where: { id: record.userId },
+        data: { passwordHash, tokenVersion: { increment: 1 } },
+      }),
       prisma.passwordResetToken.update({
         where: { id: record.id },
         data: { usedAt: new Date() },
@@ -227,6 +241,7 @@ export const authService = {
         data: { revokedAt: new Date() },
       }),
     ]);
+    await invalidateUserAuthCache(record.userId);
 
     return { ok: true };
   },

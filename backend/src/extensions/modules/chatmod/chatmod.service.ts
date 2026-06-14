@@ -1,5 +1,6 @@
 import { prisma } from '../../../config/database';
 import { AppError } from '../../../middlewares/error.middleware';
+import { auditLogService } from '../../../modules/admin/auditLog.service';
 
 /**
  * Soft-delete a room chat message. Reuses the existing `isDeleted` flag on
@@ -46,6 +47,18 @@ export const chatmodService = {
     await prisma.roomChatMessage.update({
       where: { id: messageId },
       data: { isDeleted: true },
+    });
+
+    // MODE-06: audit the moderation action. record() swallows persistence
+    // errors itself, so a failed write never breaks the delete.
+    await auditLogService.record({
+      actorId: callerId,
+      action: 'ROOM_MESSAGE_DELETED',
+      targetUserId: msg.userId,
+      targetRoomId: msg.roomId,
+      targetType: 'roomChatMessage',
+      targetId: msg.id,
+      metadata: { messageId: msg.id },
     });
 
     return { id: msg.id, alreadyDeleted: false };
