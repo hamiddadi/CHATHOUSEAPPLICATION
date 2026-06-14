@@ -7,29 +7,23 @@ import { apiClient } from '../../../shared/services/api/apiClient';
 /**
  * FCM push-token registration (Module 10 / NOTIF-016) — de-Expo: replaces the
  * `expo-notifications` token fetch with Firebase Cloud Messaging
- * (`@react-native-firebase/messaging`). On permission grant + token fetch,
- * POSTs to the existing push-token route (with fallback paths). Idempotent:
- * re-registers only when the device token changes.
+ * (`@react-native-firebase/messaging`). POSTs the token to the real backend
+ * route `/push/register` (the backend upserts on the token, so this is
+ * idempotent + safe to co-exist with pushService.registerWithBackend, which
+ * hits the same route on login). Re-registers only when the device token
+ * changes. (Previously it POSTed to three non-existent routes — /push/tokens,
+ * /users/me/push-tokens, /ext/push/tokens — and always errored.)
  */
 
-const PATHS = ['/push/tokens', '/users/me/push-tokens', '/ext/push/tokens'];
+const REGISTER_PATH = '/push/register';
 
 const postToken = async (token: string, platform: string): Promise<boolean> => {
-  for (const p of PATHS) {
-    try {
-      await apiClient.post(p, { token, platform });
-      return true;
-    } catch (err) {
-      // Errors arrive as the normalised AppError ({ kind, status }); there is
-      // no raw `err.response`. Only try the next path when the route is missing
-      // (404/405) — a real error (500, network, 403) must stop the loop instead
-      // of re-POSTing the token to every fallback path.
-      const e = err as { status?: number; kind?: string };
-      if (e.kind === 'notFound' || e.status === 404 || e.status === 405) continue;
-      return false; // real error — stop instead of spamming the other paths
-    }
+  try {
+    await apiClient.post(REGISTER_PATH, { token, platform });
+    return true;
+  } catch {
+    return false;
   }
-  return false;
 };
 
 export const useExtPushToken = (enabled = true) => {
