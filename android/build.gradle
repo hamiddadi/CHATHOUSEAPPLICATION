@@ -1,6 +1,18 @@
 // Top-level build file where you can add configuration options common to all sub-projects/modules.
 
 buildscript {
+  ext {
+    // SDK / toolchain versions. Previously supplied by the `expo-root-project`
+    // plugin (rootProject.ext.*); defined explicitly here after the de-Expo
+    // migration. Mirror gradle.properties (android.* keys) and React Native
+    // 0.83's version catalog (AGP 8.12.0 / Kotlin 2.1.20).
+    buildToolsVersion = "36.0.0"
+    minSdkVersion = 24
+    compileSdkVersion = 36
+    targetSdkVersion = 36
+    ndkVersion = "27.1.12297006"
+    kotlinVersion = "2.1.20"
+  }
   repositories {
     google()
     mavenCentral()
@@ -23,14 +35,13 @@ allprojects {
   }
 }
 
-apply plugin: "expo-root-project"
 apply plugin: "com.facebook.react.rootproject"
 
 // Force every native-module subproject onto the project's installed NDK
 // (rootProject.ext.ndkVersion = 27.1.12297006). Some libraries — notably
-// react-native-audio-recorder-player / react-native-nitro-modules — don't set
-// ndkVersion and otherwise fall back to AGP's default NDK (27.0.12077973), which
-// is not installed here, failing C++ configuration. (de-Expo migration.)
+// react-native-audio-recorder-player — don't set ndkVersion and otherwise fall
+// back to AGP's default NDK (27.0.12077973), which is not installed here,
+// failing C++ configuration. (de-Expo migration.)
 subprojects { subproject ->
   ["com.android.library", "com.android.application"].each { pluginId ->
     subproject.plugins.withId(pluginId) {

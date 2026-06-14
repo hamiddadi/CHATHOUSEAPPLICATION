@@ -7,7 +7,9 @@ screen is free to ignore this folder.
 ## Vague 1 — Onboarding & social
 
 - `api/suggestionsApi`, `hooks/useSuggestions`, `screens/ExtSuggestedFollowsScreen`
-- `api/contactsApi`, `hooks/useContactsSync` (SHA-256 phone hashing)
+- `api/contactsApi` (contacts-match REST binding; the `useContactsSync` hook was
+  removed in the de-Expo migration — it relied on `expo-contacts`. Re-add with
+  `react-native-contacts` if contacts sync is needed.)
 - `api/presenceApi`, `hooks/usePresence`, `components/ExtAvailablePeopleStrip`
 - `api/topicsApi`, `hooks/useTopics`, `screens/ExtTopicExplorerScreen`
 - `utils/socialDeepLink` (Twitter / Instagram native open)

@@ -9,7 +9,6 @@ export { ExtTopicExplorerScreen } from './screens/ExtTopicExplorerScreen';
 export { useExtSuggestions } from './hooks/useSuggestions';
 export { useExtAvailablePeople } from './hooks/usePresence';
 export { useExtTopicsTree, useExtTopicsFlat } from './hooks/useTopics';
-export { useExtContactsSync } from './hooks/useContactsSync';
 export { openTwitterHandle, openInstagramHandle } from './utils/socialDeepLink';
 export { suggestionsApi } from './api/suggestionsApi';
 export { presenceApi } from './api/presenceApi';

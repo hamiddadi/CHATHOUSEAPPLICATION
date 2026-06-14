@@ -6,7 +6,11 @@
 module.exports = {
   root: true,
   extends: [
-    'expo',
+    // de-Expo: dropped `eslint-config-expo`. The explicit plugin configs below
+    // (plus the react-native env, which defines __DEV__ and friends) cover what
+    // it provided for this TypeScript + bare-RN setup. Deliberately NOT adding
+    // `eslint:recommended` — its `no-undef` mis-fires on TS-only globals; the
+    // TypeScript compiler + @typescript-eslint already cover that ground.
     'plugin:@typescript-eslint/recommended',
     'plugin:react-hooks/recommended',
     'plugin:react-native/all',
@@ -35,6 +39,11 @@ module.exports = {
     // (de-Expo migration). It has no file on disk, so tell eslint-plugin-import
     // it is always resolvable — otherwise import/no-unresolved flags it.
     'import/core-modules': ['@env'],
+    // Don't let eslint-plugin-import parse react-native's Flow-typed .js source
+    // (e.g. Libraries/Types/CodegenTypes.js) when resolving exports — it isn't
+    // valid TS/ESLint syntax and only prints noise. eslint-config-expo set this
+    // for us before the de-Expo migration removed it.
+    'import/ignore': ['react-native'],
     react: { version: 'detect' },
   },
   rules: {
@@ -72,6 +81,11 @@ module.exports = {
     'import/no-duplicates': 'warn',
     'import/no-cycle': ['error', { maxDepth: 2 }],
     'import/no-useless-path-segments': 'warn',
+    // The @react-native-vector-icons packages expose their icon set as the
+    // default export while also re-exporting it by name (MaterialIcons,
+    // Ionicons…); importing the default is the documented usage. This rule was
+    // off under eslint-config-expo (de-Expo migration).
+    'import/no-named-as-default': 'off',
 
     // ---- Console discipline ----
     'no-console': ['warn', { allow: ['warn', 'error', 'info'] }],

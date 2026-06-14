@@ -39,6 +39,14 @@
   "include": ["**/*.ts", "**/*.tsx", "nativewind-env.d.ts"],
   "exclude": [
     "node_modules",
+    // The backend is a separate Node project with its own tsconfig + typecheck
+    // script. Excluded here so the React Native frontend program doesn't
+    // type-check backend files under RN globals (e.g. RN's fetch rejecting
+    // URLSearchParams). (de-Expo migration.)
+    "backend",
+    "android",
+    "ios",
+    "coverage",
     "babel.config.js",
     "metro.config.js",
     "jest.config.js",
