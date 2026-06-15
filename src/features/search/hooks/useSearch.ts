@@ -1,10 +1,12 @@
 import { useQuery } from '@tanstack/react-query';
 import { searchService, type SearchResults } from '../services/searchService';
 import { exploreService, type ExploreFeed } from '../services/exploreService';
+import { topicsApi, type FlatTopic } from '../../extensions/api/topicsApi';
 
 export const searchKeys = {
   all: ['search'] as const,
   query: (q: string) => [...searchKeys.all, 'query', q] as const,
+  topics: (q: string) => [...searchKeys.all, 'topics', q] as const,
   explore: () => ['explore'] as const,
 };
 
@@ -19,6 +21,15 @@ export const useSearch = (q: string) =>
     queryFn: () => searchService.search(q),
     enabled: q.trim().length > 0,
     staleTime: 10_000,
+  });
+
+/** Topics facet for the search bar — matches the static topic taxonomy. */
+export const useTopicSearch = (q: string) =>
+  useQuery<FlatTopic[]>({
+    queryKey: searchKeys.topics(q),
+    queryFn: () => topicsApi.flat({ q }),
+    enabled: q.trim().length > 0,
+    staleTime: 30_000,
   });
 
 export const useExplore = () =>

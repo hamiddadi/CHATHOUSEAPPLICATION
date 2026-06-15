@@ -12,7 +12,7 @@ import { colors, spacing } from '../../../../shared/constants/theme';
 import type { RoomStackParamList } from '../../../../core/navigation/types';
 import { useExtSearchHistory } from '../../../extensions';
 import { useDebouncedValue } from '../../../../shared/hooks/useDebouncedValue';
-import { useExplore, useSearch } from '../../hooks/useSearch';
+import { useExplore, useSearch, useTopicSearch } from '../../hooks/useSearch';
 import { SearchResultsView } from './partials/SearchResultsView';
 import { ExploreFeedView } from './partials/ExploreFeedView';
 
@@ -37,6 +37,7 @@ export const ExploreScreen: React.FC = () => {
 
   const explore = useExplore();
   const search = useSearch(debouncedQuery);
+  const topicHits = useTopicSearch(debouncedQuery);
   const history = useExtSearchHistory();
 
   const goRoom = useCallback(
@@ -114,11 +115,13 @@ export const ExploreScreen: React.FC = () => {
         ) : (
           <SearchResultsView
             data={search.data}
+            topics={topicHits.data}
             debouncedQuery={debouncedQuery}
             bottomInset={insets.bottom}
             goUser={goUser}
             goClub={goClub}
             goRoom={goRoom}
+            goTopic={goTopics}
             t={t}
           />
         )
