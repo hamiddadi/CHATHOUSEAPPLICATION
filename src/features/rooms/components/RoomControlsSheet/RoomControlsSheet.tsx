@@ -2,9 +2,19 @@ import React, { memo, useCallback } from 'react';
 import { Alert, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import MaterialIcons from '@react-native-vector-icons/material-icons';
 import { useTranslation } from 'react-i18next';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { colors, spacing } from '../../../../shared/constants/theme';
 import { errorMessage } from '../../../../shared/utils/errorMessage';
 import { useMuteAllInRoom, useToggleRoomChat } from '../../hooks/useRooms';
+import { roomSettingsExtApi } from '../../../extensions/api/roomSettingsExtApi';
+
+type HandRaiseRestriction = 'everyone' | 'followers' | 'none';
+
+const HAND_RAISE_LABELS: Record<HandRaiseRestriction, string> = {
+  everyone: 'Lever de main : tout le monde',
+  followers: 'Lever de main : abonnés',
+  none: 'Lever de main : désactivé',
+};
 
 interface RoomControlsSheetProps {
   visible: boolean;
@@ -26,6 +36,28 @@ export const RoomControlsSheet: React.FC<RoomControlsSheetProps> = memo(
     const { t } = useTranslation();
     const muteAll = useMuteAllInRoom();
     const toggleChat = useToggleRoomChat();
+    const qc = useQueryClient();
+    const settings = useQuery({
+      queryKey: ['ext', 'room-settings', roomId],
+      queryFn: () => roomSettingsExtApi.get(roomId),
+      enabled: visible,
+      staleTime: 30_000,
+    });
+    const setHandRaise = useMutation({
+      mutationFn: (restriction: HandRaiseRestriction) =>
+        roomSettingsExtApi.setHandRaise(roomId, restriction),
+      onSuccess: updated => qc.setQueryData(['ext', 'room-settings', roomId], updated),
+    });
+    const handRaise: HandRaiseRestriction = settings.data?.handRaiseRestriction ?? 'everyone';
+    const handleCycleHandRaise = useCallback(() => {
+      // everyone → followers → none → everyone
+      const next: HandRaiseRestriction =
+        handRaise === 'everyone' ? 'followers' : handRaise === 'followers' ? 'none' : 'everyone';
+      setHandRaise.mutate(next, {
+        onError: e =>
+          Alert.alert(t('roomControls.error'), errorMessage(e, t('roomControls.failed'))),
+      });
+    }, [handRaise, setHandRaise, t]);
 
     const handleMuteAll = useCallback(() => {
       Alert.alert(t('roomControls.muteAll'), t('roomControls.muteAllBody'), [
@@ -116,6 +148,11 @@ export const RoomControlsSheet: React.FC<RoomControlsSheetProps> = memo(
                   : t('roomControls.chatModsOnly')
               }
               onPress={handleToggleChatVisibility}
+            />
+            <Row
+              icon="pan-tool"
+              label={HAND_RAISE_LABELS[handRaise]}
+              onPress={handleCycleHandRaise}
             />
 
             <Pressable

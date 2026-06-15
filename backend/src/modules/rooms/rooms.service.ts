@@ -8,6 +8,7 @@ import { getBlockedIdSet } from '../social/blocks';
 import { cancelEventReminder, scheduleEventReminder } from '../../queues/eventReminders';
 import { fanoutOne } from '../../extensions/queues/followFanout';
 import { emitRoomJoinedByFollowing } from '../../extensions/realtime/aliases';
+import { roomSettingsExtService } from '../../extensions/modules/roomSettingsExt/roomSettingsExt.service';
 import { logger } from '../../config/logger';
 import {
   emitHallwayRoomClosed,
@@ -964,6 +965,11 @@ export const roomsService = {
     if (!room) throw new AppError('ROOM_001');
     if (room.endedAt || !room.isLive) throw new AppError('ROOM_004');
     await requireActiveParticipant(roomId, userId);
+
+    // #36: enforce the host's hand-raise restriction. Default 'everyone' allows
+    // all; 'followers' requires following the host; 'none' disables it entirely.
+    const allowed = await roomSettingsExtService.canRaiseHand(roomId, userId, room.hostId);
+    if (!allowed) throw new AppError('ROOM_003', 'Hand-raising is restricted in this room');
 
     await prisma.roomHandRaise.upsert({
       where: { roomId_userId: { roomId, userId } },
