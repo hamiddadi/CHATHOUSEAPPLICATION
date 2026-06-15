@@ -1,10 +1,12 @@
 import React, { memo, useCallback } from 'react';
 import { Alert, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import MaterialIcons from '@react-native-vector-icons/material-icons';
+import { useMutation } from '@tanstack/react-query';
 import { Avatar } from '../../../../shared/components/Avatar';
 import { colors, spacing } from '../../../../shared/constants/theme';
 import type { RoomParticipant } from '../../../../shared/types/domain';
 import { useKickFromRoom, useSetMute, useSetRole } from '../../hooks/useRooms';
+import { speakInviteApi } from '../../../extensions';
 
 interface HostActionsSheetProps {
   /** Visible only when a target participant is selected. `null` = closed. */
@@ -26,6 +28,21 @@ export const HostActionsSheet: React.FC<HostActionsSheetProps> = memo(
     const setMute = useSetMute();
     const setRole = useSetRole();
     const kick = useKickFromRoom();
+    // #86: speak-invite REQUEST (the invitee accepts/refuses) — distinct from
+    // the direct force-promote above.
+    const nominate = useMutation({
+      mutationFn: (userId: string) => speakInviteApi.invite(roomId, userId),
+    });
+
+    const handleNominate = useCallback(() => {
+      if (!target) return;
+      nominate.mutate(target.id, {
+        onSuccess: () =>
+          Alert.alert('Invitation envoyée', `@${target.username} est invité·e à parler.`),
+        onError: () => Alert.alert('Erreur', "Échec de l'invitation."),
+        onSettled: onClose,
+      });
+    }, [nominate, onClose, target]);
 
     const handleMute = useCallback(() => {
       if (!target) return;
@@ -111,6 +128,13 @@ export const HostActionsSheet: React.FC<HostActionsSheetProps> = memo(
                 icon="mic"
                 label="Inviter à parler"
                 onPress={() => handlePromote('SPEAKER')}
+              />
+            )}
+            {!isOnStage && (
+              <ActionRow
+                icon="record-voice-over"
+                label="Nominer pour parler (demande)"
+                onPress={handleNominate}
               />
             )}
             {isOnStage && (

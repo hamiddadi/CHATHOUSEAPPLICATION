@@ -38,7 +38,7 @@ import { TitleEditModal } from '../../components/TitleEditModal';
 import { RoomTimer } from '../../components/RoomTimer';
 import { useAuthStore } from '../../../auth/store/authStore';
 import { useCurrentRoomStore } from '../../store/currentRoomStore';
-import { recentlyPlayedApi } from '../../../extensions';
+import { recentlyPlayedApi, speakInviteApi, useExtSocketAliases } from '../../../extensions';
 import { getSocket } from '../../../../shared/services/realtime/socketClient';
 import { formatScheduled } from '../../../../shared/utils/formatScheduled';
 import StageGrid from './partials/StageGrid';
@@ -132,6 +132,22 @@ export const RoomScreen: React.FC = () => {
   // never reflects what other participants do. The second arg backs out on a
   // gated/denied join (see handleJoinDenied).
   useRoomSocket(room?.id ?? null, handleJoinDenied);
+
+  // #86: a host nominated me to speak — prompt to accept/refuse (respond posts
+  // back; on accept the backend promotes me to SPEAKER).
+  useExtSocketAliases({
+    speak_invite_sent: ({ roomId: invitedRoomId }) => {
+      if (invitedRoomId !== route.params.roomId) return;
+      Alert.alert('Invitation à parler', 'Un hôte t’invite à monter sur scène.', [
+        {
+          text: 'Refuser',
+          style: 'cancel',
+          onPress: () => void speakInviteApi.respond(invitedRoomId, false),
+        },
+        { text: 'Accepter', onPress: () => void speakInviteApi.respond(invitedRoomId, true) },
+      ]);
+    },
+  });
 
   // Mini-bar (resume): mirror the room we're in into the global store so
   // RoomMiniBar (mounted in MainNavigator) shows a "resume" pill after we
