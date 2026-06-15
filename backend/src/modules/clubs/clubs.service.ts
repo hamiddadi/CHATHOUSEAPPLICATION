@@ -278,6 +278,36 @@ export const clubsService = {
   },
 
   /**
+   * Remove a member from the club. Only an ADMIN member or the owner can do
+   * this; the owner themselves can never be removed (they delete the club
+   * instead). Decrements memberCount in the same transaction as the delete.
+   */
+  async removeMember(viewerId: string, clubId: string, targetUserId: string) {
+    const club = await prisma.club.findUnique({ where: { id: clubId } });
+    if (!club) throw new AppError('CLUB_001');
+
+    const viewerMembership = await prisma.clubMember.findUnique({
+      where: { clubId_userId: { clubId, userId: viewerId } },
+    });
+    const isAdmin = viewerMembership?.role === 'ADMIN';
+    if (!isAdmin && club.ownerId !== viewerId) throw new AppError('CLUB_002');
+
+    if (club.ownerId === targetUserId) throw new AppError('CLUB_002');
+
+    const target = await prisma.clubMember.findUnique({
+      where: { clubId_userId: { clubId, userId: targetUserId } },
+    });
+    if (!target) throw new AppError('CLUB_002');
+
+    await prisma.$transaction([
+      prisma.clubMember.delete({ where: { clubId_userId: { clubId, userId: targetUserId } } }),
+      prisma.club.update({ where: { id: clubId }, data: { memberCount: { decrement: 1 } } }),
+    ]);
+
+    return this.get(viewerId, clubId);
+  },
+
+  /**
    * Update club details. Only ADMIN members (typically the owner) can edit.
    */
   async update(viewerId: string, clubId: string, input: UpdateClubInput) {

@@ -12,7 +12,7 @@ export const houseKeys = {
   all: ['houses'] as const,
   list: (filter: 'mine' | 'discover') => [...houseKeys.all, 'list', filter] as const,
   detail: (id: string) => [...houseKeys.all, 'detail', id] as const,
-  rooms: (id: string, filter: 'live' | 'upcoming') =>
+  rooms: (id: string, filter: 'live' | 'upcoming' | 'past') =>
     [...houseKeys.all, 'rooms', id, filter] as const,
 };
 
@@ -123,9 +123,21 @@ export const useSetMemberRole = () => {
   });
 };
 
-export const useHouseRooms = (houseId: string, filter: 'live' | 'upcoming') =>
+export const useHouseRooms = (houseId: string, filter: 'live' | 'upcoming' | 'past') =>
   useQuery<HouseRoom[]>({
     queryKey: houseKeys.rooms(houseId, filter),
     queryFn: () => houseService.listRooms(houseId, filter),
     enabled: houseId.length > 0,
   });
+
+export const useRemoveMember = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ houseId, userId }: { houseId: string; userId: string }) =>
+      houseService.removeMember(houseId, userId),
+    onSuccess: updated => {
+      qc.setQueryData(houseKeys.detail(updated.id), updated);
+      void qc.invalidateQueries({ queryKey: houseKeys.all });
+    },
+  });
+};

@@ -21,6 +21,8 @@ clubsRouter.delete('/:id', asyncHandler(clubsController.remove));
 // Promote/demote a member. Guarded server-side: only an ADMIN member or the
 // club owner may change roles, and the owner's role is immutable.
 clubsRouter.patch('/:id/members/:userId/role', asyncHandler(clubsController.setMemberRole));
+// Remove a member (ADMIN/owner only; the owner can't be removed).
+clubsRouter.delete('/:id/members/:userId', asyncHandler(clubsController.removeMember));
 clubsRouter.post('/:id/join', asyncHandler(clubsController.join));
 clubsRouter.post('/:id/leave', asyncHandler(clubsController.leave));
 clubsRouter.post('/:id/invite', asyncHandler(clubsController.invite));

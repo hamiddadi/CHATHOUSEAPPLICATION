@@ -68,6 +68,15 @@ export const clubsController = {
     sendOk(res, result);
   },
 
+  async removeMember(req: Request, res: Response) {
+    const result = await clubsService.removeMember(
+      requireUserId(req),
+      paramId(req, 'id'),
+      paramId(req, 'userId'),
+    );
+    sendOk(res, result);
+  },
+
   async update(req: Request, res: Response) {
     const input = updateClubSchema.parse(req.body);
     const result = await clubsService.update(requireUserId(req), paramId(req, 'id'), input);

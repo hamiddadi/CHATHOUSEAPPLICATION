@@ -1,12 +1,17 @@
 import React, { useCallback, useMemo } from 'react';
-import { Alert, FlatList, Pressable, Share, Text, View } from 'react-native';
+import { Alert, FlatList, Image, Pressable, Share, Text, View } from 'react-native';
 import MaterialIcons from '@react-native-vector-icons/material-icons';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useExtJoinHouse, clubReqApi, type ClubJoinRequest } from '@/features/extensions';
+import {
+  useExtJoinHouse,
+  clubReqApi,
+  clubMetaApi,
+  type ClubJoinRequest,
+} from '@/features/extensions';
 import { Avatar } from '../../../../shared/components/Avatar';
 import { Button } from '../../../../shared/components/Button';
 import { Loader } from '../../../../shared/components/Loader';
@@ -23,6 +28,7 @@ import {
   useHouseRooms,
   useJoinHouse,
   useLeaveHouse,
+  useRemoveMember,
   useSetMemberRole,
 } from '../../hooks/useHouses';
 
@@ -44,9 +50,17 @@ export const HouseDetailScreen: React.FC = () => {
   const { data: house, isLoading, isError } = useHouse(houseId);
   const { data: liveRooms } = useHouseRooms(houseId, 'live');
   const { data: upcomingRooms } = useHouseRooms(houseId, 'upcoming');
+  const { data: pastRooms } = useHouseRooms(houseId, 'past');
+  const { data: clubMeta } = useQuery({
+    queryKey: [...houseKeys.detail(houseId), 'meta'],
+    queryFn: () => clubMetaApi.get(houseId),
+    enabled: houseId.length > 0,
+    staleTime: 60_000,
+  });
   const setMemberRole = useSetMemberRole();
   const joinHouse = useJoinHouse();
   const leaveHouse = useLeaveHouse();
+  const removeMember = useRemoveMember();
   const queryClient = useQueryClient();
 
   const viewerId = useAuthStore(s => s.user?.id ?? null);
@@ -207,10 +221,21 @@ export const HouseDetailScreen: React.FC = () => {
         }));
       Alert.alert(member.displayName, `Rôle actuel : ${ROLE_LABEL[member.role]}`, [
         ...options,
+        {
+          text: 'Retirer de la house',
+          style: 'destructive',
+          onPress: () =>
+            removeMember.mutate(
+              { houseId, userId: member.id },
+              {
+                onError: () => Alert.alert('Action impossible', 'Impossible de retirer ce membre.'),
+              },
+            ),
+        },
         { text: 'Annuler', style: 'cancel' },
       ]);
     },
-    [applyRole],
+    [applyRole, houseId, removeMember],
   );
 
   // Admins can manage every member except themselves and the owner — the
@@ -404,6 +429,14 @@ export const HouseDetailScreen: React.FC = () => {
         ItemSeparatorComponent={() => <View style={{ height: spacing.sm }} />}
         ListHeaderComponent={
           <View style={{ gap: spacing.xl }}>
+            {clubMeta?.coverUrl ? (
+              <Image
+                source={{ uri: clubMeta.coverUrl }}
+                className="w-full h-[120px] rounded-md"
+                resizeMode="cover"
+                accessibilityIgnoresInvertColors
+              />
+            ) : null}
             <View className="items-center gap-md">
               <Avatar
                 uri={house.iconUrl ?? undefined}
@@ -476,6 +509,7 @@ export const HouseDetailScreen: React.FC = () => {
 
             {renderRoomSection(t('house.liveRooms', 'En direct'), liveRooms, true)}
             {renderRoomSection(t('house.upcomingRooms', 'Planifiées'), upcomingRooms, false)}
+            {renderRoomSection(t('house.pastRooms', 'Rooms passées'), pastRooms, false)}
 
             <Text className="text-xxs font-body-bold text-ink-muted tracking-widest uppercase mt-lg">
               {t('house.membersList', 'Members')}

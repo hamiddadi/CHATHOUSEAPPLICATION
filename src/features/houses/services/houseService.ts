@@ -135,14 +135,20 @@ export const houseService = {
     return res.data.data;
   },
 
+  async removeMember(houseId: string, userId: string): Promise<House> {
+    const res = await apiClient.delete<Envelope<House>>(`/clubs/${houseId}/members/${userId}`);
+    return res.data.data;
+  },
+
   /**
    * Rooms attached to a house, split via the `filter` band:
    *   filter: 'live'      → currently live rooms
    *   filter: 'upcoming'  → scheduled rooms
+   *   filter: 'past'      → ended rooms (archive)
    * Hits GET /rooms?clubId=…&filter=… (the rooms list endpoint already
    * supports clubId scoping) without touching the rooms feature service.
    */
-  async listRooms(houseId: string, filter: 'live' | 'upcoming'): Promise<HouseRoom[]> {
+  async listRooms(houseId: string, filter: 'live' | 'upcoming' | 'past'): Promise<HouseRoom[]> {
     const res = await apiClient.get<Envelope<RawHouseRoom[]>>('/rooms', {
       params: { clubId: houseId, filter },
     });
