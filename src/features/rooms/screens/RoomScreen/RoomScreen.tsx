@@ -352,9 +352,14 @@ export const RoomScreen: React.FC = () => {
   const handleListenerPress = useCallback(
     (listener: UserSummary) => {
       if (listener.id === viewerId) return;
-      setProfileTarget(listener);
+      // Route through the shared press handler so a host/mod tapping a plain
+      // listener gets the moderation sheet — which carries "Inviter à parler"
+      // (promote to SPEAKER), letting the host bring someone on stage WITHOUT
+      // waiting for a hand-raise. Non-mods still fall through to the social
+      // ProfileActionSheet (handleParticipantPress branches on viewerCanModerate).
+      handleParticipantPress({ ...listener, role: 'listener', audio: 'idle', handRaised: false });
     },
-    [viewerId],
+    [handleParticipantPress, viewerId],
   );
 
   // Promote a hand-raised listener: synthesise the RoomParticipant shape the
@@ -599,6 +604,15 @@ export const RoomScreen: React.FC = () => {
                       {room.categoryEmoji} {room.category}
                     </Text>
                   </View>
+                  <View className="bg-surface-highest px-sm py-xxs rounded-xs">
+                    <Text className="text-[10px] font-body-bold text-ink-muted uppercase tracking-wider">
+                      {room.visibility === 'closed'
+                        ? t('room.visibilityClosed', 'Privée')
+                        : room.visibility === 'social'
+                          ? t('room.visibilitySocial', 'Social')
+                          : t('room.visibilityOpen', 'Ouverte')}
+                    </Text>
+                  </View>
                 </View>
                 {room.isRecording && (
                   <View className="flex-row items-center gap-xs bg-danger/20 px-sm py-xxs rounded-sm">
@@ -623,6 +637,11 @@ export const RoomScreen: React.FC = () => {
                   {room.title}
                 </Text>
               </Pressable>
+              {room.description ? (
+                <Text className="text-sm text-ink-dim leading-snug" numberOfLines={3}>
+                  {room.description}
+                </Text>
+              ) : null}
               <View className="flex-row items-center gap-sm mt-xs">
                 {room.isLive ? (
                   <RoomTimer startedAt={room.startedAt} />

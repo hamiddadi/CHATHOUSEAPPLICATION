@@ -289,7 +289,7 @@ export const CreateRoomScreen: React.FC = () => {
       }
     }
     try {
-      await createRoom.mutateAsync({
+      const created = await createRoom.mutateAsync({
         title,
         description: description.trim() || undefined,
         visibility,
@@ -299,7 +299,16 @@ export const CreateRoomScreen: React.FC = () => {
         recordingEnabled,
         houseId,
       });
-      navigation.goBack();
+      // A live room is joinable immediately: replace the create modal with the
+      // Room screen so the host lands inside it (LiveKit connects on mount)
+      // instead of being dropped back on the feed and having to re-tap the card.
+      // A scheduled room isn't live yet, so just dismiss back to the feed where
+      // it surfaces under "Upcoming".
+      if (created && !scheduledFor) {
+        navigation.replace('Room', { roomId: created.id });
+      } else {
+        navigation.goBack();
+      }
     } catch (err) {
       Alert.alert(
         t('createRoom.errorTitle', 'Création impossible'),
