@@ -55,6 +55,16 @@ export const useRoom = (roomId: string) =>
     enabled: roomId.length > 0,
   });
 
+// Public scheduled rooms a given user is hosting — drives the profile's
+// "Events à venir" section (works for any viewed user, not just self).
+export const useUserUpcomingEvents = (userId: string) =>
+  useQuery<RoomSummary[]>({
+    queryKey: [...roomKeys.all, 'user-upcoming', userId],
+    queryFn: () => roomService.userUpcoming(userId),
+    enabled: userId.length > 0,
+    staleTime: 60_000,
+  });
+
 export const useCreateRoom = () => {
   const qc = useQueryClient();
   return useMutation({

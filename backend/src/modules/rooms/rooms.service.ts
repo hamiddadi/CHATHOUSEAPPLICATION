@@ -796,6 +796,25 @@ export const roomsService = {
   },
 
   /**
+   * Public scheduled rooms a user is HOSTING — surfaced on their profile so
+   * visitors can see (and RSVP to) their upcoming events. Private rooms and
+   * RSVP-only attendance are excluded (those are the viewer's own concern).
+   */
+  async userHostedUpcoming(userId: string) {
+    return prisma.room.findMany({
+      where: {
+        hostId: userId,
+        endedAt: null,
+        isPrivate: false,
+        scheduledFor: { gte: new Date() },
+      },
+      orderBy: { scheduledFor: 'asc' },
+      take: 10,
+      include: roomInclude,
+    });
+  },
+
+  /**
    * The user's hosting history — rooms they hosted that have ended.
    * Ordered by `endedAt desc` so the most recent is first. Powers the
    * "Rooms récentes" section on MyProfile.

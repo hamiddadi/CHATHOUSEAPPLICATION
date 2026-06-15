@@ -29,6 +29,7 @@ import { formatScheduled } from '../../../../shared/utils/formatScheduled';
 import {
   ExtAvailablePeopleStrip,
   ExtRecentlyPlayedStrip,
+  ExtSuggestedFollowsStrip,
   ExtUpcomingForYouStrip,
   useExtWave,
 } from '../../../extensions';
@@ -481,6 +482,7 @@ export const RoomFeedScreen: React.FC = () => {
                 ))}
               </View>
               <ExtAvailablePeopleStrip onWaveUser={handleWaveUser} />
+              <ExtSuggestedFollowsStrip />
               <ExtUpcomingForYouStrip onSelect={handleUpcomingSelect} />
               <ExtRecentlyPlayedStrip onSelect={handleResumeSelect} />
               <UpcomingRow rooms={upcoming} onOpen={handleJoin} />

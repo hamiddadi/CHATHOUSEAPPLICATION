@@ -4,6 +4,7 @@
 // ─── Vague 1 ───
 export { ExtLinkifiedText } from './components/ExtLinkifiedText';
 export { ExtAvailablePeopleStrip } from './components/ExtAvailablePeopleStrip';
+export { ExtSuggestedFollowsStrip } from './components/ExtSuggestedFollowsStrip';
 export { ExtSuggestedFollowsScreen } from './screens/ExtSuggestedFollowsScreen';
 export { ExtTopicExplorerScreen } from './screens/ExtTopicExplorerScreen';
 export { useExtSuggestions } from './hooks/useSuggestions';

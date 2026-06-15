@@ -268,6 +268,13 @@ export const roomService = {
     return toRoom(res.data.data);
   },
 
+  // Public scheduled rooms a given user is hosting — for the "Events à venir"
+  // section on their profile.
+  async userUpcoming(userId: string): Promise<RoomSummary[]> {
+    const res = await apiClient.get<Envelope<RawRoom[]>>(`/rooms/users/${userId}/upcoming`);
+    return res.data.data.map(toSummary);
+  },
+
   async create(input: CreateRoomInput): Promise<Room> {
     const trimmed = input.title.trim();
     if (trimmed.length === 0) throw new Error('Title is required');

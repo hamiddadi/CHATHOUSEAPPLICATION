@@ -20,6 +20,8 @@ roomsRouter.get('/events/mine', asyncHandler(roomsController.myUpcoming));
 // Hosting history — closed rooms the caller once hosted. Sits above
 // `/:id` for the same literal-precedence reason as /feed and /events.
 roomsRouter.get('/history/mine', asyncHandler(roomsController.myHistory));
+// Public upcoming events a given user is hosting — shown on their profile.
+roomsRouter.get('/users/:userId/upcoming', asyncHandler(roomsController.userUpcoming));
 roomsRouter.get('/:id', asyncHandler(roomsController.get));
 // Ending a live room is a business-state transition (close + release SFU),
 // not a resource deletion. Prefer the explicit POST /:id/end action; the

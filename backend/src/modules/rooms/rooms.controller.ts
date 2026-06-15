@@ -119,6 +119,11 @@ export const roomsController = {
     sendOk(res, rows);
   },
 
+  async userUpcoming(req: Request, res: Response) {
+    const rows = await roomsService.userHostedUpcoming(paramId(req, 'userId'));
+    sendOk(res, rows);
+  },
+
   async myHistory(req: Request, res: Response) {
     const limit = parseLimit(req.query['limit']);
     const rows = await roomsService.myRoomHistory(requireUserId(req), limit);
