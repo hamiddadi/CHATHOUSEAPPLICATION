@@ -1,7 +1,7 @@
 import { prisma } from '../../../config/database';
 import { AppError } from '../../../middlewares/error.middleware';
 import { notificationsService } from '../../../modules/notifications/notifications.service';
-import { cancelEventReminder } from '../../../queues/eventReminders';
+import { cancelEventReminder, scheduleEventReminder } from '../../../queues/eventReminders';
 import { logger } from '../../../config/logger';
 
 /**
@@ -81,5 +81,49 @@ export const extEventsService = {
     }
 
     return { notified };
+  },
+
+  /**
+   * Reschedule a not-yet-live event: move its start time (and optionally
+   * rename it), then re-arm both reminder queues for the new time. Host-only.
+   */
+  async reschedule(
+    userId: string,
+    roomId: string,
+    input: { scheduledFor: Date; title?: string },
+  ): Promise<{ rescheduled: true; scheduledFor: string }> {
+    const room = await prisma.room.findUnique({ where: { id: roomId } });
+    if (!room) throw new AppError('ROOM_001');
+    if (room.hostId !== userId) throw new AppError('AUTH_008');
+    if (room.endedAt) throw new AppError('ROOM_002', 'Already ended');
+    if (!room.scheduledFor) throw new AppError('ROOM_002', 'Room is not a scheduled event');
+    if (room.isLive) throw new AppError('ROOM_002', 'Room is already live');
+    if (input.scheduledFor.getTime() <= Date.now())
+      throw new AppError('ROOM_002', 'New time must be in the future');
+
+    await prisma.room.update({
+      where: { id: roomId },
+      data: {
+        scheduledFor: input.scheduledFor,
+        ...(input.title !== undefined ? { title: input.title } : {}),
+      },
+    });
+
+    // Re-arm both reminder queues for the new time (cancel old → schedule new).
+    try {
+      await cancelEventReminder(roomId);
+      await scheduleEventReminder(roomId, input.scheduledFor);
+    } catch (err) {
+      logger.warn('ext.events.reschedule: reminder re-arm failed', { err, roomId });
+    }
+    try {
+      const { cancelReminder15, scheduleReminder15 } = await import('../../queues/reminder15');
+      await cancelReminder15(roomId);
+      await scheduleReminder15(roomId, input.scheduledFor);
+    } catch (err) {
+      logger.warn('ext.events.reschedule: reminder15 re-arm failed', { err, roomId });
+    }
+
+    return { rescheduled: true as const, scheduledFor: input.scheduledFor.toISOString() };
   },
 };

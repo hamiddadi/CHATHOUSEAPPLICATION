@@ -1,5 +1,5 @@
 import React, { memo, useCallback, useMemo, useState } from 'react';
-import { Alert, FlatList, Pressable, Text, View } from 'react-native';
+import { Alert, FlatList, Modal, Pressable, Text, View } from 'react-native';
 import MaterialIcons from '@react-native-vector-icons/material-icons';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -13,6 +13,7 @@ import { colors, spacing } from '../../../../shared/constants/theme';
 import type { RoomStackParamList } from '../../../../core/navigation/types';
 import { useAuthStore } from '../../../auth/store/authStore';
 import { ExtCalendarExportButton, eventsApi } from '../../../extensions';
+import { DateTimePickerInline } from '../../../rooms/components/DateTimePickerInline';
 import { useCancelRsvp, useMyEvents, useRsvp, useUpcomingEvents } from '../../hooks/useEvents';
 import type { ScheduledEvent } from '../../services/eventService';
 
@@ -38,14 +39,16 @@ interface CardProps {
   isHost: boolean;
   onToggle: (event: ScheduledEvent, nextState: boolean) => void;
   onCancel: (event: ScheduledEvent) => void;
+  onReschedule: (event: ScheduledEvent) => void;
   disabled?: boolean;
 }
 
 const EventCard: React.FC<CardProps> = memo(
-  ({ event, isMine, isHost, onToggle, onCancel, disabled = false }) => {
+  ({ event, isMine, isHost, onToggle, onCancel, onReschedule, disabled = false }) => {
     const { t } = useTranslation();
     const handleToggle = useCallback(() => onToggle(event, !isMine), [event, isMine, onToggle]);
     const handleCancel = useCallback(() => onCancel(event), [event, onCancel]);
+    const handleReschedule = useCallback(() => onReschedule(event), [event, onReschedule]);
 
     return (
       <View className="rounded-md bg-overlay-white-5 border border-overlay-white-10 p-xxl gap-lg">
@@ -106,18 +109,32 @@ const EventCard: React.FC<CardProps> = memo(
             label={t('extensions.events.addToCalendar', 'Add to calendar')}
           />
           {isHost && (
-            <Pressable
-              onPress={handleCancel}
-              disabled={disabled}
-              accessibilityRole="button"
-              accessibilityState={{ disabled }}
-              accessibilityLabel={`${t('extensions.events.cancelEvent', 'Cancel event')} · ${event.title}`}
-              className="rounded-pill bg-overlay-white-5 border border-danger px-xl py-sm items-center"
-            >
-              <Text className="text-sm font-body-bold text-danger">
-                {t('extensions.events.cancelEvent', 'Cancel event')}
-              </Text>
-            </Pressable>
+            <>
+              <Pressable
+                onPress={handleReschedule}
+                disabled={disabled}
+                accessibilityRole="button"
+                accessibilityState={{ disabled }}
+                accessibilityLabel={`${t('extensions.events.reschedule', 'Reprogrammer')} · ${event.title}`}
+                className="rounded-pill bg-overlay-white-5 border border-overlay-white-20 px-xl py-sm items-center"
+              >
+                <Text className="text-sm font-body-bold text-ink">
+                  {t('extensions.events.reschedule', 'Reprogrammer')}
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={handleCancel}
+                disabled={disabled}
+                accessibilityRole="button"
+                accessibilityState={{ disabled }}
+                accessibilityLabel={`${t('extensions.events.cancelEvent', 'Cancel event')} · ${event.title}`}
+                className="rounded-pill bg-overlay-white-5 border border-danger px-xl py-sm items-center"
+              >
+                <Text className="text-sm font-body-bold text-danger">
+                  {t('extensions.events.cancelEvent', 'Cancel event')}
+                </Text>
+              </Pressable>
+            </>
           )}
         </View>
       </View>
@@ -133,6 +150,9 @@ export const EventsScreen: React.FC = () => {
 
   const [tab, setTab] = useState<Tab>('upcoming');
   const [canceling, setCanceling] = useState(false);
+  const [reschedulingEvent, setReschedulingEvent] = useState<ScheduledEvent | null>(null);
+  const [newDate, setNewDate] = useState('');
+  const [rescheduling, setRescheduling] = useState(false);
 
   const viewerId = useAuthStore(s => s.user?.id ?? null);
 
@@ -195,6 +215,26 @@ export const EventsScreen: React.FC = () => {
     [canceling, t, upcoming, mine],
   );
 
+  // Host-only: open the reschedule sheet seeded with the event's current time.
+  const onReschedule = useCallback((event: ScheduledEvent) => {
+    setReschedulingEvent(event);
+    setNewDate(event.scheduledFor);
+  }, []);
+
+  const confirmReschedule = useCallback(() => {
+    if (!reschedulingEvent || !newDate || rescheduling) return;
+    setRescheduling(true);
+    eventsApi
+      .reschedule(reschedulingEvent.id, newDate)
+      .then(() => {
+        void upcoming.refetch();
+        void mine.refetch();
+        setReschedulingEvent(null);
+      })
+      .catch(() => Alert.alert(t('events.title'), t('common.actionFailed')))
+      .finally(() => setRescheduling(false));
+  }, [reschedulingEvent, newDate, rescheduling, upcoming, mine, t]);
+
   const activeList = tab === 'upcoming' ? upcoming : mine;
   const events = activeList.data ?? [];
 
@@ -207,10 +247,11 @@ export const EventsScreen: React.FC = () => {
         isHost={viewerId != null && item.hostId === viewerId}
         onToggle={onToggle}
         onCancel={onCancel}
+        onReschedule={onReschedule}
         disabled={mutating}
       />
     ),
-    [mineIds, viewerId, onToggle, onCancel, mutating],
+    [mineIds, viewerId, onToggle, onCancel, onReschedule, mutating],
   );
   const renderSeparator = useCallback(() => <View className="h-md" />, []);
 
@@ -263,6 +304,45 @@ export const EventsScreen: React.FC = () => {
           showsVerticalScrollIndicator={false}
         />
       )}
+
+      <Modal
+        visible={reschedulingEvent != null}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setReschedulingEvent(null)}
+      >
+        <Pressable
+          className="flex-1 bg-black/50 justify-end"
+          onPress={() => setReschedulingEvent(null)}
+          accessibilityLabel={t('common.cancel')}
+        >
+          <Pressable
+            className="bg-surface-high rounded-t-3xl p-xxl gap-lg"
+            onPress={() => undefined}
+          >
+            <Text className="text-lg font-display text-ink">
+              {t('extensions.events.reschedule', 'Reprogrammer')}
+            </Text>
+            {reschedulingEvent ? (
+              <Text className="text-sm text-ink-muted" numberOfLines={1}>
+                {reschedulingEvent.title}
+              </Text>
+            ) : null}
+            {newDate ? <DateTimePickerInline value={newDate} onChange={setNewDate} /> : null}
+            <Pressable
+              onPress={confirmReschedule}
+              disabled={rescheduling}
+              accessibilityRole="button"
+              accessibilityLabel={t('common.continue')}
+              className="rounded-pill bg-primary py-md items-center"
+            >
+              <Text className="text-sm font-body-bold text-primary-on-container">
+                {t('common.continue')}
+              </Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 };
