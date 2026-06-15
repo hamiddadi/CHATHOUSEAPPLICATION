@@ -80,11 +80,14 @@ describe('ChatDetailScreen', () => {
     expect(alertSpy).toHaveBeenCalledTimes(2);
   });
 
-  it('emoji button appends to the draft and reveals the send button', async () => {
+  it('emoji button opens the palette; picking an emoji reveals the send button', async () => {
     const { getByLabelText, queryByLabelText } = renderChat();
     // With an empty draft the mic button shows; send is hidden.
     expect(queryByLabelText('Send message')).toBeNull();
+    // Tapping the emoji button now toggles a quick-pick palette (no longer
+    // appends a single hardcoded emoji); picking one fills the draft.
     fireEvent.press(getByLabelText('Insert emoji'));
+    fireEvent.press(getByLabelText('🔥'));
     await waitFor(() => {
       expect(getByLabelText('Send message')).toBeTruthy();
     });

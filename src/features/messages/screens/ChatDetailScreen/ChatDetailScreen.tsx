@@ -203,11 +203,6 @@ export const ChatDetailScreen: React.FC = () => {
     [showComingSoon],
   );
   const handleAttach = useCallback(() => showComingSoon('Pièce jointe'), [showComingSoon]);
-  const handleEmoji = useCallback(() => {
-    // Quick-insert: append a smiley to the draft. Real emoji picker is a
-    // separate native module; this stop-gap keeps the button useful.
-    setDraft(d => `${d}${d.length > 0 && !d.endsWith(' ') ? ' ' : ''}🙂`);
-  }, []);
 
   const other: UserSummary | undefined =
     conversation?.participants.find(p => p.id !== myId) ?? conversation?.participants[0];
@@ -333,7 +328,6 @@ export const ChatDetailScreen: React.FC = () => {
           canSend={canSend}
           bottomInset={insets.bottom}
           keyboardVisible={keyboardVisible}
-          onEmoji={handleEmoji}
           onAttach={handleAttach}
           onMic={handleMic}
           onInputFocus={scrollToBottom}

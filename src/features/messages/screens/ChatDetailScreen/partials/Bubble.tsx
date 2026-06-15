@@ -5,6 +5,7 @@ import { GradientView } from '../../../../../shared/components/GradientView';
 import { colors, spacing } from '../../../../../shared/constants/theme';
 import { DEFAULTS } from '../../../../../shared/constants/images';
 import type { Message } from '../../../../../shared/types/domain';
+import { ExtLinkifiedText } from '../../../../extensions/components/ExtLinkifiedText';
 import VoiceMessageBubble from '../../../components/VoiceMessageBubble';
 
 const AVATAR_BUBBLE_SIZE = 32;
@@ -53,7 +54,9 @@ const Bubble: React.FC<BubbleProps> = memo(({ message, otherAvatar, showAvatar, 
                 isMine
               />
             ) : (
-              <Text className="text-sm font-body text-white leading-relaxed">{message.text}</Text>
+              <ExtLinkifiedText className="text-sm font-body text-white leading-relaxed">
+                {message.text}
+              </ExtLinkifiedText>
             )}
           </GradientView>
         </Pressable>
@@ -84,7 +87,9 @@ const Bubble: React.FC<BubbleProps> = memo(({ message, otherAvatar, showAvatar, 
               isMine={false}
             />
           ) : (
-            <Text className="text-sm font-body text-ink leading-relaxed">{message.text}</Text>
+            <ExtLinkifiedText className="text-sm font-body text-ink leading-relaxed">
+              {message.text}
+            </ExtLinkifiedText>
           )}
         </View>
         <Text className="text-[10px] text-ink-muted ml-xs mt-xxs">

@@ -1,5 +1,5 @@
-import React, { memo } from 'react';
-import { Pressable, StyleSheet, TextInput, View } from 'react-native';
+import React, { memo, useState } from 'react';
+import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import MaterialIcons from '@react-native-vector-icons/material-icons';
 import { useTranslation } from 'react-i18next';
 import { GradientView } from '../../../../../shared/components/GradientView';
@@ -11,6 +11,28 @@ const SEND_BTN_SIZE = 44;
 const GLASS_BG = 'rgba(255,255,255,0.05)';
 const SEND_GRADIENT = ['#b0c6ff', '#558dff'] as const;
 
+// Lightweight emoji palette — a no-native-module quick-pick that beats the old
+// hardcoded single smiley. Tapping appends to the draft and keeps the palette
+// open so a few can be added in a row.
+const EMOJIS = [
+  '😀',
+  '😂',
+  '😍',
+  '🥰',
+  '😎',
+  '🤔',
+  '👍',
+  '🙏',
+  '🔥',
+  '🎉',
+  '❤️',
+  '😢',
+  '😮',
+  '🙌',
+  '💯',
+  '👀',
+] as const;
+
 interface ChatInputBarProps {
   value: string;
   onChangeText: (text: string) => void;
@@ -20,7 +42,6 @@ interface ChatInputBarProps {
   /** Bottom safe-area inset; applied only when the keyboard is hidden. */
   bottomInset: number;
   keyboardVisible: boolean;
-  onEmoji: () => void;
   onAttach: () => void;
   onMic: () => void;
   onInputFocus: () => void;
@@ -34,78 +55,96 @@ const ChatInputBar: React.FC<ChatInputBarProps> = memo(
     canSend,
     bottomInset,
     keyboardVisible,
-    onEmoji,
     onAttach,
     onMic,
     onInputFocus,
   }) => {
     const { t } = useTranslation();
+    const [showEmoji, setShowEmoji] = useState(false);
 
     return (
       <View
         style={[
-          styles.footer,
+          styles.wrapper,
           { paddingBottom: keyboardVisible ? spacing.md : bottomInset + spacing.md },
         ]}
       >
-        <View style={styles.inputPill}>
-          <Pressable
-            onPress={onEmoji}
-            accessibilityRole="button"
-            accessibilityLabel={t('chat.emojiA11y')}
-            hitSlop={8}
-          >
-            <MaterialIcons
-              name="sentiment-satisfied"
-              size={INPUT_ICON_SIZE}
-              color={colors.textMuted}
-            />
-          </Pressable>
-          <TextInput
-            style={styles.input}
-            placeholder={t('chat.inputPlaceholder')}
-            placeholderTextColor={'rgba(194,198,215,0.5)'}
-            value={value}
-            onChangeText={onChangeText}
-            onFocus={onInputFocus}
-            multiline
-          />
-          <Pressable
-            onPress={onAttach}
-            accessibilityRole="button"
-            accessibilityLabel={t('chat.attachA11y')}
-            hitSlop={8}
-          >
-            <MaterialIcons name="attach-file" size={INPUT_ICON_SIZE} color={colors.textMuted} />
-          </Pressable>
-        </View>
-        {canSend ? (
-          <Pressable
-            onPress={onSend}
-            accessibilityRole="button"
-            accessibilityLabel={t('chat.sendA11y')}
-            disabled={!canSend}
-            className="rounded-pill overflow-hidden active:opacity-90"
-          >
-            <GradientView
-              colors={SEND_GRADIENT}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.sendBtn}
+        {showEmoji ? (
+          <View style={styles.palette}>
+            {EMOJIS.map(e => (
+              <Pressable
+                key={e}
+                onPress={() => onChangeText(value + e)}
+                accessibilityRole="button"
+                accessibilityLabel={e}
+                hitSlop={4}
+              >
+                <Text style={styles.emoji}>{e}</Text>
+              </Pressable>
+            ))}
+          </View>
+        ) : null}
+
+        <View style={styles.row}>
+          <View style={styles.inputPill}>
+            <Pressable
+              onPress={() => setShowEmoji(v => !v)}
+              accessibilityRole="button"
+              accessibilityLabel={t('chat.emojiA11y')}
+              hitSlop={8}
             >
-              <MaterialIcons name="send" size={INPUT_ICON_SIZE} color={colors.onPrimary} />
-            </GradientView>
-          </Pressable>
-        ) : (
-          <Pressable
-            onPress={onMic}
-            accessibilityRole="button"
-            accessibilityLabel={t('chat.micA11y')}
-            style={styles.micBtn}
-          >
-            <MaterialIcons name="mic" size={INPUT_ICON_SIZE} color={colors.textMuted} />
-          </Pressable>
-        )}
+              <MaterialIcons
+                name="sentiment-satisfied"
+                size={INPUT_ICON_SIZE}
+                color={showEmoji ? colors.primary : colors.textMuted}
+              />
+            </Pressable>
+            <TextInput
+              style={styles.input}
+              placeholder={t('chat.inputPlaceholder')}
+              placeholderTextColor={'rgba(194,198,215,0.5)'}
+              value={value}
+              onChangeText={onChangeText}
+              onFocus={onInputFocus}
+              multiline
+            />
+            <Pressable
+              onPress={onAttach}
+              accessibilityRole="button"
+              accessibilityLabel={t('chat.attachA11y')}
+              hitSlop={8}
+            >
+              <MaterialIcons name="attach-file" size={INPUT_ICON_SIZE} color={colors.textMuted} />
+            </Pressable>
+          </View>
+          {canSend ? (
+            <Pressable
+              onPress={onSend}
+              accessibilityRole="button"
+              accessibilityLabel={t('chat.sendA11y')}
+              disabled={!canSend}
+              className="rounded-pill overflow-hidden active:opacity-90"
+            >
+              <GradientView
+                colors={SEND_GRADIENT}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.sendBtn}
+              >
+                <MaterialIcons name="send" size={INPUT_ICON_SIZE} color={colors.onPrimary} />
+              </GradientView>
+            </Pressable>
+          ) : (
+            <Pressable
+              onPress={onMic}
+              accessibilityRole="button"
+              accessibilityLabel={t('chat.micA11y')}
+              style={styles.micBtn}
+            >
+              <MaterialIcons name="mic" size={INPUT_ICON_SIZE} color={colors.textMuted} />
+            </Pressable>
+          )}
+        </View>
       </View>
     );
   },
@@ -113,16 +152,26 @@ const ChatInputBar: React.FC<ChatInputBarProps> = memo(
 ChatInputBar.displayName = 'ChatInputBar';
 
 const styles = StyleSheet.create({
-  footer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
+  wrapper: {
     paddingHorizontal: spacing.xxl,
     paddingTop: spacing.sm,
     backgroundColor: colors.background,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: 'rgba(255,255,255,0.05)',
   },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  palette: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.md,
+    paddingBottom: spacing.sm,
+    justifyContent: 'space-between',
+  },
+  emoji: { fontSize: 26 },
   inputPill: {
     flex: 1,
     flexDirection: 'row',
