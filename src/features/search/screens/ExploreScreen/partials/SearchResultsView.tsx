@@ -3,13 +3,15 @@ import { Pressable, ScrollView, Text, View } from 'react-native';
 import type { TFunction } from 'i18next';
 import { EmptyState } from '../../../../../shared/components/EmptyState';
 import { spacing } from '../../../../../shared/constants/theme';
-import type { SearchResults } from '../../../services/searchService';
+import type { SearchResults, SearchRoomHit } from '../../../services/searchService';
 import type { FlatTopic } from '../../../../extensions/api/topicsApi';
 import { ClubRow, RoomRow, Section, UserRow } from './rows';
 
 interface SearchResultsViewProps {
   data: SearchResults | undefined;
   topics?: FlatTopic[];
+  /** Server-filtered rooms (language/category facets). When set, shown first. */
+  filteredRooms?: SearchRoomHit[];
   debouncedQuery: string;
   bottomInset: number;
   goUser: (id: string) => void;
@@ -22,6 +24,7 @@ interface SearchResultsViewProps {
 export const SearchResultsView: React.FC<SearchResultsViewProps> = ({
   data,
   topics,
+  filteredRooms,
   debouncedQuery,
   bottomInset,
   goUser,
@@ -34,7 +37,8 @@ export const SearchResultsView: React.FC<SearchResultsViewProps> = ({
     (data?.users.length ?? 0) +
     (data?.clubs.length ?? 0) +
     (data?.rooms.length ?? 0) +
-    (topics?.length ?? 0);
+    (topics?.length ?? 0) +
+    (filteredRooms?.length ?? 0);
   return (
     <ScrollView
       contentContainerStyle={{
@@ -46,6 +50,13 @@ export const SearchResultsView: React.FC<SearchResultsViewProps> = ({
         <EmptyState title={t('explore.searchEmpty', { q: debouncedQuery })} description="" />
       ) : (
         <View className="gap-xxl">
+          {filteredRooms && filteredRooms.length > 0 ? (
+            <Section
+              title={t('explore.filteredRooms', 'Rooms filtrées')}
+              items={filteredRooms}
+              render={r => <RoomRow key={r.id} room={r} onPress={goRoom} />}
+            />
+          ) : null}
           <Section
             title={t('explore.peopleToFollow')}
             items={data?.users}

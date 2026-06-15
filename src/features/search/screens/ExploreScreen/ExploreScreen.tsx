@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import MaterialIcons from '@react-native-vector-icons/material-icons';
 import { useNavigation } from '@react-navigation/native';
@@ -10,9 +10,10 @@ import { Input } from '../../../../shared/components/Input';
 import { Loader } from '../../../../shared/components/Loader';
 import { colors, spacing } from '../../../../shared/constants/theme';
 import type { RoomStackParamList } from '../../../../core/navigation/types';
-import { useExtSearchHistory } from '../../../extensions';
+import { useExtSearchHistory, useExtSearchRooms } from '../../../extensions';
 import { useDebouncedValue } from '../../../../shared/hooks/useDebouncedValue';
 import { useExplore, useSearch, useTopicSearch } from '../../hooks/useSearch';
+import type { SearchRoomHit } from '../../services/searchService';
 import { SearchResultsView } from './partials/SearchResultsView';
 import { ExploreFeedView } from './partials/ExploreFeedView';
 
@@ -25,6 +26,11 @@ type Nav = NativeStackNavigationProp<RoomStackParamList, 'Explore'>;
  * trigram index makes this cheap too.
  */
 const DEBOUNCE_MS = 200;
+
+// Faceted filters for room search (#63 language / #64 category). Languages map
+// to the backend's `lang:<iso>` topic convention; categories match Room.topics.
+const FILTER_LANGS = ['fr', 'en', 'ar', 'es'] as const;
+const FILTER_CATS = ['tech', 'music', 'business', 'health', 'design', 'ai'] as const;
 
 export const ExploreScreen: React.FC = () => {
   const navigation = useNavigation<Nav>();
@@ -68,6 +74,48 @@ export const ExploreScreen: React.FC = () => {
   const isSearching = debouncedQuery.length > 0;
   const showRecent = !isSearching && searchFocused && history.items.length > 0;
 
+  // #63/#64: language + category facets. When active they drive a server-side
+  // filtered room search (ext/search/rooms) shown above the default results.
+  const [langFilter, setLangFilter] = useState<string | null>(null);
+  const [catFilter, setCatFilter] = useState<string | null>(null);
+  const filterActive = langFilter != null || catFilter != null;
+  const toggleLang = useCallback(
+    (code: string) => setLangFilter(p => (p === code ? null : code)),
+    [],
+  );
+  const toggleCat = useCallback(
+    (code: string) => setCatFilter(p => (p === code ? null : code)),
+    [],
+  );
+  const extRooms = useExtSearchRooms(
+    {
+      q: debouncedQuery,
+      language: langFilter ?? undefined,
+      topic: catFilter ?? undefined,
+      liveOnly: true,
+    },
+    isSearching && filterActive,
+  );
+  const filteredRooms = useMemo<SearchRoomHit[]>(
+    () =>
+      (extRooms.data ?? []).map(r => ({
+        id: r.id,
+        title: r.title,
+        description: r.description,
+        topic: r.topic,
+        isLive: r.isLive,
+        scheduledFor: r.scheduledFor,
+        host: {
+          id: r.host.id,
+          username: r.host.username ?? '',
+          displayName: r.host.displayName ?? '',
+          avatarUrl: r.host.avatarUrl,
+        },
+        listenersCount: r.participantCount,
+      })),
+    [extRooms.data],
+  );
+
   return (
     <View className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
       <View className="flex-row items-center gap-md px-xxl py-lg">
@@ -101,6 +149,32 @@ export const ExploreScreen: React.FC = () => {
         />
       </View>
 
+      {isSearching ? (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={{ gap: spacing.xs, paddingHorizontal: spacing.xxl }}
+          className="pb-md flex-grow-0"
+        >
+          {FILTER_LANGS.map(code => (
+            <FilterChip
+              key={`l-${code}`}
+              label={code.toUpperCase()}
+              active={langFilter === code}
+              onPress={() => toggleLang(code)}
+            />
+          ))}
+          {FILTER_CATS.map(code => (
+            <FilterChip
+              key={`c-${code}`}
+              label={code}
+              active={catFilter === code}
+              onPress={() => toggleCat(code)}
+            />
+          ))}
+        </ScrollView>
+      ) : null}
+
       {showRecent ? (
         <RecentSearchesView
           items={history.items}
@@ -116,6 +190,7 @@ export const ExploreScreen: React.FC = () => {
           <SearchResultsView
             data={search.data}
             topics={topicHits.data}
+            filteredRooms={filterActive ? filteredRooms : undefined}
             debouncedQuery={debouncedQuery}
             bottomInset={insets.bottom}
             goUser={goUser}
@@ -142,6 +217,34 @@ export const ExploreScreen: React.FC = () => {
     </View>
   );
 };
+
+const FilterChip: React.FC<{ label: string; active: boolean; onPress: () => void }> = ({
+  label,
+  active,
+  onPress,
+}) => (
+  <Pressable
+    onPress={onPress}
+    accessibilityRole="button"
+    accessibilityState={{ selected: active }}
+    accessibilityLabel={`Filtre ${label}`}
+    className={
+      active
+        ? 'px-md py-xs rounded-pill bg-primary'
+        : 'px-md py-xs rounded-pill bg-overlay-white-5 border border-overlay-white-10'
+    }
+  >
+    <Text
+      className={
+        active
+          ? 'text-xs font-body-bold text-primary-on-container uppercase'
+          : 'text-xs font-body-bold text-ink-muted uppercase'
+      }
+    >
+      {label}
+    </Text>
+  </Pressable>
+);
 
 interface RecentSearchesViewProps {
   items: readonly string[];
