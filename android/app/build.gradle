@@ -132,7 +132,11 @@ android {
                 // Gradle throws an opaque MissingPropertyException).
                 ['CHATHOUSE_UPLOAD_STORE_PASSWORD', 'CHATHOUSE_UPLOAD_KEY_ALIAS', 'CHATHOUSE_UPLOAD_KEY_PASSWORD'].each { prop ->
                     if (!project.hasProperty(prop)) {
-                        throw new GradleException("$prop must be set alongside CHATHOUSE_UPLOAD_STORE_FILE for release signing (see docs/RELEASE-SIGNING.md)")
+                        // Fully-qualified org.gradle.api.GradleException so the
+                        // IDE Groovy linter resolves it (the simple name is a
+                        // Gradle default-import that the editor doesn't apply;
+                        // it always resolved fine at build time).
+                        throw new org.gradle.api.GradleException("$prop must be set alongside CHATHOUSE_UPLOAD_STORE_FILE for release signing (see docs/RELEASE-SIGNING.md)")
                     }
                 }
                 // CHATHOUSE_UPLOAD_STORE_FILE is resolved relative to this module

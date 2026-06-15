@@ -1,4 +1,8 @@
 {
   "java.configuration.updateBuildConfiguration": "interactive",
-  "java.compile.nullAnalysis.mode": "automatic"
+  "java.compile.nullAnalysis.mode": "automatic",
+  "//": "This is a React Native app — the Android build runs via ./gradlew / react-native CLI, NOT the VSCode Java/Gradle language server. The Red Hat Java extension was auto-importing Gradle plugins under node_modules (@react-native/gradle-plugin, expo-*-gradle-plugin) and reporting missing-jar / build-path errors that DO NOT affect the real build. Excluding node_modules from import silences them.",
+  "java.import.exclusions": ["**/node_modules/**", "**/.git/**", "**/build/**"],
+  "java.import.gradle.enabled": false,
+  "gradle.nestedProjects": false
 }
