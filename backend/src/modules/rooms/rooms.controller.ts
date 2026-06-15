@@ -18,6 +18,7 @@ import {
   sendReactionSchema,
   sendRoomMessageSchema,
   setRoomLockSchema,
+  setRoomVisibilitySchema,
   toggleRoomChatSchema,
   updateRoleSchema,
   updateRoomTitleSchema,
@@ -222,6 +223,16 @@ export const roomsController = {
   async setLock(req: Request, res: Response) {
     const input = setRoomLockSchema.parse(req.body);
     const result = await roomsService.setLock(paramId(req, 'id'), requireUserId(req), input.locked);
+    sendOk(res, result);
+  },
+
+  async setHidden(req: Request, res: Response) {
+    const input = setRoomVisibilitySchema.parse(req.body);
+    const result = await roomsService.setHidden(
+      paramId(req, 'id'),
+      requireUserId(req),
+      input.hidden,
+    );
     sendOk(res, result);
   },
 

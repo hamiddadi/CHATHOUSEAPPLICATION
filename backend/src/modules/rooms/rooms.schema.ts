@@ -61,6 +61,10 @@ export const setRoomLockSchema = z.object({
   locked: z.boolean(),
 });
 
+export const setRoomVisibilitySchema = z.object({
+  hidden: z.boolean(),
+});
+
 export const sendReactionSchema = z.object({
   // Short emoji — covers most pictographs and ZWJ sequences up to 16 chars.
   emoji: z.string().min(1).max(16),

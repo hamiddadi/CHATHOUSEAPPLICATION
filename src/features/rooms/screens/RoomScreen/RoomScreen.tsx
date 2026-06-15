@@ -19,6 +19,7 @@ import {
   useRaiseHand,
   useReportRoom,
   useRoom,
+  useSetHidden,
   useSetMute,
 } from '../../hooks/useRooms';
 import type { RoomListener } from '../../services/roomService';
@@ -73,12 +74,14 @@ export const RoomScreen: React.FC = () => {
   const { t } = useTranslation();
   const [isMuted, setIsMuted] = useState(false);
   const [isHandRaised, setIsHandRaised] = useState(false);
+  const [isHidden, setIsHidden] = useState(false);
 
   const { data: room, isLoading, isError } = useRoom(route.params.roomId);
   const leaveRoom = useLeaveRoom();
   const raiseHand = useRaiseHand();
   const lowerHand = useLowerHand();
   const setMute = useSetMute();
+  const setHidden = useSetHidden();
   const endRoom = useEndRoom();
   const reportRoom = useReportRoom();
   const viewerId = useAuthStore(s => s.user?.id ?? null);
@@ -376,6 +379,16 @@ export const RoomScreen: React.FC = () => {
     },
     [handleParticipantPress],
   );
+
+  // #32: toggle ghost mode (optimistic; roll back on failure).
+  const handleToggleHidden = useCallback(() => {
+    const next = !isHidden;
+    setIsHidden(next);
+    setHidden.mutate(
+      { roomId: route.params.roomId, hidden: next },
+      { onError: () => setIsHidden(!next) },
+    );
+  }, [isHidden, route.params.roomId, setHidden]);
 
   // #39: open a 1:1 DM thread with a participant. The DM service keys
   // conversations by the peer's userId, so we open ChatDetail directly. Cross-
@@ -750,8 +763,10 @@ export const RoomScreen: React.FC = () => {
           viewerCanSpeak={viewerCanSpeak}
           isMuted={isMuted}
           isHandRaised={isHandRaised}
+          isHidden={isHidden}
           onToggleMute={handleToggleMute}
           onToggleHand={handleToggleHand}
+          onToggleHidden={handleToggleHidden}
           onInvite={() => navigation.navigate('InviteToRoom', { roomId: room.id })}
           onLeave={handleLeave}
         />

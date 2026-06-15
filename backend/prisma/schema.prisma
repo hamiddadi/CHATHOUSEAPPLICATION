@@ -473,6 +473,9 @@ model Participant {
   roomId   String
   role     Role     @default(LISTENER)
   isMuted  Boolean  @default(false)
+  // #32: "ghost" mode — when true the participant is hidden from the audience
+  // list shown to OTHERS (they still see themselves). Host/mods aren't hidden.
+  isHidden Boolean  @default(false)
   joinedAt DateTime @default(now())
   leftAt   DateTime?
 

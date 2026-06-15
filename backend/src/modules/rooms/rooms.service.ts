@@ -22,7 +22,9 @@ import {
   emitRoomMuteChanged,
   emitRoomReaction,
   emitRoomRoleChanged,
+  emitRoomUserJoined,
   emitRoomUserKicked,
+  emitRoomUserLeft,
   forceLeaveRoom,
 } from '../../socket/realtime';
 import type {
@@ -309,10 +311,33 @@ export const roomsService = {
 
     return {
       ...room,
-      participants: room.participants.map(p =>
-        p.role === 'LISTENER' ? { ...p, followedByViewer: followedSet.has(p.userId) } : p,
-      ),
+      participants: room.participants
+        // #32: hide "ghost" participants from everyone but themselves.
+        .filter(p => !p.isHidden || p.userId === viewerId)
+        .map(p =>
+          p.role === 'LISTENER' ? { ...p, followedByViewer: followedSet.has(p.userId) } : p,
+        ),
     };
+  },
+
+  /**
+   * #32: toggle the caller's "ghost"/invisible state in the room. Hidden
+   * participants drop out of the audience list shown to others (they still see
+   * themselves). Broadcasts a join/leave so peers refetch the filtered list.
+   */
+  async setHidden(roomId: string, callerUserId: string, hidden: boolean) {
+    await requireActiveParticipant(roomId, callerUserId);
+    const updated = await prisma.participant.updateMany({
+      where: { roomId, userId: callerUserId, leftAt: null },
+      data: { isHidden: hidden },
+    });
+    if (updated.count === 0) throw new AppError('ROOM_005');
+    if (hidden) {
+      emitRoomUserLeft(roomId, callerUserId);
+    } else {
+      emitRoomUserJoined(roomId, callerUserId);
+    }
+    return { hidden };
   },
 
   async join(roomId: string, userId: string) {

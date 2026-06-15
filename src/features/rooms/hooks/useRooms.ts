@@ -254,6 +254,18 @@ export const useLockRoom = () => {
   });
 };
 
+// #32: toggle the viewer's invisible/ghost state in the room.
+export const useSetHidden = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ roomId, hidden }: { roomId: string; hidden: boolean }) =>
+      roomService.setHidden(roomId, hidden),
+    onSuccess: (_data, vars) => {
+      void qc.invalidateQueries({ queryKey: roomKeys.detail(vars.roomId) });
+    },
+  });
+};
+
 export const useMuteAllInRoom = () =>
   useMutation({
     mutationFn: ({ roomId, includeHost }: { roomId: string; includeHost?: boolean }) =>

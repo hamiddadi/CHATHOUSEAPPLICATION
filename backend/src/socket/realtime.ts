@@ -160,6 +160,16 @@ export const emitRoomMetaUpdated = (
   ioRef?.to(roomChannel(roomId)).emit('room:meta_updated', { roomId, ...patch });
 };
 
+// #32: presence toggle. Going invisible looks like a leave to others; becoming
+// visible looks like a join — both make peers refetch the (server-filtered)
+// participant list. Same payload shape as the socket join/leave broadcasts.
+export const emitRoomUserJoined = (roomId: string, userId: string): void => {
+  ioRef?.to(roomChannel(roomId)).emit('room:user-joined', { userId, roomId });
+};
+export const emitRoomUserLeft = (roomId: string, userId: string): void => {
+  ioRef?.to(roomChannel(roomId)).emit('room:user-left', { userId, roomId });
+};
+
 // ─── Per-user notification events ────────────────────────
 // Fires on the user's personal channel so they get live notification
 // badge updates without polling.

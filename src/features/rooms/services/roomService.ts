@@ -316,6 +316,15 @@ export const roomService = {
     return res.data.data;
   },
 
+  // #32: toggle the caller's invisible/ghost state in the room.
+  async setHidden(roomId: string, hidden: boolean): Promise<{ hidden: boolean }> {
+    const res = await apiClient.patch<Envelope<{ hidden: boolean }>>(
+      `/rooms/${roomId}/visibility`,
+      { hidden },
+    );
+    return res.data.data;
+  },
+
   async raiseHand(roomId: string): Promise<{ queued: true }> {
     await apiClient.post(`/rooms/${roomId}/raise-hand`);
     return { queued: true };
