@@ -68,4 +68,10 @@ export const recordingService = {
     const res = await apiClient.get<Envelope<RawReplay[]>>(`/recordings/room/${roomId}`);
     return res.data.data.map(toReplay);
   },
+
+  // #75: a user's published public replays (rooms they hosted).
+  async forHost(userId: string): Promise<Replay[]> {
+    const res = await apiClient.get<Envelope<RawReplay[]>>(`/recordings/users/${userId}`);
+    return res.data.data.map(toReplay);
+  },
 };

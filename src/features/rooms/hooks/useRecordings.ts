@@ -5,6 +5,7 @@ export const recordingKeys = {
   all: ['recordings'] as const,
   recent: () => [...recordingKeys.all, 'recent'] as const,
   room: (id: string) => [...recordingKeys.all, 'room', id] as const,
+  host: (id: string) => [...recordingKeys.all, 'host', id] as const,
 };
 
 /** Recent public replays across all rooms (Replays feed). */
@@ -20,4 +21,13 @@ export const useRoomReplays = (roomId: string) =>
     queryKey: recordingKeys.room(roomId),
     queryFn: () => recordingService.forRoom(roomId),
     enabled: roomId.length > 0,
+  });
+
+/** A user's published public replays — for their profile (#75). */
+export const useUserReplays = (userId: string) =>
+  useQuery<Replay[]>({
+    queryKey: recordingKeys.host(userId),
+    queryFn: () => recordingService.forHost(userId),
+    enabled: userId.length > 0,
+    staleTime: 60_000,
   });

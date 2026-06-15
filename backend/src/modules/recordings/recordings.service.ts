@@ -272,4 +272,27 @@ export const recordingsService = {
       room: { id: r.room.id, title: r.room.title, host: r.room.host },
     }));
   },
+
+  /**
+   * #75: a user's published public replays — completed recordings of rooms they
+   * hosted. Queryable via the room relation (no host column needed).
+   */
+  async listForHost(userId: string, limit = 20) {
+    const rows = await prisma.recording.findMany({
+      where: {
+        status: 'COMPLETED',
+        fileUrl: { not: null },
+        room: { isPrivate: false, hostId: userId },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: limit,
+      include: {
+        room: { select: { id: true, title: true, host: { select: publicUser } } },
+      },
+    });
+    return rows.map(r => ({
+      ...serialize(r),
+      room: { id: r.room.id, title: r.room.title, host: r.room.host },
+    }));
+  },
 };

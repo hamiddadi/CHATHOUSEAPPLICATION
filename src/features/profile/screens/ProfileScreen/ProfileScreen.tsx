@@ -15,6 +15,7 @@ import { useBlock, useReport, useWave } from '../../../social/hooks/useSocial';
 import type { ReportReason } from '../../../social/services/socialService';
 import { useHouses } from '../../../houses/hooks/useHouses';
 import { useMyRoomHistory, useUserUpcomingEvents } from '../../../rooms/hooks/useRooms';
+import { useUserReplays } from '../../../rooms/hooks/useRecordings';
 import { formatScheduled } from '../../../../shared/utils/formatScheduled';
 import { ExtBadgesRow, ExtProfileLinks } from '../../../extensions';
 import ProfileHeaderBar from './partials/ProfileHeaderBar';
@@ -71,6 +72,8 @@ export const ProfileScreen: React.FC = () => {
   const roomHistory = useMyRoomHistory(10);
   // Public scheduled rooms this user is hosting — shown to every viewer.
   const upcomingEvents = useUserUpcomingEvents(userId);
+  // Published public replays of rooms this user hosted (#75).
+  const replays = useUserReplays(userId);
 
   const goEdit = useCallback(
     () => navigation.navigate('SettingsTab', { screen: 'EditProfile' }),
@@ -95,6 +98,10 @@ export const ProfileScreen: React.FC = () => {
   );
   const goRoom = useCallback(
     (roomId: string) => navigation.navigate('RoomsTab', { screen: 'Room', params: { roomId } }),
+    [navigation],
+  );
+  const goReplays = useCallback(
+    () => navigation.navigate('RoomsTab', { screen: 'Replays' }),
     [navigation],
   );
 
@@ -309,6 +316,35 @@ export const ProfileScreen: React.FC = () => {
                   {ev.scheduledFor ? (
                     <Text className="text-xs font-body text-ink-muted">
                       {formatScheduled(ev.scheduledFor)}
+                    </Text>
+                  ) : null}
+                </View>
+                <Text className="text-ink-muted text-base">›</Text>
+              </Pressable>
+            ))}
+          </View>
+        ) : null}
+
+        {(replays.data?.length ?? 0) > 0 ? (
+          <View className="gap-md">
+            <Text className="text-sm font-body-bold text-ink-muted uppercase tracking-wider">
+              {t('profile.publicReplays', 'Replays publics')}
+            </Text>
+            {replays.data?.map(rep => (
+              <Pressable
+                key={rep.id}
+                onPress={goReplays}
+                accessibilityRole="button"
+                className="flex-row items-center gap-md p-md rounded-md bg-overlay-white-5"
+              >
+                <Text className="text-lg">▶️</Text>
+                <View className="flex-1">
+                  <Text className="text-md font-body-bold text-ink" numberOfLines={1}>
+                    {rep.roomTitle ?? t('profile.replay', 'Replay')}
+                  </Text>
+                  {rep.durationMs ? (
+                    <Text className="text-xs font-body text-ink-muted">
+                      {Math.max(1, Math.round(rep.durationMs / 60000))} min
                     </Text>
                   ) : null}
                 </View>

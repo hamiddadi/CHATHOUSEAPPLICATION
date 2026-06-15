@@ -24,4 +24,12 @@ export const recordingsController = {
     const data = await recordingsService.listForRoom(roomId);
     sendOk(res, data);
   },
+
+  async forHost(req: Request, res: Response) {
+    const raw = req.params['userId'];
+    const userId = Array.isArray(raw) ? raw[0] : raw;
+    if (!userId) throw new AppError('USER_001');
+    const data = await recordingsService.listForHost(userId);
+    sendOk(res, data);
+  },
 };
