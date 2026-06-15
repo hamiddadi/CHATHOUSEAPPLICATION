@@ -23,6 +23,8 @@ interface RawUser {
   createdAt?: string;
   // Inviter relation — only on the detail payload (GET /users/:id).
   invitedBy?: { id: string; username: string | null; displayName: string | null } | null;
+  // Live room the user is currently in (publicSelect), or null when idle.
+  currentRoomId?: string | null;
 }
 
 // Shape returned by GET /api/users/search and the follow list endpoints
@@ -100,6 +102,7 @@ const mapUser = (u: RawUser): User => ({
   // Follow table). GET /users/me omits it (you don't follow yourself) → the
   // ?? false default applies there, which is correct.
   isFollowedByMe: u.isFollowedByMe ?? false,
+  currentRoomId: u.currentRoomId ?? null,
 });
 
 const mapSummary = (u: RawSearchUser): User => ({

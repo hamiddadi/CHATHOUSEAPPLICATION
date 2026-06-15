@@ -138,7 +138,10 @@ export const roomsController = {
     // `clubs=true` restricts the feed to rooms attached to a club.
     const clubsQ = req.query['clubs'];
     const clubs = clubsQ === 'true' || clubsQ === '1';
-    const rows = await roomsService.feed(requireUserId(req), limit, undefined, {
+    // Offset paginates the ranked feed for infinite scroll (clamped to >= 0).
+    const offsetQ = req.query['offset'];
+    const offset = typeof offsetQ === 'string' ? Math.max(0, Number.parseInt(offsetQ, 10) || 0) : 0;
+    const rows = await roomsService.feed(requireUserId(req), limit, offset, {
       topic,
       following,
       clubs,

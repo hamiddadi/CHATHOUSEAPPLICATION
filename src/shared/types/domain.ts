@@ -27,6 +27,9 @@ export interface User {
   // Who invited this user (Clubhouse "Nominated by"). Only present on the
   // profile-detail payload; null when the account joined without a referral.
   invitedBy?: { username: string | null; displayName: string | null } | null;
+  // Id of the live room the user is currently in (backend publicSelect), or
+  // null. Drives the "Currently in a room" banner on their profile.
+  currentRoomId?: string | null;
 }
 
 export type UserSummary = Pick<User, 'id' | 'username' | 'displayName' | 'avatarUrl'>;
@@ -80,6 +83,10 @@ export type RoomSummary = Pick<
   participantCount?: number;
   scheduledFor?: string | null;
   isLive?: boolean;
+  // People the viewer follows who are speaking in this room (backend `feed`
+  // computes these). Drives the "friends inside" cue on the room card.
+  knownSpeakers?: UserSummary[];
+  hasKnownSpeakers?: boolean;
 };
 
 /* ============================================================

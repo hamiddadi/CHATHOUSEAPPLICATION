@@ -828,7 +828,7 @@ export const roomsService = {
   async feed(
     viewerId: string,
     limit = 20,
-    _cursor?: string,
+    offset = 0,
     filters: { topic?: string; following?: boolean; clubs?: boolean } = {},
   ) {
     const CANDIDATE_POOL = 200;
@@ -923,7 +923,9 @@ export const roomsService = {
       return b.room.createdAt.getTime() - a.room.createdAt.getTime();
     });
 
-    return scored.slice(0, limit).map(({ room, followSpeakerCount }) => ({
+    // Offset paginates the ranked pool (deterministic within a request): the
+    // FE feeds infinite-scroll by advancing offset by `limit` each page.
+    return scored.slice(offset, offset + limit).map(({ room, followSpeakerCount }) => ({
       ...room,
       // Surface the reason-for-ranking so the UI can label "Friends inside".
       knownSpeakers: room.participants

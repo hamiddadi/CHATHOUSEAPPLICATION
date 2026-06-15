@@ -1,7 +1,13 @@
 import { useCallback } from 'react';
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  keepPreviousData,
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query';
 import { env } from '../../../config/env';
-import { roomService, type CreateRoomInput } from '../services/roomService';
+import { roomService, FEED_PAGE_SIZE, type CreateRoomInput } from '../services/roomService';
 import type { Room, RoomSummary } from '../../../shared/types/domain';
 import { useCurrentRoomStore } from '../store/currentRoomStore';
 
@@ -29,13 +35,16 @@ export interface RoomsFilter {
 }
 
 export const useRooms = (filter: RoomsFilter = {}) =>
-  useQuery<RoomSummary[]>({
+  useInfiniteQuery({
     queryKey: [...roomKeys.list(), filter],
-    queryFn: () => roomService.list(filter),
+    queryFn: ({ pageParam }) => roomService.list(filter, pageParam),
+    initialPageParam: 0,
+    // A full page means the ranked pool may hold more → request the next slice
+    // at offset = pagesSoFar × pageSize. A short page ends the scroll.
+    getNextPageParam: (lastPage, allPages) =>
+      lastPage.length === FEED_PAGE_SIZE ? allPages.length * FEED_PAGE_SIZE : undefined,
     // Keep the previously-fetched feed on screen while a new filter loads so
-    // switching pills doesn't flash the skeleton. `isLoading` stays false on
-    // these transitions (data is defined), so the skeleton only shows on the
-    // genuine first load with an empty cache.
+    // switching pills doesn't flash the skeleton.
     placeholderData: keepPreviousData,
   });
 

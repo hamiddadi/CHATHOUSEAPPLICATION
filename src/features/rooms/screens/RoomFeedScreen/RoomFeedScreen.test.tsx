@@ -1,7 +1,7 @@
 /**
  * Render test for RoomFeedScreen.
  *
- * Mounts the feed, seeds the rooms-list query (key = [...roomKeys.list(), {}])
+ * Mounts the feed, seeds the rooms-list infinite query (key = [...roomKeys.list(), {}])
  * with one live room so the FlatList renders a RoomCard past the skeleton, then
  * exercises the header icons (each navigates), the FAB (CreateRoom), a filter
  * pill (local state, no crash) and the card's Join button (navigates to Room).
@@ -38,8 +38,11 @@ describe('RoomFeedScreen', () => {
   const mount = () =>
     renderScreen(<RoomFeedScreen />, {
       route: { name: 'RoomFeed' },
-      // Default filter is 'All' → params {} → key [...list(), {}].
-      seedQueryData: [{ key: [...roomKeys.list(), {}], data: [fakeRoom()] }],
+      // Default filter is 'All' → params {} → key [...list(), {}]. useRooms is an
+      // infinite query, so the cache holds a paged shape, not a flat array.
+      seedQueryData: [
+        { key: [...roomKeys.list(), {}], data: { pages: [[fakeRoom()]], pageParams: [0] } },
+      ],
     });
 
   it('mounts and renders the seeded room card + Live Now header', () => {

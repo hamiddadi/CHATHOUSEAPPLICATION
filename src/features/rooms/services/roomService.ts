@@ -87,8 +87,9 @@ interface RawRoom {
   hasKnownSpeakers?: boolean;
 }
 
-// Feed page size requested from GET /rooms/feed (backend caps at 50).
-const FEED_PAGE_SIZE = 30;
+// Feed page size requested from GET /rooms/feed (backend caps at 50). Exported
+// so the infinite-scroll hook can detect a full page (→ another page may exist).
+export const FEED_PAGE_SIZE = 30;
 // Avatar preview counts surfaced in a room summary card.
 const TOP_SPEAKERS_PREVIEW = 3;
 const TOP_LISTENERS_PREVIEW = 5;
@@ -198,6 +199,10 @@ const toSummary = (raw: RawRoom): RoomSummary => {
     isLive: raw.isLive,
     topSpeakers: speakers.slice(0, TOP_SPEAKERS_PREVIEW).map(p => toSummaryUser(p.user)),
     topListeners: listeners.slice(0, TOP_LISTENERS_PREVIEW).map(p => toSummaryUser(p.user)),
+    // Forward the backend's "followed speakers in this room" enrichment so the
+    // card can render a friends-inside cue (it previously dropped these).
+    knownSpeakers: (raw.knownSpeakers ?? []).map(toSummaryUser),
+    hasKnownSpeakers: raw.hasKnownSpeakers ?? (raw.knownSpeakers?.length ?? 0) > 0,
   };
 };
 
@@ -231,7 +236,7 @@ export interface RoomsListFilter {
 }
 
 export const roomService = {
-  async list(filter: RoomsListFilter = {}): Promise<RoomSummary[]> {
+  async list(filter: RoomsListFilter = {}, offset = 0): Promise<RoomSummary[]> {
     // The `upcoming`/`mine`/`live` list filters live on GET /rooms (the
     // personalised /rooms/feed only ranks live rooms). Route there when a
     // `filter` is requested so the "À venir" band can pull scheduled rooms.
@@ -248,6 +253,8 @@ export const roomService = {
     const res = await apiClient.get<Envelope<RawRoom[]>>('/rooms/feed', {
       params: {
         limit: FEED_PAGE_SIZE,
+        // Infinite scroll: advance the ranked feed by `offset` (page * size).
+        ...(offset > 0 ? { offset } : {}),
         ...(filter.topic ? { topic: filter.topic } : {}),
         ...(filter.following ? { following: 'true' } : {}),
         ...(filter.clubs ? { clubs: 'true' } : {}),

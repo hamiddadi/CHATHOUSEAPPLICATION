@@ -1,5 +1,13 @@
 import React, { memo, useCallback, useMemo, useState } from 'react';
-import { FlatList, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  FlatList,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import MaterialIcons from '@react-native-vector-icons/material-icons';
 import { useTranslation } from 'react-i18next';
 import { useNavigation } from '@react-navigation/native';
@@ -161,6 +169,15 @@ const RoomCard: React.FC<RoomCardProps> = memo(({ room, onJoin }) => {
               <Text className="text-xs font-body-medium text-ink-muted" numberOfLines={1}>
                 {t('feed.insideHouse', 'Inside {{houseName}}', { houseName: room.houseName })}
               </Text>
+            )}
+            {room.hasKnownSpeakers && (room.knownSpeakers?.length ?? 0) > 0 && (
+              <View className="bg-primary/15 px-sm py-xxs rounded-xs">
+                <Text className="text-xxs font-body-bold text-primary">
+                  {t('feed.friendsInside', '👋 {{count}} ami·e·s', {
+                    count: room.knownSpeakers?.length ?? 0,
+                  })}
+                </Text>
+              </View>
             )}
           </View>
           <Text className="text-xl font-display text-white leading-snug">{room.title}</Text>
@@ -349,7 +366,20 @@ export const RoomFeedScreen: React.FC = () => {
   const [activeFilter, setActiveFilter] = useState<Filter>('All');
   const fab = useAnimatedPress({ scaleTo: 0.9 });
   const filterParams = useMemo(() => filterToParams(activeFilter), [activeFilter]);
-  const { data: rooms, isLoading, isError, refetch, isRefetching } = useRooms(filterParams);
+  const {
+    data: feedPages,
+    isLoading,
+    isError,
+    refetch,
+    isRefetching,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useRooms(filterParams);
+  const rooms = useMemo(() => feedPages?.pages.flat() ?? [], [feedPages]);
+  const handleEndReached = useCallback(() => {
+    if (hasNextPage && !isFetchingNextPage) void fetchNextPage();
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
   // Scheduled rooms shown as a horizontal "Upcoming" band above Live Now.
   // Backend's `upcoming` filter already orders by scheduledFor ascending.
@@ -419,12 +449,21 @@ export const RoomFeedScreen: React.FC = () => {
         />
       ) : (
         <FlatList
-          data={rooms ?? []}
+          data={rooms}
           renderItem={renderItem}
           keyExtractor={keyExtractor}
           ItemSeparatorComponent={renderSeparator}
           refreshing={isRefetching}
           onRefresh={refetch}
+          onEndReached={handleEndReached}
+          onEndReachedThreshold={0.6}
+          ListFooterComponent={
+            isFetchingNextPage ? (
+              <View className="py-xl items-center">
+                <ActivityIndicator />
+              </View>
+            ) : null
+          }
           contentContainerStyle={[
             styles.listContent,
             { paddingBottom: insets.bottom + FAB_BOTTOM_OFFSET + spacing.giant },

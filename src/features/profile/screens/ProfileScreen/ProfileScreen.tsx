@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { Alert, ScrollView, Share, View } from 'react-native';
+import { Alert, Pressable, ScrollView, Share, Text, View } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Clipboard from '@react-native-clipboard/clipboard';
@@ -269,6 +269,21 @@ export const ProfileScreen: React.FC = () => {
               onWave={handleWave}
             />
           )}
+
+          {!isSelf && user.currentRoomId ? (
+            <Pressable
+              onPress={() => user.currentRoomId && goRoom(user.currentRoomId)}
+              accessibilityRole="button"
+              accessibilityLabel={t('profile.currentlyInRoomA11y', 'Rejoindre la room en cours')}
+              className="flex-row items-center gap-sm self-stretch bg-primary/15 rounded-md px-lg py-md"
+            >
+              <View className="w-2 h-2 rounded-pill bg-success" />
+              <Text className="text-sm font-body-medium text-primary flex-1">
+                {t('profile.currentlyInRoom', 'En direct dans une room — tape pour rejoindre')}
+              </Text>
+              <Text className="text-primary text-base">›</Text>
+            </Pressable>
+          ) : null}
         </View>
 
         {isSelf && (
