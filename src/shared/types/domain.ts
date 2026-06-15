@@ -7,6 +7,9 @@
 /* ============================================================
  * User
  * ========================================================== */
+/** #114: who may start a DM with a user. */
+export type DmPrivacy = 'everyone' | 'followers' | 'mutual' | 'nobody';
+
 export interface User {
   id: string;
   username: string;
@@ -30,6 +33,8 @@ export interface User {
   // Id of the live room the user is currently in (backend publicSelect), or
   // null. Drives the "Currently in a room" banner on their profile.
   currentRoomId?: string | null;
+  // Who may DM this user (#114). Only present on the `me` payload.
+  dmPrivacy?: DmPrivacy;
 }
 
 export type UserSummary = Pick<User, 'id' | 'username' | 'displayName' | 'avatarUrl'>;

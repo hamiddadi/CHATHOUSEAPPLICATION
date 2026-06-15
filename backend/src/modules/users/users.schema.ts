@@ -13,6 +13,8 @@ export const updateMeSchema = z
     // 50. Allow the empty string so the user can clear a handle from the form.
     twitter: z.string().max(50).optional(),
     instagram: z.string().max(50).optional(),
+    // #114: who may DM this user.
+    dmPrivacy: z.enum(['everyone', 'followers', 'mutual', 'nobody']).optional(),
   })
   .strict();
 

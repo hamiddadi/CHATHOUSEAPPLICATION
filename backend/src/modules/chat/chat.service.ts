@@ -19,19 +19,42 @@ const conversationPair = (a: string, b: string): [string, string] => (a < b ? [a
  * socket handler funnel through `chatService.send`), so there's no way
  * to bypass by skipping the API.
  */
-const assertMutualFollow = async (a: string, b: string): Promise<void> => {
+// #114: honour the RECIPIENT's DM privacy. 'everyone' opens DMs to anyone;
+// 'followers' lets people who follow the recipient message them; 'mutual'
+// (default) keeps the close-friends rule (both follow each other); 'nobody'
+// closes DMs entirely. All paths funnel through chatService.send, so the gate
+// can't be bypassed.
+const assertCanMessage = async (senderId: string, recipientId: string): Promise<void> => {
+  const recipient = await prisma.user.findUnique({
+    where: { id: recipientId },
+    select: { dmPrivacy: true },
+  });
+  const privacy = recipient?.dmPrivacy ?? 'mutual';
+  if (privacy === 'nobody') throw new AppError('CHAT_004');
+  if (privacy === 'everyone') return;
+
   const rows = await prisma.follow.findMany({
     where: {
       OR: [
-        { followerId: a, followingId: b },
-        { followerId: b, followingId: a },
+        { followerId: senderId, followingId: recipientId },
+        { followerId: recipientId, followingId: senderId },
       ],
     },
     select: { followerId: true, followingId: true },
   });
-  const aFollowsB = rows.some(r => r.followerId === a && r.followingId === b);
-  const bFollowsA = rows.some(r => r.followerId === b && r.followingId === a);
-  if (!(aFollowsB && bFollowsA)) throw new AppError('CHAT_004');
+  const senderFollowsRecipient = rows.some(
+    r => r.followerId === senderId && r.followingId === recipientId,
+  );
+  const recipientFollowsSender = rows.some(
+    r => r.followerId === recipientId && r.followingId === senderId,
+  );
+
+  if (privacy === 'followers') {
+    if (!senderFollowsRecipient) throw new AppError('CHAT_004');
+    return;
+  }
+  // 'mutual' (default): both must follow each other.
+  if (!(senderFollowsRecipient && recipientFollowsSender)) throw new AppError('CHAT_004');
 };
 
 export const chatService = {
@@ -180,7 +203,7 @@ export const chatService = {
     });
     if (!peer) throw new AppError('USER_001');
 
-    await assertMutualFollow(senderId, receiverId);
+    await assertCanMessage(senderId, receiverId);
 
     const sender = await prisma.user.findUnique({
       where: { id: senderId },
@@ -230,7 +253,7 @@ export const chatService = {
     });
     if (!peer) throw new AppError('USER_001');
 
-    await assertMutualFollow(senderId, receiverId);
+    await assertCanMessage(senderId, receiverId);
 
     const sender = await prisma.user.findUnique({
       where: { id: senderId },

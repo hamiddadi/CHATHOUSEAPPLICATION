@@ -39,6 +39,7 @@ const meSelect = {
   isVisible: true,
   allowWaves: true,
   isPrivateAccount: true,
+  dmPrivacy: true,
   latitude: true,
   longitude: true,
   lastSeenAt: true,

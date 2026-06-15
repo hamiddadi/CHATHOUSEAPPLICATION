@@ -23,6 +23,14 @@ import { mediaService } from '../../../../shared/services/api/mediaService';
 import { errorMessage } from '../../../../shared/utils/errorMessage';
 import { usernameFormSchema } from '../../../auth/schemas';
 import { useMe, useUpdateProfile } from '../../hooks/useProfile';
+import type { DmPrivacy } from '../../../../shared/types/domain';
+
+const DM_PRIVACY_LABELS: Record<DmPrivacy, string> = {
+  everyone: 'Tout le monde',
+  followers: 'Mes abonnés',
+  mutual: 'Amis (abonnement mutuel)',
+  nobody: 'Personne',
+};
 
 const DISPLAY_NAME_MAX = 40;
 const NAME_MAX = 50;
@@ -44,6 +52,7 @@ export const EditProfileScreen: React.FC = () => {
   const [bio, setBio] = useState('');
   const [twitter, setTwitter] = useState('');
   const [instagram, setInstagram] = useState('');
+  const [dmPrivacy, setDmPrivacy] = useState<DmPrivacy>('mutual');
   // `avatarUri` is the local preview (file://). `avatarBase64`/`avatarMime`
   // hold the freshly-picked image so we can upload it on save and swap the
   // local URI for the remote https URL the backend returns.
@@ -61,8 +70,19 @@ export const EditProfileScreen: React.FC = () => {
       setBio(me.bio ?? '');
       setTwitter(me.twitter ?? '');
       setInstagram(me.instagram ?? '');
+      setDmPrivacy(me.dmPrivacy ?? 'mutual');
     }
   }, [me]);
+
+  const handleDmPrivacy = useCallback(() => {
+    Alert.alert(t('profile.edit.dmPrivacy', "Qui peut m'écrire ?"), undefined, [
+      ...(['everyone', 'followers', 'mutual', 'nobody'] as DmPrivacy[]).map(v => ({
+        text: DM_PRIVACY_LABELS[v],
+        onPress: () => setDmPrivacy(v),
+      })),
+      { text: t('common.cancel', 'Annuler'), style: 'cancel' as const },
+    ]);
+  }, [t]);
 
   const handlePickImage = async () => {
     const result = await launchImageLibrary({
@@ -105,6 +125,7 @@ export const EditProfileScreen: React.FC = () => {
         avatarUrl,
         twitter,
         instagram,
+        dmPrivacy,
       });
       notifySuccess();
       navigation.goBack();
@@ -128,6 +149,7 @@ export const EditProfileScreen: React.FC = () => {
     lastName,
     twitter,
     instagram,
+    dmPrivacy,
     navigation,
     updateProfile,
     username,
@@ -277,6 +299,23 @@ export const EditProfileScreen: React.FC = () => {
           maxLength={HANDLE_MAX}
           leftAdornment={<Text className="text-md text-ink-muted">@</Text>}
         />
+
+        <Pressable
+          onPress={handleDmPrivacy}
+          accessibilityRole="button"
+          accessibilityLabel={t('profile.edit.dmPrivacy', "Qui peut m'écrire ?")}
+          className="mt-md flex-row items-center justify-between p-md rounded-md bg-overlay-white-5"
+        >
+          <View className="flex-1">
+            <Text className="text-xs font-body text-ink-muted">
+              {t('profile.edit.dmPrivacy', "Qui peut m'écrire ?")}
+            </Text>
+            <Text className="text-md font-body-medium text-ink">
+              {DM_PRIVACY_LABELS[dmPrivacy]}
+            </Text>
+          </View>
+          <Text className="text-ink-muted text-base">›</Text>
+        </Pressable>
 
         <View className="mt-xl">
           <Button

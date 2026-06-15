@@ -133,6 +133,9 @@ model User {
   isVisible    Boolean   @default(false) // Ghost Mode ON by default → user must opt-in to map visibility (privacy-safe)
   allowWaves   Boolean   @default(true)
   isPrivateAccount Boolean @default(false)
+  // #114: who may start a DM with this user — 'everyone' | 'followers' |
+  // 'mutual' (default, close-friends) | 'nobody'. Enforced in chatService.send.
+  dmPrivacy    String    @default("mutual") @db.VarChar(16)
   latitude     Float?
   longitude    Float?
   lastSeenAt   DateTime?

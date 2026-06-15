@@ -1,6 +1,6 @@
 import { apiClient } from '../../../shared/services/api/apiClient';
 import type { Envelope } from '../../../shared/types/api';
-import type { User } from '../../../shared/types/domain';
+import type { DmPrivacy, User } from '../../../shared/types/domain';
 
 // Shape returned by GET /api/users/me, PATCH /api/users/me and
 // GET /api/users/:id. The two backend selects (`meSelect`/`publicSelect`)
@@ -25,6 +25,8 @@ interface RawUser {
   invitedBy?: { id: string; username: string | null; displayName: string | null } | null;
   // Live room the user is currently in (publicSelect), or null when idle.
   currentRoomId?: string | null;
+  // DM privacy (#114) — only on the `me` payload (meSelect).
+  dmPrivacy?: 'everyone' | 'followers' | 'mutual' | 'nobody';
 }
 
 // Shape returned by GET /api/users/search and the follow list endpoints
@@ -103,6 +105,7 @@ const mapUser = (u: RawUser): User => ({
   // ?? false default applies there, which is correct.
   isFollowedByMe: u.isFollowedByMe ?? false,
   currentRoomId: u.currentRoomId ?? null,
+  dmPrivacy: u.dmPrivacy,
 });
 
 const mapSummary = (u: RawSearchUser): User => ({
@@ -127,6 +130,7 @@ export interface UpdateProfileInput {
   avatarUrl?: string | null;
   twitter?: string;
   instagram?: string;
+  dmPrivacy?: DmPrivacy;
 }
 
 export const profileService = {
@@ -154,7 +158,9 @@ export const profileService = {
       avatarUrl?: string;
       twitter?: string;
       instagram?: string;
+      dmPrivacy?: DmPrivacy;
     } = {};
+    if (input.dmPrivacy !== undefined) body.dmPrivacy = input.dmPrivacy;
     if (input.displayName !== undefined) body.displayName = input.displayName.trim();
     if (input.firstName !== undefined) body.firstName = input.firstName.trim();
     if (input.lastName !== undefined) body.lastName = input.lastName.trim();
