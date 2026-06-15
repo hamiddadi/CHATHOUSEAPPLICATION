@@ -76,6 +76,10 @@ export const roomsController = {
     // Release SFU state too so a subsequent /rooms/:id/join on a reused id
     // doesn't inherit the old router.
     await closeSfuRoom(roomId);
+    // Destroy the LiveKit room server-side so every participant is
+    // force-disconnected from the audio bus (their tokens are still valid
+    // otherwise). Best-effort — no-op when LiveKit isn't configured.
+    void livekitService.deleteRoom(roomId);
     sendOk(res, result);
   },
 
@@ -187,6 +191,10 @@ export const roomsController = {
     // `close` handler fans out `rtc:producer-closed` so consumers clean up.
     // Idempotent: a no-op (returns 0) if RTC wasn't in use for this user.
     closeProducersForUserInRoom(roomId, input.userId);
+    // Force-disconnect the kicked user from the LiveKit audio bus too —
+    // otherwise their still-valid token keeps them streaming until it expires.
+    // Best-effort — no-op when LiveKit isn't configured.
+    void livekitService.removeParticipant(roomId, input.userId);
     sendOk(res, result);
   },
 

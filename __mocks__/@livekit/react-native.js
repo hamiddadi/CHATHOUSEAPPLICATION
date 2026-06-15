@@ -51,4 +51,8 @@ module.exports = {
     stopAudioSession: jest.fn(async () => undefined),
     configureAudio: jest.fn(async () => undefined),
   },
+  AndroidAudioTypePresets: {
+    communication: {},
+    media: {},
+  },
 };

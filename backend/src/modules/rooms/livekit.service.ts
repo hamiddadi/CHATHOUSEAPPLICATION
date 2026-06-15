@@ -1,5 +1,6 @@
-import { AccessToken } from 'livekit-server-sdk';
+import { AccessToken, RoomServiceClient } from 'livekit-server-sdk';
 import { env } from '../../config/env';
+import { logger } from '../../config/logger';
 import { AppError } from '../../middlewares/error.middleware';
 
 /**
@@ -23,6 +24,24 @@ export type LivekitParticipantRole = 'HOST' | 'MODERATOR' | 'SPEAKER' | 'LISTENE
 
 const isLivekitConfigured = (): boolean =>
   Boolean(env.LIVEKIT_API_KEY && env.LIVEKIT_API_SECRET && env.LIVEKIT_URL);
+
+// EgressClient/RoomServiceClient want the HTTP(S) host; LIVEKIT_URL is ws(s)://.
+const httpHost = (wsUrl: string): string => wsUrl.replace(/^ws/i, 'http');
+
+// Lazily-built admin client for server-side room moderation (kick / close).
+// Reused across calls; null until LiveKit is configured.
+let roomServiceRef: RoomServiceClient | null = null;
+const roomServiceClient = (): RoomServiceClient | null => {
+  if (!isLivekitConfigured()) return null;
+  if (!roomServiceRef) {
+    roomServiceRef = new RoomServiceClient(
+      httpHost(env.LIVEKIT_URL as string),
+      env.LIVEKIT_API_KEY as string,
+      env.LIVEKIT_API_SECRET as string,
+    );
+  }
+  return roomServiceRef;
+};
 
 export const livekitService = {
   isConfigured: isLivekitConfigured,
@@ -91,5 +110,44 @@ export const livekitService = {
       expiresAt: new Date(expiresAtSec * 1000).toISOString(),
       expiresInSec: ttl,
     };
+  },
+
+  /**
+   * Force-disconnect a participant from the LiveKit room (server-side kick).
+   * Without this, a kicked client's still-valid token lets it keep streaming
+   * audio until the token expires. Best-effort: no-op when LiveKit isn't
+   * configured, and swallows "participant not found" (they may never have
+   * connected to the audio bus). identity === userId by our token convention.
+   */
+  async removeParticipant(roomId: string, userId: string): Promise<void> {
+    const client = roomServiceClient();
+    if (!client) return;
+    try {
+      await client.removeParticipant(roomId, userId);
+    } catch (err) {
+      logger.warn('livekit removeParticipant failed', {
+        roomId,
+        userId,
+        err: err instanceof Error ? err.message : err,
+      });
+    }
+  },
+
+  /**
+   * Delete the LiveKit room server-side (force-disconnects everyone). Called
+   * when a host ends the room so a reused roomId can't inherit stale audio
+   * state. Best-effort; no-op when LiveKit isn't configured.
+   */
+  async deleteRoom(roomId: string): Promise<void> {
+    const client = roomServiceClient();
+    if (!client) return;
+    try {
+      await client.deleteRoom(roomId);
+    } catch (err) {
+      logger.warn('livekit deleteRoom failed', {
+        roomId,
+        err: err instanceof Error ? err.message : err,
+      });
+    }
   },
 };

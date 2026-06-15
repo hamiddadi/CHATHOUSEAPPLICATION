@@ -12,6 +12,7 @@ import com.facebook.react.common.ReleaseLevel
 import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint
 import com.facebook.react.defaults.DefaultReactHost.getDefaultReactHost
 import com.facebook.react.defaults.DefaultReactNativeHost
+import com.chathouse.audio.RoomForegroundPackage
 
 class MainApplication : Application(), ReactApplication {
 
@@ -19,7 +20,9 @@ class MainApplication : Application(), ReactApplication {
     object : DefaultReactNativeHost(this) {
       override fun getPackages(): List<ReactPackage> =
         // Packages that cannot be autolinked yet can be added manually here.
-        PackageList(this).packages
+        // RoomForegroundPackage bridges the audio-room foreground service so
+        // JS can keep live audio alive when the app is backgrounded.
+        PackageList(this).packages.apply { add(RoomForegroundPackage()) }
 
       override fun getJSMainModuleName(): String = "index"
 

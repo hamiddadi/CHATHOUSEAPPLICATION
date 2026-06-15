@@ -30,9 +30,12 @@ import {
   getLiveKitEvents,
   mapLiveKitConnectionState,
   setLiveKitMuted,
+  startLiveKitAudioSession,
+  stopLiveKitAudioSession,
   type LiveKitRoom,
   type LiveKitParticipant,
 } from './livekit/LiveKitEngine';
+import { startRoomForeground, stopRoomForeground } from './foregroundAudio';
 
 // Re-exported for `useRoomAudio` to detect the "missing native module" path.
 export const SKELETON_SENTINEL = LIVEKIT_UNAVAILABLE_SENTINEL;
@@ -127,6 +130,11 @@ export const startRoomAudio = async ({
   } catch (e) {
     throw e;
   }
+
+  // Configure + start the native audio session BEFORE connecting, so Android
+  // sets the in-communication audio mode and routes capture/playback to the
+  // speaker. Without this the mic captures but no audio is audible.
+  await startLiveKitAudioSession();
 
   const events = getLiveKitEvents();
 
@@ -406,6 +414,10 @@ export const startRoomAudio = async ({
     await setLiveKitMuted(room, isMuted);
   }
 
+  // Now that audio is flowing, promote the Android foreground service so the
+  // OS keeps the process (and the room) alive when backgrounded. Best-effort.
+  void startRoomForeground();
+
   // Register existing remote participants
   for (const [, participant] of room.remoteParticipants) {
     emitJoin(participant.identity);
@@ -434,6 +446,10 @@ export const startRoomAudio = async ({
       room.off(events.Reconnected, handleReconnected);
       disconnectLiveKitRoom(room);
       peers.clear();
+      // Tear down the foreground service + native audio session so we release
+      // audio focus and stop the ongoing notification once we leave the room.
+      void stopRoomForeground();
+      void stopLiveKitAudioSession();
     },
     setMuted: async (muted: boolean) => {
       await setLiveKitMuted(room, muted);

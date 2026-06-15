@@ -33,6 +33,24 @@ interface LiveKitSdk {
     Reconnecting: string;
   };
   registerGlobals: () => void;
+  // Native audio session manager. MUST be configured + started before
+  // connecting a Room or Android won't route mic/speaker correctly (audio
+  // focus, communication mode, Bluetooth). See AudioSession.d.ts.
+  AudioSession: {
+    configureAudio: (config: LiveKitAudioConfig) => Promise<void>;
+    startAudioSession: () => Promise<void>;
+    stopAudioSession: () => Promise<void>;
+  };
+  AndroidAudioTypePresets: { communication: unknown; media: unknown };
+}
+
+/** Minimal shape of `@livekit/react-native`'s AudioConfiguration we use. */
+interface LiveKitAudioConfig {
+  android?: {
+    preferredOutputList?: ('speaker' | 'earpiece' | 'headset' | 'bluetooth')[];
+    audioTypeOptions: unknown;
+  };
+  ios?: { defaultOutput?: 'speaker' | 'earpiece' };
 }
 
 export interface LiveKitRoom {
@@ -188,6 +206,56 @@ export const isLiveKitAvailable = (): boolean => {
   } catch {
     return false;
   }
+};
+
+// AudioSession is a process-global native singleton, so we ref-guard it with
+// a module-level flag: started once when the first room connects, stopped when
+// the last room closes. With one active room at a time this is exact.
+let audioSessionStarted = false;
+
+/**
+ * Configure + start the native LiveKit AudioSession. Idempotent. MUST run
+ * before `room.connect()` so Android sets the communication audio mode and
+ * routes to the speaker (otherwise the mic captures but nothing is audible).
+ * No-op when the native module is absent (Expo Go).
+ */
+export const startLiveKitAudioSession = async (): Promise<void> => {
+  if (audioSessionStarted) return;
+  let s: LiveKitSdk;
+  try {
+    s = ensureSdk();
+  } catch {
+    return; // native module unavailable — handled by the caller's sentinel
+  }
+  try {
+    await s.AudioSession.configureAudio({
+      android: {
+        // Prefer the loudspeaker for a Clubhouse-style room; the OS still
+        // overrides to a wired headset / Bluetooth when one is connected.
+        preferredOutputList: ['speaker'],
+        audioTypeOptions: s.AndroidAudioTypePresets.communication,
+      },
+      ios: { defaultOutput: 'speaker' },
+    });
+    await s.AudioSession.startAudioSession();
+    audioSessionStarted = true;
+  } catch {
+    /* noop — leave audioSessionStarted false so a later attempt can retry */
+  }
+};
+
+/**
+ * Stop the native AudioSession, releasing audio focus back to the system.
+ * Called when the last room closes.
+ */
+export const stopLiveKitAudioSession = async (): Promise<void> => {
+  if (!sdk || !audioSessionStarted) return;
+  try {
+    await sdk.AudioSession.stopAudioSession();
+  } catch {
+    /* noop */
+  }
+  audioSessionStarted = false;
 };
 
 /**
