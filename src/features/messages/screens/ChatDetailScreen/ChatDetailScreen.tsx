@@ -24,6 +24,7 @@ import {
   useSendMessage,
   useSendVoiceMessage,
   useMarkConversationRead,
+  useDeleteMessage,
 } from '../../hooks/useMessages';
 import { useTypingIndicator } from '../../hooks/useTypingIndicator';
 import { useVoiceMessage } from '../../hooks/useVoiceMessage';
@@ -129,6 +130,7 @@ export const ChatDetailScreen: React.FC = () => {
   const sendMessage = useSendMessage();
   const sendVoice = useSendVoiceMessage();
   const markRead = useMarkConversationRead();
+  const deleteMessage = useDeleteMessage();
   const { isPeerTyping, notifyTyping } = useTypingIndicator(peerId);
 
   // Voice notes: record → upload → send, then pin the thread to the bottom.
@@ -220,6 +222,31 @@ export const ChatDetailScreen: React.FC = () => {
   const yesterdayLabel = t('chat.dateYesterday');
   const language = i18n.language;
 
+  // Long-press your own message → confirm → DELETE /chat/messages/:id and prune
+  // it from the thread cache. Sender-only on the backend, so we guard on isMine.
+  const handleDeleteMessage = useCallback(
+    (message: Message) => {
+      if (!message.isMine) return;
+      Alert.alert(
+        t('chat.deleteTitle', 'Supprimer le message'),
+        t('chat.deleteBody', 'Ce message sera supprimé définitivement.'),
+        [
+          { text: t('common.cancel', 'Annuler'), style: 'cancel' },
+          {
+            text: t('common.delete', 'Supprimer'),
+            style: 'destructive',
+            onPress: () =>
+              deleteMessage.mutate(
+                { messageId: message.id, conversationId: peerId },
+                { onError: reportApiError },
+              ),
+          },
+        ],
+      );
+    },
+    [deleteMessage, peerId, reportApiError, t],
+  );
+
   const renderItem = useCallback(
     ({ item }: { item: ChatListItem }) => {
       if (item.kind === 'date' && item.date) {
@@ -233,12 +260,13 @@ export const ChatDetailScreen: React.FC = () => {
             message={item.message}
             otherAvatar={otherAvatar}
             showAvatar={item.showAvatar ?? true}
+            onLongPress={handleDeleteMessage}
           />
         );
       }
       return null;
     },
-    [language, otherAvatar, todayLabel, yesterdayLabel],
+    [language, otherAvatar, todayLabel, yesterdayLabel, handleDeleteMessage],
   );
 
   const keyExtractor = useCallback((item: ChatListItem) => item.id, []);

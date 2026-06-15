@@ -1,5 +1,5 @@
 import React, { memo } from 'react';
-import { Image, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import MaterialIcons from '@react-native-vector-icons/material-icons';
 import { GradientView } from '../../../../../shared/components/GradientView';
 import { colors, spacing } from '../../../../../shared/constants/theme';
@@ -26,28 +26,37 @@ interface BubbleProps {
   message: Message;
   otherAvatar: string | null;
   showAvatar: boolean;
+  /** Long-press handler — only wired on your own messages (sender-only delete). */
+  onLongPress?: (message: Message) => void;
 }
 
-const Bubble: React.FC<BubbleProps> = memo(({ message, otherAvatar, showAvatar }) => {
+const Bubble: React.FC<BubbleProps> = memo(({ message, otherAvatar, showAvatar, onLongPress }) => {
   if (message.isMine) {
     return (
       <View style={styles.sentRow}>
-        <GradientView
-          colors={SENT_GRADIENT}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.sentBubble}
+        <Pressable
+          onLongPress={onLongPress ? () => onLongPress(message) : undefined}
+          delayLongPress={350}
+          accessibilityRole="button"
+          accessibilityHint="Maintenir pour supprimer le message"
         >
-          {message.kind === 'voice' && message.audioUrl ? (
-            <VoiceMessageBubble
-              audioUrl={message.audioUrl}
-              durationMs={message.durationMs}
-              isMine
-            />
-          ) : (
-            <Text className="text-sm font-body text-white leading-relaxed">{message.text}</Text>
-          )}
-        </GradientView>
+          <GradientView
+            colors={SENT_GRADIENT}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.sentBubble}
+          >
+            {message.kind === 'voice' && message.audioUrl ? (
+              <VoiceMessageBubble
+                audioUrl={message.audioUrl}
+                durationMs={message.durationMs}
+                isMine
+              />
+            ) : (
+              <Text className="text-sm font-body text-white leading-relaxed">{message.text}</Text>
+            )}
+          </GradientView>
+        </Pressable>
         <View style={styles.metaRowRight}>
           <Text className="text-[10px] text-ink-muted">{formatTime(message.sentAt)}</Text>
           <MaterialIcons name="done-all" size={12} color={colors.primary} />

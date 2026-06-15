@@ -51,6 +51,23 @@ export const useSendMessage = () => {
   });
 };
 
+export const useDeleteMessage = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    // Backend allows sender-only deletion (DELETE /chat/messages/:id). We pass
+    // the conversationId alongside so the optimistic cache prune targets the
+    // right thread without an extra lookup.
+    mutationFn: ({ messageId }: { messageId: string; conversationId: string }) =>
+      messageService.remove(messageId),
+    onSuccess: (_res, { messageId, conversationId }) => {
+      qc.setQueryData<Message[]>(messageKeys.messages(conversationId), prev =>
+        prev ? prev.filter(m => m.id !== messageId) : prev,
+      );
+      void qc.invalidateQueries({ queryKey: messageKeys.conversations() });
+    },
+  });
+};
+
 export const useSendVoiceMessage = () => {
   const qc = useQueryClient();
   return useMutation({

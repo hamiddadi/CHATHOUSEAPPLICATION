@@ -74,6 +74,17 @@ export const useJoinHouse = () => {
   });
 };
 
+export const useLeaveHouse = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (houseId: string) => houseService.leave(houseId),
+    onSuccess: (_result, houseId) => {
+      void qc.invalidateQueries({ queryKey: houseKeys.detail(houseId) });
+      void qc.invalidateQueries({ queryKey: houseKeys.all });
+    },
+  });
+};
+
 export const useInviteToHouse = () =>
   useMutation({
     mutationFn: ({ houseId, userIds }: { houseId: string; userIds: readonly string[] }) =>

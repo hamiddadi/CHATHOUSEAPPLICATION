@@ -104,6 +104,13 @@ export const houseService = {
     return res.data.data;
   },
 
+  async leave(houseId: string): Promise<{ left: true }> {
+    // Backend rejects the owner with CLUB_005 (they must delete the house
+    // instead) — callers should hide the action for the owner.
+    const res = await apiClient.post<Envelope<{ left: true }>>(`/clubs/${houseId}/leave`);
+    return res.data.data;
+  },
+
   async invite(houseId: string, userIds: readonly string[]): Promise<{ sent: number }> {
     const res = await apiClient.post<Envelope<{ sent: number }>>(`/clubs/${houseId}/invite`, {
       userIds,

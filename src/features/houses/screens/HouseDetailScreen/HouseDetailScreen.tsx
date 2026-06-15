@@ -22,6 +22,7 @@ import {
   useHouse,
   useHouseRooms,
   useJoinHouse,
+  useLeaveHouse,
   useSetMemberRole,
 } from '../../hooks/useHouses';
 
@@ -45,9 +46,12 @@ export const HouseDetailScreen: React.FC = () => {
   const { data: upcomingRooms } = useHouseRooms(houseId, 'upcoming');
   const setMemberRole = useSetMemberRole();
   const joinHouse = useJoinHouse();
+  const leaveHouse = useLeaveHouse();
   const queryClient = useQueryClient();
 
   const viewerId = useAuthStore(s => s.user?.id ?? null);
+  // The owner can't leave (backend CLUB_005) — they delete the house instead.
+  const viewerIsOwner = !!viewerId && house?.ownerId === viewerId;
 
   // The viewer can manage roles when they are an admin of this house. (The
   // owner is always materialised as an ADMIN member server-side.)
@@ -126,9 +130,33 @@ export const HouseDetailScreen: React.FC = () => {
     });
   }, [houseId, joinHouse]);
 
+  const handleLeave = useCallback(() => {
+    Alert.alert(
+      t('house.leaveTitle', 'Quitter la house'),
+      t('house.leaveBody', 'Vous ne recevrez plus ses rooms et events.'),
+      [
+        { text: t('common.cancel', 'Annuler'), style: 'cancel' },
+        {
+          text: t('house.leaveConfirm', 'Quitter'),
+          style: 'destructive',
+          onPress: () =>
+            leaveHouse.mutate(houseId, {
+              onSuccess: () => navigation.goBack(),
+              onError: e =>
+                Alert.alert('Erreur', errorMessage(e, 'Impossible de quitter cette house.')),
+            }),
+        },
+      ],
+    );
+  }, [houseId, leaveHouse, navigation, t]);
+
   const handleOptions = useCallback(() => {
     const shareUrl = `https://app.chathouse.com/h/${houseId}`;
-    Alert.alert('Options de la house', undefined, [
+    const buttons: {
+      text: string;
+      style?: 'cancel' | 'destructive';
+      onPress?: () => void;
+    }[] = [
       {
         text: 'Partager la house',
         onPress: () => {
@@ -139,13 +167,19 @@ export const HouseDetailScreen: React.FC = () => {
           }).catch(() => undefined);
         },
       },
-      {
-        text: 'Inviter des membres',
-        onPress: handleInvite,
-      },
-      { text: 'Annuler', style: 'cancel' },
-    ]);
-  }, [handleInvite, houseId]);
+      { text: 'Inviter des membres', onPress: handleInvite },
+    ];
+    // A member who isn't the owner can leave (the owner deletes instead).
+    if (house?.isJoinedByMe && !viewerIsOwner) {
+      buttons.push({
+        text: t('house.leave', 'Quitter la house'),
+        style: 'destructive',
+        onPress: handleLeave,
+      });
+    }
+    buttons.push({ text: 'Annuler', style: 'cancel' });
+    Alert.alert('Options de la house', undefined, buttons);
+  }, [handleInvite, houseId, house?.isJoinedByMe, viewerIsOwner, handleLeave, t]);
 
   const applyRole = useCallback(
     (userId: string, role: HouseMemberRole) => {
