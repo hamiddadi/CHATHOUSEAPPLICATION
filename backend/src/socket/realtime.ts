@@ -150,7 +150,12 @@ export const emitUserFollowerCount = (userId: string, count: number): void => {
 
 export const emitRoomMetaUpdated = (
   roomId: string,
-  patch: { title?: string; chatEnabled?: boolean; chatVisibility?: 'ALL' | 'MODS_ONLY' },
+  patch: {
+    title?: string;
+    chatEnabled?: boolean;
+    chatVisibility?: 'ALL' | 'MODS_ONLY';
+    isLocked?: boolean;
+  },
 ): void => {
   ioRef?.to(roomChannel(roomId)).emit('room:meta_updated', { roomId, ...patch });
 };

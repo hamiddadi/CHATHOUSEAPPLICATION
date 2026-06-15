@@ -54,6 +54,7 @@ roomsRouter.post('/:id/kick', asyncHandler(roomsController.kick));
 // Live room metadata edits (host/mod only)
 roomsRouter.patch('/:id/title', asyncHandler(roomsController.updateTitle));
 roomsRouter.patch('/:id/chat', asyncHandler(roomsController.toggleChat));
+roomsRouter.patch('/:id/lock', asyncHandler(roomsController.setLock));
 roomsRouter.post('/:id/mute-all', asyncHandler(roomsController.muteAll));
 
 // Invitations & pings — bulk add to room or notify a friend to join.

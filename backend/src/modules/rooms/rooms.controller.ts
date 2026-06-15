@@ -17,6 +17,7 @@ import {
   muteSchema,
   sendReactionSchema,
   sendRoomMessageSchema,
+  setRoomLockSchema,
   toggleRoomChatSchema,
   updateRoleSchema,
   updateRoomTitleSchema,
@@ -215,6 +216,12 @@ export const roomsController = {
   async toggleChat(req: Request, res: Response) {
     const input = toggleRoomChatSchema.parse(req.body);
     const result = await roomsService.toggleChat(paramId(req, 'id'), requireUserId(req), input);
+    sendOk(res, result);
+  },
+
+  async setLock(req: Request, res: Response) {
+    const input = setRoomLockSchema.parse(req.body);
+    const result = await roomsService.setLock(paramId(req, 'id'), requireUserId(req), input.locked);
     sendOk(res, result);
   },
 

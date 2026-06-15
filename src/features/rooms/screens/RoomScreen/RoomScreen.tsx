@@ -674,6 +674,18 @@ export const RoomScreen: React.FC = () => {
                     listeners: room.listenersCount,
                   })}
                 </Text>
+                {room.totalAttendees && room.totalAttendees > 0 ? (
+                  <Text className="text-[10px] text-ink-dim">
+                    {t('room.totalAttendees', '· {{count}} au total', {
+                      count: room.totalAttendees,
+                    })}
+                  </Text>
+                ) : null}
+                {room.isLocked ? (
+                  <View className="flex-row items-center gap-xxs">
+                    <Text className="text-[10px] text-ink-dim">🔒</Text>
+                  </View>
+                ) : null}
               </View>
             </View>
 
@@ -771,6 +783,7 @@ export const RoomScreen: React.FC = () => {
         roomId={room.id}
         chatEnabled={room.chatEnabled}
         chatVisibility={room.chatVisibility}
+        isLocked={room.isLocked ?? false}
         onClose={() => setControlsOpen(false)}
         onEditTitle={() => setTitleEditOpen(true)}
         onInvite={() => navigation.navigate('InviteToRoom', { roomId: room.id })}

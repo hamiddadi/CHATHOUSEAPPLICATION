@@ -349,6 +349,13 @@ export const roomsService = {
       if (!f) throw new AppError('ROOM_007');
     }
 
+    // #34: a locked room blocks NEW entries — the host and already-admitted
+    // participants (incl. mods, who are participants) still pass; everyone else
+    // is turned away without ending the room.
+    if (room.isLocked && room.hostId !== userId && !existing) {
+      throw new AppError('ROOM_010');
+    }
+
     // Active ban check — a moderator-issued kick installs a RoomBan row;
     // expired bans are silently ignored so users can return after the
     // sanction window.
@@ -370,6 +377,9 @@ export const roomsService = {
     });
     if (!fresh || fresh.endedAt) throw new AppError('ROOM_004');
 
+    // #33: a brand-new Participant row means a distinct first-time attendee;
+    // a re-join (un-leave) doesn't count again.
+    const isNewParticipant = !existing;
     let wasAlreadyActive = false;
     if (existing) {
       if (existing.leftAt) {
@@ -395,7 +405,11 @@ export const roomsService = {
         prisma.user.update({ where: { id: userId }, data: { currentRoomId: roomId } }),
         prisma.room.update({
           where: { id: roomId },
-          data: { participantCount: { increment: 1 } },
+          data: {
+            participantCount: { increment: 1 },
+            // #33: only bump the cumulative counter for a first-time join.
+            ...(isNewParticipant ? { totalAttendees: { increment: 1 } } : {}),
+          },
           select: { participantCount: true },
         }),
       ]);
@@ -1217,6 +1231,15 @@ export const roomsService = {
       emitHallwayRoomUpdated(roomId, { title: updated.title });
     }
     return { title: updated.title };
+  },
+
+  // #34: lock/unlock the room. Host/mod only. Broadcast so every client can
+  // reflect the locked badge; the join guard enforces it server-side.
+  async setLock(roomId: string, callerUserId: string, locked: boolean) {
+    await requireHostOrMod(roomId, callerUserId);
+    await prisma.room.update({ where: { id: roomId }, data: { isLocked: locked } });
+    emitRoomMetaUpdated(roomId, { isLocked: locked });
+    return { isLocked: locked };
   },
 
   async toggleChat(roomId: string, callerUserId: string, input: ToggleRoomChatInput) {

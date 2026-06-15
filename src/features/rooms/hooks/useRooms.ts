@@ -243,6 +243,17 @@ export const useToggleRoomChat = () => {
   });
 };
 
+export const useLockRoom = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ roomId, locked }: { roomId: string; locked: boolean }) =>
+      roomService.setLock(roomId, locked),
+    onSuccess: (_data, vars) => {
+      void qc.invalidateQueries({ queryKey: roomKeys.detail(vars.roomId) });
+    },
+  });
+};
+
 export const useMuteAllInRoom = () =>
   useMutation({
     mutationFn: ({ roomId, includeHost }: { roomId: string; includeHost?: boolean }) =>

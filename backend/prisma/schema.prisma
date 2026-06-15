@@ -299,6 +299,11 @@ model Room {
   topics       String[]  @default([])
   maxSpeakers  Int       @default(10)
   participantCount Int   @default(0) // Denormalized for feed perf
+  // #33: cumulative count of distinct users who ever joined (never decremented).
+  totalAttendees Int    @default(0)
+  // #34: when locked, only the host/mods and already-admitted participants may
+  // (re)join — blocks new entries without ending the room.
+  isLocked     Boolean   @default(false)
   scheduledFor DateTime?
   createdAt    DateTime  @default(now())
   endedAt      DateTime?

@@ -76,6 +76,8 @@ interface RawRoom {
   topic: string | null;
   topics?: string[];
   scheduledFor: string | null;
+  totalAttendees?: number;
+  isLocked?: boolean;
   createdAt: string;
   endedAt: string | null;
   host?: RawUser;
@@ -171,6 +173,8 @@ const toRoom = (raw: RawRoom): Room => {
     speakersCount: speakers.length,
     listenersCount: listeners.length,
     participantCount: raw.participantCount ?? speakers.length + listeners.length,
+    totalAttendees: raw.totalAttendees ?? 0,
+    isLocked: raw.isLocked ?? false,
     isLive: raw.isLive,
     isRecording: raw.recordingEnabled ?? false,
     chatEnabled: raw.chatEnabled ?? true,
@@ -303,6 +307,13 @@ export const roomService = {
   async leave(roomId: string): Promise<{ left: true }> {
     await apiClient.post(`/rooms/${roomId}/leave`);
     return { left: true };
+  },
+
+  async setLock(roomId: string, locked: boolean): Promise<{ isLocked: boolean }> {
+    const res = await apiClient.patch<Envelope<{ isLocked: boolean }>>(`/rooms/${roomId}/lock`, {
+      locked,
+    });
+    return res.data.data;
   },
 
   async raiseHand(roomId: string): Promise<{ queued: true }> {

@@ -57,6 +57,10 @@ export const inviteToRoomSchema = z.object({
   userIds: z.array(z.string().min(1)).min(1).max(50),
 });
 
+export const setRoomLockSchema = z.object({
+  locked: z.boolean(),
+});
+
 export const sendReactionSchema = z.object({
   // Short emoji — covers most pictographs and ZWJ sequences up to 16 chars.
   emoji: z.string().min(1).max(16),

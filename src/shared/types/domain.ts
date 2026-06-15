@@ -64,6 +64,9 @@ export interface Room {
   speakersCount: number;
   listenersCount: number;
   participantCount?: number;
+  // Cumulative distinct attendees (#33) and host lock state (#34).
+  totalAttendees?: number;
+  isLocked?: boolean;
   isLive: boolean;
   isRecording: boolean;
   chatEnabled: boolean;

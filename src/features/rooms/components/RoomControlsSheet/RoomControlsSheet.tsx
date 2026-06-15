@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { colors, spacing } from '../../../../shared/constants/theme';
 import { errorMessage } from '../../../../shared/utils/errorMessage';
-import { useMuteAllInRoom, useToggleRoomChat } from '../../hooks/useRooms';
+import { useLockRoom, useMuteAllInRoom, useToggleRoomChat } from '../../hooks/useRooms';
 import { roomSettingsExtApi } from '../../../extensions/api/roomSettingsExtApi';
 
 type HandRaiseRestriction = 'everyone' | 'followers' | 'none';
@@ -21,6 +21,7 @@ interface RoomControlsSheetProps {
   roomId: string;
   chatEnabled: boolean;
   chatVisibility: 'ALL' | 'MODS_ONLY';
+  isLocked: boolean;
   onClose: () => void;
   onEditTitle: () => void;
   onInvite: () => void;
@@ -32,10 +33,21 @@ interface RoomControlsSheetProps {
  * `HostActionsSheet` which targets a single participant.
  */
 export const RoomControlsSheet: React.FC<RoomControlsSheetProps> = memo(
-  ({ visible, roomId, chatEnabled, chatVisibility, onClose, onEditTitle, onInvite }) => {
+  ({ visible, roomId, chatEnabled, chatVisibility, isLocked, onClose, onEditTitle, onInvite }) => {
     const { t } = useTranslation();
     const muteAll = useMuteAllInRoom();
     const toggleChat = useToggleRoomChat();
+    const lockRoom = useLockRoom();
+
+    const handleToggleLock = useCallback(() => {
+      lockRoom.mutate(
+        { roomId, locked: !isLocked },
+        {
+          onError: e =>
+            Alert.alert(t('roomControls.error'), errorMessage(e, t('roomControls.failed'))),
+        },
+      );
+    }, [isLocked, lockRoom, roomId, t]);
     const qc = useQueryClient();
     const settings = useQuery({
       queryKey: ['ext', 'room-settings', roomId],
@@ -153,6 +165,11 @@ export const RoomControlsSheet: React.FC<RoomControlsSheetProps> = memo(
               icon="pan-tool"
               label={HAND_RAISE_LABELS[handRaise]}
               onPress={handleCycleHandRaise}
+            />
+            <Row
+              icon={isLocked ? 'lock' : 'lock-open'}
+              label={isLocked ? 'Déverrouiller la room' : 'Verrouiller la room'}
+              onPress={handleToggleLock}
             />
 
             <Pressable

@@ -37,6 +37,7 @@ export const ERROR_CODES = {
   ROOM_007: { status: 403, message: 'Private room — invitation required' },
   ROOM_008: { status: 403, message: 'You are banned from this room' },
   ROOM_009: { status: 400, message: 'Cannot mute the host' },
+  ROOM_010: { status: 403, message: 'Room is locked' },
 
   USER_001: { status: 404, message: 'User not found' },
   USER_002: { status: 409, message: 'Username already taken' },
