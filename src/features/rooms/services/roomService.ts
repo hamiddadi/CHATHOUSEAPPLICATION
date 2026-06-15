@@ -466,9 +466,12 @@ export const roomService = {
   },
 
   async ping(targetUserId: string, roomId: string): Promise<{ pinged: true }> {
-    const res = await apiClient.post<Envelope<{ pinged: true }>>(`/users/${targetUserId}/ping`, {
-      roomId,
-    });
+    // Canonical route: both ids come from the path (see rooms.controller.ts `ping`).
+    // A former /users/:userId/ping alias was removed — it was broken (the shared
+    // controller read the room id from params.id, which that route never provided).
+    const res = await apiClient.post<Envelope<{ pinged: true }>>(
+      `/rooms/${roomId}/ping/${targetUserId}`,
+    );
     return res.data.data;
   },
 
