@@ -6,6 +6,7 @@ import { Avatar } from '../../../../shared/components/Avatar';
 import { colors, spacing } from '../../../../shared/constants/theme';
 import { apiClient } from '../../../../shared/services/api/apiClient';
 import { usePingUserToRoom } from '../../hooks/useRooms';
+import { messageService } from '../../../messages/services/messageService';
 import { errorMessage } from '../../../../shared/utils/errorMessage';
 import type { UserSummary } from '../../../../shared/types/domain';
 import { useExtBackend } from '../../../extensions/hooks/useExtBackend';
@@ -28,6 +29,8 @@ interface ProfileActionSheetProps {
   onClose: () => void;
   /** Optional: navigate to the full profile. */
   onOpenProfile?: (userId: string) => void;
+  /** Optional: open a 1:1 DM thread with this participant. */
+  onMessage?: (userId: string) => void;
 }
 
 /**
@@ -38,10 +41,18 @@ interface ProfileActionSheetProps {
  * surface (kick / mute / promote).
  */
 export const ProfileActionSheet: React.FC<ProfileActionSheetProps> = memo(
-  ({ target, roomId, viewerId, onClose, onOpenProfile }) => {
+  ({ target, roomId, viewerId, onClose, onOpenProfile, onMessage }) => {
     const follow = useMutation({ mutationFn: realFollow });
     const ping = usePingUserToRoom();
     const wave = useMutation({ mutationFn: realWave });
+    // #112: post the room link as a DM so the participant can hop in from chat.
+    const shareDm = useMutation({
+      mutationFn: (userId: string) =>
+        messageService.send(
+          userId,
+          `Rejoins-moi sur Chathouse 👉 https://app.chathouse.com/room/${roomId}`,
+        ),
+    });
     const { status: extStatus } = useExtBackend();
     const [tipping, setTipping] = useState(false);
     const handleTip = useCallback(() => setTipping(true), []);
@@ -93,6 +104,26 @@ export const ProfileActionSheet: React.FC<ProfileActionSheetProps> = memo(
       onClose();
     }, [onClose, onOpenProfile, target]);
 
+    const handleMessage = useCallback(() => {
+      if (!target || !onMessage) return;
+      onMessage(target.id);
+      onClose();
+    }, [onClose, onMessage, target]);
+
+    const handleShareRoom = useCallback(() => {
+      if (!target) return;
+      shareDm.mutate(target.id, {
+        onSuccess: () => {
+          Alert.alert(
+            'Lien envoyé',
+            `@${target.username ?? target.displayName} a reçu le lien de la room.`,
+          );
+          onClose();
+        },
+        onError: e => Alert.alert('Erreur', errorMessage(e, 'Échec')),
+      });
+    }, [onClose, shareDm, target]);
+
     if (!target) return null;
     const isSelf = viewerId === target.id;
 
@@ -117,8 +148,12 @@ export const ProfileActionSheet: React.FC<ProfileActionSheetProps> = memo(
               {!isSelf ? (
                 <>
                   <ActionRow icon="person-add" label="Suivre" onPress={handleFollow} />
+                  {onMessage ? (
+                    <ActionRow icon="chat" label="Envoyer un message" onPress={handleMessage} />
+                  ) : null}
                   <ActionRow icon="notifications" label="Ping (rejoins-moi)" onPress={handlePing} />
                   <ActionRow icon="waves" label="Envoyer un wave 🌊" onPress={handleWave} />
+                  <ActionRow icon="share" label="Partager cette room" onPress={handleShareRoom} />
                   {extStatus.features.payments ? (
                     <ActionRow
                       icon="volunteer-activism"

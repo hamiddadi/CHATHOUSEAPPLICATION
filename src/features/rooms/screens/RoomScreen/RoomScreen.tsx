@@ -377,6 +377,22 @@ export const RoomScreen: React.FC = () => {
     [handleParticipantPress],
   );
 
+  // #39: open a 1:1 DM thread with a participant. The DM service keys
+  // conversations by the peer's userId, so we open ChatDetail directly. Cross-
+  // tab navigation goes through the root 'Main' navigator (see MapsScreen).
+  const handleMessageUser = useCallback(
+    (userId: string) => {
+      (navigation as unknown as { navigate: (name: string, params: object) => void }).navigate(
+        'Main',
+        {
+          screen: 'MessagesTab',
+          params: { screen: 'ChatDetail', params: { conversationId: userId } },
+        },
+      );
+    },
+    [navigation],
+  );
+
   const handleShare = useCallback(async () => {
     if (!room) return;
     try {
@@ -740,6 +756,7 @@ export const RoomScreen: React.FC = () => {
         roomId={room.id}
         viewerId={viewerId}
         onClose={() => setProfileTarget(null)}
+        onMessage={handleMessageUser}
       />
       <RoomChatSidebar
         visible={chatOpen}
