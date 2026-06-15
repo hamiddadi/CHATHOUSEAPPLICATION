@@ -217,6 +217,9 @@ model User {
   // Referral self-relation: the user who invited me, and everyone I invited.
   invitedBy           User?                @relation("UserInvites", fields: [invitedById], references: [id], onDelete: SetNull)
   invitedUsers        User[]               @relation("UserInvites")
+  // #76: profile-view records I made and ones I received.
+  profileViewsGiven    ProfileView[]       @relation("ProfileViewer")
+  profileViewsReceived ProfileView[]       @relation("ProfileViewed")
 
   @@index([isOnline])
   @@index([isVisible])
@@ -227,6 +230,23 @@ model User {
   @@index([invitedById])
   // Covers getOnlineLocations (map): visible + online + recently-seen.
   @@index([isVisible, isOnline, lastSeenAt])
+}
+
+// ─── ProfileView (who viewed my profile — premium) ──────
+// One row per (viewer → viewed) pair; viewedAt updates on a re-view so the
+// list shows distinct viewers ordered by their most recent visit. Reading the
+// list is premium-gated server-side.
+model ProfileView {
+  id           String   @id @default(cuid())
+  viewerId     String
+  viewedUserId String
+  viewedAt     DateTime @default(now())
+
+  viewer     User @relation("ProfileViewer", fields: [viewerId], references: [id], onDelete: Cascade)
+  viewedUser User @relation("ProfileViewed", fields: [viewedUserId], references: [id], onDelete: Cascade)
+
+  @@unique([viewerId, viewedUserId])
+  @@index([viewedUserId, viewedAt])
 }
 
 // ─── Monetization: Tip ledger ───────────────────────────

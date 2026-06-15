@@ -10,7 +10,14 @@ import { EmptyState } from '../../../../shared/components/EmptyState';
 import { spacing } from '../../../../shared/constants/theme';
 import type { SettingsStackScreenProps } from '../../../../core/navigation/types';
 import { useAuthStore } from '../../../auth/store/authStore';
-import { useFollow, useMe, useProfile, useUnfollow } from '../../hooks/useProfile';
+import {
+  useFollow,
+  useMe,
+  useProfile,
+  useProfileViewers,
+  useUnfollow,
+} from '../../hooks/useProfile';
+import { Avatar } from '../../../../shared/components/Avatar';
 import { useBlock, useReport, useWave } from '../../../social/hooks/useSocial';
 import type { ReportReason } from '../../../social/services/socialService';
 import { useHouses } from '../../../houses/hooks/useHouses';
@@ -74,6 +81,8 @@ export const ProfileScreen: React.FC = () => {
   const upcomingEvents = useUserUpcomingEvents(userId);
   // Published public replays of rooms this user hosted (#75).
   const replays = useUserReplays(userId);
+  // Who viewed my profile (#76) — premium, self only.
+  const viewers = useProfileViewers(isSelf);
 
   const goEdit = useCallback(
     () => navigation.navigate('SettingsTab', { screen: 'EditProfile' }),
@@ -351,6 +360,39 @@ export const ProfileScreen: React.FC = () => {
                 <Text className="text-ink-muted text-base">›</Text>
               </Pressable>
             ))}
+          </View>
+        ) : null}
+
+        {isSelf ? (
+          <View className="gap-md">
+            <Text className="text-sm font-body-bold text-ink-muted uppercase tracking-wider">
+              {t('profile.whoViewed', 'Qui a vu mon profil')}
+            </Text>
+            {viewers.isError ? (
+              <Text className="text-sm font-body text-ink-muted">
+                {t('profile.whoViewedPremium', '🔒 Réservé aux membres Premium.')}
+              </Text>
+            ) : (viewers.data?.length ?? 0) === 0 ? (
+              <Text className="text-sm font-body text-ink-muted">
+                {t('profile.whoViewedEmpty', 'Personne pour le moment.')}
+              </Text>
+            ) : (
+              viewers.data?.map(v => (
+                <View
+                  key={v.user.id}
+                  className="flex-row items-center gap-md p-md rounded-md bg-overlay-white-5"
+                >
+                  <Avatar
+                    uri={v.user.avatarUrl ?? undefined}
+                    name={v.user.displayName}
+                    sizeValue={36}
+                  />
+                  <Text className="text-md font-body-medium text-ink flex-1" numberOfLines={1}>
+                    {v.user.displayName}
+                  </Text>
+                </View>
+              ))
+            )}
           </View>
         ) : null}
 

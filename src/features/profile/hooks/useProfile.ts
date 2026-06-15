@@ -1,5 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { profileService, type UpdateProfileInput } from '../services/profileService';
+import {
+  profileService,
+  type ProfileViewer,
+  type UpdateProfileInput,
+} from '../services/profileService';
 import type { User } from '../../../shared/types/domain';
 
 export const profileKeys = {
@@ -9,7 +13,18 @@ export const profileKeys = {
   followers: (id: string) => [...profileKeys.all, 'followers', id] as const,
   following: (id: string) => [...profileKeys.all, 'following', id] as const,
   search: (q: string) => [...profileKeys.all, 'search', q] as const,
+  viewers: () => [...profileKeys.all, 'viewers'] as const,
 };
+
+/** #76: who viewed my profile — premium (403s for non-premium; no retry). */
+export const useProfileViewers = (enabled: boolean) =>
+  useQuery<ProfileViewer[]>({
+    queryKey: profileKeys.viewers(),
+    queryFn: () => profileService.profileViewers(),
+    enabled,
+    retry: false,
+    staleTime: 60_000,
+  });
 
 export const useMe = () =>
   useQuery<User>({ queryKey: profileKeys.me(), queryFn: () => profileService.me() });

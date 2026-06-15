@@ -26,6 +26,8 @@ usersRouter.post('/me/cancel-deletion', asyncHandler(usersController.cancelDelet
 // GDPR Article 20 — data portability. Returns a JSON archive of every
 // piece of user-owned content the platform holds.
 usersRouter.get('/me/export', asyncHandler(usersController.exportData));
+// #76: who viewed my profile (premium-gated in the service).
+usersRouter.get('/me/profile-views', asyncHandler(usersController.profileViews));
 usersRouter.get('/online-locations', asyncHandler(usersController.onlineLocations));
 usersRouter.get('/check-username', asyncHandler(usersController.checkUsername));
 usersRouter.get('/suggest-username', asyncHandler(usersController.suggestUsername));

@@ -1,6 +1,11 @@
 import { apiClient } from '../../../shared/services/api/apiClient';
 import type { Envelope } from '../../../shared/types/api';
-import type { DmPrivacy, User } from '../../../shared/types/domain';
+import type { DmPrivacy, User, UserSummary } from '../../../shared/types/domain';
+
+export interface ProfileViewer {
+  viewedAt: string;
+  user: UserSummary;
+}
 
 // Shape returned by GET /api/users/me, PATCH /api/users/me and
 // GET /api/users/:id. The two backend selects (`meSelect`/`publicSelect`)
@@ -142,6 +147,23 @@ export const profileService = {
   async get(userId: string): Promise<User> {
     const res = await apiClient.get<Envelope<RawUser>>(`/users/${userId}`);
     return mapUser(res.data.data);
+  },
+
+  // #76: who recently viewed my profile (premium — 403s otherwise).
+  async profileViewers(): Promise<ProfileViewer[]> {
+    const res =
+      await apiClient.get<Envelope<{ viewedAt: string; user: RawSearchUser }[]>>(
+        '/users/me/profile-views',
+      );
+    return res.data.data.map(r => ({
+      viewedAt: r.viewedAt,
+      user: {
+        id: r.user.id,
+        username: r.user.username ?? '',
+        displayName: r.user.displayName ?? r.user.username ?? '',
+        avatarUrl: r.user.avatarUrl,
+      },
+    }));
   },
 
   async update(input: UpdateProfileInput): Promise<User> {

@@ -21,6 +21,11 @@ export const usersController = {
     sendOk(res, me);
   },
 
+  async profileViews(req: Request, res: Response) {
+    const rows = await usersService.listProfileViewers(requireUserId(req));
+    sendOk(res, rows);
+  },
+
   async updateMe(req: Request, res: Response) {
     const input = updateMeSchema.parse(req.body);
     const me = await usersService.updateMe(requireUserId(req), input);

@@ -117,6 +117,18 @@ export const usersService = {
     });
     if (!user) throw new AppError('USER_001');
 
+    // #76: record the visit (fire-and-forget) so the viewed user can later see
+    // who looked at their profile. Best-effort — never blocks/fails the read.
+    if (viewerId && viewerId !== id) {
+      void prisma.profileView
+        .upsert({
+          where: { viewerId_viewedUserId: { viewerId, viewedUserId: id } },
+          create: { viewerId, viewedUserId: id },
+          update: { viewedAt: new Date() },
+        })
+        .catch(() => undefined);
+    }
+
     // Per-viewer relationship flag so the client can render Follow/Following
     // without a second round-trip. Cheap indexed lookup on the unique pair.
     let isFollowedByMe = false;
@@ -128,6 +140,27 @@ export const usersService = {
       isFollowedByMe = rel !== null;
     }
     return { ...user, isFollowedByMe };
+  },
+
+  /**
+   * #76: distinct users who recently viewed my profile, newest visit first.
+   * Premium-gated — non-premium callers get PREMIUM_001.
+   */
+  async listProfileViewers(userId: string, limit = 30) {
+    const me = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { isPremium: true },
+    });
+    if (!me?.isPremium) throw new AppError('PREMIUM_001');
+    const rows = await prisma.profileView.findMany({
+      where: { viewedUserId: userId },
+      orderBy: { viewedAt: 'desc' },
+      take: Math.min(limit, 100),
+      include: {
+        viewer: { select: { id: true, username: true, displayName: true, avatarUrl: true } },
+      },
+    });
+    return rows.map(r => ({ viewedAt: r.viewedAt.toISOString(), user: r.viewer }));
   },
 
   async checkUsername(input: UsernameAvailabilityInput) {
