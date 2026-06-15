@@ -10,7 +10,12 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
-import { useExtTopicsTree, useExtTopicsFlat, type Topic } from '../hooks/useTopics';
+import {
+  useExtTopicsTree,
+  useExtTopicsFlat,
+  useExtTopicsTrending,
+  type Topic,
+} from '../hooks/useTopics';
 import { colors } from '../../../shared/constants/theme';
 
 interface Props {
@@ -29,6 +34,7 @@ export const ExtTopicExplorerScreen: React.FC<Props> = ({ onSelectTopic }) => {
 
   const tree = useExtTopicsTree();
   const flat = useExtTopicsFlat(query.trim() || undefined);
+  const trending = useExtTopicsTrending();
 
   const isSearching = query.trim().length > 0;
 
@@ -75,55 +81,85 @@ export const ExtTopicExplorerScreen: React.FC<Props> = ({ onSelectTopic }) => {
           )}
         />
       ) : (
-        <View style={styles.twoPane}>
-          <FlatList
-            style={styles.leftPane}
-            data={tree.data?.topics ?? []}
-            keyExtractor={t => t.slug}
-            renderItem={({ item }) => {
-              const active = item.slug === activeParent;
-              return (
+        <View style={styles.defaultPane}>
+          {trending.data && trending.data.length > 0 ? (
+            <View style={styles.trendingWrap}>
+              <Text style={styles.trendingTitle}>
+                {t('extensions.topics.trending', 'Tendances')}
+              </Text>
+              <FlatList
+                horizontal
+                data={trending.data}
+                keyExtractor={tp => tp.slug}
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.trendingRow}
+                renderItem={({ item }) => (
+                  <Pressable
+                    style={styles.trendingChip}
+                    onPress={() => onSelectTopic?.(item.slug)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`${item.label} (${item.count})`}
+                  >
+                    <Text style={styles.emoji}>{item.emoji}</Text>
+                    <Text style={styles.trendingLabel} numberOfLines={1}>
+                      {item.label}
+                    </Text>
+                    <Text style={styles.trendingCount}>{item.count}</Text>
+                  </Pressable>
+                )}
+              />
+            </View>
+          ) : null}
+          <View style={styles.twoPane}>
+            <FlatList
+              style={styles.leftPane}
+              data={tree.data?.topics ?? []}
+              keyExtractor={t => t.slug}
+              renderItem={({ item }) => {
+                const active = item.slug === activeParent;
+                return (
+                  <Pressable
+                    style={[styles.parentRow, active && styles.parentRowActive]}
+                    onPress={() => setActiveParent(item.slug)}
+                    accessibilityRole="tab"
+                    accessibilityState={{ selected: active }}
+                  >
+                    <Text style={styles.emoji}>{item.emoji}</Text>
+                    <Text style={[styles.parentLabel, active && styles.parentLabelActive]}>
+                      {item.label}
+                    </Text>
+                  </Pressable>
+                );
+              }}
+            />
+            <FlatList
+              style={styles.rightPane}
+              data={activeChildren}
+              keyExtractor={t => t.slug}
+              renderItem={({ item }) => (
                 <Pressable
-                  style={[styles.parentRow, active && styles.parentRowActive]}
-                  onPress={() => setActiveParent(item.slug)}
-                  accessibilityRole="tab"
-                  accessibilityState={{ selected: active }}
+                  style={styles.childRow}
+                  onPress={() => onSelectTopic?.(item.slug)}
+                  accessibilityRole="button"
+                  accessibilityLabel={t(
+                    'extensions.topics.selectSubTopicA11y',
+                    'Select sub-topic {{label}}',
+                    { label: item.label },
+                  )}
                 >
                   <Text style={styles.emoji}>{item.emoji}</Text>
-                  <Text style={[styles.parentLabel, active && styles.parentLabelActive]}>
-                    {item.label}
-                  </Text>
+                  <Text style={styles.childLabel}>{item.label}</Text>
                 </Pressable>
-              );
-            }}
-          />
-          <FlatList
-            style={styles.rightPane}
-            data={activeChildren}
-            keyExtractor={t => t.slug}
-            renderItem={({ item }) => (
-              <Pressable
-                style={styles.childRow}
-                onPress={() => onSelectTopic?.(item.slug)}
-                accessibilityRole="button"
-                accessibilityLabel={t(
-                  'extensions.topics.selectSubTopicA11y',
-                  'Select sub-topic {{label}}',
-                  { label: item.label },
-                )}
-              >
-                <Text style={styles.emoji}>{item.emoji}</Text>
-                <Text style={styles.childLabel}>{item.label}</Text>
-              </Pressable>
-            )}
-            ListEmptyComponent={
-              <View style={styles.empty}>
-                <Text style={styles.emptyText}>
-                  {t('extensions.topics.empty', 'Pick a category on the left.')}
-                </Text>
-              </View>
-            }
-          />
+              )}
+              ListEmptyComponent={
+                <View style={styles.empty}>
+                  <Text style={styles.emptyText}>
+                    {t('extensions.topics.empty', 'Pick a category on the left.')}
+                  </Text>
+                </View>
+              }
+            />
+          </View>
         </View>
       )}
     </SafeAreaView>
@@ -142,7 +178,29 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     color: colors.text,
   },
+  defaultPane: { flex: 1 },
   twoPane: { flex: 1, flexDirection: 'row' },
+  trendingWrap: { paddingTop: 8, paddingBottom: 4 },
+  trendingTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.textMuted,
+    paddingHorizontal: 16,
+    marginBottom: 8,
+    textTransform: 'uppercase',
+  },
+  trendingRow: { paddingHorizontal: 12, gap: 8 },
+  trendingChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 9999,
+    backgroundColor: colors.surfaceHigh,
+  },
+  trendingLabel: { fontSize: 13, color: colors.text, maxWidth: 120 },
+  trendingCount: { fontSize: 12, fontWeight: '700', color: colors.primary },
   leftPane: {
     flexBasis: 140,
     borderRightWidth: StyleSheet.hairlineWidth,

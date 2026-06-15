@@ -41,8 +41,16 @@ const trendingRooms = async () => {
   }));
 };
 
-const trendingClubs = async () => {
-  const clubs = await prisma.club.findMany({
+const trendingClubs = async (viewerId: string) => {
+  // #62: bias suggestions toward the viewer's interests. Pull a wider pool of
+  // popular OPEN clubs, then re-rank so clubs whose category matches one of the
+  // viewer's interests bubble to the top; ties fall back to member count.
+  const viewer = await prisma.user.findUnique({
+    where: { id: viewerId },
+    select: { interests: true },
+  });
+  const interests = new Set((viewer?.interests ?? []).map(i => i.toLowerCase()));
+  const pool = await prisma.club.findMany({
     where: { privacy: 'OPEN' },
     include: {
       _count: {
@@ -53,8 +61,16 @@ const trendingClubs = async () => {
       },
     },
     orderBy: [{ members: { _count: 'desc' } }, { createdAt: 'desc' }],
-    take: EXPLORE_CLUBS,
+    take: EXPLORE_CLUBS * 2,
   });
+  const clubs = [...pool]
+    .sort((a, b) => {
+      const am = interests.has((a.category ?? '').toLowerCase()) ? 1 : 0;
+      const bm = interests.has((b.category ?? '').toLowerCase()) ? 1 : 0;
+      if (am !== bm) return bm - am;
+      return b._count.members - a._count.members;
+    })
+    .slice(0, EXPLORE_CLUBS);
   return clubs.map(c => ({
     id: c.id,
     name: c.name,
@@ -107,7 +123,7 @@ export const exploreService = {
   async feed(viewerId: string) {
     const [rooms, clubs, users] = await Promise.all([
       trendingRooms(),
-      trendingClubs(),
+      trendingClubs(viewerId),
       featuredUsers(viewerId),
     ]);
     return { rooms, clubs, users };
