@@ -74,6 +74,7 @@ export const clubsService = {
           name: input.name.trim(),
           slug: finalSlug,
           description: input.description?.trim() || null,
+          rules: input.rules?.trim() || null,
           privacy: privacyToDb(input.privacy),
           category: input.category,
           categoryEmoji: input.categoryEmoji,
@@ -321,6 +322,7 @@ export const clubsService = {
     const data: Prisma.ClubUpdateInput = {};
     if (input.name !== undefined) data.name = input.name.trim();
     if (input.description !== undefined) data.description = input.description?.trim() || null;
+    if (input.rules !== undefined) data.rules = input.rules?.trim() || null;
     if (input.iconUrl !== undefined) data.iconUrl = input.iconUrl;
     if (input.category !== undefined) data.category = input.category;
     if (input.categoryEmoji !== undefined) data.categoryEmoji = input.categoryEmoji;

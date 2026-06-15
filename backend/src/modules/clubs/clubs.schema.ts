@@ -8,6 +8,7 @@ export const clubPrivacyEnum = z.enum(['OPEN', 'SOCIAL', 'PRIVATE']);
 export const createClubSchema = z.object({
   name: z.string().min(2).max(50),
   description: z.string().max(500).optional(),
+  rules: z.string().max(2000).optional(),
   privacy: clubPrivacyEnum.default('OPEN'),
   category: z.string().max(32).default('tech'),
   categoryEmoji: z.string().max(8).default('🏠'),
@@ -26,6 +27,7 @@ export const inviteSchema = z.object({
 export const updateClubSchema = z.object({
   name: z.string().min(2).max(50).optional(),
   description: z.string().max(500).optional(),
+  rules: z.string().max(2000).nullish(),
   privacy: clubPrivacyEnum.optional(),
   category: z.string().max(32).optional(),
   categoryEmoji: z.string().max(8).optional(),

@@ -14,6 +14,7 @@ const PRIVACY_TO_DB: Record<HousePrivacy, 'OPEN' | 'PRIVATE' | 'SOCIAL'> = {
 export interface CreateHouseInput {
   name: string;
   description: string;
+  rules?: string;
   privacy: HousePrivacy;
   iconUrl?: string | null;
 }
@@ -21,6 +22,7 @@ export interface CreateHouseInput {
 export interface UpdateHouseInput {
   name?: string;
   description?: string;
+  rules?: string | null;
   privacy?: HousePrivacy;
   iconUrl?: string | null;
 }
@@ -78,6 +80,7 @@ export const houseService = {
     const res = await apiClient.post<Envelope<House>>('/clubs', {
       name: input.name.trim(),
       description: input.description.trim() || undefined,
+      rules: input.rules?.trim() || undefined,
       privacy: PRIVACY_TO_DB[input.privacy],
       iconUrl: input.iconUrl ?? undefined,
     });
@@ -88,6 +91,7 @@ export const houseService = {
     const res = await apiClient.patch<Envelope<House>>(`/clubs/${id}`, {
       name: input.name !== undefined ? input.name.trim() : undefined,
       description: input.description !== undefined ? input.description.trim() : undefined,
+      rules: input.rules !== undefined ? input.rules?.trim() || null : undefined,
       privacy: input.privacy !== undefined ? PRIVACY_TO_DB[input.privacy] : undefined,
       iconUrl: input.iconUrl ?? undefined,
     });

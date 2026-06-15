@@ -619,6 +619,8 @@ model Club {
   name          String       @unique @db.VarChar(50)
   slug          String       @unique @db.VarChar(60)
   description   String?      @db.VarChar(500)
+  // #87: house rules / charter shown on the club page.
+  rules         String?      @db.VarChar(2000)
   iconUrl       String?      @db.VarChar(500)
   privacy       ClubPrivacy  @default(OPEN)
   category      String       @default("tech") @db.VarChar(32)

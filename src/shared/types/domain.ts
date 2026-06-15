@@ -106,6 +106,8 @@ export interface House {
   id: string;
   name: string;
   description: string;
+  /** House rules / charter (#87). Null/absent when unset. */
+  rules?: string | null;
   category: RoomCategory;
   categoryEmoji: string;
   iconUrl: string | null;

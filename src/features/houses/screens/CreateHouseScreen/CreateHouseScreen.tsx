@@ -116,6 +116,7 @@ export const CreateHouseScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
+  const [rules, setRules] = useState('');
   const [privacy, setPrivacy] = useState<Privacy>('open');
   const [iconUri, setIconUri] = useState<string | null>(null);
   const [iconBase64, setIconBase64] = useState<string | null>(null);
@@ -156,6 +157,7 @@ export const CreateHouseScreen: React.FC = () => {
       await createHouse.mutateAsync({
         name,
         description,
+        rules: rules.trim() || undefined,
         privacy,
         iconUrl,
       });
@@ -168,7 +170,7 @@ export const CreateHouseScreen: React.FC = () => {
     } finally {
       setUploading(false);
     }
-  }, [createHouse, description, iconBase64, iconMime, name, navigation, privacy, t]);
+  }, [createHouse, description, rules, iconBase64, iconMime, name, navigation, privacy, t]);
 
   const canCreate = name.trim().length >= 2 && !createHouse.isPending && !uploading;
 
@@ -249,6 +251,16 @@ export const CreateHouseScreen: React.FC = () => {
           numberOfLines={4}
           maxLength={DESC_MAX}
           helperText={`${description.length} / ${DESC_MAX}`}
+        />
+
+        <Input
+          label={t('houses.create.rulesLabel', 'Règles (optionnel)')}
+          placeholder={t('houses.create.rulesPlaceholder', 'Les règles de la maison…')}
+          value={rules}
+          onChangeText={setRules}
+          multiline
+          numberOfLines={4}
+          maxLength={2000}
         />
 
         <View className="gap-sm">

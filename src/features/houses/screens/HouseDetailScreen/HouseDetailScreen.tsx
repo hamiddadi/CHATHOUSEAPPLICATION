@@ -450,6 +450,14 @@ export const HouseDetailScreen: React.FC = () => {
               <Text className="text-sm font-body text-ink-muted text-center">
                 {house.description}
               </Text>
+              {house.rules ? (
+                <View className="self-stretch gap-xs">
+                  <Text className="text-xxs font-body-bold text-ink-muted tracking-widest uppercase">
+                    {t('house.rules', 'Règles')}
+                  </Text>
+                  <Text className="text-sm font-body text-ink-muted">{house.rules}</Text>
+                </View>
+              ) : null}
               <View className="flex-row items-center gap-xxl">
                 <View className="items-center">
                   <Text className="text-xl font-display text-ink">

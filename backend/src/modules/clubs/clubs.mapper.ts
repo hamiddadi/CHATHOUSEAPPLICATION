@@ -63,6 +63,7 @@ export const toApi = (club: ClubWithRelations, viewerId: string) => ({
   id: club.id,
   name: club.name,
   description: club.description ?? '',
+  rules: club.rules ?? null,
   category: club.category,
   categoryEmoji: club.categoryEmoji,
   iconUrl: club.iconUrl,

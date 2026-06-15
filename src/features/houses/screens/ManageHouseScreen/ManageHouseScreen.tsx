@@ -124,6 +124,7 @@ export const ManageHouseScreen: React.FC = () => {
 
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
+  const [rules, setRules] = useState('');
   const [privacy, setPrivacy] = useState<HousePrivacy>('open');
   const [initialised, setInitialised] = useState(false);
 
@@ -132,6 +133,7 @@ export const ManageHouseScreen: React.FC = () => {
   if (house && !initialised) {
     setName(house.name);
     setDescription(house.description);
+    setRules(house.rules ?? '');
     setPrivacy(house.privacy);
     setInitialised(true);
   }
@@ -143,7 +145,7 @@ export const ManageHouseScreen: React.FC = () => {
 
   const handleSave = useCallback(() => {
     updateHouse.mutate(
-      { houseId, input: { name, description, privacy } },
+      { houseId, input: { name, description, rules: rules.trim() || null, privacy } },
       {
         onSuccess: () => navigation.goBack(),
         onError: e =>
@@ -153,7 +155,7 @@ export const ManageHouseScreen: React.FC = () => {
           ),
       },
     );
-  }, [updateHouse, houseId, name, description, privacy, navigation, t]);
+  }, [updateHouse, houseId, name, description, rules, privacy, navigation, t]);
 
   const performDelete = useCallback(() => {
     deleteHouse.mutate(houseId, {
@@ -244,6 +246,16 @@ export const ManageHouseScreen: React.FC = () => {
           numberOfLines={4}
           maxLength={DESC_MAX}
           helperText={`${description.length} / ${DESC_MAX}`}
+        />
+
+        <Input
+          label={t('houses.create.rulesLabel', 'Règles (optionnel)')}
+          placeholder={t('houses.create.rulesPlaceholder', 'Les règles de la maison…')}
+          value={rules}
+          onChangeText={setRules}
+          multiline
+          numberOfLines={4}
+          maxLength={2000}
         />
 
         <View className="gap-sm">
