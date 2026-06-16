@@ -3,7 +3,6 @@ import { asyncHandler } from '../../utils/asyncHandler';
 import { requireAuth } from '../../middlewares/auth.middleware';
 import { socialController } from '../social/social.controller';
 import { followController } from '../follow/follow.controller';
-import { roomsController } from '../rooms/rooms.controller';
 import { usersController } from './users.controller';
 
 export const usersRouter: Router = Router();
@@ -40,7 +39,8 @@ usersRouter.post('/:id/wave', asyncHandler(socialController.wave));
 usersRouter.post('/:id/block', asyncHandler(socialController.block));
 usersRouter.delete('/:id/block', asyncHandler(socialController.unblock));
 usersRouter.post('/:id/report', asyncHandler(socialController.report));
-// Ping a user to come join a room. Body: { roomId }. Sends a ROOM_INVITE
-// notification with `data.ping = true` so the client can render it as a
-// nudge rather than a formal invite.
-usersRouter.post('/:userId/ping', asyncHandler(roomsController.ping));
+// NOTE: pinging a user to a room lives on the rooms router as
+// POST /rooms/:id/ping/:userId (both ids in the path). A former
+// /users/:userId/ping alias was removed — it was wired to the shared ping
+// controller, which reads the room id from params.id, a param this route
+// never provided, so it always 404'd.
