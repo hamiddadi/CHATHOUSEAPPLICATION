@@ -44,6 +44,32 @@ describe('Users — profile CRUD, search, lookup', () => {
     await disconnectRedis();
   });
 
+  // Presence heartbeat — HTTP fallback to the `presence_update` socket event.
+  it('POST /api/users/me/heartbeat marks the user online + refreshes lastSeenAt', async () => {
+    const user = await register(app);
+    createdIds.push(user.id);
+
+    const before = await prisma.user.findUnique({
+      where: { id: user.id },
+      select: { lastSeenAt: true },
+    });
+
+    const res = await request(app)
+      .post('/api/users/me/heartbeat')
+      .set('Authorization', `Bearer ${user.token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.online).toBe(true);
+
+    const after = await prisma.user.findUnique({
+      where: { id: user.id },
+      select: { isOnline: true, lastSeenAt: true },
+    });
+    expect(after?.isOnline).toBe(true);
+    expect(after?.lastSeenAt?.getTime() ?? 0).toBeGreaterThanOrEqual(
+      before?.lastSeenAt?.getTime() ?? 0,
+    );
+  });
+
   // 2.2 — Modifier profil
   it('PATCH /api/users/me updates displayName, bio, avatarUrl', async () => {
     const user = await register(app);

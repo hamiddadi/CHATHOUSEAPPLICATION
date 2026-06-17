@@ -98,6 +98,20 @@ export const usersService = {
     });
   },
 
+  /**
+   * Presence touch — flips isOnline and refreshes lastSeenAt. Driven by the
+   * socket presence handler (connect / `presence_update` heartbeat / disconnect)
+   * and the POST /users/me/heartbeat fallback. Keeps discovery surfaces
+   * (explore featured users, available-people strip, map) reflecting reality.
+   */
+  async touchPresence(userId: string, online: boolean) {
+    await prisma.user.update({
+      where: { id: userId },
+      data: { isOnline: online, lastSeenAt: new Date() },
+    });
+    return { online };
+  },
+
   async getById(id: string, viewerId?: string) {
     // A block is a symmetric break: a blocked user's profile must not be
     // readable by the other party. Also hide soft-deleted accounts.

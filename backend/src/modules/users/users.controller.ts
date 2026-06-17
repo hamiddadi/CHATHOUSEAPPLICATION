@@ -44,6 +44,13 @@ export const usersController = {
     sendOk(res, result);
   },
 
+  // Presence heartbeat — HTTP fallback the FE uses when its socket is down.
+  // The preferred path is the `presence_update` socket event.
+  async heartbeat(req: Request, res: Response) {
+    const result = await usersService.touchPresence(requireUserId(req), true);
+    sendOk(res, result);
+  },
+
   async onlineLocations(req: Request, res: Response) {
     const rows = await usersService.getOnlineLocations(requireUserId(req));
     sendOk(res, rows);

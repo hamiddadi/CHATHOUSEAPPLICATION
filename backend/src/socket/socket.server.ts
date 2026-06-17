@@ -12,6 +12,7 @@ import { registerMapsHandlers } from './handlers/maps.handler';
 import { registerRtcHandlers } from './handlers/rtc.handler';
 import { registerHallwayHandlers } from './handlers/hallway.handler';
 import { registerLatencyHandlers } from './handlers/latency.handler';
+import { registerPresenceHandlers } from './handlers/presence.handler';
 import { setRealtimeServer } from './realtime';
 
 /**
@@ -79,6 +80,7 @@ export const createSocketServer = async (httpServer: HttpServer): Promise<Server
     registerRtcHandlers(socket);
     registerHallwayHandlers(io, socket);
     registerLatencyHandlers(socket);
+    registerPresenceHandlers(socket);
 
     socket.on('disconnect', reason => {
       // A user can have multiple concurrent sockets (two tabs). If this is

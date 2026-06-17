@@ -15,6 +15,8 @@ usersRouter.patch('/me', asyncHandler(usersController.updateMe));
 usersRouter.patch('/me/username', asyncHandler(usersController.setUsername));
 usersRouter.patch('/me/visibility', asyncHandler(usersController.setVisibility));
 usersRouter.patch('/me/location', asyncHandler(usersController.setLocation));
+// Presence heartbeat HTTP fallback (socket `presence_update` is preferred).
+usersRouter.post('/me/heartbeat', asyncHandler(usersController.heartbeat));
 usersRouter.patch('/me/interests', asyncHandler(usersController.setInterests));
 usersRouter.patch('/me/onboarding', asyncHandler(usersController.completeOnboarding));
 usersRouter.get('/me/blocked', asyncHandler(socialController.listBlocked));
