@@ -4,6 +4,15 @@ module.exports = {
   testEnvironment: 'node',
   roots: ['<rootDir>/tests'],
   testMatch: ['**/*.test.ts'],
+  // Seed-dependent smoke suites require a pre-seeded DB (fixed fixture users
+  // from `npm run seed`) and throw "Run seed first" otherwise. Excluded from the
+  // default run so `npm test` stays green on a non-seeded DB; run them via
+  // `npm run test:seeded`, which seeds first (it clears the ignore via the CLI).
+  testPathIgnorePatterns: [
+    '/node_modules/',
+    '<rootDir>/tests/seed-api.test.ts',
+    '<rootDir>/tests/seed-socket.test.ts',
+  ],
   moduleNameMapper: {
     '^@/(.*)$': '<rootDir>/src/$1',
     // firebase-admin v14 exposes /messaging only via the package `exports` map;
