@@ -90,10 +90,15 @@ const featuredUsers = async (viewerId: string) => {
   // excluding the viewer themselves and anyone they've blocked (or who
   // has blocked them — symmetric break). Ordered by follower count
   // when available; fallback to recent activity.
+  //
+  // NOTE: we intentionally do NOT gate on `isVisible`. That flag is the Maps
+  // "Ghost Mode" (map/location visibility, default OFF for privacy — see
+  // schema + maps.handler). Coupling Explore discovery to it made the featured-
+  // users list empty for everyone who never opted into map visibility. Explore
+  // is a separate surface; it surfaces recently-active, non-blocked users.
   const users = await prisma.user.findMany({
     where: {
       id: { notIn: [viewerId, ...blocked] },
-      isVisible: true,
       OR: [{ isOnline: true }, { lastSeenAt: { gte: since } }],
     },
     select: {
