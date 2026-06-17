@@ -65,6 +65,11 @@ export const setRoomVisibilitySchema = z.object({
   hidden: z.boolean(),
 });
 
+// #14: flip a room's type between public and private after creation.
+export const setRoomPrivacySchema = z.object({
+  isPrivate: z.boolean(),
+});
+
 export const sendReactionSchema = z.object({
   // Short emoji — covers most pictographs and ZWJ sequences up to 16 chars.
   emoji: z.string().min(1).max(16),

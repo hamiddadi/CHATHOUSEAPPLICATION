@@ -18,6 +18,7 @@ import {
   sendReactionSchema,
   sendRoomMessageSchema,
   setRoomLockSchema,
+  setRoomPrivacySchema,
   setRoomVisibilitySchema,
   toggleRoomChatSchema,
   updateRoleSchema,
@@ -171,6 +172,17 @@ export const roomsController = {
     sendOk(res, rows);
   },
 
+  // #3: host/mod declines a specific listener's pending speak request.
+  // roomId + targetUserId both come from the path (DELETE /:id/hand-raises/:userId).
+  async dismissHandRaise(req: Request, res: Response) {
+    const result = await roomsService.dismissHandRaise(
+      paramId(req, 'id'),
+      requireUserId(req),
+      paramId(req, 'userId'),
+    );
+    sendOk(res, result);
+  },
+
   async sendMessage(req: Request, res: Response) {
     const input = sendRoomMessageSchema.parse(req.body);
     const msg = await roomsService.sendRoomMessage(paramId(req, 'id'), requireUserId(req), input);
@@ -223,6 +235,17 @@ export const roomsController = {
   async setLock(req: Request, res: Response) {
     const input = setRoomLockSchema.parse(req.body);
     const result = await roomsService.setLock(paramId(req, 'id'), requireUserId(req), input.locked);
+    sendOk(res, result);
+  },
+
+  // #14: flip the room between public and private after creation (host only).
+  async setPrivacy(req: Request, res: Response) {
+    const input = setRoomPrivacySchema.parse(req.body);
+    const result = await roomsService.setPrivacy(
+      paramId(req, 'id'),
+      requireUserId(req),
+      input.isPrivate,
+    );
     sendOk(res, result);
   },
 

@@ -40,6 +40,8 @@ roomsRouter.get('/:id/rsvps', asyncHandler(roomsController.listRsvps));
 roomsRouter.post('/:id/raise-hand', asyncHandler(roomsController.raiseHand));
 roomsRouter.delete('/:id/raise-hand', asyncHandler(roomsController.lowerHand));
 roomsRouter.get('/:id/hand-raises', asyncHandler(roomsController.listHandRaises));
+// Host/mod declines a specific listener's pending speak request (refuse).
+roomsRouter.delete('/:id/hand-raises/:userId', asyncHandler(roomsController.dismissHandRaise));
 
 // In-room text chat (distinct from DMs under /api/chat).
 roomsRouter.post('/:id/messages', asyncHandler(roomsController.sendMessage));
@@ -55,6 +57,8 @@ roomsRouter.post('/:id/kick', asyncHandler(roomsController.kick));
 roomsRouter.patch('/:id/title', asyncHandler(roomsController.updateTitle));
 roomsRouter.patch('/:id/chat', asyncHandler(roomsController.toggleChat));
 roomsRouter.patch('/:id/lock', asyncHandler(roomsController.setLock));
+// Flip room type public↔private after creation (host only).
+roomsRouter.patch('/:id/privacy', asyncHandler(roomsController.setPrivacy));
 roomsRouter.patch('/:id/visibility', asyncHandler(roomsController.setHidden));
 roomsRouter.post('/:id/mute-all', asyncHandler(roomsController.muteAll));
 

@@ -1034,6 +1034,20 @@ export const roomsService = {
     return { lowered: true as const };
   },
 
+  // #3: a host/moderator *declines* a pending speak request. Removes the
+  // target's hand-raise from the queue and broadcasts room:hand_lowered so the
+  // listener's UI and every moderator's queue clear. Distinct from lowerHand,
+  // which only ever lowers the caller's *own* hand — this is the moderator-side
+  // "refuse" that mirrors the "accept" path (promote to SPEAKER).
+  async dismissHandRaise(roomId: string, callerUserId: string, targetUserId: string) {
+    await requireHostOrMod(roomId, callerUserId);
+    const res = await prisma.roomHandRaise.deleteMany({
+      where: { roomId, userId: targetUserId },
+    });
+    if (res.count > 0) emitRoomHandLowered(roomId, targetUserId);
+    return { dismissed: res.count > 0 };
+  },
+
   async listHandRaises(roomId: string, viewerId: string) {
     await requireActiveParticipant(roomId, viewerId);
     const rows = await prisma.roomHandRaise.findMany({
@@ -1265,6 +1279,46 @@ export const roomsService = {
     await prisma.room.update({ where: { id: roomId }, data: { isLocked: locked } });
     emitRoomMetaUpdated(roomId, { isLocked: locked });
     return { isLocked: locked };
+  },
+
+  // #14: flip a room between public and private after creation (host only —
+  // it's a fundamental room property, unlike lock/title which mods can touch).
+  // The hallway listing only ever holds public, live rooms, so mirror the flip
+  // there: going private removes it, going public (re)adds it. Members of the
+  // room learn via room:meta_updated so they can reflect the privacy badge.
+  async setPrivacy(roomId: string, callerUserId: string, isPrivate: boolean) {
+    await requireHost(roomId, callerUserId);
+    const updated = await prisma.room.update({
+      where: { id: roomId },
+      data: { isPrivate },
+      select: {
+        id: true,
+        title: true,
+        hostId: true,
+        clubId: true,
+        isLive: true,
+        isPrivate: true,
+        scheduledFor: true,
+        createdAt: true,
+      },
+    });
+    emitRoomMetaUpdated(roomId, { isPrivate: updated.isPrivate });
+    if (updated.isLive) {
+      if (updated.isPrivate) {
+        emitHallwayRoomClosed(roomId);
+      } else {
+        emitHallwayRoomCreated({
+          id: updated.id,
+          title: updated.title,
+          hostId: updated.hostId,
+          clubId: updated.clubId,
+          isLive: updated.isLive,
+          scheduledFor: updated.scheduledFor ? updated.scheduledFor.toISOString() : null,
+          createdAt: updated.createdAt.toISOString(),
+        });
+      }
+    }
+    return { isPrivate: updated.isPrivate };
   },
 
   async toggleChat(roomId: string, callerUserId: string, input: ToggleRoomChatInput) {

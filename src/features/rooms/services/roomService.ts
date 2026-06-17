@@ -316,6 +316,15 @@ export const roomService = {
     return res.data.data;
   },
 
+  // #14: flip the room between public and private after creation (host only).
+  async setPrivacy(roomId: string, isPrivate: boolean): Promise<{ isPrivate: boolean }> {
+    const res = await apiClient.patch<Envelope<{ isPrivate: boolean }>>(
+      `/rooms/${roomId}/privacy`,
+      { isPrivate },
+    );
+    return res.data.data;
+  },
+
   // #32: toggle the caller's invisible/ghost state in the room.
   async setHidden(roomId: string, hidden: boolean): Promise<{ hidden: boolean }> {
     const res = await apiClient.patch<Envelope<{ hidden: boolean }>>(
@@ -333,6 +342,14 @@ export const roomService = {
   async lowerHand(roomId: string): Promise<{ lowered: true }> {
     await apiClient.delete(`/rooms/${roomId}/raise-hand`);
     return { lowered: true };
+  },
+
+  // #3: host/mod declines a specific listener's pending speak request (refuse).
+  async dismissHandRaise(roomId: string, userId: string): Promise<{ dismissed: boolean }> {
+    const res = await apiClient.delete<Envelope<{ dismissed: boolean }>>(
+      `/rooms/${roomId}/hand-raises/${userId}`,
+    );
+    return res.data.data;
   },
 
   async setMute(

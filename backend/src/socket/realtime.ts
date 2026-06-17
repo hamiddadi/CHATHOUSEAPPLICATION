@@ -155,6 +155,7 @@ export const emitRoomMetaUpdated = (
     chatEnabled?: boolean;
     chatVisibility?: 'ALL' | 'MODS_ONLY';
     isLocked?: boolean;
+    isPrivate?: boolean;
   },
 ): void => {
   ioRef?.to(roomChannel(roomId)).emit('room:meta_updated', { roomId, ...patch });
