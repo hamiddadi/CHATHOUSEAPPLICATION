@@ -20,6 +20,16 @@ module.exports = {
     '^firebase-admin/messaging$': '<rootDir>/node_modules/firebase-admin/lib/messaging',
   },
   setupFiles: ['<rootDir>/tests/setup.env.ts'],
+  // Retry transient integration-infra failures (socket ENOBUFS / waitFor
+  // timeouts that only surface in the long back-to-back --runInBand sweep, never
+  // when a file runs in isolation). See tests/setup.retry.ts.
+  setupFilesAfterEnv: ['<rootDir>/tests/setup.retry.ts'],
+  // Integration suites hit a real Postgres + Redis and run several bcrypt
+  // hashes / socket round-trips per test. The 5s Jest default is too tight when
+  // the host is under load (CI, parallel builds) and produces spurious hook/test
+  // timeouts (twoPointComm afterAll, passwordReset). 30s applies to tests AND
+  // before/after hooks, giving ~6x headroom without masking a real hang.
+  testTimeout: 30000,
   collectCoverageFrom: ['src/**/*.ts', '!src/**/*.d.ts', '!src/app.ts'],
   coverageDirectory: 'coverage',
   clearMocks: true,
