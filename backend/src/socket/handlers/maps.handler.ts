@@ -3,8 +3,7 @@ import { usersService } from '../../modules/users/users.service';
 import { locationSchema, visibilitySchema } from '../../modules/users/users.schema';
 import { logger } from '../../config/logger';
 import { getUserId } from '../socket.middleware';
-
-const MAPS_CHANNEL = 'maps:presence';
+import { MAPS_CHANNEL } from '../channels';
 
 /**
  * All sockets that open the map join the `maps:presence` channel so every

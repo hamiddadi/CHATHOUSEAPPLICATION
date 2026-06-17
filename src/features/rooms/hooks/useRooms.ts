@@ -10,6 +10,7 @@ import { env } from '../../../config/env';
 import { roomService, FEED_PAGE_SIZE, type CreateRoomInput } from '../services/roomService';
 import type { Room, RoomSummary } from '../../../shared/types/domain';
 import { useCurrentRoomStore } from '../store/currentRoomStore';
+import { roomAudioSession } from '../services/roomAudioSession';
 
 export const roomKeys = {
   all: ['rooms'] as const,
@@ -314,6 +315,9 @@ export const useCurrentRoom = () => {
       leaveRoom.mutate(room.id);
     }
     clearRoom();
+    // Tear down the persistent audio session (the engine outlives the screen,
+    // so it must be stopped explicitly on a real leave — not on unmount).
+    void roomAudioSession.stop();
   };
 
   return { room, isMuted, toggleMute, leave };

@@ -1,6 +1,6 @@
 import type { Server } from 'socket.io';
 import { HALLWAY_ROOM } from './handlers/hallway.handler';
-import { roomChannel, userChannel } from './channels';
+import { MAPS_CHANNEL, roomChannel, userChannel } from './channels';
 
 /**
  * Side-channel the HTTP layer uses to fan events into the socket tier.
@@ -41,6 +41,15 @@ export const emitHallwayRoomClosed = (roomId: string): void => {
  */
 export const emitRoomEnded = (roomId: string): void => {
   ioRef?.to(roomChannel(roomId)).emit('room:ended', { roomId });
+};
+
+/**
+ * Broadcast that a host/mod flipped live-captions for the room, so every
+ * client subscribes/unsubscribes the caption stream live instead of only
+ * picking it up on next mount.
+ */
+export const emitRoomCaptionsState = (roomId: string, enabled: boolean): void => {
+  ioRef?.to(roomChannel(roomId)).emit('room:captions_state', { roomId, enabled });
 };
 
 export const emitHallwayRoomUpdated = (
@@ -146,6 +155,25 @@ export const emitRoomMuteChanged = (
 
 export const emitUserFollowerCount = (userId: string, count: number): void => {
   ioRef?.to(userChannel(userId)).emit('user:follower_count', { userId, count });
+};
+
+// ─── Maps presence — live mic/room-audio state ───────────────────────────
+/**
+ * Fan a user's live mic/room-audio state out to everyone watching the map
+ * (`map:user_update`). Bridges the room tier (mute toggles, join/leave) into
+ * the maps tier so a follower's avatar marker flips between speaking / muted /
+ * listener / online badges in real time. Carries only the changed flags — no
+ * coordinates, which still stream via `maps:user-moved` — so the client merges
+ * it as a surgical per-user patch. No-op before socket boot.
+ */
+export const emitMapUserUpdate = (payload: {
+  userId: string;
+  isSpeaking?: boolean;
+  isMuted?: boolean;
+  isListener?: boolean;
+  isInRoom?: boolean;
+}): void => {
+  ioRef?.to(MAPS_CHANNEL).emit('map:user_update', payload);
 };
 
 export const emitRoomMetaUpdated = (

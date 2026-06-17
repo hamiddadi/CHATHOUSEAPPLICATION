@@ -18,6 +18,21 @@ interface MapsUserOffline {
 }
 
 /**
+ * Backend `map:user_update` payload — partial mic/room-audio state for one
+ * user, fanned out to the `maps:presence` channel when they mute/unmute, take
+ * the stage, or join/leave a room. Carries no coordinates (those still arrive
+ * via `maps:user-moved`); it's a pure state delta merged surgically below.
+ */
+interface MapUserUpdate {
+  userId: string;
+  isSpeaking?: boolean;
+  isMuted?: boolean;
+  isListener?: boolean;
+  /** false → the user left the room; clears every room-audio flag. */
+  isInRoom?: boolean;
+}
+
+/**
  * Subscribes to followers presence via WebSocket.
  * Falls back to `MOCK_FOLLOWERS_ON_MAP` when `env.REALTIME_ENABLED === false`
  * so the feature is demo-able without a server.
@@ -80,11 +95,48 @@ export const useFollowersOnMap = (): FollowerOnMap[] => {
       if (!cancelled) setFollowers(prev => prev.filter(f => f.id !== p.userId));
     };
 
+    // Surgical mic/room-audio patch: only the matching follower is rewritten
+    // (a partial spread merge), every other entry keeps its identity so its
+    // marker doesn't re-render — exactly the per-user update the live badge
+    // needs. NEVER replace the whole array on a mic toggle, or every marker on
+    // the map re-rasterizes (expensive on Android).
+    const onUserUpdate = (u: MapUserUpdate) => {
+      if (cancelled) return;
+      setFollowers(prev =>
+        prev.map(f => {
+          if (f.id !== u.userId) return f;
+          // Leaving a room clears every room-audio signal so the marker falls
+          // back to the plain "online" badge.
+          if (u.isInRoom === false) {
+            return {
+              ...f,
+              presence: 'online',
+              lastSeenMinutesAgo: 0,
+              liveRoomId: null,
+              liveRoomTitle: null,
+              isSpeaking: false,
+              isMuted: false,
+              isListener: false,
+            };
+          }
+          return {
+            ...f,
+            presence: 'online',
+            lastSeenMinutesAgo: 0,
+            ...(u.isSpeaking !== undefined && { isSpeaking: u.isSpeaking }),
+            ...(u.isMuted !== undefined && { isMuted: u.isMuted }),
+            ...(u.isListener !== undefined && { isListener: u.isListener }),
+          };
+        }),
+      );
+    };
+
     void (async () => {
       const socket = await getSocket();
       if (cancelled || !socket) return;
       socket.on('maps:user-moved', onMoved);
       socket.on('maps:user-offline', onOffline);
+      socket.on('map:user_update', onUserUpdate);
     })();
 
     return () => {
@@ -94,6 +146,7 @@ export const useFollowersOnMap = (): FollowerOnMap[] => {
       void getSocket().then(s => {
         s?.off('maps:user-moved', onMoved);
         s?.off('maps:user-offline', onOffline);
+        s?.off('map:user_update', onUserUpdate);
       });
     };
   }, []);

@@ -1,27 +1,39 @@
+import crypto from 'node:crypto';
 import { extError } from '../../utils/ExtAppError';
 import { logger } from '../../../config/logger';
+import { redis } from '../../../config/redis';
 
 /**
- * Twitter / X OAuth import scaffold (Module 1.7 / AUTH-013/014).
+ * Twitter / X OAuth import (Module 1.7 / AUTH-013/014).
  *
  * Implements the OAuth 2.0 PKCE flow to fetch a user's display name,
  * username, profile picture, and bio. Feature-flagged on
  * TWITTER_CLIENT_ID / TWITTER_CLIENT_SECRET env vars.
  *
- * The flow:
- *   1. Mobile app calls /ext/twitter/url → server returns authorize URL
- *      with state + code_challenge
- *   2. User completes OAuth in a webview → redirect with `code`
- *   3. Mobile app calls /ext/twitter/exchange?code=...&codeVerifier=...
- *      → server fetches the access_token then GET /2/users/me
- *      → returns {name, username, profile_image_url, description}
- *   4. Frontend pre-fills SetupProfile with the returned values.
+ * PKCE is driven entirely server-side so the mobile client needs no crypto
+ * dependency: the server mints `state` + `code_verifier`, derives the
+ * `code_challenge`, and stashes the verifier in Redis keyed by `state`
+ * (10-min TTL, one-time use). The flow:
+ *   1. App calls POST /ext/twitter/begin → { url, state }
+ *   2. App opens `url` in the system browser; user authorizes; Twitter
+ *      redirects to `chathouse://oauth/twitter?code=…&state=…`
+ *   3. App captures the deep link and calls POST /ext/twitter/complete
+ *      { state, code } → server looks the verifier up by `state`, exchanges
+ *      the code, then GET /2/users/me → { name, username, bio, avatarUrl }
+ *   4. Frontend pre-fills the profile form with the returned values.
  *
  * No DB schema change — the imported data is held in client state.
  */
 
 const isConfigured = (): boolean =>
   Boolean(process.env.TWITTER_CLIENT_ID && process.env.TWITTER_CLIENT_SECRET);
+
+/** Base64url (no padding) — the encoding PKCE + OAuth `state` require. */
+const b64url = (buf: Buffer): string =>
+  buf.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+const pkceKey = (state: string): string => `ext:twitter:pkce:${state}`;
+const PKCE_TTL_S = 600;
 
 interface TwitterImportResult {
   name: string;
@@ -33,10 +45,39 @@ interface TwitterImportResult {
 export const twitterService = {
   configured: isConfigured,
 
+  /**
+   * Step 1: mint state + PKCE verifier, persist the verifier in Redis keyed
+   * by state (one-time, TTL'd), and return the authorize URL + state.
+   */
+  async beginAuth(): Promise<{ url: string; state: string }> {
+    if (!isConfigured()) {
+      throw extError('TWITTER_NOT_CONFIGURED');
+    }
+    const state = b64url(crypto.randomBytes(16));
+    const codeVerifier = b64url(crypto.randomBytes(32));
+    const codeChallenge = b64url(crypto.createHash('sha256').update(codeVerifier).digest());
+    await redis.setEx(pkceKey(state), PKCE_TTL_S, codeVerifier);
+    return { url: this.authorizeUrl(state, codeChallenge), state };
+  },
+
+  /**
+   * Step 3: look the verifier up by state (deleting it so a code can't be
+   * replayed), then exchange the code for the user's profile.
+   */
+  async completeAuth(state: string, code: string): Promise<TwitterImportResult> {
+    const key = pkceKey(state);
+    const codeVerifier = await redis.get(key);
+    await redis.del(key);
+    if (!codeVerifier) {
+      throw extError('TWITTER_STATE_INVALID');
+    }
+    return this.exchange(code, codeVerifier);
+  },
+
   authorizeUrl(state: string, codeChallenge: string): string {
     const rawClientId = process.env.TWITTER_CLIENT_ID;
     if (!isConfigured() || !rawClientId) {
-      throw extError('PAY_NOT_CONFIGURED', 'Twitter OAuth not configured');
+      throw extError('TWITTER_NOT_CONFIGURED');
     }
     const clientId = encodeURIComponent(rawClientId);
     const redirectUri = encodeURIComponent(
@@ -54,7 +95,7 @@ export const twitterService = {
     const clientId = process.env.TWITTER_CLIENT_ID;
     const clientSecret = process.env.TWITTER_CLIENT_SECRET;
     if (!isConfigured() || !clientId || !clientSecret) {
-      throw extError('PAY_NOT_CONFIGURED', 'Twitter OAuth not configured');
+      throw extError('TWITTER_NOT_CONFIGURED');
     }
     const redirectUri = process.env.TWITTER_REDIRECT_URI ?? 'chathouse://oauth/twitter';
 
@@ -87,7 +128,7 @@ export const twitterService = {
         status: tokenRes.status,
         error: oauthError,
       });
-      throw extError('PAY_INVALID', 'Twitter token exchange failed');
+      throw extError('TWITTER_OAUTH_FAILED', 'Twitter token exchange failed');
     }
     const tok = (await tokenRes.json()) as { access_token: string };
 
@@ -99,7 +140,7 @@ export const twitterService = {
       },
     );
     if (!userRes.ok) {
-      throw extError('PAY_INVALID', 'Twitter user fetch failed');
+      throw extError('TWITTER_OAUTH_FAILED', 'Twitter user fetch failed');
     }
     const body = (await userRes.json()) as {
       data: {

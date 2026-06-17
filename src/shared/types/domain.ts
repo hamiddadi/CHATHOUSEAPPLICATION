@@ -204,6 +204,20 @@ export interface FollowerOnMap extends UserSummary {
   liveRoomTitle: string | null;
   /** Minutes since the user was last active. Used for grayscale fade. */
   lastSeenMinutesAgo: number;
+  // ── Live mic / room-audio state (maps marker status badge) ──────────────
+  // The REST snapshot may omit these (only `currentRoom` is known there, so the
+  // mapper seeds `isListener`); the socket `map:user_update` event then refines
+  // them in real time as the user mutes / unmutes / changes stage role. They map
+  // onto the product "MapUser" contract — `avatarUrl`↔profilePhoto,
+  // `liveRoomId`↔roomId/isInRoom, `presence`↔isOnline. Ghost Mode is enforced
+  // upstream (offline/invisible users never reach the roster), so there is no
+  // `isVisible` flag to carry here.
+  /** Mic open and active — unmuted speaker. Green badge + pulse. */
+  isSpeaking?: boolean;
+  /** Mic intentionally muted. Red badge. */
+  isMuted?: boolean;
+  /** In a room but not on stage (listener). Blue badge. */
+  isListener?: boolean;
 }
 
 /* ============================================================

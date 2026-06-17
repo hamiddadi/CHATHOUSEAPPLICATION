@@ -38,6 +38,11 @@ const toFollowerOnMap = (r: RawFollowerOnMap): FollowerOnMap | null => {
     liveRoomId: live?.id ?? null,
     liveRoomTitle: live?.title ?? null,
     lastSeenMinutesAgo: minutesAgo,
+    // The roster select only tells us *whether* they're in a live room, not
+    // their stage role / mute state — so seed them as a listener (blue badge).
+    // The socket `map:user_update` event refines this to speaking/muted in real
+    // time once they take the stage or toggle their mic.
+    isListener: live != null,
   };
 };
 

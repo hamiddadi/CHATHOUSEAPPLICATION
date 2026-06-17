@@ -38,7 +38,15 @@ import { TitleEditModal } from '../../components/TitleEditModal';
 import { RoomTimer } from '../../components/RoomTimer';
 import { useAuthStore } from '../../../auth/store/authStore';
 import { useCurrentRoomStore } from '../../store/currentRoomStore';
-import { recentlyPlayedApi, speakInviteApi, useExtSocketAliases } from '../../../extensions';
+import { roomAudioSession } from '../../services/roomAudioSession';
+import {
+  recentlyPlayedApi,
+  speakInviteApi,
+  useExtSocketAliases,
+  useExtCaptions,
+  useLocalCaptionPublisher,
+  ExtCaptionsOverlay,
+} from '../../../extensions';
 import { getSocket } from '../../../../shared/services/realtime/socketClient';
 import { formatScheduled } from '../../../../shared/utils/formatScheduled';
 import StageGrid from './partials/StageGrid';
@@ -120,6 +128,7 @@ export const RoomScreen: React.FC = () => {
   // with no Participant row and therefore no audio (livekit-token → ROOM_005).
   const handleJoinDenied = useCallback(() => {
     useCurrentRoomStore.getState().clear(); // denied → not in the room, no mini-bar
+    void roomAudioSession.stop();
     navigation.goBack();
     Alert.alert(
       t('room.alert.joinDeniedTitle', 'Unable to join'),
@@ -172,6 +181,19 @@ export const RoomScreen: React.FC = () => {
   // (chat, hand-raise, reactions) keeps working.
   const audio = useRoomAudio({ roomId: room?.id ?? null, enabled: Boolean(room) });
 
+  // Live captions (Clubhouse-style). `useExtCaptions` subscribes to the
+  // `room:caption` stream + the live on/off flag; the publisher runs the
+  // on-device recogniser only when captions are ON and we can actually speak
+  // (unmuted speaker), streaming our transcript up for the backend to relay.
+  const captions = useExtCaptions(roomId);
+  useLocalCaptionPublisher({
+    roomId,
+    active: captions.configured && captions.enabled && viewerCanSpeak && !isMuted,
+  });
+  const handleToggleCaptions = useCallback(() => {
+    void captions.setEnabled(!captions.enabled);
+  }, [captions]);
+
   // Sync the local mute icon when the host force-mutes us, AND react to
   // a kick targeting us. Both events are server-side broadcasts; the
   // client filters on `userId === viewerId`.
@@ -204,6 +226,7 @@ export const RoomScreen: React.FC = () => {
         // they dismiss the alert. The 30-min RoomBan installed by the
         // backend prevents an immediate re-join.
         useCurrentRoomStore.getState().clear();
+        void roomAudioSession.stop();
         navigation.goBack();
         Alert.alert(
           t('room.alert.removedTitle', 'You have been removed'),
@@ -219,6 +242,7 @@ export const RoomScreen: React.FC = () => {
       const endedHandler = (payload: { roomId?: string }): void => {
         if (payload.roomId && payload.roomId !== roomId) return;
         useCurrentRoomStore.getState().clear();
+        void roomAudioSession.stop();
         navigation.goBack();
         Alert.alert(
           t('room.alert.endedTitle', 'Room ended'),
@@ -292,6 +316,7 @@ export const RoomScreen: React.FC = () => {
   const handleLeave = useCallback(async () => {
     // "Leave quietly" = fully leave → drop the mini-bar (unlike a plain back).
     useCurrentRoomStore.getState().clear();
+    void roomAudioSession.stop();
     if (room) {
       try {
         await leaveRoom.mutateAsync(room.id);
@@ -318,6 +343,7 @@ export const RoomScreen: React.FC = () => {
             endRoom.mutate(room.id, {
               onSettled: () => {
                 useCurrentRoomStore.getState().clear();
+                void roomAudioSession.stop();
                 navigation.goBack();
               },
             }),
@@ -759,6 +785,10 @@ export const RoomScreen: React.FC = () => {
         columnWrapperStyle={styles.othersColumnWrapper}
       />
 
+      {/* Floating live-captions overlay — renders the rolling transcript
+          near the bottom of the room when captions are on. */}
+      {captions.enabled ? <ExtCaptionsOverlay lines={captions.lines} /> : null}
+
       {/* Floating reactions bar — sits just above the action pill so the
           float-up emojis fly in front of the controls. pointerEvents
           'box-none' on the wrapper lets taps on the action pill pass
@@ -818,6 +848,9 @@ export const RoomScreen: React.FC = () => {
         onClose={() => setControlsOpen(false)}
         onEditTitle={() => setTitleEditOpen(true)}
         onInvite={() => navigation.navigate('InviteToRoom', { roomId: room.id })}
+        captionsConfigured={captions.configured}
+        captionsEnabled={captions.enabled}
+        onToggleCaptions={handleToggleCaptions}
       />
       <TitleEditModal
         visible={titleEditOpen}

@@ -8,14 +8,12 @@ export const twitterRouter: Router = Router();
 
 twitterRouter.use(requireAuth);
 
-const urlSchema = z.object({
+// PKCE runs server-side, so the client never sends a verifier — it only
+// echoes back the `state` it received from /begin and the `code` Twitter
+// handed it on redirect.
+const completeSchema = z.object({
   state: z.string().min(8).max(128),
-  codeChallenge: z.string().min(8).max(200),
-});
-
-const exchangeSchema = z.object({
   code: z.string().min(1).max(500),
-  codeVerifier: z.string().min(8).max(200),
 });
 
 twitterRouter.get(
@@ -26,19 +24,18 @@ twitterRouter.get(
 );
 
 twitterRouter.post(
-  '/url',
-  asyncHandler(async (req, res) => {
-    const { state, codeChallenge } = urlSchema.parse(req.body);
-    const url = twitterService.authorizeUrl(state, codeChallenge);
-    res.json({ url });
+  '/begin',
+  asyncHandler(async (_req, res) => {
+    const out = await twitterService.beginAuth();
+    res.json(out);
   }),
 );
 
 twitterRouter.post(
-  '/exchange',
+  '/complete',
   asyncHandler(async (req, res) => {
-    const { code, codeVerifier } = exchangeSchema.parse(req.body);
-    const profile = await twitterService.exchange(code, codeVerifier);
+    const { state, code } = completeSchema.parse(req.body);
+    const profile = await twitterService.completeAuth(state, code);
     res.json(profile);
   }),
 );

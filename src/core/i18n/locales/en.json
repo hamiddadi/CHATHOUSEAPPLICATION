@@ -94,6 +94,8 @@
     "muteAllDone": "{{count}} speaker(s) muted.",
     "enableChat": "Enable chat",
     "disableChat": "Disable chat",
+    "enableCaptions": "Enable live captions",
+    "disableCaptions": "Disable live captions",
     "chatVisibleAll": "Make chat visible to everyone",
     "chatModsOnly": "Limit chat to moderators",
     "cancel": "Cancel",
@@ -523,6 +525,9 @@
       "skip": "Skip",
       "addPhoto": "Add a photo",
       "photoPermission": "Allow photo access to choose a picture.",
+      "importFromX": "Import from X",
+      "importing": "Importing…",
+      "importFailed": "Couldn't import from X",
       "errors": {
         "displayNameTooLong": "Max 60 characters.",
         "bioTooLong": "Max 150 characters."

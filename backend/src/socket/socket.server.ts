@@ -5,6 +5,9 @@ import { env } from '../config/env';
 import { logger } from '../config/logger';
 import { redis } from '../config/redis';
 import { closeAllProducersForUser, onProducerEvents } from '../webrtc/mediasoup.manager';
+import { registerCaptionsRealtime } from '../extensions/realtime/captions.realtime';
+import { roomsService } from '../modules/rooms/rooms.service';
+import { emitMapUserUpdate, setRealtimeServer } from './realtime';
 import { socketAuth } from './socket.middleware';
 import { registerRoomHandlers } from './handlers/room.handler';
 import { registerChatHandlers } from './handlers/chat.handler';
@@ -13,7 +16,6 @@ import { registerRtcHandlers } from './handlers/rtc.handler';
 import { registerHallwayHandlers } from './handlers/hallway.handler';
 import { registerLatencyHandlers } from './handlers/latency.handler';
 import { registerPresenceHandlers } from './handlers/presence.handler';
-import { setRealtimeServer } from './realtime';
 
 /**
  * Boot the Socket.IO layer on top of the existing HTTP server. The Redis
@@ -81,6 +83,36 @@ export const createSocketServer = async (httpServer: HttpServer): Promise<Server
     registerHallwayHandlers(io, socket);
     registerLatencyHandlers(socket);
     registerPresenceHandlers(socket);
+    // Extensions: on-device live-captions relay (caption:publish → room:caption).
+    registerCaptionsRealtime(io, socket);
+
+    // `disconnecting` fires while socket.rooms is still populated — the only
+    // place we can see which room channels this socket was in. Clean up the
+    // user's room participation so an ungraceful drop (app killed, network
+    // loss, logout) doesn't leave a ghost participant behind. Skipped when the
+    // SAME user still has another live socket in that room (multi-device), so a
+    // second device — or a brief reconnect — doesn't evict them.
+    socket.on('disconnecting', () => {
+      const roomChannels = [...socket.rooms].filter(r => r.startsWith('room:'));
+      if (roomChannels.length === 0) return;
+      void (async () => {
+        for (const channel of roomChannels) {
+          const roomId = channel.slice('room:'.length);
+          try {
+            const peers = await io.in(channel).fetchSockets();
+            const userHasAnotherSocket = peers.some(
+              s => s.id !== socket.id && (s.data as { userId?: string }).userId === userId,
+            );
+            if (userHasAnotherSocket) continue;
+            await roomsService.leave(roomId, userId);
+            io.to(channel).emit('room:user-left', { userId, roomId });
+            emitMapUserUpdate({ userId, isInRoom: false });
+          } catch (err) {
+            logger.warn('socket disconnect room cleanup failed', { err, roomId, userId });
+          }
+        }
+      })();
+    });
 
     socket.on('disconnect', reason => {
       // A user can have multiple concurrent sockets (two tabs). If this is

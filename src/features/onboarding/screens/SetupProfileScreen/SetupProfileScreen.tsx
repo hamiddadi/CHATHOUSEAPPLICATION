@@ -26,6 +26,7 @@ import { errorMessage } from '../../../../shared/utils/errorMessage';
 import type { OnboardingStackParamList } from '../../../../core/navigation/types';
 import { setupProfileFormSchema, type SetupProfileFormValues } from '../../schemas';
 import { useOnboardingStore } from '../../store/onboardingStore';
+import { useTwitterImport } from '../../../extensions/hooks/useTwitterImport';
 
 type Nav = NativeStackNavigationProp<OnboardingStackParamList, 'Onboarding'>;
 
@@ -41,7 +42,11 @@ export const SetupProfileScreen: React.FC = () => {
   const [avatarUri, setAvatarUri] = useState<string | null>(null);
   const [avatarBase64, setAvatarBase64] = useState<string | null>(null);
   const [avatarMime, setAvatarMime] = useState<string | undefined>(undefined);
+  // Remote avatar URL imported from X — used as-is at submit (no re-upload)
+  // when the user hasn't picked a local photo on top of it.
+  const [remoteAvatarUrl, setRemoteAvatarUrl] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const twitter = useTwitterImport();
 
   const pickImage = async () => {
     try {
@@ -69,12 +74,39 @@ export const SetupProfileScreen: React.FC = () => {
   const {
     control,
     handleSubmit,
+    setValue,
     formState: { errors, isSubmitting },
   } = useForm<SetupProfileFormValues>({
     resolver: zodResolver(setupProfileFormSchema),
     mode: 'onChange',
     defaultValues: { displayName: '', bio: '' },
   });
+
+  const onImportFromX = useCallback(async () => {
+    try {
+      const profile = await twitter.start();
+      if (!profile) return; // cancelled / denied / timed out
+      if (profile.name) {
+        setValue('displayName', profile.name.slice(0, 60), { shouldValidate: true });
+      }
+      if (profile.bio) {
+        setValue('bio', profile.bio.slice(0, BIO_MAX), { shouldValidate: true });
+      }
+      if (profile.avatarUrl) {
+        setAvatarUri(profile.avatarUrl);
+        setRemoteAvatarUrl(profile.avatarUrl);
+        // Drop any prior local pick so submit uses the imported remote URL.
+        setAvatarBase64(null);
+        setAvatarMime(undefined);
+      }
+      notifySuccess();
+    } catch (err) {
+      Alert.alert(
+        t('common.error', 'Something went wrong'),
+        errorMessage(err, t('onboarding.setupProfile.importFailed', "Couldn't import from X")),
+      );
+    }
+  }, [twitter, setValue, t]);
 
   const onSubmit = useCallback(
     async (values: SetupProfileFormValues) => {
@@ -87,6 +119,9 @@ export const SetupProfileScreen: React.FC = () => {
         if (avatarBase64) {
           setUploading(true);
           avatarUrl = await mediaService.uploadAvatar(avatarBase64, avatarMime);
+        } else if (remoteAvatarUrl) {
+          // Imported from X — already a remote https URL, pass it through.
+          avatarUrl = remoteAvatarUrl;
         }
         setProfile({
           displayName: values.displayName || undefined,
@@ -104,7 +139,7 @@ export const SetupProfileScreen: React.FC = () => {
         setUploading(false);
       }
     },
-    [navigation, setProfile, avatarBase64, avatarMime, t],
+    [navigation, setProfile, avatarBase64, avatarMime, remoteAvatarUrl, t],
   );
 
   const onSkip = useCallback(() => {
@@ -151,6 +186,24 @@ export const SetupProfileScreen: React.FC = () => {
           <Text className="mt-sm text-sm text-ink-muted">
             {t('onboarding.setupProfile.addPhoto', 'Add a photo')}
           </Text>
+
+          {twitter.configured ? (
+            <Pressable
+              onPress={onImportFromX}
+              disabled={twitter.importing}
+              accessibilityRole="button"
+              accessibilityLabel={t('onboarding.setupProfile.importFromX', 'Import from X')}
+              className="mt-md flex-row items-center gap-sm px-lg py-sm rounded-pill bg-surface border border-surface-border"
+              style={twitter.importing ? setupStyles.importingBtn : undefined}
+            >
+              <MaterialIcons name="alternate-email" size={16} color={colors.text} />
+              <Text className="text-sm font-body-bold text-ink">
+                {twitter.importing
+                  ? t('onboarding.setupProfile.importing', 'Importing…')
+                  : t('onboarding.setupProfile.importFromX', 'Import from X')}
+              </Text>
+            </Pressable>
+          ) : null}
         </View>
 
         <View className="gap-xl">
@@ -217,5 +270,8 @@ const setupStyles = StyleSheet.create({
   avatarImage: {
     width: '100%',
     height: '100%',
+  },
+  importingBtn: {
+    opacity: 0.6,
   },
 });

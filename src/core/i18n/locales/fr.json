@@ -94,6 +94,8 @@
     "muteAllDone": "{{count}} speaker(s) muté(s).",
     "enableChat": "Activer le chat",
     "disableChat": "Désactiver le chat",
+    "enableCaptions": "Activer les sous-titres",
+    "disableCaptions": "Désactiver les sous-titres",
     "chatVisibleAll": "Rendre le chat visible à tous",
     "chatModsOnly": "Limiter le chat aux modérateurs",
     "cancel": "Annuler",
@@ -523,6 +525,9 @@
       "skip": "Passer",
       "addPhoto": "Ajouter une photo",
       "photoPermission": "Autorise l'accès aux photos pour choisir une image.",
+      "importFromX": "Importer depuis X",
+      "importing": "Import en cours…",
+      "importFailed": "Impossible d'importer depuis X",
       "errors": {
         "displayNameTooLong": "Maximum 60 caractères.",
         "bioTooLong": "Maximum 150 caractères."

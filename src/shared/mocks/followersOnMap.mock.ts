@@ -25,6 +25,8 @@ export const MOCK_FOLLOWERS_ON_MAP: readonly FollowerOnMap[] = [
     liveRoomId: 'r1',
     liveRoomTitle: 'Scaling to 10M users',
     lastSeenMinutesAgo: 0,
+    // On stage with the mic open → green badge + pulse.
+    isSpeaking: true,
   },
   {
     ...pickUser(1),
@@ -61,6 +63,8 @@ export const MOCK_FOLLOWERS_ON_MAP: readonly FollowerOnMap[] = [
     liveRoomId: 'r2',
     liveRoomTitle: 'The Death of Minimalism',
     lastSeenMinutesAgo: 0,
+    // In the room but muted → red mic-off badge.
+    isMuted: true,
   },
   {
     ...pickUser(4),

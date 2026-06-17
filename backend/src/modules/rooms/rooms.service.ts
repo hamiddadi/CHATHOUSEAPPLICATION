@@ -14,6 +14,7 @@ import {
   emitHallwayRoomClosed,
   emitHallwayRoomCreated,
   emitHallwayRoomUpdated,
+  emitMapUserUpdate,
   emitRoomEnded,
   emitRoomHandLowered,
   emitRoomHandRaised,
@@ -758,6 +759,15 @@ export const roomsService = {
     });
     if (updated.count === 0) throw new AppError('ROOM_005');
     emitRoomMuteChanged(roomId, { userId: targetUserId, isMuted: input.isMuted });
+    // Bridge the mic state to the map: a muted participant shows the red
+    // mic-off badge, an unmuted one the green speaking badge. Only stage
+    // participants are mutable, so this is never a listener.
+    emitMapUserUpdate({
+      userId: targetUserId,
+      isMuted: input.isMuted,
+      isSpeaking: !input.isMuted,
+      isListener: false,
+    });
     return { userId: targetUserId, isMuted: input.isMuted };
   },
 

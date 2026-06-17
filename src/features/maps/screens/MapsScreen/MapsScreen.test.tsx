@@ -52,7 +52,7 @@ describe('MapsScreen', () => {
     // After the async location effect settles, the map UI is shown.
     await waitFor(() => expect(getByLabelText('Find a friend')).toBeTruthy());
     // First mock follower (Alex Rivers) has a live room → label includes ", live".
-    // The label appears twice (the Marker annotation + the FollowerPin custom
+    // The label appears twice (the Marker annotation + the UserMapMarker custom
     // content both set it — on native these are distinct layers; once Marker is
     // mocked as a View they collapse into two matching nodes).
     expect(getAllByLabelText('Alex Rivers, live').length).toBeGreaterThan(0);
@@ -78,7 +78,7 @@ describe('MapsScreen', () => {
     const { getAllByLabelText, getByText, navigation } = renderScreen(<MapsScreen />, {
       route: { name: 'Maps', params: {} },
     });
-    // [0] is the outer Marker (carries onPress); [1] is the inner FollowerPin.
+    // [0] is the outer Marker (carries onPress); [1] is the inner UserMapMarker content.
     const pin = (await waitFor(() => getAllByLabelText('Alex Rivers, live')))[0];
     fireEvent.press(pin);
     // Mini-card surfaces a Message button.

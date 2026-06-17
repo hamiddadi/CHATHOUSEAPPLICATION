@@ -25,6 +25,10 @@ interface RoomControlsSheetProps {
   onClose: () => void;
   onEditTitle: () => void;
   onInvite: () => void;
+  /** Live-captions row — only shown when the ASR backend is configured. */
+  captionsConfigured?: boolean;
+  captionsEnabled?: boolean;
+  onToggleCaptions?: () => void;
 }
 
 /**
@@ -33,7 +37,19 @@ interface RoomControlsSheetProps {
  * `HostActionsSheet` which targets a single participant.
  */
 export const RoomControlsSheet: React.FC<RoomControlsSheetProps> = memo(
-  ({ visible, roomId, chatEnabled, chatVisibility, isLocked, onClose, onEditTitle, onInvite }) => {
+  ({
+    visible,
+    roomId,
+    chatEnabled,
+    chatVisibility,
+    isLocked,
+    onClose,
+    onEditTitle,
+    onInvite,
+    captionsConfigured = false,
+    captionsEnabled = false,
+    onToggleCaptions,
+  }) => {
     const { t } = useTranslation();
     const muteAll = useMuteAllInRoom();
     const toggleChat = useToggleRoomChat();
@@ -171,6 +187,17 @@ export const RoomControlsSheet: React.FC<RoomControlsSheetProps> = memo(
               label={isLocked ? 'Déverrouiller la room' : 'Verrouiller la room'}
               onPress={handleToggleLock}
             />
+            {captionsConfigured && onToggleCaptions ? (
+              <Row
+                icon={captionsEnabled ? 'closed-caption' : 'closed-caption-off'}
+                label={
+                  captionsEnabled
+                    ? t('roomControls.disableCaptions', 'Désactiver les sous-titres')
+                    : t('roomControls.enableCaptions', 'Activer les sous-titres')
+                }
+                onPress={onToggleCaptions}
+              />
+            ) : null}
 
             <Pressable
               onPress={onClose}

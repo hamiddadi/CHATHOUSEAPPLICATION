@@ -1,8 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 import { env } from '../../../config/env';
-import { getSocket } from '../../../shared/services/realtime/socketClient';
-import { errorMessage } from '../../../shared/utils/errorMessage';
-import { startRoomAudio, type RoomAudioHandle } from '../services/roomAudioService';
+import {
+  roomAudioSession,
+  useRoomAudioStore,
+  SELF_KEY,
+  type RoomAudioStatus,
+} from '../services/roomAudioSession';
 
 interface UseRoomAudioOptions {
   roomId: string | null;
@@ -10,22 +13,17 @@ interface UseRoomAudioOptions {
 }
 
 interface UseRoomAudioState {
-  status: 'idle' | 'connecting' | 'live' | 'reconnecting' | 'error' | 'unsupported';
+  status: RoomAudioStatus;
   error: string | null;
   /**
    * Additive convenience flag for UI banners — `true` while the LiveKit SDK
    * has lost the link and is auto-retrying (or we're driving a bounded
-   * manual rejoin). Equivalent to `status === 'reconnecting'`; exposed as a
-   * dedicated boolean so call sites can show a transient bandeau without
-   * widening their `status` checks. Always `false` on the unsupported
-   * (Expo Go) path, where connection-state callbacks never fire.
+   * manual rejoin). Equivalent to `status === 'reconnecting'`.
    */
   reconnecting: boolean;
   /**
    * Per-user "is currently speaking" flag, driven by LiveKit's
-   * ActiveSpeakersChanged. Self is keyed under `__self__`. The map shape
-   * (instead of a Set) keeps the existing call sites —
-   * `audio.scores.get(userId) ?? 0` — working unchanged:
+   * ActiveSpeakersChanged. Self is keyed under `__self__`.
    * 0 = silent, 1 = speaking.
    */
   scores: ReadonlyMap<string, number>;
@@ -33,127 +31,50 @@ interface UseRoomAudioState {
   setPeerVolume: (userId: string, volume: number) => void;
 }
 
-const SELF_KEY = '__self__';
+const EMPTY_SCORES: ReadonlyMap<string, number> = new Map();
 
 /**
- * Threshold against the `scores` map. With the LiveKit
- * ActiveSpeakersChanged-backed implementation the values are effectively
- * 0 or 1 (we feed the isSpeaking bit through), so any threshold in
- * (0, 1] works. Kept exported for call-site stability — RoomScreen
- * reads it to compute `isSpeakingLive`.
+ * Threshold against the `scores` map (values are effectively 0/1). Kept
+ * exported for call-site stability — RoomScreen reads it to compute
+ * `isSpeakingLive`.
  */
 export const SPEAKING_SCORE_THRESHOLD = 0.5;
 
+/**
+ * Thin subscriber over {@link roomAudioSession}. It asks the singleton session
+ * to connect the room (idempotent) and reflects its reactive state — but it
+ * deliberately does NOT close the session on unmount, so audio keeps playing
+ * when the user navigates away (mini-bar) or backgrounds the app. The session
+ * is closed explicitly on leave/kick/room-end via `roomAudioSession.stop()`.
+ */
 export const useRoomAudio = ({
   roomId,
   enabled = true,
 }: UseRoomAudioOptions): UseRoomAudioState => {
-  const handleRef = useRef<RoomAudioHandle | null>(null);
-  const [status, setStatus] = useState<UseRoomAudioState['status']>('idle');
-  const [error, setError] = useState<string | null>(null);
-  const [scores, setScores] = useState<Map<string, number>>(() => new Map());
+  const activeRoomId = useRoomAudioStore(s => s.roomId);
+  const rawStatus = useRoomAudioStore(s => s.status);
+  const rawError = useRoomAudioStore(s => s.error);
+  const rawScores = useRoomAudioStore(s => s.scores);
 
   useEffect(() => {
-    if (!roomId || !enabled || !env.REALTIME_ENABLED) {
-      setStatus('idle');
-      return;
-    }
-    let cancelled = false;
-    setStatus('connecting');
-    void (async () => {
-      try {
-        const socket = await getSocket();
-        if (!socket) throw new Error('socket not connected');
-        const handle = await startRoomAudio({
-          socket,
-          roomId,
-          onLocalScore: level => {
-            // Local mic level (0..1). Use the same threshold as VAD so
-            // the local indicator behaves identically to remote ones.
-            setScores(prev => {
-              const next = new Map(prev);
-              next.set(SELF_KEY, level >= SPEAKING_SCORE_THRESHOLD ? 1 : 0);
-              return next;
-            });
-          },
-          onPeerScore: ev => {
-            // Use the explicit VAD bit when present, otherwise fall back
-            // to the volume value above the threshold.
-            const speaking = ev.speaking || ev.volume >= SPEAKING_SCORE_THRESHOLD;
-            setScores(prev => {
-              const next = new Map(prev);
-              next.set(ev.userId, speaking ? 1 : 0);
-              return next;
-            });
-          },
-          onPeerGone: userId => {
-            setScores(prev => {
-              if (!prev.has(userId)) return prev;
-              const next = new Map(prev);
-              next.delete(userId);
-              return next;
-            });
-          },
-          onStatusChange: next => {
-            // Connection-health transitions from the LiveKit SDK. Only ever
-            // fires once the room is connected (never on the unsupported path),
-            // so it's safe to map straight onto the hook's status:
-            //   connected           → 'live'  (audio flowing again)
-            //   reconnecting/failed  → 'reconnecting'  (service auto-rejoins
-            //                          on failed; the banner stays up while
-            //                          the bounded retry runs)
-            // We never override a terminal 'error'/'unsupported' that the
-            // start() catch block set, nor flip back before start() resolves.
-            if (cancelled) return;
-            setStatus(prev => {
-              if (prev === 'error' || prev === 'unsupported' || prev === 'idle') {
-                return prev;
-              }
-              return next === 'connected' ? 'live' : 'reconnecting';
-            });
-          },
-        });
-        if (cancelled) {
-          await handle.close();
-          return;
-        }
-        handleRef.current = handle;
-        setStatus('live');
-      } catch (err) {
-        if (cancelled) return;
-        const msg = errorMessage(err, 'unknown');
-        // The "native module missing" sentinel — surfaces as
-        // `unsupported` so the UI can show a "audio à venir — installer
-        // @livekit/react-native" banner instead of a hard error toast.
-        if (msg.includes('@livekit/react-native not installed')) {
-          setStatus('unsupported');
-        } else if (msg.includes('mic permission denied')) {
-          setStatus('error');
-        } else {
-          setStatus('error');
-        }
-        setError(msg);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-      const h = handleRef.current;
-      handleRef.current = null;
-      if (h) void h.close();
-      setScores(new Map());
-    };
+    if (!roomId || !enabled || !env.REALTIME_ENABLED) return;
+    void roomAudioSession.start(roomId);
+    // No cleanup: the session outlives this screen on purpose.
   }, [roomId, enabled]);
 
-  // Keep the controls stable: scores changes ~5x/s (200ms VAD ticks), so
-  // binding these into the same memo would re-invalidate every consumer
-  // that depends on them. They only ever read handleRef.current.
   const setMuted = useCallback(async (muted: boolean) => {
-    await handleRef.current?.setMuted(muted);
+    await roomAudioSession.setMuted(muted);
   }, []);
   const setPeerVolume = useCallback((userId: string, volume: number) => {
-    handleRef.current?.setPeerVolume(userId, volume);
+    roomAudioSession.setPeerVolume(userId, volume);
   }, []);
+
+  // Only surface state that belongs to THIS room — if the singleton is bound to
+  // another room (or none), this screen sees a clean idle.
+  const isThisRoom = Boolean(roomId) && activeRoomId === roomId;
+  const status: RoomAudioStatus = isThisRoom ? rawStatus : 'idle';
+  const scores = isThisRoom ? rawScores : EMPTY_SCORES;
+  const error = isThisRoom ? rawError : null;
 
   return useMemo(
     () => ({
@@ -164,7 +85,7 @@ export const useRoomAudio = ({
       setMuted,
       setPeerVolume,
     }),
-    [error, scores, status, setMuted, setPeerVolume],
+    [status, error, scores, setMuted, setPeerVolume],
   );
 };
 

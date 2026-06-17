@@ -17,7 +17,7 @@ import { useLocationBroadcast } from '../../hooks/useLocationBroadcast';
 import { GOOGLE_MAPS_COLORS } from '../../constants/mapColors'; // Google Maps color style
 import { ACTIVE_TILE_PROVIDER } from '../../constants/tileProviders'; // OSM Migration — Voyager tiles mimic Google Maps
 import { FollowerMiniCard } from '../../components/FollowerMiniCard';
-import { FollowerPin } from '../../components/FollowerPin';
+import { UserMapMarker } from '../../components/UserMapMarker';
 import { GhostModeToggle } from '../../components/GhostModeToggle';
 import { MapSearchBar } from '../../components/MapSearchBar';
 import { MapTopAppBar } from '../../components/MapTopAppBar';
@@ -219,20 +219,10 @@ export const MapsScreen: React.FC = () => {
             <UserLocationPulse />
           </Marker>
         )}
+        {/* Each follower marker owns its own <Marker> + per-marker
+            tracksViewChanges lifecycle (mic/role changes repaint surgically). */}
         {filteredFollowers.map(f => (
-          <Marker
-            key={f.id}
-            coordinate={{
-              latitude: f.location.latitude,
-              longitude: f.location.longitude,
-            }}
-            onPress={() => handlePinPress(f)}
-            tracksViewChanges={tracksMarkers}
-            anchor={{ x: 0.5, y: 0.5 }}
-            accessibilityLabel={`${f.displayName}${f.liveRoomId ? ', live' : ''}`}
-          >
-            <FollowerPin follower={f} />
-          </Marker>
+          <UserMapMarker key={f.id} user={f} onPress={handlePinPress} />
         ))}
       </MapView>
 

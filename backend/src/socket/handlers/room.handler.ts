@@ -6,6 +6,7 @@ import {
   closeProducersForUserInRoom,
 } from '../../webrtc/mediasoup.manager';
 import { roomChannel } from '../channels';
+import { emitMapUserUpdate } from '../realtime';
 import { getUserId } from '../socket.middleware';
 
 interface JoinPayload {
@@ -43,6 +44,9 @@ export const registerRoomHandlers = (io: Server, socket: Socket): void => {
         userId: userId(),
         roomId: payload.roomId,
       });
+      // Bridge to the map: joiners enter as listeners (blue hearing badge);
+      // setMute later flips them to speaking/muted if they take the stage.
+      emitMapUserUpdate({ userId: userId(), isInRoom: true, isListener: true });
       socket.emit('room:participants', { participants: room.participants });
       ack?.(true);
     } catch (err) {
@@ -62,6 +66,9 @@ export const registerRoomHandlers = (io: Server, socket: Socket): void => {
         userId: userId(),
         roomId: payload.roomId,
       });
+      // Bridge to the map: leaving clears every room-audio flag, so the marker
+      // falls back to the plain online badge.
+      emitMapUserUpdate({ userId: userId(), isInRoom: false });
       ack?.(true);
     } catch (err) {
       logger.warn('room:leave failed', { err });

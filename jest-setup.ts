@@ -73,6 +73,9 @@ jest.mock('@livekit/react-native', () => require('./__mocks__/@livekit/react-nat
 jest.mock('@livekit/react-native-webrtc', () =>
   require('./__mocks__/@livekit/react-native-webrtc'),
 );
+// On-device speech recogniser — the real module builds a NativeEventEmitter at
+// import time (throws under jest); the stub keeps the caption publisher inert.
+jest.mock('@react-native-voice/voice', () => require('./__mocks__/@react-native-voice/voice'));
 jest.mock('react-native-audio-recorder-player', () =>
   require('./__mocks__/react-native-audio-recorder-player'),
 );

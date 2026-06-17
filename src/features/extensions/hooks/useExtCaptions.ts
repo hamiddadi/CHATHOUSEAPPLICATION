@@ -61,6 +61,29 @@ export const useExtCaptions = (roomId: string | null) => {
     };
   }, [roomId]);
 
+  // Live flag updates — a host/mod toggling captions broadcasts
+  // `room:captions_state`, so everyone in the room flips without remounting.
+  useEffect(() => {
+    if (!roomId) return;
+    let cancelled = false;
+    let cleanup: (() => void) | null = null;
+    void (async () => {
+      const socket = await getSocket();
+      if (cancelled || !socket) return;
+      const onState = (payload: { roomId: string; enabled: boolean }): void => {
+        if (payload.roomId !== roomId) return;
+        setEnabledLocal(payload.enabled);
+        if (!payload.enabled) setLines([]);
+      };
+      socket.on('room:captions_state', onState);
+      cleanup = () => socket.off('room:captions_state', onState);
+    })();
+    return () => {
+      cancelled = true;
+      if (cleanup) cleanup();
+    };
+  }, [roomId, socketStatus]);
+
   // Subscribe to caption stream — listens to two canonical event names so
   // the wiring is robust to which backend layer emits the line.
   useEffect(() => {

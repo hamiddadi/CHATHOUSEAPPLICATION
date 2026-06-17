@@ -2,6 +2,7 @@ import { redis } from '../../../config/redis';
 import { prisma } from '../../../config/database';
 import { logger } from '../../../config/logger';
 import { AppError } from '../../../middlewares/error.middleware';
+import { emitRoomCaptionsState } from '../../../socket/realtime';
 import { extError } from '../../utils/ExtAppError';
 
 /**
@@ -55,6 +56,9 @@ export const captionsService = {
     }
     if (!allowed) throw new AppError('AUTH_008', 'Not allowed');
     await redis.set(flagKey(roomId), enabled ? '1' : '0');
+    // Live-propagate so listeners already in the room subscribe/unsubscribe the
+    // caption stream without remounting.
+    emitRoomCaptionsState(roomId, enabled);
     return { enabled };
   },
 
