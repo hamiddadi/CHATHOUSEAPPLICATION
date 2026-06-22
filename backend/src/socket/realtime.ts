@@ -38,9 +38,16 @@ export const emitHallwayRoomClosed = (roomId: string): void => {
  * Tells everyone still in a room that it has ended, so non-host participants
  * leave the screen. The socket `room:end` handler already emits this; the REST
  * end() path must emit it too (its clients never send the socket event).
+ *
+ * `endedBy`/`endedByName` identify the host who closed the room so clients can
+ * show *who* ended it. They're omitted for an automatic (empty-room) close,
+ * where there is no actor.
  */
-export const emitRoomEnded = (roomId: string): void => {
-  ioRef?.to(roomChannel(roomId)).emit('room:ended', { roomId });
+export const emitRoomEnded = (
+  roomId: string,
+  payload: { endedBy?: string; endedByName?: string | null } = {},
+): void => {
+  ioRef?.to(roomChannel(roomId)).emit('room:ended', { roomId, ...payload });
 };
 
 /**
@@ -123,7 +130,7 @@ export const emitRoomRoleChanged = (
 
 export const emitRoomUserKicked = (
   roomId: string,
-  payload: { userId: string; kickedBy: string },
+  payload: { userId: string; kickedBy: string; kickedByName?: string | null },
 ): void => {
   ioRef?.to(roomChannel(roomId)).emit('room:user_kicked', { roomId, ...payload });
 };
@@ -138,11 +145,19 @@ export const emitRoomUserKicked = (
  * just this one). A dedicated `room:you_were_kicked` is pushed to the user's
  * personal channel first so their client still gets a direct signal even
  * though it's about to leave the room channel. No-op before socket boot.
+ *
+ * `kickedByName` is the moderator's human-facing display name, carried so the
+ * kicked user's client can show *who* removed them.
  */
-export const forceLeaveRoom = (roomId: string, userId: string, kickedBy: string): void => {
+export const forceLeaveRoom = (
+  roomId: string,
+  userId: string,
+  kickedBy: string,
+  kickedByName?: string | null,
+): void => {
   // Personal channel is independent of the room channel, so this lands
   // regardless of the eviction below.
-  ioRef?.to(userChannel(userId)).emit('room:you_were_kicked', { roomId, kickedBy });
+  ioRef?.to(userChannel(userId)).emit('room:you_were_kicked', { roomId, kickedBy, kickedByName });
   ioRef?.in(userChannel(userId)).socketsLeave(roomChannel(roomId));
 };
 

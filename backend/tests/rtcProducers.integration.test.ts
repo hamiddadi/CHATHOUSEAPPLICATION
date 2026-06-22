@@ -58,7 +58,11 @@ const register = async (app: Express) => {
   const res = await request(app)
     .post('/api/auth/register')
     .send({ username, email: `${username}@test.local`, password: 'test-password-123' });
-  return { id: res.body.data.user.id as string, token: res.body.data.accessToken as string };
+  return {
+    id: res.body.data.user.id as string,
+    token: res.body.data.accessToken as string,
+    username,
+  };
 };
 
 const createRoom = async (app: Express, token: string) => {
@@ -168,14 +172,19 @@ describeOrSkip('rtc:list-producers + room cleanup', () => {
     await new Promise<void>(resolve => hostSock.emit('room:join', { roomId }, () => resolve()));
     await new Promise<void>(resolve => listenerSock.emit('room:join', { roomId }, () => resolve()));
 
-    const listenerSawEnd = new Promise<{ roomId: string }>(resolve => {
-      listenerSock.once('room:ended', (payload: { roomId: string }) => resolve(payload));
+    const listenerSawEnd = new Promise<{ roomId: string; endedByName?: string | null }>(resolve => {
+      listenerSock.once('room:ended', (payload: { roomId: string; endedByName?: string | null }) =>
+        resolve(payload),
+      );
     });
 
     await new Promise<void>(resolve => hostSock.emit('room:end', { roomId }, () => resolve()));
 
     const ended = await listenerSawEnd;
     expect(ended.roomId).toBe(roomId);
+    // The broadcast names *who* closed the room (displayName ?? username); the
+    // host registered with only a username, so that's the resolved name.
+    expect(ended.endedByName).toBe(host.username);
 
     // After end, the host is no longer a member (participant.leftAt set by
     // roomsService.end), so RTC queries must now be denied.

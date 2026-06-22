@@ -234,8 +234,10 @@
     "alert": {
       "removedTitle": "You have been removed",
       "removedBody": "A moderator has expelled you from this room. You cannot rejoin for 30 minutes.",
+      "removedByBody": "{{name}} removed you from this room. You cannot rejoin for 30 minutes.",
       "endedTitle": "Room ended",
       "endedBody": "This room has been closed by the host.",
+      "endedByBody": "{{name}} closed the room.",
       "stageTitle": "On stage 🎙️",
       "roleHost": "You are now the host of the room.",
       "roleMod": "You are now a moderator.",

@@ -219,7 +219,11 @@ export const RoomScreen: React.FC = () => {
         if (payload.roomId && payload.roomId !== roomId) return;
         setIsMuted(payload.isMuted);
       };
-      const kickHandler = (payload: { userId: string; roomId?: string }): void => {
+      const kickHandler = (payload: {
+        userId: string;
+        roomId?: string;
+        kickedByName?: string | null;
+      }): void => {
         if (payload.userId !== viewerId) return;
         if (payload.roomId && payload.roomId !== roomId) return;
         // Pop the screen first so the user lands somewhere safe even if
@@ -228,25 +232,40 @@ export const RoomScreen: React.FC = () => {
         useCurrentRoomStore.getState().clear();
         void roomAudioSession.stop();
         navigation.goBack();
+        // Name the moderator who removed them when the backend resolved it;
+        // fall back to the generic copy when it's missing (older server, etc).
+        const moderatorName = payload.kickedByName?.trim();
         Alert.alert(
           t('room.alert.removedTitle', 'You have been removed'),
-          t(
-            'room.alert.removedBody',
-            'A moderator has expelled you from this room. You cannot rejoin for 30 minutes.',
-          ),
+          moderatorName
+            ? t(
+                'room.alert.removedByBody',
+                '{{name}} removed you from this room. You cannot rejoin for 30 minutes.',
+                { name: moderatorName },
+              )
+            : t(
+                'room.alert.removedBody',
+                'A moderator has expelled you from this room. You cannot rejoin for 30 minutes.',
+              ),
         );
       };
       // The host closed the room (REST /rooms/:id/end or socket room:end).
       // A missing roomId means "this room"; otherwise it must match the one
       // we're viewing. Pop the screen and tell the user it's over.
-      const endedHandler = (payload: { roomId?: string }): void => {
+      const endedHandler = (payload: { roomId?: string; endedByName?: string | null }): void => {
         if (payload.roomId && payload.roomId !== roomId) return;
         useCurrentRoomStore.getState().clear();
         void roomAudioSession.stop();
         navigation.goBack();
+        // Name the host who closed the room when the backend resolved it; fall
+        // back to the generic copy for an automatic (empty-room) close, which
+        // has no actor.
+        const closerName = payload.endedByName?.trim();
         Alert.alert(
           t('room.alert.endedTitle', 'Room ended'),
-          t('room.alert.endedBody', 'This room has been closed by the host.'),
+          closerName
+            ? t('room.alert.endedByBody', '{{name}} closed the room.', { name: closerName })
+            : t('room.alert.endedBody', 'This room has been closed by the host.'),
         );
       };
       const roleHandler = (payload: { userId: string; role: string; roomId?: string }): void => {

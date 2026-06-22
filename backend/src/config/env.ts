@@ -169,6 +169,17 @@ const envSchema = z.object({
   OTP_TTL_MINUTES: z.coerce.number().int().positive().default(5),
   OTP_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
   OTP_RATE_LIMIT_PER_HOUR: z.coerce.number().int().positive().default(5),
+  // Dev/QA test numbers: comma-separated phone numbers (E.164 or bare national
+  // digits) that skip the real SMS/OTP and log in with the fixed OTP_TEST_CODE.
+  // Matched by digit-suffix so the country code the client prepends is
+  // irrelevant (e.g. "550728585" matches the "+213550728585" the app sends).
+  // HARD-GATED to non-production in otp.service — inert when NODE_ENV=production
+  // so it can never weaken a live deployment. Empty = feature off.
+  OTP_TEST_NUMBERS: z.string().default(''),
+  OTP_TEST_CODE: z
+    .string()
+    .regex(/^[0-9]{6}$/, 'OTP_TEST_CODE must be 6 digits')
+    .default('000000'),
   TWILIO_ACCOUNT_SID: z.string().optional(),
   TWILIO_AUTH_TOKEN: z.string().optional(),
   TWILIO_FROM_NUMBER: z.string().optional(),

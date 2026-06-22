@@ -49,6 +49,11 @@ services:
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?JWT_ACCESS_SECRET is required}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET is required}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8081}
+      # Dev/QA OTP bypass — these numbers skip the real SMS and log in with
+      # OTP_TEST_CODE. Hard-gated to non-production in otp.service, so inert
+      # whenever NODE_ENV=production. Override or clear via the host env / .env.
+      OTP_TEST_NUMBERS: ${OTP_TEST_NUMBERS:-550728585}
+      OTP_TEST_CODE: ${OTP_TEST_CODE:-000000}
       # ─── mediasoup (phase 4) — narrow UDP port range to reduce host ports
       # exposed. Widen to 40000-49999 when load-testing many simultaneous
       # rooms; each transport uses one UDP port.

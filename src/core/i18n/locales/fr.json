@@ -234,8 +234,10 @@
     "alert": {
       "removedTitle": "Vous avez été retiré",
       "removedBody": "Un modérateur vous a expulsé de cette room. Vous ne pouvez pas y revenir avant 30 minutes.",
+      "removedByBody": "{{name}} vous a retiré de cette room. Vous ne pouvez pas y revenir avant 30 minutes.",
       "endedTitle": "Room terminée",
       "endedBody": "Cette room a été fermée par l'hôte.",
+      "endedByBody": "{{name}} a fermé la room.",
       "stageTitle": "Sur la scène 🎙️",
       "roleHost": "Vous êtes maintenant l'hôte de la room.",
       "roleMod": "Vous êtes désormais modérateur.",

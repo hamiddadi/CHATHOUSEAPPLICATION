@@ -24,8 +24,76 @@ const checkAndBumpRateLimit = async (phoneNumber: string): Promise<boolean> => {
   return count <= env.OTP_RATE_LIMIT_PER_HOUR;
 };
 
+/**
+ * Dev/QA test-number allowlist (OTP_TEST_NUMBERS, comma-separated). Entries may
+ * be E.164 or bare national digits; matching is digit-suffix so the country
+ * code the client prepends is irrelevant ("550728585" matches "+213550728585").
+ * Short entries (<6 digits) are dropped to avoid trivial suffix collisions.
+ */
+const TEST_NUMBER_DIGITS = env.OTP_TEST_NUMBERS.split(',')
+  .map(s => s.replace(/\D/g, ''))
+  .filter(s => s.length >= 6);
+
+const isTestPhone = (phoneNumber: string): boolean => {
+  // HARD prod gate: the bypass is inert in production no matter what's set.
+  if (env.NODE_ENV === 'production' || TEST_NUMBER_DIGITS.length === 0) return false;
+  const digits = phoneNumber.replace(/\D/g, '');
+  return TEST_NUMBER_DIGITS.some(t => digits === t || digits.endsWith(t));
+};
+
+/**
+ * Find-or-create the user for a verified phone number and mint a token pair.
+ * Shared by the normal OTP-verify success path and the dev test-number bypass.
+ */
+const establishSession = async (phoneNumber: string) => {
+  // OTP-01: find-or-create via upsert so two requests racing on a brand-new
+  // phone number can't both INSERT and collide on the @unique phoneNumber
+  // (which would surface as a 500). New users get a placeholder username they
+  // must replace on SetupProfile; frontend routes them there via `isNewUser`.
+  const existing = await prisma.user.findUnique({
+    where: { phoneNumber },
+    select: { id: true },
+  });
+  const isNewUser = existing === null;
+  const user = await prisma.user.upsert({
+    where: { phoneNumber },
+    create: { phoneNumber },
+    update: {},
+  });
+
+  const tokens = await issueTokenPair(user.id);
+  return {
+    session: {
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
+      expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+    },
+    user: {
+      id: user.id,
+      username: user.username ?? '',
+      displayName: user.displayName ?? '',
+      phoneNumber: user.phoneNumber ?? '',
+      avatarUrl: user.avatarUrl,
+      bio: user.bio,
+      interests: user.interests,
+      hasCompletedOnboarding: user.hasCompletedOnboarding,
+      createdAt: user.createdAt.toISOString(),
+    },
+    isNewUser,
+  };
+};
+
 export const otpService = {
   async send(input: SendOtpInput): Promise<{ sent: true; expiresIn: number }> {
+    // Dev/QA test number: no real SMS, no DB code, no rate limit — the tester
+    // just enters OTP_TEST_CODE on the next screen (verified in `verify`).
+    if (isTestPhone(input.phoneNumber)) {
+      logger.info(
+        `[otp] test-number ${input.phoneNumber} — skipping SMS, use code ${env.OTP_TEST_CODE}`,
+      );
+      return { sent: true, expiresIn: env.OTP_TTL_MINUTES * 60 };
+    }
+
     const within = await checkAndBumpRateLimit(input.phoneNumber);
     if (!within) throw new AppError('RATE_LIMIT_001');
 
@@ -63,6 +131,13 @@ export const otpService = {
   },
 
   async verify(input: VerifyOtpInput) {
+    // Dev/QA test number: accept the fixed OTP_TEST_CODE and log straight in,
+    // bypassing the real code lookup. `isTestPhone` is hard-gated to non-prod.
+    if (isTestPhone(input.phoneNumber) && input.code === env.OTP_TEST_CODE) {
+      logger.info(`[otp] test-number bypass login for ${input.phoneNumber}`);
+      return establishSession(input.phoneNumber);
+    }
+
     const record = await prisma.otpCode.findFirst({
       where: {
         phoneNumber: input.phoneNumber,
@@ -108,40 +183,6 @@ export const otpService = {
       throw new AppError('AUTH_002', 'OTP code expired or not found');
     }
 
-    // OTP-01: find-or-create via upsert so two requests racing on a brand-new
-    // phone number can't both INSERT and collide on the @unique phoneNumber
-    // (which would surface as a 500). New users get a placeholder username they
-    // must replace on SetupProfile; frontend routes them there via `isNewUser`.
-    const existing = await prisma.user.findUnique({
-      where: { phoneNumber: input.phoneNumber },
-      select: { id: true },
-    });
-    const isNewUser = existing === null;
-    const user = await prisma.user.upsert({
-      where: { phoneNumber: input.phoneNumber },
-      create: { phoneNumber: input.phoneNumber },
-      update: {},
-    });
-
-    const tokens = await issueTokenPair(user.id);
-    return {
-      session: {
-        accessToken: tokens.accessToken,
-        refreshToken: tokens.refreshToken,
-        expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
-      },
-      user: {
-        id: user.id,
-        username: user.username ?? '',
-        displayName: user.displayName ?? '',
-        phoneNumber: user.phoneNumber ?? '',
-        avatarUrl: user.avatarUrl,
-        bio: user.bio,
-        interests: user.interests,
-        hasCompletedOnboarding: user.hasCompletedOnboarding,
-        createdAt: user.createdAt.toISOString(),
-      },
-      isNewUser,
-    };
+    return establishSession(input.phoneNumber);
   },
 };

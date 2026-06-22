@@ -619,9 +619,16 @@ export const roomsService = {
     // Drop any pending reminder — the room is over.
     await cancelEventReminder(roomId);
     emitHallwayRoomClosed(roomId);
+    // Resolve the closer's display name so participants' clients can show *who*
+    // ended the room. displayName ?? username is the repo-wide convention.
+    const closer = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { displayName: true, username: true },
+    });
+    const endedByName = closer?.displayName ?? closer?.username ?? null;
     // Tell participants still in the room to leave (REST end() path; the socket
     // room:end handler already emits this for the socket path).
-    emitRoomEnded(roomId);
+    emitRoomEnded(roomId, { endedBy: userId, endedByName });
     // Stop + finalize the Replay recording if one is running (gated/no-op).
     void recordingsService
       .stopForRoom(roomId)
@@ -1253,11 +1260,20 @@ export const roomsService = {
       metadata: { banMinutes: minutes, permanent: minutes === 0, reason: options.reason ?? null },
     });
 
-    emitRoomUserKicked(roomId, { userId: targetUserId, kickedBy: callerUserId });
+    // Resolve the moderator's display name so the kicked user's client can show
+    // *who* removed them (e.g. "Jane removed you from this room"). displayName ??
+    // username is the repo-wide convention for a human-facing name (cf. pingUser).
+    const kicker = await prisma.user.findUnique({
+      where: { id: callerUserId },
+      select: { displayName: true, username: true },
+    });
+    const kickedByName = kicker?.displayName ?? kicker?.username ?? null;
+
+    emitRoomUserKicked(roomId, { userId: targetUserId, kickedBy: callerUserId, kickedByName });
     // Authoritatively evict the kicked user's socket(s) from the room channel —
     // the broadcast above only notifies; this enforces it server-side so a
     // client that ignores the event can't keep receiving room broadcasts.
-    forceLeaveRoom(roomId, targetUserId, callerUserId);
+    forceLeaveRoom(roomId, targetUserId, callerUserId, kickedByName);
     // ANO-10 fix: read the committed count rather than using a stale snapshot.
     const updatedRoom = await prisma.room.findUnique({
       where: { id: roomId },

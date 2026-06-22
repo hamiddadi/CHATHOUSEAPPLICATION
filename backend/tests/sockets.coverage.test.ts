@@ -28,7 +28,11 @@ const register = async (app: Express) => {
   const res = await request(app)
     .post('/api/auth/register')
     .send({ username: u, email: `${u}@test.local`, password: 'test-password-123' });
-  return { id: res.body.data.user.id as string, token: res.body.data.accessToken as string };
+  return {
+    id: res.body.data.user.id as string,
+    token: res.body.data.accessToken as string,
+    username: u,
+  };
 };
 
 describe('Socket.IO — room broadcasts + chat presence events', () => {
@@ -268,7 +272,7 @@ describe('Socket.IO — room broadcasts + chat presence events', () => {
 
     // Host kicks target via REST. The target must get a direct personal signal
     // on its user channel AND be evicted from the room channel server-side.
-    const kicked = waitForEvent<{ roomId: string; kickedBy: string }>(
+    const kicked = waitForEvent<{ roomId: string; kickedBy: string; kickedByName?: string | null }>(
       targetSock,
       'room:you_were_kicked',
     );
@@ -277,7 +281,13 @@ describe('Socket.IO — room broadcasts + chat presence events', () => {
       .set('Authorization', `Bearer ${host.token}`)
       .send({ userId: target.id });
 
-    expect(await kicked).toMatchObject({ roomId, kickedBy: host.id });
+    // The personal signal names *who* removed them (displayName ?? username);
+    // the host registered with only a username, so that's the resolved name.
+    expect(await kicked).toMatchObject({
+      roomId,
+      kickedBy: host.id,
+      kickedByName: host.username,
+    });
 
     // socketsLeave propagates through the adapter; poll until the target is
     // evicted (bounded, so a genuine no-op still fails fast).
