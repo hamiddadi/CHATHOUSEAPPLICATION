@@ -51,6 +51,10 @@ coverage/
 # Build
 build/
 
+# Build artifacts: prebuilt APKs are large binaries that bloat the repo and
+# stall HTTP pushes — keep them on disk but out of git. Produce via gradle.
+*.apk
+
 # Uploaded media (avatars) — created at runtime by the backend upload module;
 # the files are environment-specific and must not be versioned. The directory
 # is mkdir'd on first write (backend/src/modules/upload/upload.service.ts).
