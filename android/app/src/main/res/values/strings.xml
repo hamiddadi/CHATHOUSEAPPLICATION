@@ -1,3 +1,8 @@
 <resources>
   <string name="app_name">Chathouse</string>
+  <!-- Live-audio foreground-service notification + channel. Add values-<lang>/
+       overrides to localise. -->
+  <string name="audio_channel_name">Audio rooms</string>
+  <string name="audio_channel_desc">Shown while a live audio room is active.</string>
+  <string name="audio_room_active">Audio room active</string>
 </resources>

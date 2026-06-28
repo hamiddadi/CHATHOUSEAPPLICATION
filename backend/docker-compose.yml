@@ -5,10 +5,12 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: chathouse
-      POSTGRES_PASSWORD: chathouse
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-chathouse}
       POSTGRES_DB: chathouse
+    # Bind to loopback only: a dev DB with trivial creds must not be reachable
+    # from the LAN. Host tooling/tests still reach it on localhost:5433.
     ports:
-      - '5433:5432'
+      - '127.0.0.1:5433:5432'
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
@@ -21,8 +23,9 @@ services:
     image: redis:7-alpine
     container_name: chathouse-redis
     restart: unless-stopped
+    # Loopback only — same reasoning as postgres above.
     ports:
-      - '6379:6379'
+      - '127.0.0.1:6379:6379'
     volumes:
       - redis-data:/data
     healthcheck:
@@ -44,7 +47,7 @@ services:
       NODE_ENV: ${NODE_ENV:-development}
       PORT: 4000
       HOST: 0.0.0.0
-      DATABASE_URL: postgresql://chathouse:chathouse@postgres:5432/chathouse?schema=public
+      DATABASE_URL: postgresql://chathouse:${POSTGRES_PASSWORD:-chathouse}@postgres:5432/chathouse?schema=public
       REDIS_URL: redis://redis:6379
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?JWT_ACCESS_SECRET is required}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET is required}

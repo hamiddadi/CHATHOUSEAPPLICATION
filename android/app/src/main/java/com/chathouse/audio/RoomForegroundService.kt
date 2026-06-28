@@ -13,6 +13,7 @@ import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
+import com.chathouse.app.R
 
 /**
  * Foreground service that keeps the process alive while a Chathouse audio room
@@ -25,9 +26,9 @@ import androidx.core.content.ContextCompat
  * to what RECORD_AUDIO allows at runtime (see resolveServiceType).
  *
  * Lifecycle: started with ACTION_START when a room becomes active and stopped
- * with ACTION_STOP (or automatically when the task is removed). Wiring a JS
- * bridge to start/stop it is part of the audio-module migration; until then the
- * class is dormant (nothing starts it) and runtime behaviour is unchanged.
+ * with ACTION_STOP (or automatically when the task is removed). It is driven
+ * from JS via RoomForegroundModule (foregroundAudio.ts → roomAudioService.ts),
+ * which starts it whenever a room is joined.
  */
 class RoomForegroundService : Service() {
 
@@ -49,9 +50,9 @@ class RoomForegroundService : Service() {
     createChannel()
     val notification: Notification =
       NotificationCompat.Builder(this, CHANNEL_ID)
-        .setContentTitle("Chathouse")
-        .setContentText("Audio room active")
-        .setSmallIcon(applicationInfo.icon)
+        .setContentTitle(getString(R.string.app_name))
+        .setContentText(getString(R.string.audio_room_active))
+        .setSmallIcon(R.drawable.ic_stat_audio)
         .setOngoing(true)
         .setCategory(NotificationCompat.CATEGORY_SERVICE)
         .build()
@@ -99,7 +100,12 @@ class RoomForegroundService : Service() {
       val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
       if (manager.getNotificationChannel(CHANNEL_ID) == null) {
         val channel =
-          NotificationChannel(CHANNEL_ID, "Audio rooms", NotificationManager.IMPORTANCE_LOW)
+          NotificationChannel(
+            CHANNEL_ID,
+            getString(R.string.audio_channel_name),
+            NotificationManager.IMPORTANCE_LOW,
+          )
+        channel.description = getString(R.string.audio_channel_desc)
         channel.setShowBadge(false)
         manager.createNotificationChannel(channel)
       }
