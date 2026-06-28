@@ -18,6 +18,8 @@ const { prisma } =
   require('../../src/config/database') as typeof import('../../src/config/database');
 const { connectRedis, disconnectRedis } =
   require('../../src/config/redis') as typeof import('../../src/config/redis');
+const { clubReqService } =
+  require('../../src/extensions/modules/clubreq/clubreq.service') as typeof import('../../src/extensions/modules/clubreq/clubreq.service');
 /* eslint-enable @typescript-eslint/no-require-imports */
 
 const rand = () => Math.random().toString(36).slice(2, 10);
@@ -145,5 +147,35 @@ describe('Workflow — adhésion club', () => {
       .send({ userIds: [outsider.id] });
 
     expect(invite.status).toBe(403);
+  });
+
+  // La liste admin des demandes d'adhésion (club SOCIAL) doit dénormaliser
+  // l'identité du demandeur (nom / username) au lieu de renvoyer le cuid brut,
+  // sinon l'inbox d'approbation affiche un id illisible (audit 2026-06-28).
+  it("clubreq SOCIAL : list() enrichit chaque demande avec l'identité du demandeur", async () => {
+    const owner = await registerUser(app);
+    const joiner = await registerUser(app);
+    createdUserIds.push(owner.id, joiner.id);
+    const clubId = await createClub(app, owner, 'SOCIAL');
+
+    // Le demandeur soumet une demande → mise en attente (club SOCIAL). On passe
+    // par le service directement: les routes /api/ext/* ne sont pas montées par
+    // createApp() dans ce harnais (seules les routes core le sont).
+    const reqResult = await clubReqService.request(joiner.id, clubId, 'please let me in');
+    expect(reqResult.status).toBe('pending');
+
+    // L'admin (owner) liste les demandes → identité dénormalisée présente.
+    const items = await clubReqService.list(owner.id, clubId);
+    const mine = items.find(it => it.userId === joiner.id);
+    expect(mine).toBeDefined();
+
+    const joinerRow = await prisma.user.findUnique({
+      where: { id: joiner.id },
+      select: { username: true },
+    });
+    // The enriched username is the real handle, never the raw cuid.
+    expect(mine?.username).toBe(joinerRow?.username);
+    expect(mine?.username).not.toBe(joiner.id);
+    expect(mine?.message).toBe('please let me in');
   });
 });

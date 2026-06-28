@@ -354,7 +354,7 @@ export const HouseDetailScreen: React.FC = () => {
           >
             <View className="flex-1">
               <Text className="text-md font-body-bold text-ink" numberOfLines={1}>
-                {req.userId}
+                {req.displayName ?? req.username ?? req.userId}
               </Text>
               {req.message ? (
                 <Text className="text-xs font-body text-ink-muted" numberOfLines={2}>

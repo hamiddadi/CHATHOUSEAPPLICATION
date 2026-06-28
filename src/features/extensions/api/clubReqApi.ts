@@ -13,6 +13,14 @@ export interface ClubJoinRequest {
    * keep type-checking. PRIVATE clubs reject the request entirely (CLUB_003).
    */
   status?: 'joined' | 'pending';
+  /**
+   * Requester identity, present on the admin `list()` payload so the approval
+   * UI can show a name/avatar instead of the raw `userId`. Absent from the
+   * `request()` response (the requester already knows who they are).
+   */
+  username?: string | null;
+  displayName?: string | null;
+  avatarUrl?: string | null;
 }
 
 export const clubReqApi = {

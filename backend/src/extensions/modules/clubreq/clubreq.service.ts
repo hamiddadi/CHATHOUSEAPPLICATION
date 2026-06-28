@@ -25,6 +25,13 @@ interface JoinRequest {
   //  - 'joined'  : OPEN club, the caller was added directly as a member
   //  - 'pending' : SOCIAL club, an admin must approve the request
   status?: 'joined' | 'pending';
+  // Requester identity, denormalised into the admin list() response so the
+  // approval UI shows a name/avatar instead of a raw user id. Omitted by
+  // request() (the requester already knows who they are). Looked up live from
+  // Prisma at list() time, so existing Redis payloads need no backfill.
+  username?: string | null;
+  displayName?: string | null;
+  avatarUrl?: string | null;
 }
 
 const reqKey = (clubId: string, userId: string) => `ext:clubreq:${clubId}:${userId}`;
@@ -161,7 +168,22 @@ export const clubReqService = {
     if (stale.length > 0) {
       await redis.sRem(indexKey(clubId), stale);
     }
-    return items;
+    if (items.length === 0) return items;
+
+    // Denormalise requester identity so admins see names, not raw cuids. One
+    // batched query for the whole page. A requester whose account was hard-
+    // deleted keeps the bare userId (the row is harmless and rare).
+    const requesters = await prisma.user.findMany({
+      where: { id: { in: items.map(it => it.userId) } },
+      select: { id: true, username: true, displayName: true, avatarUrl: true },
+    });
+    const byId = new Map(requesters.map(u => [u.id, u]));
+    return items.map(it => {
+      const u = byId.get(it.userId);
+      return u
+        ? { ...it, username: u.username, displayName: u.displayName, avatarUrl: u.avatarUrl }
+        : it;
+    });
   },
 
   async approve(callerId: string, clubId: string, requesterId: string) {
