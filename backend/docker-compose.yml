@@ -79,9 +79,40 @@ services:
       # ICE servers sent to clients. When running the `turn` profile below,
       # override to: '[{"urls":"stun:127.0.0.1:3478"},{"urls":"turn:127.0.0.1:3478","username":"chathouse","credential":"chathouse"}]'
       ICE_SERVERS_JSON: ${ICE_SERVERS_JSON:-[{"urls":"stun:stun.l.google.com:19302"}]}
+      # ─── LiveKit (live-audio engine) ─────────────────────────────────────
+      # Token signing is a purely-local HMAC with KEY/SECRET, so these three
+      # vars alone flip /rooms/:id/livekit-token from 503 → 200. The `livekit`
+      # service below makes the issued token actually connectable from a host
+      # browser. LIVEKIT_URL is handed to clients, so it must be host-reachable
+      # (127.0.0.1 for same-host; set the LAN IP to test from a phone, exactly
+      # like MEDIASOUP_ANNOUNCED_IP above). Dev creds only — never use in prod.
+      # SECRET must be ≥ 32 chars (LiveKit server requirement).
+      LIVEKIT_URL: ${LIVEKIT_URL:-ws://127.0.0.1:7880}
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-devkey}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-devsecretdevsecretdevsecretdevsecret}
+      LIVEKIT_TOKEN_TTL_SECONDS: ${LIVEKIT_TOKEN_TTL_SECONDS:-3600}
     ports:
       - '4000:4000'
       - '40000-40499:40000-40499/udp'
+
+  # ─── LiveKit server (live audio) — dev single node ───
+  # Self-hosted so the token issued by /livekit-token is actually connectable
+  # in dev. Key/secret MUST match the api's LIVEKIT_API_KEY / LIVEKIT_API_SECRET
+  # above. Redis isn't needed for a single node (see livekit/livekit.yaml).
+  livekit:
+    image: livekit/livekit-server:v1.8
+    container_name: chathouse-livekit
+    restart: unless-stopped
+    command: ['--config', '/etc/livekit.yaml']
+    environment:
+      LIVEKIT_KEYS: '${LIVEKIT_API_KEY:-devkey}: ${LIVEKIT_API_SECRET:-devsecretdevsecretdevsecretdevsecret}'
+    volumes:
+      # Dev config moves the media UDP range below the Windows ephemeral range.
+      - ./livekit/livekit.dev.yaml:/etc/livekit.yaml:ro
+    ports:
+      - '7880:7880'
+      - '7881:7881'
+      - '41100-41199:41100-41199/udp'
 
   # ─── coturn STUN/TURN server (phase 5) ───────────────
   # Disabled in the default profile — local testing often works over host

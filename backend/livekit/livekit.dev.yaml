@@ -1,0 +1,14 @@
+# Dev-only single-node LiveKit config (mounted by docker-compose.yml).
+# Identical to livekit.yaml except the RTC media UDP range is moved BELOW the
+# Windows dynamic/ephemeral port range (starts at 49152) so `docker compose up`
+# can bind the host ports. 41100-41199 sits just above mediasoup's 40000-40499,
+# so the two engines never collide. Key/secret come from LIVEKIT_KEYS env var.
+port: 7880
+rtc:
+  tcp_port: 7881
+  port_range_start: 41100
+  port_range_end: 41199
+  use_external_ip: true
+logging:
+  level: info
+  json: true

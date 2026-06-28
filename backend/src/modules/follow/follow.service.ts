@@ -1,5 +1,5 @@
 import { Prisma } from '@prisma/client';
-import { prisma } from '../../config/database';
+import { prisma, runWriteWithRetry } from '../../config/database';
 import { AppError } from '../../middlewares/error.middleware';
 import { notificationsService } from '../notifications/notifications.service';
 import { getBlockedIdSet } from '../social/blocks';
@@ -82,22 +82,40 @@ export const followService = {
     // Public account → immediate follow. Create the ACCEPTED edge AND bump both
     // denormalized counts in one transaction so the relation and the counters
     // can't drift; the counter update RETURNs the new follower count.
+    //
+    // The two `User` row updates are issued in a canonical order (lower id
+    // first) so two reciprocal follows running at the same time (A→B and B→A)
+    // always acquire the row locks in the SAME sequence — otherwise Postgres
+    // detects a deadlock (40P01) and aborts one, which previously surfaced as a
+    // 500. `runWriteWithRetry` is a belt-and-suspenders for any residual
+    // serialization conflict; P2002 (already following) still falls through to
+    // the idempotent branch below.
     let isNewFollow = true;
     let newFollowerCount = 0;
     try {
-      const [, , updatedTarget] = await prisma.$transaction([
-        prisma.follow.create({ data: { followerId, followingId } }),
-        prisma.user.update({
-          where: { id: followerId },
-          data: { followingCount: { increment: 1 } },
+      newFollowerCount = await runWriteWithRetry(() =>
+        prisma.$transaction(async tx => {
+          await tx.follow.create({ data: { followerId, followingId } });
+          const bumpFollower = () =>
+            tx.user.update({
+              where: { id: followerId },
+              data: { followingCount: { increment: 1 } },
+            });
+          const bumpTarget = () =>
+            tx.user.update({
+              where: { id: followingId },
+              data: { followerCount: { increment: 1 } },
+              select: { followerCount: true },
+            });
+          if (followerId < followingId) {
+            await bumpFollower();
+            return (await bumpTarget()).followerCount;
+          }
+          const target = await bumpTarget();
+          await bumpFollower();
+          return target.followerCount;
         }),
-        prisma.user.update({
-          where: { id: followingId },
-          data: { followerCount: { increment: 1 } },
-          select: { followerCount: true },
-        }),
-      ]);
-      newFollowerCount = updatedTarget.followerCount;
+      );
     } catch (err) {
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
         isNewFollow = false;
@@ -132,12 +150,16 @@ export const followService = {
       WHERE "followerId" = ${followerId} AND "followingId" = ${followingId}
       RETURNING "status"`;
     if (removed.some(r => r.status === 'ACCEPTED')) {
-      const [, rows] = await prisma.$transaction([
-        prisma.$executeRaw`UPDATE "User" SET "followingCount" = GREATEST("followingCount" - 1, 0), "updatedAt" = NOW() WHERE id = ${followerId}`,
-        prisma.$queryRaw<
-          { followerCount: number }[]
-        >`UPDATE "User" SET "followerCount" = GREATEST("followerCount" - 1, 0), "updatedAt" = NOW() WHERE id = ${followingId} RETURNING "followerCount"`,
-      ]);
+      // Same reciprocal-write deadlock risk as follow() — retry on a transient
+      // conflict so a concurrent follow/unfollow of the inverse edge can't 500.
+      const [, rows] = await runWriteWithRetry(() =>
+        prisma.$transaction([
+          prisma.$executeRaw`UPDATE "User" SET "followingCount" = GREATEST("followingCount" - 1, 0), "updatedAt" = NOW() WHERE id = ${followerId}`,
+          prisma.$queryRaw<
+            { followerCount: number }[]
+          >`UPDATE "User" SET "followerCount" = GREATEST("followerCount" - 1, 0), "updatedAt" = NOW() WHERE id = ${followingId} RETURNING "followerCount"`,
+        ]),
+      );
       emitUserFollowerCount(followingId, rows[0]?.followerCount ?? 0);
       // FOLL-05: retract the NEW_FOLLOWER notification so a follow→unfollow→
       // re-follow cycle can't spam the target.
@@ -164,12 +186,14 @@ export const followService = {
       data: { status: 'ACCEPTED' },
     });
     if (promoted.count === 0) throw new AppError('USER_001');
-    const [, rows] = await prisma.$transaction([
-      prisma.$executeRaw`UPDATE "User" SET "followingCount" = "followingCount" + 1, "updatedAt" = NOW() WHERE id = ${requesterId}`,
-      prisma.$queryRaw<
-        { followerCount: number }[]
-      >`UPDATE "User" SET "followerCount" = "followerCount" + 1, "updatedAt" = NOW() WHERE id = ${meId} RETURNING "followerCount"`,
-    ]);
+    const [, rows] = await runWriteWithRetry(() =>
+      prisma.$transaction([
+        prisma.$executeRaw`UPDATE "User" SET "followingCount" = "followingCount" + 1, "updatedAt" = NOW() WHERE id = ${requesterId}`,
+        prisma.$queryRaw<
+          { followerCount: number }[]
+        >`UPDATE "User" SET "followerCount" = "followerCount" + 1, "updatedAt" = NOW() WHERE id = ${meId} RETURNING "followerCount"`,
+      ]),
+    );
     emitUserFollowerCount(meId, rows[0]?.followerCount ?? 0);
     // Clear the now-handled FOLLOW_REQUEST notification.
     await prisma.notification.deleteMany({
