@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   Alert,
   FlatList,
@@ -17,66 +17,57 @@ import { Avatar } from '../../../../shared/components/Avatar';
 import { Button } from '../../../../shared/components/Button';
 import { Input } from '../../../../shared/components/Input';
 import { EmptyState } from '../../../../shared/components/EmptyState';
+import { Loader } from '../../../../shared/components/Loader';
 import { colors, spacing } from '../../../../shared/constants/theme';
 import type { MessageStackParamList } from '../../../../core/navigation/types';
-import { searchService, type SearchUserHit } from '../../../search/services/searchService';
+import type { User } from '../../../../shared/types/domain';
+import { useAuthStore } from '../../../auth/store/authStore';
+import { useFollowing } from '../../../profile/hooks/useProfile';
 import { useAddGroupMembers, useGroup } from '../../hooks/useGroups';
 
 type Nav = NativeStackNavigationProp<MessageStackParamList, 'AddGroupMembers'>;
 type Route = RouteProp<MessageStackParamList, 'AddGroupMembers'>;
 
-const SEARCH_DEBOUNCE_MS = 250;
-const SEARCH_LIMIT = 20;
-
-/** Search users and add the selected ones to an existing group conversation. */
+/**
+ * Add people to an existing group. Candidates are restricted to the people you
+ * follow (same DM follow-gate as a 1:1 — see NewMessageScreen / chatService),
+ * minus the members already in the group. The old global user search let you
+ * pick anyone, which the backend would then silently reject.
+ */
 export const AddGroupMembersScreen: React.FC = () => {
   const navigation = useNavigation<Nav>();
   const route = useRoute<Route>();
   const insets = useSafeAreaInsets();
   const { t } = useTranslation();
   const conversationId = route.params.conversationId;
+  const myId = useAuthStore(s => s.user?.id) ?? '';
 
   const { data: group } = useGroup(conversationId);
+  const { data: following, isLoading } = useFollowing(myId);
   const addMembers = useAddGroupMembers();
-  // Existing members can't be re-added — filter them out of results. Memoized
-  // so it doesn't rebuild every render (which would churn renderItem's deps).
+  // Existing members can't be re-added — drop them from the candidate list.
   const existingIds = useMemo(
     () => new Set((group?.members ?? []).map(m => m.id)),
     [group?.members],
   );
 
   const [query, setQuery] = useState('');
-  const [debounced, setDebounced] = useState('');
-  const [results, setResults] = useState<SearchUserHit[]>([]);
-  const [searching, setSearching] = useState(false);
-  const [selected, setSelected] = useState<Map<string, SearchUserHit>>(new Map());
+  const [selected, setSelected] = useState<Map<string, User>>(new Map());
 
-  useEffect(() => {
-    const id = setTimeout(() => setDebounced(query.trim()), SEARCH_DEBOUNCE_MS);
-    return () => clearTimeout(id);
-  }, [query]);
+  // People I follow who aren't already in the group, narrowed by the filter.
+  const candidates = useMemo(
+    () => (following ?? []).filter(u => !existingIds.has(u.id)),
+    [following, existingIds],
+  );
+  const results = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (q.length === 0) return candidates;
+    return candidates.filter(
+      u => u.displayName.toLowerCase().includes(q) || u.username.toLowerCase().includes(q),
+    );
+  }, [candidates, query]);
 
-  useEffect(() => {
-    if (debounced.length === 0) {
-      setResults([]);
-      return;
-    }
-    let cancelled = false;
-    setSearching(true);
-    void searchService
-      .users(debounced, SEARCH_LIMIT)
-      .then(rows => {
-        if (!cancelled) setResults(rows);
-      })
-      .finally(() => {
-        if (!cancelled) setSearching(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [debounced]);
-
-  const toggle = useCallback((hit: SearchUserHit) => {
+  const toggle = useCallback((hit: User) => {
     setSelected(prev => {
       const next = new Map(prev);
       if (next.has(hit.id)) next.delete(hit.id);
@@ -100,20 +91,14 @@ export const AddGroupMembersScreen: React.FC = () => {
   const handleClose = useCallback(() => navigation.goBack(), [navigation]);
 
   const renderItem = useCallback(
-    ({ item }: { item: SearchUserHit }) => {
-      const alreadyMember = existingIds.has(item.id);
+    ({ item }: { item: User }) => {
       const isSelected = selected.has(item.id);
       return (
         <Pressable
-          onPress={() => !alreadyMember && toggle(item)}
-          disabled={alreadyMember}
+          onPress={() => toggle(item)}
           accessibilityRole="checkbox"
-          accessibilityState={{ checked: isSelected, disabled: alreadyMember }}
-          className={
-            alreadyMember
-              ? 'flex-row items-center gap-md px-xxl py-md opacity-40'
-              : 'flex-row items-center gap-md px-xxl py-md active:opacity-70'
-          }
+          accessibilityState={{ checked: isSelected }}
+          className="flex-row items-center gap-md px-xxl py-md active:opacity-70"
         >
           <Avatar uri={item.avatarUrl ?? undefined} name={item.displayName} size="lg" />
           <View className="flex-1">
@@ -125,17 +110,18 @@ export const AddGroupMembersScreen: React.FC = () => {
             </Text>
           </View>
           <MaterialIcons
-            name={alreadyMember ? 'check' : isSelected ? 'check-circle' : 'radio-button-unchecked'}
+            name={isSelected ? 'check-circle' : 'radio-button-unchecked'}
             size={24}
             color={isSelected ? colors.primary : colors.textMuted}
           />
         </Pressable>
       );
     },
-    [existingIds, selected, toggle],
+    [selected, toggle],
   );
 
   const selectedCount = selected.size;
+  const hasCandidates = candidates.length > 0;
 
   return (
     <KeyboardAvoidingView
@@ -157,43 +143,52 @@ export const AddGroupMembersScreen: React.FC = () => {
         </Text>
       </View>
 
-      <View className="px-xxl pb-md">
-        <Input
-          placeholder={t('messages.searchPeople', 'Search people')}
-          value={query}
-          onChangeText={setQuery}
-          autoCapitalize="none"
-          autoCorrect={false}
-          autoFocus
-          leftAdornment={<MaterialIcons name="search" size={18} color={colors.textMuted} />}
-        />
-      </View>
+      {hasCandidates && (
+        <View className="px-xxl pb-md">
+          <Input
+            placeholder={t('messages.filterPeople', 'Filter people you follow')}
+            value={query}
+            onChangeText={setQuery}
+            autoCapitalize="none"
+            autoCorrect={false}
+            autoFocus
+            leftAdornment={<MaterialIcons name="search" size={18} color={colors.textMuted} />}
+          />
+          <Text className="text-xs font-body text-ink-muted mt-xs">
+            {t('messages.followGateAddHint', 'You can add people you follow.')}
+          </Text>
+        </View>
+      )}
 
-      <FlatList
-        data={results}
-        renderItem={renderItem}
-        keyExtractor={item => item.id}
-        keyboardShouldPersistTaps="handled"
-        ItemSeparatorComponent={() => <View className="h-px bg-overlay-white-5 ml-[76px]" />}
-        contentContainerStyle={{ paddingBottom: insets.bottom + spacing.giant }}
-        ListEmptyComponent={
-          debounced.length === 0 ? (
-            <EmptyState
-              title={t('messages.addPeople', 'Add people')}
-              description={t(
-                'messages.searchPeopleHint',
-                'Search for people to add to this group.',
-              )}
-            />
-          ) : searching ? null : (
-            <EmptyState
-              title={t('messages.noResults', 'No one found')}
-              description={t('messages.noResultsHint', 'Try a different name or username.')}
-            />
-          )
-        }
-        showsVerticalScrollIndicator={false}
-      />
+      {isLoading ? (
+        <Loader fullscreen accessibilityLabel={t('common.loading', 'Loading')} />
+      ) : (
+        <FlatList
+          data={results}
+          renderItem={renderItem}
+          keyExtractor={item => item.id}
+          keyboardShouldPersistTaps="handled"
+          ItemSeparatorComponent={() => <View className="h-px bg-overlay-white-5 ml-[76px]" />}
+          contentContainerStyle={{ paddingBottom: insets.bottom + spacing.giant }}
+          ListEmptyComponent={
+            !hasCandidates ? (
+              <EmptyState
+                title={t('messages.noFollowing', 'No one to message yet')}
+                description={t(
+                  'messages.noFollowingAddHint',
+                  'Follow people to add them to a group.',
+                )}
+              />
+            ) : (
+              <EmptyState
+                title={t('messages.noResults', 'No one found')}
+                description={t('messages.noResultsHint', 'Try a different name or username.')}
+              />
+            )
+          }
+          showsVerticalScrollIndicator={false}
+        />
+      )}
 
       {selectedCount > 0 && (
         <View

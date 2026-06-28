@@ -46,7 +46,9 @@
     "emojiA11y": "Insert emoji",
     "attachA11y": "Attach file",
     "micA11y": "Record voice message",
-    "typing": "typing…"
+    "typing": "typing…",
+    "cannotMessageTitle": "Can't send message",
+    "cannotMessageBody": "You both need to follow each other to exchange messages."
   },
   "voice": {
     "preview": "🎤 Voice message",
@@ -111,7 +113,13 @@
     "newMessageTitle": "New message",
     "searchPeople": "Search people",
     "searchHint": "Search for someone to start a conversation.",
-    "searchGroupHint": "Search for people. Pick one for a direct message, or several to start a group.",
+    "searchGroupHint": "Pick from people you follow: one for a direct message, or several to start a group.",
+    "followGateHint": "You can message people you follow.",
+    "followGateAddHint": "You can add people you follow.",
+    "noFollowing": "No one to message yet",
+    "noFollowingHint": "Follow people to start messaging them.",
+    "noFollowingAddHint": "Follow people to add them to a group.",
+    "filterPeople": "Filter people you follow",
     "message": "Message",
     "createGroupN": "Create group · {{count}}",
     "groupError": "Couldn't create the group. Try again.",

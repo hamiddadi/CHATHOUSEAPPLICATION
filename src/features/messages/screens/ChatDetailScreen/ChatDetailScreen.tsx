@@ -13,6 +13,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { Loader } from '../../../../shared/components/Loader';
 import { useApiErrorToast } from '../../../../shared/hooks/useApiErrorToast';
+import { toAppError } from '../../../../shared/services/api/errorHandler';
 import { colors, spacing } from '../../../../shared/constants/theme';
 import type { MessageStackParamList } from '../../../../core/navigation/types';
 import type { Message, UserSummary } from '../../../../shared/types/domain';
@@ -184,9 +185,25 @@ export const ChatDetailScreen: React.FC = () => {
       setDraft('');
       scrollToBottom();
     } catch (err) {
+      // The only 403 on a DM send is the follow-gate (CHAT_004 — a block, or the
+      // recipient's dmPrivacy not satisfied; default 'mutual'). Spell the rule
+      // out instead of a raw toast, and keep the draft so nothing typed is lost.
+      // The peer's dmPrivacy isn't exposed client-side (it's a `me`-only field),
+      // so this gate can only be surfaced reactively here, not pre-disabled.
+      const e = toAppError(err);
+      if (e.kind === 'forbidden') {
+        Alert.alert(
+          t('chat.cannotMessageTitle', 'Message impossible'),
+          t(
+            'chat.cannotMessageBody',
+            'Vous devez vous suivre mutuellement pour échanger des messages.',
+          ),
+        );
+        return;
+      }
       reportApiError(err);
     }
-  }, [draft, reportApiError, route.params.conversationId, scrollToBottom, sendMessage]);
+  }, [draft, reportApiError, route.params.conversationId, scrollToBottom, sendMessage, t]);
 
   // Features below are not yet implemented end-to-end (no attachment upload
   // pipeline). Rather than no-op handlers — which make the buttons feel

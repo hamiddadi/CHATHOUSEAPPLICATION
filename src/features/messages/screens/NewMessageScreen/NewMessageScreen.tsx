@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   Alert,
   FlatList,
@@ -17,61 +17,54 @@ import { Avatar } from '../../../../shared/components/Avatar';
 import { Button } from '../../../../shared/components/Button';
 import { Input } from '../../../../shared/components/Input';
 import { EmptyState } from '../../../../shared/components/EmptyState';
+import { Loader } from '../../../../shared/components/Loader';
 import { colors, spacing } from '../../../../shared/constants/theme';
 import type { MessageStackParamList } from '../../../../core/navigation/types';
-import { searchService, type SearchUserHit } from '../../../search/services/searchService';
+import type { User } from '../../../../shared/types/domain';
+import { useAuthStore } from '../../../auth/store/authStore';
+import { useFollowing } from '../../../profile/hooks/useProfile';
 import { useCreateGroup } from '../../hooks/useGroups';
 
 type Nav = NativeStackNavigationProp<MessageStackParamList, 'NewMessage'>;
 
-const SEARCH_DEBOUNCE_MS = 250;
-const SEARCH_LIMIT = 20;
-
 /**
- * Pick one or more people to message. Selecting exactly one opens a 1:1 thread
- * (a "conversation id" is just the peer's user id — see messageService);
- * selecting two or more creates a group conversation and opens it. We `replace`
- * so Back returns to the conversation list rather than this picker.
+ * Pick one or more people to message. The candidate set is restricted to the
+ * people you follow — the DM follow-gate (`chatService.send` →
+ * `assertCanMessage`) only lets DMs flow between mutual/followed users, so
+ * surfacing every platform user here (the old global search) just produced
+ * "select someone → send fails" dead ends. Scoping to your following list
+ * mirrors Clubhouse's compose picker and matches the rule the backend enforces.
+ *
+ * Selecting exactly one opens a 1:1 thread (a "conversation id" is just the
+ * peer's user id — see messageService); selecting two or more creates a group
+ * conversation and opens it. We `replace` so Back returns to the conversation
+ * list rather than this picker.
  */
 export const NewMessageScreen: React.FC = () => {
   const navigation = useNavigation<Nav>();
   const insets = useSafeAreaInsets();
   const { t } = useTranslation();
   const createGroup = useCreateGroup();
+  const myId = useAuthStore(s => s.user?.id) ?? '';
+
+  // First page of who I follow (limit 50, server-side). Enough for a picker; a
+  // local filter narrows it as the user types — no per-keystroke network call.
+  const { data: following, isLoading } = useFollowing(myId);
 
   const [query, setQuery] = useState('');
-  const [debounced, setDebounced] = useState('');
-  const [results, setResults] = useState<SearchUserHit[]>([]);
-  const [searching, setSearching] = useState(false);
   // Selected peers, keyed by id so toggling is O(1) and order-stable enough.
-  const [selected, setSelected] = useState<Map<string, SearchUserHit>>(new Map());
+  const [selected, setSelected] = useState<Map<string, User>>(new Map());
 
-  useEffect(() => {
-    const id = setTimeout(() => setDebounced(query.trim()), SEARCH_DEBOUNCE_MS);
-    return () => clearTimeout(id);
-  }, [query]);
+  const results = useMemo(() => {
+    const all = following ?? [];
+    const q = query.trim().toLowerCase();
+    if (q.length === 0) return all;
+    return all.filter(
+      u => u.displayName.toLowerCase().includes(q) || u.username.toLowerCase().includes(q),
+    );
+  }, [following, query]);
 
-  useEffect(() => {
-    if (debounced.length === 0) {
-      setResults([]);
-      return;
-    }
-    let cancelled = false;
-    setSearching(true);
-    void searchService
-      .users(debounced, SEARCH_LIMIT)
-      .then(rows => {
-        if (!cancelled) setResults(rows);
-      })
-      .finally(() => {
-        if (!cancelled) setSearching(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [debounced]);
-
-  const toggle = useCallback((hit: SearchUserHit) => {
+  const toggle = useCallback((hit: User) => {
     setSelected(prev => {
       const next = new Map(prev);
       if (next.has(hit.id)) next.delete(hit.id);
@@ -113,7 +106,7 @@ export const NewMessageScreen: React.FC = () => {
   }, [selectedCount, t]);
 
   const renderItem = useCallback(
-    ({ item }: { item: SearchUserHit }) => {
+    ({ item }: { item: User }) => {
       const isSelected = selected.has(item.id);
       return (
         <Pressable
@@ -143,6 +136,8 @@ export const NewMessageScreen: React.FC = () => {
     [selected, toggle],
   );
 
+  const hasFollowing = (following?.length ?? 0) > 0;
+
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -163,43 +158,52 @@ export const NewMessageScreen: React.FC = () => {
         </Text>
       </View>
 
-      <View className="px-xxl pb-md">
-        <Input
-          placeholder={t('messages.searchPeople', 'Search people')}
-          value={query}
-          onChangeText={setQuery}
-          autoCapitalize="none"
-          autoCorrect={false}
-          autoFocus
-          leftAdornment={<MaterialIcons name="search" size={18} color={colors.textMuted} />}
-        />
-      </View>
+      {hasFollowing && (
+        <View className="px-xxl pb-md">
+          <Input
+            placeholder={t('messages.filterPeople', 'Filter people you follow')}
+            value={query}
+            onChangeText={setQuery}
+            autoCapitalize="none"
+            autoCorrect={false}
+            autoFocus
+            leftAdornment={<MaterialIcons name="search" size={18} color={colors.textMuted} />}
+          />
+          <Text className="text-xs font-body text-ink-muted mt-xs">
+            {t('messages.followGateHint', 'You can message people you follow.')}
+          </Text>
+        </View>
+      )}
 
-      <FlatList
-        data={results}
-        renderItem={renderItem}
-        keyExtractor={item => item.id}
-        keyboardShouldPersistTaps="handled"
-        ItemSeparatorComponent={() => <View className="h-px bg-overlay-white-5 ml-[76px]" />}
-        contentContainerStyle={{ paddingBottom: insets.bottom + spacing.giant }}
-        ListEmptyComponent={
-          debounced.length === 0 ? (
-            <EmptyState
-              title={t('messages.newMessageTitle', 'New message')}
-              description={t(
-                'messages.searchGroupHint',
-                'Search for people. Pick one for a direct message, or several to start a group.',
-              )}
-            />
-          ) : searching ? null : (
-            <EmptyState
-              title={t('messages.noResults', 'No one found')}
-              description={t('messages.noResultsHint', 'Try a different name or username.')}
-            />
-          )
-        }
-        showsVerticalScrollIndicator={false}
-      />
+      {isLoading ? (
+        <Loader fullscreen accessibilityLabel={t('common.loading', 'Loading')} />
+      ) : (
+        <FlatList
+          data={results}
+          renderItem={renderItem}
+          keyExtractor={item => item.id}
+          keyboardShouldPersistTaps="handled"
+          ItemSeparatorComponent={() => <View className="h-px bg-overlay-white-5 ml-[76px]" />}
+          contentContainerStyle={{ paddingBottom: insets.bottom + spacing.giant }}
+          ListEmptyComponent={
+            !hasFollowing ? (
+              <EmptyState
+                title={t('messages.noFollowing', 'No one to message yet')}
+                description={t(
+                  'messages.noFollowingHint',
+                  'Follow people to start messaging them.',
+                )}
+              />
+            ) : (
+              <EmptyState
+                title={t('messages.noResults', 'No one found')}
+                description={t('messages.noResultsHint', 'Try a different name or username.')}
+              />
+            )
+          }
+          showsVerticalScrollIndicator={false}
+        />
+      )}
 
       {selectedCount > 0 && (
         <View

@@ -46,7 +46,9 @@
     "emojiA11y": "Insérer un emoji",
     "attachA11y": "Joindre un fichier",
     "micA11y": "Enregistrer un message vocal",
-    "typing": "écrit…"
+    "typing": "écrit…",
+    "cannotMessageTitle": "Message impossible",
+    "cannotMessageBody": "Vous devez vous suivre mutuellement pour échanger des messages."
   },
   "voice": {
     "preview": "🎤 Message vocal",
@@ -111,7 +113,13 @@
     "newMessageTitle": "Nouveau message",
     "searchPeople": "Rechercher une personne",
     "searchHint": "Recherche quelqu'un pour démarrer une conversation.",
-    "searchGroupHint": "Recherche des personnes. Choisis-en une pour un message privé, ou plusieurs pour créer un groupe.",
+    "searchGroupHint": "Choisis parmi tes abonnements : une personne pour un message privé, ou plusieurs pour créer un groupe.",
+    "followGateHint": "Tu peux écrire aux personnes que tu suis.",
+    "followGateAddHint": "Tu peux ajouter les personnes que tu suis.",
+    "noFollowing": "Personne à qui écrire",
+    "noFollowingHint": "Suis des personnes pour pouvoir leur envoyer un message.",
+    "noFollowingAddHint": "Suis des personnes pour pouvoir les ajouter à un groupe.",
+    "filterPeople": "Filtrer tes abonnements",
     "message": "Message",
     "createGroupN": "Créer le groupe · {{count}}",
     "groupError": "Impossible de créer le groupe. Réessaie.",
