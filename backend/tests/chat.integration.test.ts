@@ -154,6 +154,51 @@ describe('Chat integration', () => {
     expect(ok.status).toBe(201);
   });
 
+  it('block overrides dmPrivacy=everyone: a blocked user cannot DM (CHAT_004)', async () => {
+    const alice = await registerUser(app);
+    const bob = await registerUser(app);
+    createdIds.push(alice.id, bob.id);
+
+    // Bob opens his DMs to everyone — without a block, anyone may message him
+    // (no mutual follow needed).
+    await prisma.user.update({ where: { id: bob.id }, data: { dmPrivacy: 'everyone' } });
+
+    // Sanity: everyone + no block ⇒ a stranger CAN DM.
+    const open = await request(app)
+      .post(`/api/chat/${bob.id}`)
+      .set('Authorization', `Bearer ${alice.token}`)
+      .send({ content: 'hi (open)' });
+    expect(open.status).toBe(201);
+
+    // Bob blocks Alice.
+    await prisma.block.create({ data: { blockerId: bob.id, blockedId: alice.id } });
+
+    // Alice (blocked) can no longer DM Bob despite dmPrivacy=everyone.
+    const blocked = await request(app)
+      .post(`/api/chat/${bob.id}`)
+      .set('Authorization', `Bearer ${alice.token}`)
+      .send({ content: 'hi (blocked)' });
+    expect(blocked.status).toBe(403);
+    expect(blocked.body.error.code).toBe('CHAT_004');
+
+    // The cut is symmetric: Bob (the blocker) also cannot DM Alice.
+    await prisma.user.update({ where: { id: alice.id }, data: { dmPrivacy: 'everyone' } });
+    const reverse = await request(app)
+      .post(`/api/chat/${alice.id}`)
+      .set('Authorization', `Bearer ${bob.token}`)
+      .send({ content: 'hi back' });
+    expect(reverse.status).toBe(403);
+    expect(reverse.body.error.code).toBe('CHAT_004');
+
+    // Lifting the block restores messaging under dmPrivacy=everyone.
+    await prisma.block.deleteMany({ where: { blockerId: bob.id, blockedId: alice.id } });
+    const restored = await request(app)
+      .post(`/api/chat/${bob.id}`)
+      .set('Authorization', `Bearer ${alice.token}`)
+      .send({ content: 'hi again' });
+    expect(restored.status).toBe(201);
+  });
+
   it('unread-count + markReadWithPeer: bulk-read drops the count to zero', async () => {
     const alice = await registerUser(app);
     const bob = await registerUser(app);

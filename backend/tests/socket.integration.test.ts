@@ -15,7 +15,7 @@ const { createApp } = require('../src/app') as typeof import('../src/app');
 const { createSocketServer } =
   require('../src/socket/socket.server') as typeof import('../src/socket/socket.server');
 const { prisma } = require('../src/config/database') as typeof import('../src/config/database');
-const { connectRedis, disconnectRedis } =
+const { connectRedis, disconnectRedis, redis } =
   require('../src/config/redis') as typeof import('../src/config/redis');
 /* eslint-enable @typescript-eslint/no-require-imports */
 
@@ -75,6 +75,27 @@ describe('Socket.IO integration', () => {
   it('rejects connection without a token', async () => {
     await expect(connectWith('')).rejects.toThrow();
   });
+
+  it('rejects a socket token revoked by a tokenVersion bump (cross-device logout)', async () => {
+    const user = await register(app);
+    createdIds.push(user.id);
+
+    // Baseline: the freshly minted token connects fine.
+    const ok = await connectWith(user.token);
+    ok.disconnect();
+
+    // Simulate a cross-device logout / password reset: bump tokenVersion and
+    // drop the cached auth verdict (exactly what invalidateUserAuthCache does on
+    // the HTTP side). The old access token now carries a stale `tv`.
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { tokenVersion: { increment: 1 } },
+    });
+    await redis.del(`user:susp:${user.id}`);
+
+    // The same (now stale) token must be rejected on the socket, just like HTTP.
+    await expect(connectWith(user.token)).rejects.toThrow();
+  }, 20_000);
 
   it('chat:send delivers the message to the receiver in real-time', async () => {
     const alice = await register(app);
