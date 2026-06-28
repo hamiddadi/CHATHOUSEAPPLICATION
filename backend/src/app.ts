@@ -96,12 +96,18 @@ export const createApp = (): express.Express => {
   // the label to avoid high-cardinality raw paths.
   app.use(httpMetricsMiddleware);
 
-  // Prometheus scrape endpoint — unauthenticated by default for local/dev. In
-  // production it requires `Authorization: Bearer <METRICS_TOKEN>` when that env
-  // var is set, so the metric surface isn't publicly enumerable. Mounted BEFORE
-  // the /api globalLimiter so scrapes don't burn the API budget.
+  // Prometheus scrape endpoint. In production it is fail-CLOSED: a METRICS_TOKEN
+  // must be configured and presented as `Authorization: Bearer <token>`, so the
+  // metric surface is never publicly enumerable on a prod deploy that forgot to
+  // set the token. Outside production it stays open for local/dev scraping (with
+  // optional token enforcement when one is set). Mounted BEFORE the /api
+  // globalLimiter so scrapes don't burn the API budget.
   app.get('/metrics', (req, res, next) => {
     const token = process.env.METRICS_TOKEN;
+    if (env.NODE_ENV === 'production' && !token) {
+      res.status(403).end();
+      return;
+    }
     if (token && req.get('authorization') !== `Bearer ${token}`) {
       res.status(403).end();
       return;
