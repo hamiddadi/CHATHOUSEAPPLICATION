@@ -25,6 +25,22 @@ const conversationPair = (a: string, b: string): [string, string] => (a < b ? [a
 // closes DMs entirely. All paths funnel through chatService.send, so the gate
 // can't be bypassed.
 const assertCanMessage = async (senderId: string, recipientId: string): Promise<void> => {
+  // A block is a symmetric cut: if either party blocked the other, no DM flows
+  // regardless of the recipient's dmPrivacy — including 'everyone'. The privacy
+  // gate below alone let a blocked user keep DMing a recipient open to everyone,
+  // since blocking only severs the follow graph (which 'followers'/'mutual' rely
+  // on) and never touched the Block table here.
+  const blocked = await prisma.block.findFirst({
+    where: {
+      OR: [
+        { blockerId: senderId, blockedId: recipientId },
+        { blockerId: recipientId, blockedId: senderId },
+      ],
+    },
+    select: { id: true },
+  });
+  if (blocked) throw new AppError('CHAT_004');
+
   const recipient = await prisma.user.findUnique({
     where: { id: recipientId },
     select: { dmPrivacy: true },

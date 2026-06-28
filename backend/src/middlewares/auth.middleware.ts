@@ -38,7 +38,9 @@ export const blacklistKey = (token: string): string =>
 
 // Lockout-propagation window for the suspension cache: how long a cached
 // suspended/clear verdict is trusted before requireAuth re-reads the DB.
-const SUSPENSION_CACHE_TTL_SECONDS = 60;
+// Exported so the socket auth layer reuses the SAME window and verdict format
+// (`0:<tokenVersion>`), keeping HTTP and realtime revocation in lock-step.
+export const SUSPENSION_CACHE_TTL_SECONDS = 60;
 
 /**
  * Verify the bearer access token on every protected route. Supports the

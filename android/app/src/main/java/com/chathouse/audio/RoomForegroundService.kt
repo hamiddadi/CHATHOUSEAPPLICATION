@@ -1,28 +1,28 @@
 package com.chathouse.audio
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 
 /**
  * Foreground service that keeps the process alive while a Chathouse audio room
  * (LiveKit) is active in the background, so Android does not kill live audio.
  *
- * Declared in AndroidManifest.xml with `foregroundServiceType="mediaPlayback"`
- * (and `stopWithTask="true"`). The manifest entry + the FOREGROUND_SERVICE /
- * FOREGROUND_SERVICE_MEDIA_PLAYBACK / POST_NOTIFICATIONS permissions are injected
- * by the `with-audio-background` Expo config plugin, but the plugin only patches
- * the manifest -- the service had NO implementation. This class is authored as
- * part of committing the bare `android/` project to git (de-Expo migration): a
- * manifest <service> with no backing class is a latent ClassNotFoundException the
- * moment anything tries to start it.
+ * Declared in AndroidManifest.xml with
+ * `foregroundServiceType="mediaPlayback|microphone"` (and `stopWithTask="true"`).
+ * The `microphone` type is required on Android 14+ so a speaker publishing audio
+ * via LiveKit keeps the mic open while backgrounded; the actual type is narrowed
+ * to what RECORD_AUDIO allows at runtime (see resolveServiceType).
  *
  * Lifecycle: started with ACTION_START when a room becomes active and stopped
  * with ACTION_STOP (or automatically when the task is removed). Wiring a JS
@@ -57,14 +57,32 @@ class RoomForegroundService : Service() {
         .build()
 
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-      startForeground(
-        NOTIFICATION_ID,
-        notification,
-        ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK,
-      )
+      startForeground(NOTIFICATION_ID, notification, resolveServiceType())
     } else {
       startForeground(NOTIFICATION_ID, notification)
     }
+  }
+
+  /**
+   * The room is a Clubhouse-style live audio space: speakers capture the mic via
+   * LiveKit/WebRTC and the service exists to keep that audio alive in the
+   * background. On Android 14+ background mic capture REQUIRES the `microphone`
+   * FGS type, otherwise the OS mutes the speaker once backgrounded.
+   *
+   * We always keep `mediaPlayback` (covers listeners) and add `microphone` only
+   * when RECORD_AUDIO is actually granted — declaring `microphone` without the
+   * permission makes startForeground throw a SecurityException on Android 14+,
+   * which would crash listeners (who never grant the mic).
+   */
+  private fun resolveServiceType(): Int {
+    var type = ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+    val micGranted =
+      ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
+        PackageManager.PERMISSION_GRANTED
+    if (micGranted) {
+      type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+    }
+    return type
   }
 
   private fun stopForegroundCompat() {

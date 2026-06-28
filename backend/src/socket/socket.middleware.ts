@@ -2,7 +2,7 @@ import type { Socket } from 'socket.io';
 import { redis } from '../config/redis';
 import { prisma } from '../config/database';
 import { verifyAccessToken } from '../utils/jwt';
-import { blacklistKey } from '../middlewares/auth.middleware';
+import { blacklistKey, SUSPENSION_CACHE_TTL_SECONDS } from '../middlewares/auth.middleware';
 
 export interface AuthedSocketData {
   userId: string;
@@ -43,20 +43,48 @@ export const socketAuth = async (socket: Socket, next: (err?: Error) => void): P
 
     const claims = verifyAccessToken(token);
 
-    // Mirror HTTP requireAuth: a suspended user keeps a valid JWT for up to
-    // 15 min but must NOT be able to transact over realtime either (join
-    // rooms, publish audio, chat, broadcast location). Same short-TTL Redis
-    // cache as the HTTP path so unsuspend() invalidation is shared.
+    // Mirror HTTP requireAuth (auth.middleware.ts) exactly: enforce suspension
+    // AND AUTH-03 token revocation (tokenVersion) over realtime too, sharing the
+    // SAME Redis verdict cache + `0:<tokenVersion>` format so suspend()/logout
+    // invalidation is common to HTTP and socket. Previously the socket layer
+    // skipped the tokenVersion check, so a token revoked by a cross-device
+    // logout / password reset stayed valid on the socket until its ~15-min
+    // natural expiry.
     const cacheKey = `user:susp:${claims.sub}`;
     const cached = await redis.get(cacheKey);
     if (cached === '1') return next(new Error('ACCOUNT_SUSPENDED'));
-    if (cached === null) {
+    // Clean cached verdict is `0:<tokenVersion>`; a bare legacy '0' or any
+    // unexpected value is treated as a miss and re-read, so it fails safe.
+    const cachedTv =
+      cached && cached.startsWith('0:') && Number.isInteger(Number(cached.slice(2)))
+        ? Number(cached.slice(2))
+        : null;
+    if (cachedTv !== null) {
+      if (claims.tv !== undefined && claims.tv !== cachedTv) {
+        return next(new Error('TOKEN_REVOKED'));
+      }
+    } else {
       const user = await prisma.user.findUnique({
         where: { id: claims.sub },
-        select: { suspendedUntil: true },
+        select: { suspendedUntil: true, tokenVersion: true },
       });
-      const isSuspended = Boolean(user?.suspendedUntil && user.suspendedUntil > new Date());
-      await redis.setEx(cacheKey, 60, isSuspended ? '1' : '0');
+      if (!user) return next(new Error('UNAUTHORIZED'));
+      if (claims.tv !== undefined && claims.tv !== user.tokenVersion) {
+        return next(new Error('TOKEN_REVOKED'));
+      }
+      const now = new Date();
+      const suspendedUntil = user.suspendedUntil;
+      const isSuspended = suspendedUntil !== null && suspendedUntil > now;
+      // Cap the cached-verdict TTL at the suspension's remaining time so the
+      // '1' marker never outlives the sanction (matches requireAuth).
+      const remainingSec =
+        suspendedUntil === null
+          ? SUSPENSION_CACHE_TTL_SECONDS
+          : Math.max(1, Math.ceil((suspendedUntil.getTime() - now.getTime()) / 1000));
+      const ttl = isSuspended
+        ? Math.min(SUSPENSION_CACHE_TTL_SECONDS, remainingSec)
+        : SUSPENSION_CACHE_TTL_SECONDS;
+      await redis.setEx(cacheKey, ttl, isSuspended ? '1' : `0:${user.tokenVersion}`);
       if (isSuspended) return next(new Error('ACCOUNT_SUSPENDED'));
     }
 

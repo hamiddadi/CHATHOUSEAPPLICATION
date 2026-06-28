@@ -49,6 +49,10 @@ export const useCurrentLocation = (): UseCurrentLocationReturn => {
   const [error, setError] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
   const watchIdRef = useRef<number | null>(null);
+  // `start` runs several awaits (consent Alert, permission request, 8s GPS race)
+  // and is also exposed as `requestAgain`, so it can resolve after the screen
+  // unmounts. Guard every post-await setState against a stale write.
+  const mountedRef = useRef(true);
 
   const clearWatch = useCallback(() => {
     if (watchIdRef.current !== null) {
@@ -75,6 +79,7 @@ export const useCurrentLocation = (): UseCurrentLocationReturn => {
             ],
           );
         });
+        if (!mountedRef.current) return;
         if (!userConsented) {
           setPermission('denied');
           return;
@@ -83,6 +88,7 @@ export const useCurrentLocation = (): UseCurrentLocationReturn => {
         const result = await PermissionsAndroid.request(
           PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
         );
+        if (!mountedRef.current) return;
         if (result !== PermissionsAndroid.RESULTS.GRANTED) {
           setPermission('denied');
           return;
@@ -93,20 +99,27 @@ export const useCurrentLocation = (): UseCurrentLocationReturn => {
       // Race the first fix against a timeout so a missing GPS fix can't hang
       // forever. On timeout we leave `coords` null and rely on watchPosition
       // below to deliver the position when it becomes available.
+      let raceTimer: ReturnType<typeof setTimeout> | undefined;
       const initial = await Promise.race<{ coords: GeoCoords } | null>([
         new Promise<{ coords: GeoCoords } | null>(resolve => {
           Geolocation.getCurrentPosition(
             pos => resolve({ coords: pos.coords }),
             err => {
               // code 2 = POSITION_UNAVAILABLE (device location services off).
-              if (err.code === 2) setPermission('disabled');
+              if (err.code === 2 && mountedRef.current) setPermission('disabled');
               resolve(null);
             },
             { enableHighAccuracy: false, timeout: INITIAL_FIX_TIMEOUT_MS, maximumAge: 10_000 },
           );
         }),
-        new Promise<null>(resolve => setTimeout(() => resolve(null), INITIAL_FIX_TIMEOUT_MS)),
+        new Promise<null>(resolve => {
+          raceTimer = setTimeout(() => resolve(null), INITIAL_FIX_TIMEOUT_MS);
+        }),
       ]);
+      // Whichever side lost the race leaves a pending timer; clear it so it never
+      // fires after the fix already arrived (or after the component unmounts).
+      if (raceTimer) clearTimeout(raceTimer);
+      if (!mountedRef.current) return;
       if (initial) setCoords(initial.coords);
       setReady(true);
 
@@ -114,7 +127,9 @@ export const useCurrentLocation = (): UseCurrentLocationReturn => {
       // re-invocation of start() (e.g. double-tap "Grant access") can't leak it.
       clearWatch();
       watchIdRef.current = Geolocation.watchPosition(
-        pos => setCoords(pos.coords),
+        pos => {
+          if (mountedRef.current) setCoords(pos.coords);
+        },
         () => undefined,
         {
           enableHighAccuracy: false,
@@ -123,14 +138,19 @@ export const useCurrentLocation = (): UseCurrentLocationReturn => {
         },
       );
     } catch (e) {
+      if (!mountedRef.current) return;
       setError((e as Error).message);
       setReady(true);
     }
   }, [clearWatch]);
 
   useEffect(() => {
+    mountedRef.current = true;
     void start();
-    return () => clearWatch();
+    return () => {
+      mountedRef.current = false;
+      clearWatch();
+    };
   }, [start, clearWatch]);
 
   return { permission, coords, error, requestAgain: start, ready };
