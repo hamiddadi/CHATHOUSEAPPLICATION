@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<title>ChatHouse vs Clubhouse — Comparaison écran par écran</title>
+<style>
+  :root{
+    --navy:#0c112e; --navy2:#141936; --navy3:#191d3b; --surfHigh:#232846;
+    --ink:#dee0ff; --inkMut:#c2c6d7; --inkDim:#A0AEC0;
+    --primary:#558dff; --primaryLite:#b0c6ff; --secondary:#bac3ff; --lav:#2f3f92;
+    --accent:#00a754; --accent2:#00e475; --gold:#ffd700; --danger:#c0392b;
+    --text:#16204a; --muted:#5b6488; --line:#d9deec;
+  }
+  @page { size: A4; margin: 15mm 13mm 16mm 13mm; }
+  *{ box-sizing:border-box; }
+  html{ -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  body{ font-family:"Segoe UI","Helvetica Neue",Arial,sans-serif; color:var(--text); font-size:11px; line-height:1.5; margin:0; }
+  h2{ font-size:16px; margin:22px 0 8px; color:var(--navy); padding-bottom:5px; border-bottom:2.5px solid var(--primary); page-break-after:avoid; }
+  h3{ font-size:12.5px; margin:14px 0 6px; color:var(--lav); page-break-after:avoid; }
+  p{ margin:6px 0; } .muted{ color:var(--muted); } .small{ font-size:10px; }
+
+  /* Cover (dark, brand) */
+  .cover{ background:radial-gradient(120% 80% at 50% 0%, #1a2150 0%, var(--navy) 55%); color:var(--ink);
+          margin:-15mm -13mm 0; padding:34mm 13mm 24mm; text-align:center; page-break-after:always; }
+  .logo{ width:96px; height:96px; object-fit:contain; margin-bottom:18px; }
+  .kicker{ letter-spacing:4px; text-transform:uppercase; color:var(--secondary); font-weight:700; font-size:11px; }
+  .cover h1{ font-size:34px; margin:12px 0 0; color:#fff; font-weight:800; letter-spacing:.5px; }
+  .cover h1 .vs{ color:var(--primaryLite); font-weight:600; }
+  .cover .sub{ color:var(--inkMut); font-size:13px; margin-top:8px; }
+  .badge-final{ display:inline-block; margin:26px auto 0; padding:16px 40px; border-radius:20px;
+                background:linear-gradient(135deg,var(--primary),#8a5bff); box-shadow:0 8px 30px rgba(85,141,255,.35); }
+  .badge-final .n{ font-size:54px; font-weight:800; line-height:1; color:#fff; }
+  .badge-final .n small{ font-size:22px; opacity:.85; }
+  .badge-final .l{ font-size:11px; letter-spacing:2px; text-transform:uppercase; color:#e8ecff; }
+  .cover .meta{ margin-top:30px; color:var(--inkDim); font-size:10.5px; }
+  .rule{ width:60px; height:3px; background:var(--accent2); border-radius:3px; margin:18px auto 0; }
+
+  table{ width:100%; border-collapse:collapse; margin:8px 0 4px; }
+  th,td{ border:1px solid var(--line); padding:6px 8px; text-align:left; vertical-align:top; }
+  th{ background:#e8edff; color:var(--lav); font-weight:700; font-size:10.5px; }
+  tr{ page-break-inside:avoid; }
+  td.score,th.score{ text-align:center; white-space:nowrap; font-weight:800; width:46px; }
+  .s-green{ background:#e1f6ea; color:#0a7a42; } .s-blue{ background:#e6edff; color:#2647c7; }
+  .s-amber{ background:#fff5dd; color:#9a6a00; } .s-red{ background:#fde8e8; color:var(--danger); }
+  .zone-score{ font-weight:800; color:var(--primary); }
+  .x{ color:var(--danger); font-weight:700; } .ok{ color:#0a7a42; font-weight:700; }
+  ul{ margin:6px 0; padding-left:18px; } li{ margin:3px 0; }
+  .pb{ page-break-before:always; }
+  .note{ background:#f3f6ff; border-left:3px solid var(--primary); padding:8px 12px; border-radius:4px; margin:10px 0; }
+  .legend span{ display:inline-block; margin-right:12px; }
+  .chip{ display:inline-block; padding:1px 7px; border-radius:10px; font-size:9.5px; font-weight:700; }
+  footer{ margin-top:18px; border-top:1px solid var(--line); padding-top:6px; color:#9aa1bd; font-size:9px; }
+
+  /* Score bars */
+  .bars{ margin:10px 0 4px; }
+  .bar-row{ display:flex; align-items:center; gap:10px; margin:7px 0; page-break-inside:avoid; }
+  .bar-row .lab{ width:165px; font-size:10.5px; color:var(--text); }
+  .bar-row .wt{ width:34px; font-size:9.5px; color:var(--muted); text-align:right; }
+  .track{ flex:1; height:13px; background:#eef1f8; border-radius:7px; overflow:hidden; border:1px solid #e3e7f2; }
+  .fill{ height:100%; border-radius:7px; }
+  .bar-row .val{ width:30px; font-weight:800; font-size:11px; text-align:right; }
+  .f-green{ background:linear-gradient(90deg,#00a754,#00e475); }
+  .f-blue{ background:linear-gradient(90deg,#3f6fe0,#558dff); }
+  .f-amber{ background:linear-gradient(90deg,#d39a00,#ffd700); }
+  .f-red{ background:linear-gradient(90deg,#b53024,#e05a4d); }
+  .gauge{ margin:14px 0 4px; }
+  .gauge .track{ height:26px; border-radius:14px; }
+  .gauge .fill{ background:linear-gradient(90deg,var(--primary),#8a5bff); display:flex; align-items:center; justify-content:flex-end; }
+  .gauge .fill span{ color:#fff; font-weight:800; font-size:13px; padding-right:12px; }
+  .gauge .cap{ display:flex; justify-content:space-between; font-size:9px; color:var(--muted); margin-top:3px; }
+</style>
+</head>
+<body>
+
+<div class="cover">
+  <img class="logo" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAABIAAAASACAYAAACHqDZaAABDOUlEQVR4AezBCZifZWEv0N/3zmSSSSbLACEgBLIQEraw7zsIIkVQULFVURRFRUALLgUqURBEvcKtoiKC1FbrhhRLRcWNCLKURRbZZZfdQAhLAmS+C899fK69JRIgCfN/55zT9PXPbAMAAABAtUoAAAAAqFoJAAAAAFUrAQAAAKBqJQAAAABUrQQAAACAqpUAAAAAULUSAAAAAKpWAgAAAEDVSgAAAACoWgkAAAAAVSsBAAAAoGolAAAAAFStBAAAAICqlQAAAABQtRIAAAAAqlYCAAAAQNVKAAAAAKhaCQAAAABVKwEAAACgaiUAAAAAVK0EAAAAgKqVAAAAAFC1EgAAAACqVgIAAABA1UoAAAAAqFoJAAAAAFUrAQAAAKBqJQAAAABUrQQAAACAqpUAAAAAULUSAAAAAKpWAgAAAEDVSgAAAACoWgkAAAAAVSsBAAAAoGolAAAAAFStBAAAAICqlQAAAABQtRIAAAAAqlYCAAAAQNVKAAAAAKhaCQAAAABVKwEAAACgaiUAAAAAVK0EAAAAgKqVAAAAAFC1EgAAAACqVgIAAABA1UoAAAAAqFoJAAAAAFUrAQAAAKBqJQAAAABUrQQAAACAqpUAAAAAULUSAAAAAKpWAgAAAEDVSgAAAACoWgkAAAAAVSsBAAAAoGolAAAAAFStBAAAAICqlQAAAABQtRIAAAAAqlYCAAAAQNVKAAAAAKhaCQAAAABVKwEAAACgaiUAAAAAVK0EAAAAgKqVAAAAAFC1EgAAAACqVgIAAABA1UoAAAAAqFoJAAAAAFUrAQAAAKBqJQAAAABUrQQAAACAqpUAAAAAULUSAAAAAKpWAgAAAEDVSgAAAACoWgkAAAAAVSsBAAAAoGolAAAAAFStBAAAAICqlQAAAABQtRIAAAAAqlYCAAAAQNVKAAAAAKhaCQAAAABVKwEAAACgaiUAAAAAVK0EAAAAgKqVAAAAAFC1EgAAAACqVgIAAABA1UoAAAAAqFoJAAAAAFUrAQAAAKBqJQAAAABUrQQAAACAqpUAAAAAULUSAAAAAKpWAgAAAEDVSgAAAACoWgkAAAAAVSsBAAAAoGolAAAAAFStBAAAAICqlQAAAABQtRIAAAAAqlYCAAAAQNVKAAAAAKhaCQAAAABVKwEAAACgaiUAAAAAVK0EAAAAgKqVAAAAAFC1EgAAAACqVgIAAABA1UoAAAAAqFoJAAAAAFUrAQAAAKBqJQAAAABUrQQAAACAqpUAAAAAULUSAAAAAKpWAgAAAEDVSgAAAACoWgkAAAAAVSsBAAAAoGolAAAAAFStBAAAAICqlQAAAABQtRIAAAAAqlYCAAAAQNVKAAAAAKhaCQAAAABVKwEAAACgaiUAAAAAVK0EAAAAgKqVAAAAAFC1EgAAAACqVgIAAABA1UoAAAAAqFoJAAAAAFUrAQAAAKBqJQAAAABUrQQAAACAqpUAAAAAULUSAAAAAKpWAgAAAEDVSgAAAACoWgkAAAAAVSsBAAAAoGolAAAAAFStBAAAAICqlQAAAABQtRIAAAAAqlYCAAAAQNVKAAAAAKhaCQAAAABVKwEAAACgaiUAAAAAVK0EAAAAgKqVAAAAAFC1EgAAAACqVgIAAABA1UoAAAAAqFoJAAAAAFUrAQAAAKBqJQAAAABUrQQAAACAqpUAAAAAULUSAAAAAKpWAgAAAEDVSgAAAACoWgkAAAAAVSsBAAAAoGolAAAAAFStBAAAAICqlQAAAABQtRIAAAAAqlYCAAAAQNVKAAAAAKhaCQAAAABVKwEAAACgaiUAAAAAVK0EAAAAgKqVAAAAAFC1EgAAAACqVgIAAABA1UoAAAAAqFoJAAAAAFUrAQAAAKBqJQAAAABUrQQAAACAqpUAAAAAULUSAAAAAKpWAgAAAEDVSgAAAACoWgkAAAAAVSsBAAAAoGolAAAAAFStBAAAAICqlQAAAABQtRIAAAAAqlYCAAAAQNVKAAAAAKhaCQAAAABVKwEAAACgaiUAAAAAVK0EAAAAgKqVAAAAAFC1EgAAAACqVgIAAABA1UoAAAAAqFoJAAAAAFUrAQAAAKBqJQAAAABUrQQAAACAqpUAAAAAULUSAAAAAKpWAgAAAEDVSgAAAACoWgkAAAAAVSsBAAAAoGolAAAAAFStBAAAAICqlQAAAABQtRIAAAAAqlYCAAAAQNVKAAAAAKhaCQAAAABVKwEAAACgaiUAAAAAVK0EAAAAgKqVAAAAAFC1EgAAAACqVgIAAABA1UoAAAAAqFoJAAAAAFUrAQAAAKBqJQAAAABUrQQAAACAqpUAAAAAULUSAAAAAKpWAgAAAEDVSgAAAACoWgkAAAAAVSsBAAAAoGolAAAAAFStBAAAAICqlQAAAABQtRIAAAAAqlYCAAAAQNVKAAAAAKhaCQAAAABVKwEAAACgaiUAAAAAVK0EAAAAgKqVAAAAAFC1EgAAAACqVgIAAABA1UoAAAAAqFoJAAAAAFUrAQAAAKBqJQAAAABUrQQAAACAqpUAAAAAULUSAAAAAKpWAgAAAEDVSgAAAACoWgkAAAAAVSsBAAAAoGolAAAAAFStBAAAAICqlQAAAABQtRIAAAAAqlYCAAAAQNVKAAAAAKhaCQAAAABVKwEAAACgaiUAAAAAVK0EAAAAgKqVAAAAAFC1EgAAAACqVgIAAABA1UoAAAAAqFoJAAAAAFUrAQAAAKBqJQAAAABUrQQAAACAqpUAAAAAULUSAAAAAKpWAgAAAEDVSgAAAACoWgkAAAAAVSsBAAAAoGolAAAAAFStBAAAAICqlQAAAABQtRIAAAAAqlYCAAAAQNVKAAAAAKhaCQAAAABVKwEAAACgaiUAAAAAVK0EAAAAgKqVAAAAAFC1EgAAAACqVgIAAABA1UoAAAAAqFoJAAAAAFUrAQAAAKBqJQAAAABUrQQAAACAqpUAAAAAULUSAAAAAKpWAgAAAEDVSgAAAACoWgkAAAAAVSsBAAAAoGolAAAAAFStBAAAAICqlQAAAABQtRIAAAAAqlYCAAAAQNVKAAAAAKhaCQAAAABVKwEAAACgaiUAAAAAVK0EAAAAgKqVAAAAAFC1EgAAAACqVgIAAABA1UoAAAAAqFoJAAAAAFUrAQAAAKBqJQAAAABUrQQAAACAqpUAAAAAULUSAAAAAKpWAgAAAEDVSgAAAACoWgkAAAAAVSsBAAAAoGolAAAAAFStBAAAAICqlQAAAABQtRIAAAAAqlYCAAAAQNVKAAAAAKhaCQAAAABVKwEAAACgaiUAAAAAVK0EAAAAgKqVAAAAAFC1EgAAAACqVgIAAABA1UoAAAAAqFoJAAAAAFUrAQAAAKBqJQAAAABUrQQAAACAqpUAAAAAULUSAAAAAKpWAgAAAEDVSgAAAACoWgkAAAAAVSsBAAAAoGolAAAAAFStBAAAAICqlQAAAABQtRIAAAAAqlYCAAAAQNVKAAAAAKhaCQAAAABVKwEAAACgaiUAAAAAVK0EAAAAgKqVAAAAAFC1EgAAAACqVgIAAABA1boDALws41dcLuusv0mApeei2b/IggULAwC8NN0BAP6b9llN2iZ/YcNNN81ue701z2fi5DUzYaWJAZaev9n72nbOQ/c3eR6nfenTeeC+B/OX2jRpmiYAwP/V9PXPbAMAQ1yTgYwc1dvmWatNntIce9J3AnSu9+y7XRbMn9/mWY8/9mSTpgQAhrKmr39mGwAYgkaNGt6uuvrkJs9af+Otsu87Dg1Qn5M+/eE8cP89ec4tN16fhQubAMBQ0/T1z2wDAEPE9LWmZ/1Nts5z1ttoq6y93qYBho4Lfvkf+eNdt+Y5553z/Tz88LwAwFDQ9PXPbAMAFWrbgXR1NW3zrC/+8zl5zthxy2fEiJEBeGze3Dz++KO59oqL2q+edGyes3Bh0jwrAFCZpq9/ZhsAqMjIkT0Z1deXGetskA8deWIAFtfH3r935s59OA/PmZNnngkAVKPp65/ZBgA6XNsOZOvtdshz9njj/pm+zkYBeKl++ZPvt1deMruZM+fB3PD76wMAna7p65/ZBgA6UNsOtHnWuuvPzG57vbXZavvdA7AkPfH4vFx+0S/zzVP/V/700MNt0qR5VgCgwzR9/TPbAEAHaZqBDB/ek69/b3Z6R44KwLLym5+fna+e9KnMn78gSVcAoFN09fROmBUA6ABtO5A11pya1+39thxx3CkZNqwnAMvS6lNmZJ+/OzB/uv/OLFjwWDvv0ceaAEAHaPr6Z7YBgEFu0pTVs9nWO2ffdxwagMHg0Ufm5KzvnpJf/eTszJv3ZABgMGv6+me2AYBBaWH6+kZl1ue/0Y6fsErTN3psAAabPz14fx6d+6f2I+/ft2kHkjQlADDYNH39M9sAwCDSZCDjlhuXgz7y6Wy46XYB6BTfOeOk/PzHZ2bOnx5J05QAwGDR9PXPbAMAg0U7kDe9/d15yzs/FIBOdfyR781ll1wSABgsunp6J8wKAAwC62+4QbvvOz7Q7LHPOwPQyTbdeueMH79Ce8et1zVPPDE/APBKa/r6Z7YBgFdI27ZZdeLK+aczfhqAWr3ltRvk6afbAMArpaund8KsAMAroLd3WFZdbWJOOu3HAajZ+pts2d503X81jz06N23bBACWta6e3gmzAgDL2IgR3fno0SdlvwM/HoDaLb/CSs1ue74145Yb11528flNUgIAy1JXT++EWQGAZaUdyOGfOCH7vPV97ZprbdAEYAiZuuZ6zUabbd12dQ3klhuvb54VAFgWugMAy8TCdsyY0c073/+xbLnda/OsJgBD0LQZ6zfTZqyfZ7UXzT6vmTv38bZ5VgBgKWr6+me2AYClqG0H2t332icHHDyrCQD/zccO2ie33HRLAGBpKgGApWzXv9krBxw8qwkA/8ORnz41U6dNCQAsTU1f/8w2ALCEte1A1l53nXz8mFMyctTolFICwPN7+qmnsmDBkzn0XbvnkUceCwAsaSUAsBSsve46Ofak76Rv9NiUUgLAog3r6Unf6LE5+V/Oy+gxvQGAJa0EAJawqdOm5OjPfjMAvDgjRozM0Z89vR3XPzoAsCR19fROmBUAeJnats2YsSNz2JGfzRvecmBGjuoLAC9e/3Ljm0233CEbbLx5Lvz1uUmaAMDL1dXTO2FWAOBlGjt2VM448+K8auKUDB/RGwBeutFj+vOqiVOy2VY7tb889wfNQBsAeFlKAOBlGjeuL585+XsBYMmaNHVG86EjPpOenhIAeDlKAOBlGDNmZI487pR2wkoTA8CSt+V2r81hR30+pbRtAOAlKgGAl2jsuL780zd+nCnT1m0CwFKzyZY752vf/nnTZCAA8FKUAMBL0Nc3Iqd//8KMHtMfAJa+/uVXzD+e8NUMG9a0AYAXqQQAXqRx/aPzyc//cxsAlqn1N9o6h3zsuGbYsCYA8GKUAMBiats2faNHZNbnvtFOmjqjCQDL3Fbb755PnHBqmmYgALC4unp6J8wKACyGceP6csaZF2fsuOWbAPCKGT9hlWy74+756Tn/lrZtAgAvpAQAFsPYsaPyua+eFQAGh5VXnZTDjvp8enpKAOCFdPX0TpgVAPgrxo4dlSOP/1r7qolTmgAwaKyy2tRMXH1KLr7gZ2nbJgCwKCUAsAht22bs2FH57FfPypRp6zYBYNDZbJtdc9LXf5SmGQgALEoJACxS2572g99m+RUmBIDBa+VVJ+WQjx0bAFiUEgBYhDXWXKMJAB1h8hprt+P6RwcAnk8JADyPyWtMzpHHnRYAOsOqq09r/vH4r7d9fSMCAP+/EgD4C207kLXWXTuf+8q/Z8y45QJA51h96ozmjLMuydhxfQGAv1QCAH+hq6tpjznx3wJA5zrui98JAPylEgD4C7vt+cYA0NnGjls+U6dNCQD8WQkAPKttB/KaPfZq9zvwiCYAdLQRI0bmqM+cnmnTp6VtB9oAMOSVAMCzZqyzdt5z6Kea7u7uAND5Ro/pz/Ff+kH6+noDACUADHmlDLRb7/DaAFCfbXfePW070AaAIa2rp3fCrAAwZLXtQD58xPHNzq99cwCoz0ab79A88qd7cuvNNzUBYMgqAWBI6+nparfecY8AUK9td3pd02QgAAxdJQAMWSNGdOf4L347ANRt7fU3zwEHf7ztKm0AGJpKABiytthmp0yaunYTAKr3mj3f2qy40kptABiSSgAYctq2zYoTls++7/xQABg6DvvESRk2rGkDwJBTAsCQM2xYky//6y8zfsIqAWDomDR17ebU757fBIAhpwSAIWejzbYKAENTz/DhGb/icgFgaCkBYMj5wOGfCQBDU0/PiLx2r78LAENLCQBDyt5veXv6Ro8NAEPXbq9/e6avPSMADB0lAAwZw7qbrLn2hgFgaOvpGZF1198sTQYCwNDQ1dM7YVYAqF53V/KBwz+ZLbffPQCw3oZbpckzufaqy9M0TQCoWwkA1WvbNn1jRme7V78+APBnb9rvkJQmAAwBJQBUr2kG8vXvXRAA+P998vNfDwD1KwGgepOnTg0APJ/lx6+c0WN6A0DdSgCo3v7vPyIA8HwmvGq1bLXdrm0AqFoJAFXbarvts+ZaGwYAFuVv33VYs9LK4wNAvUoAqNroMePa7p6eAMCi9I0em57hwwNAvUoAqNaIEd3ZeIudmgDAC9hh1zekyUAAqFMJANVacaWVstHmOwQAXsiebzogw3q6A0CdSgCoUk9PyRdO/c8AwOL69n9eGQDqVAJAldbbYJMAwIvV3z86ANSnq6d3wqwAUJ0vfuPHAYAXq7d3RHv5JRc2AaAqJQDUp10YAHgphg0b3rTtQACoSwkA1Tnw0CPaAMBLsMNr9skmm28RAOrSHQCq0jd6RCavuV7aAMBLs/k2u7ZXXX5p88zCAFCJEgCqMn2tmZm65npNAOAl2nG3NzWjx44JAPUoAaAe7UD6lx/fBgBepv7lVkj7rABQhRIAqtG//Lgc+OHjmgDAy3TCl89KKW0TAKpQAgAAAEDVSgCoxMJ87FNfbgMAS8h7DjmiDQBVKAGgCk3TZOqa6zUBgCVk2oz1A0AdSgAAAACoWgkAVXjd3n8XAFiSVlxpYjN9rekBoPOVAFCFbV+9VxsAWIJGjhqd6WtvGAA6XwkAHa+3d1hG9Y1tAgBL2GpTpqerqw0Ana0EgI63y+77ZPyEVQIAS9r2u+yd1adMDQCdrQQAAACAqpUAAAAAULUSADpaT0/J9HU2DgAsLRtvvkOaDASAzlUCQEdbdfVJ2WybXQMAS8ub9zs0w0f0BIDOVQIAAABA1UoAAAAAqFoJAB2raQay4y5vaAMAS9lOr9mrfVYA6EwlAHSs4cN7stvr92sCAEvZ/gd9oknaNgB0pBIAAAAAqlYCAAAAQNVKAAAAAKhaCQAdqW0H2mNO/Jc2ALCMvOlt724CQEcqAaBjTZq6dhMAWEZeNXFyAOhMJQAAAABUrQQAAACAqpUAAAAAULUSAAAAAKpWAgAAAEDVSgDoSE3aJgCwDHV3DUvbDgSAzlMCQEc65B8+HQBYlrbcfvdsue0OAaDzlAAAAABQtRIAAAAAqlYCAAAAQNVKAAAAAKhadwDoWG0AAABeWAkAAAAAVSsBAAAAoGolAAAAAFStBAAAAICqlQAAAABQtRIAAAAAqlYCAAAAQNVKAAAAAKhaCQAAAABV6w4AnalN0gYAAOAFlQAAAABQtRIAAAAAqlYCAAAAQNVKAAAAAKhaCQAAAABVKwEAAACgaiUAAAAAVK0EAAAAgKqVAAAAAFC1EgAAAACqVgIAAABA1UoAAAAAqFoJAAAAAFUrAQAAAKBqJQAAAABUrQQAAACAqpUAAAAAULUSAAAAAKpWAgAAAEDVSgAAAACoWgkAAAAAVSsBAAAAoGolAAAAAFStBAAAAICqlQAAAABQte4A0JHaJG3oVLfe9Pv8x5nfzKJssc2rs/m2u4Ql49G5D+cbX/5Mns+oUaNzwCFHhSXn7O+elttvvSmL8p5DjsrIUaMDACw73QEAlqrHHp2bZxY+nd/++qf58Vn/muc8tWB+5j4yJ4ty1WUX5l9O/UL+bK83759Nt94p3d3D0jd6bHh+Ty1YkCeemJdnnn46sw5/V/5s4cKFmfPQ/Xk+pZT87rIL82crr7J6DvrosXnOmDH9KV1d4fnNffhPadPmh9/6Wq649Df5s7mP/ClPLViQRbnx979LKSXPOfDDszJx0tQMH96b3pGjAgAsHU1f/8w2AHScgz/2qWyz015hcFqwYH6uvvyiPOdbp52Ye+++I0vCxElrZN93fDBrzFgv/cutEP6fKy79Ta6+7Lc59+xvZ0l510H/kMlrrJU1114//D933/GH3PvHO3PSpw/PM888kyVh4y22z46veUOG9fRkg022DoPXicccnIsvmB0AOkt3AIAlavbPz8lN11+V8875Xpa0u26/JZ//5Iey2TY7Z43p62WvN++foe6aKy/ONVdekh//8F/z9NNPZUk6/eTjs+JKq2bL7XfNjru+PiuvunqGsvlPPpEf/tupue7qy3Lz9VdnSbr84vNz+cXnZ/iI3uy2199mg022ztozNwkAsGR0BwBYYi781bn55imfy7xHH8nSdOkFv8iVl16Q3/3XBdltz7dk8213yVAz/8kncsInDs6D99+TB++/J0vLA/fdnbO/e3quvPSCTJo6PQd95NgMRWd+65T87rILc9N1V2VpWjD/yZz93dNz0eyf5bB//EImTZ0eAODl6w4A8LLdedvNOeKQt2Zg4TNZuHBhloWnn1qQ666+LDf+/nd5/9NPZY3p62blVVZP7eY9+khO/d/H5IpLZufpp5/KsnLnbTflrttvzkWzf5a93vzO7PXmd6dn+PDU7vY/3JiLzv9JfvT9MzIwMJBl5YF7786Rh7w1r5o4KR8/5uQsP35CAICXrqund8KsANBxNt9mx6w2eUZ45V1/zRX5wjF/n8fmzU3btlnW2nYgl174i1xxyexMnb5OVhi/Umo179FHcsaXT8hFs3+agYGFeSUMLFyY666+PF1dJeusv2lqdumFv8ynPnpAbvj9lWnbNsvawMBA5j4yJ7fe/PusufYGGT1mXHjlXTz73Nx95x0BoLN09fROmBUAOs7m2+yY1SbPCK+ch+c8lG+cfHzOO+d7eeC+P+aV9vhj83Lz9Vdn6prrZLkVJqRGJ3/2yFw0+6cZDG649soMG9aTGetumBpd+Ktzc/qXjsuCBfPzSnvogXtzxx9uzK03X5eNNts2vLIunn1u7r7zjgDQWbp6eifMCgAdZ/Ntdsxqk2eEV8b8+U/mmI8ckKsu/23mPfpIBotH5z6cK//rN9los+0yeuy41OKppxbk5M8dlYt/c14Gi7Ztc9N1VyVNkzVnzEwpJTVo24FccsHPc9oXj828R+dmsHjowfty2y3X58H778kGm2yVrq7u8Mq4ePa5ufvOOwJAZykBAF60E485LHfcdlMGo4f/9GCO+tDbc9stN6QGcx+Zky9/7qhc+Ktz07ZtBpMFC+bnO9/4Yn747a/lmaefSg0uOv9nOfHYw/PYvEcz2AwMDOTXPzs7//690wMAvDglAMCLct3Vl+W+e+7MYPb4Y4/mnz7z8dzw+yvTyeY/+UTO+MoJuWj2zzKY/eBbp+RH3//ndLrf/vonOeWkT2awu+6qy3LfPXcFAFh8JQDAYrv15utyyomzct89d2Wwu+eu2/LVLxydO2+7KZ3qlJM+md/++ifpBGd959T8+3dPS6e6aPbPcsZXTsj8J5/IYHfd1Zflfx/30cyf/2QAgMVTAgAslicefyyfPPxdue+eu9Ip7r37jtz+hxvTtm06zVe/cHQuOv9n6RRPLViQ73/zyznvnO+l0yxYMD+33HBN5j4yJ53i1puvy6c+8u4AAIunBABYLFdcMjvz5z+ZTnPy547KpRf+Ip3k7jtvzV13/CFtO5BO8swzz+T6a6/Io3MfTqcYGBjImd86Jeec+c10mjkP3Z8bfn9lAIAXVgIAvKDzz/tRTj/5uHSqH377a+kkV19+UW654Zp0ogt/dW7uv/eudIqFzzyds797ejrRw3MeyilfmJXrr7kiAMBfVwIA/FUDAwtzzZWX5PHH5qVT3XP37fnhv52aTnDnbTfnP35wRjrZyZ89Kp3iS587Kp3snrtvzx233pi2bQMALFoJAPBX/eLcH+Y3vzgnneypBQtyyw3X5pGHH8pgd8O1V2TOQw+kk937xzty2y3XZ7C794935PZbrk+n+8aXP5M7br0pAMCilQAAQ8LlF/86V1322wx2p33puNTgtC8el8HuP8/8l9x3z10BAOpXAgAs0gP3/THnnfP9sGx867STUot7/3h7fvWTs8Ky8e3TTgoAsGglAMAiPfH4Y7nj1htTizO+ckLuu+fODFbXX315avHYvEdz5+03Z7C66Pyf5vyf/0dqcd01lwcAWLQSAGCRrrny4tTkiccfy8DChRmMbrvlhsyb90hqcu/dd+ShB+7NYPTUUwvy1IL5qcXAwMJc+7tLAwA8vxIAYJG++88npzb/eda/ZjCa/fMf5b4/3pmaXPlfF+Sm667KYDP3kTm54Fc/Tk0WPvNMzvzWKQEAnl8JADCkXHT+T8PQ9vi8ubn68osCAAwdJQAAAABUrTsAdKY2SRuWoksuOC8DCxemOm2SNoNPm3q1GVzaVGnOQ/fnxmuvzPR1NgwA8N+VAADP6yc/+k4WLnwmLH03XXdVrrzsgtTo3LO/nUfnPhyWvvvuuSuXXzI7AMD/VAIADC1NBp2HHrw39959R2p003VXZcH8JwMA8EoqAQCGljYAAAwxJQAAAABUrQQAAACAqpUAALzCtth21+y259+mRgd95NNZYcWVAwDwSioBAJ7XJlvskFK6wtJXSknpKqlRd3d3mqYJS1//8uMzbcZ6AQD+pxIA4Hn9zd5vT1d3d4DOsPIqq2fTrXYKAPA/lQAAAABQtRIAYEiZttbMDEarTJySkaNGpybjJ7wq45ZbIYPN8BEjs9qkaQEAho4SAGCRdtrtDanNOw78SAajV+/+xqwycXJqsumWO2bt9TbJYLP8+AnZY5/9UpOurq7ssMteAQCeX3cA6EhtkjYsbTu9Zu/89EffSU3aJG1YJpqkzeDUpi6lqzvb7bJn2gAAz6cEAFik7p6ejOtfPrV41wePyEqrrJ7B6sjjT0ktpqy5Tt6y/6EZrLbe8bXZYdfXpxbjV1w5AMCilQAAi7TKxMl549ven1oMH96bUkoGqxG9I1OLrtKVnp7hGay6u4ele9iw1OLQf/hsAIBFKwEA/qoZ622caWutn0631robZdpaMzPY7fmm/VODPd+8fwa7rXfcPcuvMCGdbusdd89y4ycEAFi0EgDgr1p1tSmZOGlqmqZJp2qaJqtNmZ5XrTopg91m27w6XV3d6WTd3cOy6VY7ZbBba92N0r/8+HSyUkrWWX/TjB4zLgDAopUAAC/ovYcenZVXnZROtf0ue2X/D3w8nWCN6evmbe/5+3Syoz9/ejrFrP91RiZNmZ5Ote3Oe2Sn3fYOAPDXlQAAi2W7nfdIp3r3B49IJ5kybe2sstqUdKJ1N9w8/cuvmE7R3T0s+73vo+lEfaPHZsPNtgsA8MJKAIDF8ro3vjP7vPXAdJp93/HBdHUPSyeZvs6GOejwYzNm3HLpJDPW2TDvOeQfs8L4ldJJJk5aI9vuvEc6zfsO+1S22HaXAAAvrAQAWCxd3d1Zd4PNM6pvdDrFG/72PXndm96ZUko6zZQ118mElSemU3R1dWXS1BmZsPLEdJrRY8blgIOPygabbJ1OMbZ/+awzc9MAAIunBABYbGutt3He+6GjM265FTLYLbfCipm65rrp7h6WTvUPx56cGetsmE6w/S575Z0f+Hg61fARvVl3wy0yrGd4BruJk9bIEZ/+SnpHjgoAsHhKAIAXZfNtdsm7P3hkenqGZ7DqHTkq7z74qGyy5Q7pZCNHjc77Dz8m6264eQazHV/zhrzjfR9Np9tjn/3ypre9L4PZKhMn570fOjqrT5keAGDxlQAAL9qmW+2Ugz56XAargz/+mWy8+fapwYSVJ+Z9f/+pTF5jrQxG2+38urztgL/P8BG9qcFr3/C2vHm/gzIYjegdmcM+cWKmzZgZAODF6erpnTArAHSczbbeMatNnhFeOauuNiVT11w31155SRbMfzKDwbjlVshhnzgxG2yydWoyclRfXr37G3PFJbPz8JwHMxg0TZNd99g37/3w/2kPTsD1rMs7Af/e5/tyYiDONGoNiqJotbhF64IKVmtbl9rRasfpdNpp1VmqFRm7uOGCERWtCwWmtS5otQguaCsUigoIhC1ICET2RZYQCBBCDCQhOTnnvJNcY6/LcbAC2c73P/d9vz9js2enFYPBIE962rOy2+4PzlWXX5yJic2ZDuY/4tH50BFfzh6P3CvsWosXnZwVy28MAKNlMDZn/sIAMHL23f/F2WvvfcKu9Yg9H5NfnP+IXP6DJdm0aWN2pVe85g/z0lf+fn5l319Nq37luS9M30/lng3rc9faNdlVnvqMfbPvC34zr3vTO9KqJzxpQcZmPyi7zX1wVtz4w+xKe+39hBzwtg/lUY95fNj1Fi86OSuW3xgARsswAMA2ed6vvjRzdpubqy+/ON885jPZFX7vjw/I7/7Bn6R1D3now/PHb3xHrr3yknzyg3+eNatXZWd70tOelf/5vw7O/Ec+Oq17xWv+a+6+60eZNWssi0795+wKB7z9w9nz0XvncU98SgCAB24wNmf+wgAwcvbd/8XZa+99wvSwxyMfnSc+aUGGs2blluXXZ9P4xqTvsyNVVV7w67+dty88Ik9/9n4ZDAaZKR7ysPnZ79densf/8lOz7MJzMzGxOTva7nP/XQ498ti8+OWvyUMeNj8zxezZD8pTn/Hc/OYrXpvLf3BB1q5ZnR1t1qyx/Lt/Py9vfvuH8vwXviwPedjDw/SxeNHJWbH8xgAwWgZjc+YvDAAjZ9/9X5y99t4nTB+DwTBPftqz8x9e+7qsuvWWDIbDrFm9KtvbI/Z8TPZ52jOzz1OemTf9xSHZfe6DMxgMMtPM2W33PPqxv5SHP+JRmZyazG0rV6Sfmsr29u9/4SF52jOflz/980PymMc9MbNnPygzzaxZY9l97oOz34t+K7esuD6PfPTeuXvtjzK+aWO2twXPfH5+7aW/k7e9//Dsudfj0nVdmF4WLzo5K5bfGABGyzAAwHb3p395SG5efl2WLD4jW33lC0dkWw0Gg/ze696SJ+yzIE9e8Ozwf+33opdnvxe9PP/yT1/O5s3jueDc7+XaKy/Jtnrer74kez/hyXn4Ho/K81/40pDsPvfBedvBh2erc04/Odde+YOcfPyx2VYP+8U98pJX/uds9ZLf/r3stvvcAADb1zAAwA6x516Py557PS5bPWGfBdnqm8d8Jpct+37uq4c9fI+8+W0fzlZd1+VJT3tWuHeveM1/zVb77v8bWbN6VW687qp86dMfy/317kM/neFwVh756MfmF+Y9LNy7/V/8W3nW816U5+z/G9lq4z0b8rH3H5j742Wv+v089wUvyZzdds/ev/SkAAA7Tjd33oI+AIyct7zjkLzg138njJbJiYlMTU3mvuq6LsNZY+H+6/upTGzenPtr1tjs8MBsHt+U+2MwGKYGgzBaDv/QgVl89qIAMFqGAQB2msFwmEGGYcfrusqssdlh55k1NjsAwPRUAQAAAKBpFQAAAACaVgEAAACgaRUAAAAAmlYBAAAAoGkVAAAAAJpWAQAAAKBpFQAAAACaVgEAAACgaRUAAAAAmlYBAAAAoGkVAAAAAJpWAQAAAKBpFQAAAACaVgEAAACgacMAMJL6JH0AYOfqA8AoqgAAAADQtGEAGE19kj4AsHP1AWAEVQAAAABoWgUAAACAplUAAAAAaFoFAAAAgKZVAAAAAGhaBQAAAICmVQAAAABoWgUAAACAplUAAAAAaFoFAAAAgKZVAAAAAGhaBQAAAICmVQAAAABoWgUAAACAplUAAAAAaFoFAAAAgKZVAAAAAGhaBQAAAICmVQAAAABoWgUAAACAplUAAAAAaFoFgJH0tS8eHgDYmX541bL+B0vPCwCjpwLASFp1+x19AGAnWnnzDd0992wOAKOnAgAAAEDTKgAAAAA0rQIAAABA0yoAAAAANK0CAAAAQNMqAAAAADStAgAAAEDTKgCMpK6r7r//x+f0AYCd5G8+9t4AMJoqAIysqampLgCw8/QBYCRVAAAAAGjaMACMtD4AAAD/tgoAI2vz5olcfMEZAYAd7Xvf/lqfdAFgNFUAGFmTk8lx/3BEAGBH+/JnPtZtFQBGUgUAAACAplUAAAAAaFoFgJG26tZbctVlSwIAO8qiU76Z8fHNfQAYWRUARtq6dRuz5NxTAgA7yndO+HKmprouAIysCgAAAABNqwAw8q67+pJs3LA+ALC93bL8h/3aNasDwGirADDyrrj0sty68sY+ALCdnf6dr3d3rl4bAEZbBQAAAICmVQBowoobru4CANvRxPh47lx1awAYfRUAmvB3n3xfAGB7WnHTtf15Z50RAEZfBQAAAICmVQBowtRU+oPf+toAwPZy6Lve0AWAJlQAaELXVbd61W0BgO1l/foNAaANwwDQjLvvvitnn/atvODXXx0A2BbfOPrw9FNJugDQgAoAzZiYSM4786QAwLY6/dvfTLoKAG2oANCUezasy8aNGwIAD9Rda+/MxMREAGhHBYCmXHnZ5TnntG/1AYAH6DOHvTN3370hALSjAgAAAEDTKgA050uf+asuAPAALDn3u7l4yeIA0JYKAM2ZmEiWLVkUALi/lp7/vfR9BYC2VABo0mEffGsA4P4645STA0B7KgAAAAA0rQJAk8bHJ/Lhd/1RHwC4j978hy8IAG2qANCkrqssv+Ha7vprL+0DAD/H0vNPy11r7+oDQJMqADTr7rs25PRvfz0A8PN89YuHZWqq6wJAkyoANO307xzfLb/+yj4A8DOc9I9H5eYblweAdlUAaNrkZHLJRWd3AYB7sXHjhlx20XnpUwGgXRUAmnfMUYcHAO7N9ddckosvXBIA2lYBoHl93+WIDx8YAPhpRx1xcB8AmlcBoHldV7ls2QUZH98YAPhXGzduyMpbbg4A7asAMCOsW3dPPn7wn/QBgB976+t/I8mgCwDNqwAwY9zwwytz1WVLAgCnnXRsv37d+gAwM1QAmDHWr9/UXXPFRQGAxWd9O1NTXQCYGSoAzCjHfv7IbFh/dwCYub77z0f3ly67qAsAM8ZgbM78hQFg5ui6pNucpzxjvwAw80yMj+eYoz7a3bn6zgAwcwzG5sxfGABmlKsuu6hfd9eqPOM5v9YFgBnlo+95Q3/lZZd1AWBGqQAwAw26H1x4TgCYea66bFkXAGacwdic+QsDwIyz7u713Q+WfC/P2e8lGZs9JwC0bcWN1/TvfNMru3s2bg4AM08FgBnr2quuztVXLA0A7TvxuM92d921PgDMTBUAZrSjjjg4ALTt+msu6RefdUoAmLkqAMxoP1pzd976uhcHgHYd/Od/2G3e3AeAmasCwIzWdV1+tObOLD3/tADQnlNPPKafnOwDwMw2GJszf2EAmNGmppKli0/NYx//y9ljz8cGgDYc/9VP5djPH94lFQBmtgoAbLFp02SuvWpZAGjHRd8/M31fAYAKAPzYN4/5fH/Gd77eB4CRNjE+niM/fGCuvuKKAMBWg7E58xcGALbotlh6/hnd7LFhnviUZwWA0fSZw96Z8xadnq7rAgBbVQDg/zHIKSd+JQCMrnPP/G4fAPgJFQD4KatuvyN/9/G3ZWJ8PACMjo0b1uegN78qk5MBgP/HYGzO/IUBgJ/QdV2W33BdVt50VZ77wlcEgOlvzerb8sF3/EFWLF+RbosAwE+oAMDPsPjsM/PpT7w9AEx/hx70+tx80y0BgHszGJszf2EA4F50XZfl112T21del+fs/9IAMD295y2vzvIblqfrugDAvRmMzZm/MADws3Rdbrz+2n5y4p7uKc/YLwBMLx/4y9/PtVdfna7rAgA/SwUAfo6uq+7C807LurvWBIDp4+rLluTmm65P13UBgH9LBQDugxU33ZwPvfOPAsD0sHrVynz8/X/ar1+3MQDw81QA4D5afsPy/t0HvCoT4+MBYNfZuHFD3vmmV2bDhvEuAHAfDMbmzF8YALgPui3W/mhtvn/2SXnW834ju+3+4ACwc1175cU56IDXZOM9mwMA91UFAO6nW1bcko+8+/UBYOe6/ppL+o8f/MZsvGdzAOD+qADAA7Dy5lvznre8OgDsPB98x+u6des2BgDur8HYnPkLAwAPwJo71/TfP/vEbt/9X5YHzdktAOwYt95yQ/7s9b+ZjRsnAgAPxGBszvyFAYAHoNvirrV3ZdkFp2XVbTflac98QQDYftauuSNf+fxH+6M//ZFs2DDeBQAeoGEAYButuOnm3LT8mKy58/Yc8I7DAsD2cehBr8uK5Su6AMA2GozNmb8wALCNuq7LTdf/MHeuWp5nPf83A8C2ec9bXp0br7+x77YIAGyjwdic+QsDANtD1+WG667NTdddmmfv/7JUVQC4f1avWpmD/+y1WbF8RbotAgDbwWBszvyFAYDt6JYVy3Pn7Tfm2c9/SQC47ybGx/OBt/2XrLx5ZQBgexqMzZm/MACwnd143TX53slfSZepPOFJzwwA/7a//dhf5B8+c2juuH11AGB7G4zNmb8wALC9dV02btyUS5ael4c89KH93r/01C4A/H/Gxzfm0598R84545Rs2rQ5ALAjDMbmzF8YANhRusqF55/ZbbxnbSY2j+cRj3pcAPi/Tj3pmP7EbxzVnX/Omem6LgCwowzG5sxfGADYgbquyzVXXpqli0/NYx/3y9ljz8cGYKY7/qufyrFfOLy7ZcWKAMCO1s2dt6APAOwkg0HyC/Pm5cgvnRGAmehHq2/PX/7Jb2XTpvH0fQUAdobB2Jz5CwMAO0nfJxvW35NTT/pyHvKQh2XeQ+dnbPacALRu5YrrcsmFi3LIO1/fb97cd0kXANhZBmNz5i8MAOxEXddl06bxXHDu6bnqsvPyopf9pwC0bOWK63LoQa/PotO+nb7vugDATjYYmzN/YQBgF1m96o6cdcrXc/vKG/unP+fXugA05tCD/rg/4euf7e5auy4AsKt0c+ct6AMAu1o/mRpU/64PfbZ78tOfF4BRNjU1la9/8eP5l386pp+c7LuuqwDArjQYmzN/YQBgV+sqfd91Z512fN/3m7uqQR728D0DMGrOPeOfc9qJx/Tf+edvdH3fbRUA2NW6ufMW9AGAaWa33Wf3ez567+79n/xaAEbBD6+8OF/+3Edy3TVXZHKyCwBMJ93ceQv6AMA0tdvus/un/crzugMPOjIA09W7/vS3c9vKW7J581QAYDrq5s5b0AcAprG+n+qTdP/lDQfmSU9/bv/4Jz69C8AudsnSs3LqicdmyeKzk3Tpui4AMF11c+ct6AMAI2I4TJ7/wpfm5a9+Q/+Yxz+5C8BOdv5Z/5KLv396Fp327XRdBQBGQTd33oI+ADBi5j54Th71mMf37/2rY7oA7AQbN27Iew98db961e3d5s19AGCUdHPnLegDACOo76cyHFa2+vP3Hp59nrpvHrTb7gHYXjasvzv/+OXDc8pJ38hWk5MBgJHUzZ23oA8ANGDWrK5/7R8d0GWLl7zyjzI29qAA3F+33nJDLjzvlGx17OePTNdVAGDUdXPnLegDAI15wj77ZNbY7P5FL/ndbv9ff3UAfp7jvvTJXHPlsv72W1d0d9y+OgDQkm7uvAV9AKBRg0Gy2+675eF77JkP/PU3AvDTDvjDF2RqajLr7lqXPhUAaFE3d96CPgDQuH6LrpvqssUb/+wD+cU9HpWt9nrck7Pb7g8O0L7Vq1Zm1a3Ls9WiU/8xi049KVv1faXrugBAy7q58xb0AYAZap+nPCV7PuaX+myx/4tf1T3xyc8O0I5zvvetXH3F0j5bXPz9Rd3qO9YEAGaibu68BX0AgOy+++x+3kN/sctPOOSIb2Zs7EEBpr9Llp6VYz730fykW29ZkYmJAMCM182dt6APAHCvZs3q+qTr8mPzH/HIfPTvTgqw6/3P1z47ExOT+VeTk5OZmuoCAPz/urnzFvQBALbJm992SPZ78e9kplpy7nezds0dfWA7uOCc7+TSZRd3AQC2m2EAALbBd0/4h/7oz3686/vqAgDAtFQBAHiAzjzluP7Ln/tE1/cVAACmr2EAAO6nVbfelBt+eHk+d/gHkgwCAMD0NgwAwP1w6UXn5K8/eGA2bZpMMugCAMC0VwEAuI+uvnxJjvjwW7Np02QAABgdwwAA3EeHHvTfMzERAABGzDAAAP+GVbfelGuuWJrPHv7+TEwEAIARNAwAwM+wZvVt+ci7X5/bb7sjAACMrgoAwM/wwbf/QW6/7Y4AADDahgEA+Ckb1t+d9/2v3+1vu3VVt0UAABhtwwAA/NjExESO/+rf5qzTjs8dt6/utggAAKNvGACAH/vfhx6YC88/NwAAtKUCALDFYR94U5YsPjsAALRnGABgRlu2ZFG+c/wXs+zCJX3XVRcAAJozDAAwY33rK3+b447+dLqu0m0RAACaNAwAMCN9/YufyAnHfSldVwEAoG0VAGDGOembn8sJx30xSQUAgPYNAwDMGEvPPy3XXnFRTjju6CSDAAAwMwwDAGyzPkmf6e2c730rRx2xMBMTfQAAmFmGAQCad/myxfnc4e/P5GQAAJiBhgEAmnXbyuVZc8fKfOTd/yPJIAAAzEzDAABN+uHVy/pPHPzGbt3d9yQZBACAmWsYAKA5a1bflk+8743dunX3BAAAhgEAmnPQm1+V9es2BgAAthoGAGjCj1bfnqWLT+2/+veHdffcszkAAPCvhgEAto8+u9RfvfcNWbF8RRcAAPgpFQBg5C38i9dmxfIVAQCAezMMADCSJsbHc/NN1/ZHHfme7vprr+27rroAAMC9GAYAGEl//7fvy6LTvt1li66rLgAA8DNUAICR87nD35UzT/2XAADAfVEBAEbKF/73e/tFp5yYrqsAAMB9MQwAMBIuvuD0LD7zxJx9+ild1w0CAAD31TAAwLR38j99Icd+/q+TVLquCwAA3B8VAGBa++4JX8xX//6v+6QCAAAPxDAAwLS0ds0dufwH5+Xoz34iyaALAAA8QMMAANPOJUvPymGHHJiJiT7JIAAAsC0qAMC0csnSs3LkoX+WiYk+AACwPQwDAEwba9fckcMOOTATE30AAGB7GQYA2OVW3XpTbrrx6hx56F9kcjIAALBdDQMA7FK33XJDPvKeN2T1qjsDAAA7wjAAwC714Xf9cdbcuTYAALCjDAMA7BLj4xvzrje9Ineu/lG6rgsAAOwowwAAO9XGDevzvZOPzbePPzpr7lybrusCAAA70jAAwE51xKEH9JdefFEXAADYSSoAwE7z8ff9t1xy0YVdAABgJxoGANjhrrzk/HzrK5/qL122NF1XXQAAYCcaBgDYoU742qdy3NGfyRZd11UAAGBnGwYA2GGO/dyhOfn4Y5MMAgAAu0oFANghTvjap3Ly8ccmGQQAAHalYQCA7WrZBWfksovPzcnHfy3JIAAAsKsNAwBsN4tOOa7/wt98sJuc7AIAANNFBQDYLpac+9184W8+1E1OdgEAgOlkGABgm61ccX2+9dWjkgwCAADTTQUA2Gbf+urfJxkEAACmowoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABN+z/7oWY8fbpdugAAAABJRU5ErkJggg==" alt="ChatHouse" />
+  <div class="kicker">Rapport d'analyse produit</div>
+  <h1>ChatHouse <span class="vs">vs</span> Clubhouse</h1>
+  <div class="sub">Comparaison approfondie, écran par écran</div>
+  <div class="rule"></div>
+  <div class="badge-final">
+    <div class="n">88<small>/100</small></div>
+    <div class="l">Parité globale</div>
+  </div>
+  <div class="meta">
+    39 écrans analysés · 11 zones fonctionnelles<br/>
+    Basé sur l'audit du code source réel (lecture seule)<br/>
+    28 juin 2026
+  </div>
+</div>
+
+<h2>Méthode &amp; barème</h2>
+<p>Chaque écran de ChatHouse est confronté à son équivalent Clubhouse et noté en <b>parité</b> : <b>100 = égale ou dépasse</b> Clubhouse pour la fonction visée. Les fonctionnalités où ChatHouse <b>dépasse</b> Clubhouse ne sont pas pénalisées. L'inventaire provient de la lecture du code réel (écrans <code>.tsx</code> + hooks/partials/services), pas de suppositions.</p>
+<p class="legend small">
+  <span><span class="chip s-green">90–100</span> parité totale / supérieure</span>
+  <span><span class="chip s-blue">80–89</span> parité forte</span>
+  <span><span class="chip s-amber">60–79</span> partielle</span>
+  <span><span class="chip s-red">&lt;60</span> lacune</span>
+</p>
+<div class="note small"><b>Cadrage technique :</b> ChatHouse est une app <b>React Native (bare)</b> — audio temps réel via <b>LiveKit/WebRTC</b>, backend Node/TS. Référentiel Clubhouse : hallway, rooms live (scène / lever de main / modération / replays / captions), clubs, profil-identité, Backchannel DM, onboarding téléphone, events/RSVP.</div>
+
+<h2>1. Onboarding / Auth</h2>
+<table>
+<thead><tr><th>Écran ChatHouse</th><th>Équivalent Clubhouse</th><th>État ChatHouse</th><th>Manques</th><th class="score">Score</th></tr></thead>
+<tbody>
+<tr><td>LandingScreen</td><td>Welcome</td><td>Marketing + CTA, dev-skip</td><td>—</td><td class="score s-green">90</td></tr>
+<tr><td>PhoneScreen</td><td>Phone entry</td><td>Sélecteur pays, validation E.164, gate ≥16 ans</td><td>—</td><td class="score s-green">95</td></tr>
+<tr><td>OtpScreen</td><td>SMS verify</td><td>6 cases, auto-submit, 5 essais, cooldown 60s</td><td>—</td><td class="score s-green">95</td></tr>
+<tr><td>NameScreen</td><td>Real name</td><td>Prénom/nom avant username (ordre Clubhouse)</td><td>—</td><td class="score s-green">100</td></tr>
+<tr><td>UsernameScreen</td><td>Username</td><td>Suggestions API + validation</td><td>—</td><td class="score s-green">95</td></tr>
+<tr><td>SetupProfileScreen</td><td>Photo / bio</td><td>Photo + bio + <b>import X/Twitter</b></td><td>—</td><td class="score s-green">95</td></tr>
+<tr><td>InterestSelectionScreen</td><td>Topics</td><td>Multi-sélection min 3 / max 10</td><td>—</td><td class="score s-green">95</td></tr>
+<tr><td>NotificationsPermissionScreen</td><td>Turn on notifications</td><td>Prompt OS + enregistrement token push</td><td>—</td><td class="score s-green">100</td></tr>
+<tr><td>WelcomeSlidesScreen</td><td>(intro)</td><td>Carrousel 4 slides</td><td>—</td><td class="score s-green">90</td></tr>
+<tr><td>WaitlistScreen</td><td>Waitlist / invite gating</td><td><b>Écran mort</b> (jamais routé)</td><td>Pas de vrai gating par invitation ; pas de sync contacts</td><td class="score s-red">40</td></tr>
+</tbody>
+</table>
+<p class="small">Sous-total : <span class="zone-score">~89/100</span> — seul vrai trou : pas de waitlist/contacts (peu critique, Clubhouse est désormais ouvert).</p>
+
+<h2>2. Hallway / Rooms <span class="small muted">(cœur Clubhouse)</span></h2>
+<table>
+<thead><tr><th>Écran ChatHouse</th><th>Équivalent Clubhouse</th><th>État ChatHouse</th><th>Manques</th><th class="score">Score</th></tr></thead>
+<tbody>
+<tr><td>RoomFeedScreen</td><td>Hallway</td><td>Feed paginé live, filtres, upcoming, strips (wave / suggestions / recently-played), updates socket</td><td>—</td><td class="score s-green">92</td></tr>
+<tr><td>RoomScreen</td><td>Room</td><td>Scène speakers/listeners, <b>lever main + file</b>, <b>modération complète</b> (mute others / make-speaker / move-to-audience / mod / transfert host / kick+ban / mute-all / lock / restrict main), <b>réactions emoji</b>, <b>captions live</b>, <b>audio arrière-plan</b>, ping+wave, tip, chat, ghost listener</td><td><span class="x">Spatial audio ✕</span> · <span class="x">Music mode ✕</span></td><td class="score s-blue">88</td></tr>
+<tr><td>CreateRoomScreen</td><td>Start a room</td><td>Visibilité 3 niveaux, house, topics, <b>co-hôtes</b>, <b>planification</b>, recording</td><td>—</td><td class="score s-green">95</td></tr>
+<tr><td>InviteToRoomScreen</td><td>Invite to room</td><td>Recherche + sélection multiple (max 50)</td><td>—</td><td class="score s-green">90</td></tr>
+<tr><td>ReplaysScreen</td><td>Replays</td><td>Liste + lecteur inline (play/pause/progression)</td><td>Pas de <b>scrub/seek</b>, ni <b>clips</b>, ni <b>transcript</b></td><td class="score s-amber">60</td></tr>
+<tr><td>EventsScreen</td><td>Upcoming / Events</td><td>Upcoming/Mine, <b>RSVP</b>, <b>export calendrier .ics</b>, host reschedule/cancel</td><td>Rappels push dédiés</td><td class="score s-blue">85</td></tr>
+</tbody>
+</table>
+<p class="small">Sous-total : <span class="zone-score">~85/100</span> — cœur très solide ; vrais écarts : <b>spatial audio</b>, <b>music mode</b>, profondeur des replays.</p>
+
+<h2>3. Clubs <span class="small muted">(« Houses »)</span></h2>
+<table>
+<thead><tr><th>Écran ChatHouse</th><th>Équivalent Clubhouse</th><th>État ChatHouse</th><th>Manques</th><th class="score">Score</th></tr></thead>
+<tbody>
+<tr><td>HouseListScreen</td><td>Clubs list</td><td>Onglets Mine / Discover, FAB création</td><td>Pas de recherche club ici (via Explore)</td><td class="score s-blue">80</td></tr>
+<tr><td>HouseDetailScreen</td><td>Club page</td><td>Cover, règles, membres, <b>rôles admin/mod/member</b>, <b>inbox demandes SOCIAL</b>, rooms live/planifiées/passées</td><td>—</td><td class="score s-green">90</td></tr>
+<tr><td>CreateHouseScreen</td><td>Create club</td><td>Icône, nom/desc/<b>règles</b>, <b>privacy OPEN/SOCIAL/PRIVATE</b></td><td>—</td><td class="score s-green">92</td></tr>
+<tr><td>ManageHouseScreen</td><td>Club admin</td><td>Édition + suppression (owner)</td><td>Pas d'édition cover/icône ici</td><td class="score s-blue">85</td></tr>
+<tr><td>HouseInvitationScreen</td><td>Club invite accept</td><td>Accepter/refuser via deep-link</td><td>Nom de l'inviteur absent du payload</td><td class="score s-blue">85</td></tr>
+<tr><td>InviteMemberScreen</td><td>Invite to club</td><td>Lien partageable + invite ciblée</td><td>—</td><td class="score s-green">90</td></tr>
+</tbody>
+</table>
+<p class="small">Sous-total : <span class="zone-score">~87/100</span> — modèle clubs complet : 3 niveaux de privacy + approbation + rôles.</p>
+
+<h2>4. Identité <span class="small muted">(Profil)</span></h2>
+<table>
+<thead><tr><th>Écran ChatHouse</th><th>Équivalent Clubhouse</th><th>État ChatHouse</th><th>Manques</th><th class="score">Score</th></tr></thead>
+<tbody>
+<tr><td>ProfileScreen</td><td>Profile</td><td>Vrai nom + @username, bio, <b>Joined</b>, <b>Nominated by</b>, <b>liens Twitter/Insta</b>, follow, wave, badges, liens custom, live-banner, block/report</td><td>— (dépasse via badges/premium)</td><td class="score s-green">95</td></tr>
+<tr><td>EditProfileScreen</td><td>Edit profile</td><td>Photo, noms, username, bio, handles, <b>DM privacy</b></td><td>—</td><td class="score s-green">90</td></tr>
+<tr><td>FollowersScreen</td><td>Followers / Following</td><td>Onglets + follow inline</td><td>—</td><td class="score s-green">95</td></tr>
+<tr><td>TipHistoryScreen</td><td>Payments</td><td>Historique tips (envoyés/reçus)</td><td><i>bonus — proche des Payments Clubhouse</i></td><td class="score s-blue">85</td></tr>
+</tbody>
+</table>
+<p class="small">Sous-total : <span class="zone-score">~91/100</span> — tous les marqueurs d'identité Clubhouse + extras.</p>
+
+<h2>5. Découverte</h2>
+<table>
+<thead><tr><th>Écran ChatHouse</th><th>Équivalent Clubhouse</th><th>État ChatHouse</th><th>Manques</th><th class="score">Score</th></tr></thead>
+<tbody>
+<tr><td>ExploreScreen</td><td>Explore / Search</td><td>Trending rooms/clubs/users, recherche users/clubs/rooms/<b>topics</b>, <b>filtres langue/catégorie</b>, recherches récentes</td><td>—</td><td class="score s-green">92</td></tr>
+<tr><td>NotificationsScreen</td><td>Activity</td><td>9 types, onglets, deep-links, mark-read, swipe-delete</td><td>Deep-link DM non finalisé</td><td class="score s-blue">88</td></tr>
+</tbody>
+</table>
+<p class="small">Sous-total : <span class="zone-score">~90/100</span>.</p>
+
+<h2>6. Messages <span class="small muted">(« Backchannel »)</span></h2>
+<table>
+<thead><tr><th>Écran ChatHouse</th><th>Équivalent Clubhouse</th><th>État ChatHouse</th><th>Manques</th><th class="score">Score</th></tr></thead>
+<tbody>
+<tr><td>MessagesScreen</td><td>Backchannel list</td><td>Conversations 1:1 + <b>groupes</b>, aperçu vocal, live socket</td><td>Bande présence en ligne inactive</td><td class="score s-blue">85</td></tr>
+<tr><td>ChatDetailScreen</td><td>DM thread</td><td>Texte + <b>notes vocales</b>, typing, accusés lu, suppression, emojis</td><td><b>Appels</b> &amp; <b>pièces jointes</b> = « Coming soon » ; présence off</td><td class="score s-blue">82</td></tr>
+<tr><td>NewMessageScreen</td><td>New message</td><td>Recherche, 1:1 ou groupe</td><td>—</td><td class="score s-green">95</td></tr>
+<tr><td>GroupChatScreen</td><td>Group chat</td><td>Texte + vocal, brouillon</td><td>—</td><td class="score s-green">90</td></tr>
+<tr><td>GroupInfoScreen</td><td>Group management</td><td>Renommer / membres / retirer / quitter</td><td>—</td><td class="score s-green">90</td></tr>
+<tr><td>AddGroupMembersScreen</td><td>Add members</td><td>Recherche + exclusion des membres présents</td><td>—</td><td class="score s-green">95</td></tr>
+</tbody>
+</table>
+<p class="small">Sous-total : <span class="zone-score">~89/100</span> — dépasse Clubhouse sur le vocal/groupes ; freiné par les stubs « Coming soon ».</p>
+
+<h2>7. Settings</h2>
+<table>
+<thead><tr><th>Écran ChatHouse</th><th>Équivalent Clubhouse</th><th>État ChatHouse</th><th>Manques</th><th class="score">Score</th></tr></thead>
+<tbody>
+<tr><td>SettingsScreen</td><td>Settings</td><td>Profil, <b>RGPD (export / suppression / consentement)</b>, thème, invite (lien HMAC + quota), logout propre, extras (premium/tips/admin)</td><td>Privacy reléguée à l'écran Extensions</td><td class="score s-green">90</td></tr>
+<tr><td>NotificationSettingsScreen</td><td>Notification settings</td><td><b>9 catégories</b> + fréquence + mute par club/utilisateur</td><td>—</td><td class="score s-green">95</td></tr>
+<tr><td>BlockedUsersScreen</td><td>Blocked</td><td>Liste + déblocage</td><td>—</td><td class="score s-green">95</td></tr>
+</tbody>
+</table>
+<p class="small">Sous-total : <span class="zone-score">~93/100</span>.</p>
+
+<h2>8. Exclusif ChatHouse <span class="small muted">(hors Clubhouse — bonus)</span></h2>
+<table>
+<thead><tr><th>Élément</th><th>Apport</th></tr></thead>
+<tbody>
+<tr><td><b>MapsScreen</b></td><td>Carte géo-sociale des abonnés en ligne + Ghost Mode + rejoindre une room / envoyer un DM depuis la carte</td></tr>
+<tr><td>Transverse</td><td><b>Tips / monétisation</b>, <b>premium « qui a vu mon profil »</b>, <b>notes vocales en DM</b>, <b>badges</b>, <b>liens de profil custom</b>, rooms rattachées aux clubs, RGPD complet</td></tr>
+</tbody>
+</table>
+
+<div class="pb"></div>
+<h2>Récapitulatif par zone</h2>
+<div class="bars">
+  <div class="bar-row"><span class="lab">Rooms / Hallway <span class="muted">(30%)</span></span><div class="track"><div class="fill f-blue" style="width:85%"></div></div><span class="val">85</span></div>
+  <div class="bar-row"><span class="lab">Onboarding / Auth <span class="muted">(12%)</span></span><div class="track"><div class="fill f-blue" style="width:89%"></div></div><span class="val">89</span></div>
+  <div class="bar-row"><span class="lab">Clubs (Houses) <span class="muted">(12%)</span></span><div class="track"><div class="fill f-blue" style="width:87%"></div></div><span class="val">87</span></div>
+  <div class="bar-row"><span class="lab">Identité (Profil) <span class="muted">(12%)</span></span><div class="track"><div class="fill f-green" style="width:91%"></div></div><span class="val">91</span></div>
+  <div class="bar-row"><span class="lab">Découverte <span class="muted">(10%)</span></span><div class="track"><div class="fill f-green" style="width:90%"></div></div><span class="val">90</span></div>
+  <div class="bar-row"><span class="lab">Messages (Backchannel) <span class="muted">(12%)</span></span><div class="track"><div class="fill f-blue" style="width:89%"></div></div><span class="val">89</span></div>
+  <div class="bar-row"><span class="lab">Settings <span class="muted">(7%)</span></span><div class="track"><div class="fill f-green" style="width:93%"></div></div><span class="val">93</span></div>
+</div>
+
+<div class="gauge">
+  <div class="track"><div class="fill" style="width:88%"><span>88 / 100</span></div></div>
+  <div class="cap"><span>0</span><span>Parité globale pondérée</span><span>100</span></div>
+</div>
+
+<h3 class="ok">Forces</h3>
+<ul>
+  <li>Reproduit fidèlement le <b>cœur Clubhouse</b> : hallway scoré, rooms live (scène, lever de main + file, modération complète, réactions, captions live, audio arrière-plan), clubs à 3 niveaux de privacy avec rôles et approbation, identité complète, onboarding téléphone dans l'ordre Clubhouse, events + RSVP, Backchannel DM.</li>
+  <li><b>Dépasse</b> Clubhouse sur plusieurs axes : notes vocales en DM, groupes DM complets, carte géo-sociale, tips, premium, badges, RGPD complet, filtres de recherche langue/catégorie.</li>
+</ul>
+<h3 class="x">Écarts restants</h3>
+<ul>
+  <li><b>Spatial audio</b> ✕ et <b>music mode / partage de son en room</b> ✕ (briques signature Clubhouse).</li>
+  <li><b>Profondeur des replays</b> : pas de scrub/clips/transcript.</li>
+  <li>Pas de <b>waitlist / sync contacts</b> réelle à l'entrée.</li>
+  <li>Finitions : appels &amp; pièces jointes DM (« Coming soon »), présence en ligne non branchée, deep-link DM des notifications.</li>
+</ul>
+<div class="note">
+  <b>Conclusion.</b> À <b>~88 % de parité écran</b>, et compte tenu de ses extensions, ChatHouse est <b>fonctionnellement au niveau de Clubhouse — voire au-dessus en largeur de fonctionnalités</b>. Il ne lui manque essentiellement que <b>trois briques signature</b> (spatial audio, music mode, replays riches) pour une parité quasi totale.
+</div>
+
+<footer>
+  ChatHouse vs Clubhouse — Comparaison écran par écran · Généré le 28/06/2026 · Analyse basée sur le code source (lecture seule) · Document interne.
+</footer>
+
+</body>
+</html>

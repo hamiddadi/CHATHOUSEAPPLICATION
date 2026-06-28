@@ -1,0 +1,615 @@
+<!doctype html><html lang="fr"><head><meta charset="utf-8"/>
+<title>ChatHouse — Manuel détaillé des écrans</title>
+<style>
+:root{--navy:#0c112e;--ink:#dee0ff;--inkMut:#c2c6d7;--inkDim:#A0AEC0;--primary:#558dff;--primaryLite:#b0c6ff;--secondary:#bac3ff;--lav:#2f3f92;--accent2:#00e475;--text:#16204a;--muted:#5b6488;--line:#dde2ef;}
+@page{size:A4;margin:13mm 12mm 14mm 12mm;}
+*{box-sizing:border-box;} html{-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+body{font-family:"Segoe UI","Helvetica Neue",Arial,sans-serif;color:var(--text);font-size:10px;line-height:1.45;margin:0;}
+.cover{background:radial-gradient(120% 80% at 50% 0%,#1a2150 0%,var(--navy) 55%);color:var(--ink);margin:-13mm -12mm 0;padding:42mm 12mm 30mm;text-align:center;page-break-after:always;}
+.cover img{width:92px;height:92px;object-fit:contain;margin-bottom:16px;}
+.cover .k{letter-spacing:4px;text-transform:uppercase;color:var(--secondary);font-weight:700;font-size:11px;}
+.cover h1{font-size:30px;margin:12px 0 0;color:#fff;font-weight:800;border:none;padding:0;}
+.cover .s{color:var(--inkMut);font-size:13px;margin-top:8px;}
+.cover .rule{width:60px;height:3px;background:var(--accent2);border-radius:3px;margin:18px auto 0;}
+.cover .big{margin-top:22px;font-size:42px;font-weight:800;color:#fff;}
+.cover .big small{font-size:15px;color:var(--primaryLite);font-weight:600;}
+.cover .m{margin-top:24px;color:var(--inkDim);font-size:10px;}
+h1{font-size:15px;margin:16px 0 8px;color:#fff;background:linear-gradient(90deg,var(--primary),#8a5bff);padding:7px 12px;border-radius:7px;page-break-before:always;page-break-after:avoid;}
+h2{font-size:12px;margin:12px 0 3px;color:var(--navy);border-left:3px solid var(--primary);padding:2px 0 2px 8px;page-break-after:avoid;}
+p{margin:5px 0;} ul{margin:3px 0 6px;padding-left:16px;} li{margin:2px 0;page-break-inside:avoid;}
+b{color:var(--lav);} code{background:#eef2ff;color:#2647c7;padding:0 3px;border-radius:3px;font-size:9px;font-family:Consolas,monospace;}
+blockquote{background:#f3f6ff;border-left:3px solid var(--primary);margin:8px 0;padding:7px 12px;border-radius:4px;color:#33406b;font-size:9.5px;}
+hr{border:none;border-top:1px solid var(--line);margin:10px 0;}
+h1:first-of-type{page-break-before:avoid;}
+</style></head><body>
+<div class="cover">
+<img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAABIAAAASACAYAAACHqDZaAABDOUlEQVR4AezBCZifZWEv0N/3zmSSSSbLACEgBLIQEraw7zsIIkVQULFVURRFRUALLgUqURBEvcKtoiKC1FbrhhRLRcWNCLKURRbZZZfdQAhLAmS+C899fK69JRIgCfN/55zT9PXPbAMAAABAtUoAAAAAqFoJAAAAAFUrAQAAAKBqJQAAAABUrQQAAACAqpUAAAAAULUSAAAAAKpWAgAAAEDVSgAAAACoWgkAAAAAVSsBAAAAoGolAAAAAFStBAAAAICqlQAAAABQtRIAAAAAqlYCAAAAQNVKAAAAAKhaCQAAAABVKwEAAACgaiUAAAAAVK0EAAAAgKqVAAAAAFC1EgAAAACqVgIAAABA1UoAAAAAqFoJAAAAAFUrAQAAAKBqJQAAAABUrQQAAACAqpUAAAAAULUSAAAAAKpWAgAAAEDVSgAAAACoWgkAAAAAVSsBAAAAoGolAAAAAFStBAAAAICqlQAAAABQtRIAAAAAqlYCAAAAQNVKAAAAAKhaCQAAAABVKwEAAACgaiUAAAAAVK0EAAAAgKqVAAAAAFC1EgAAAACqVgIAAABA1UoAAAAAqFoJAAAAAFUrAQAAAKBqJQAAAABUrQQAAACAqpUAAAAAULUSAAAAAKpWAgAAAEDVSgAAAACoWgkAAAAAVSsBAAAAoGolAAAAAFStBAAAAICqlQAAAABQtRIAAAAAqlYCAAAAQNVKAAAAAKhaCQAAAABVKwEAAACgaiUAAAAAVK0EAAAAgKqVAAAAAFC1EgAAAACqVgIAAABA1UoAAAAAqFoJAAAAAFUrAQAAAKBqJQAAAABUrQQAAACAqpUAAAAAULUSAAAAAKpWAgAAAEDVSgAAAACoWgkAAAAAVSsBAAAAoGolAAAAAFStBAAAAICqlQAAAABQtRIAAAAAqlYCAAAAQNVKAAAAAKhaCQAAAABVKwEAAACgaiUAAAAAVK0EAAAAgKqVAAAAAFC1EgAAAACqVgIAAABA1UoAAAAAqFoJAAAAAFUrAQAAAKBqJQAAAABUrQQAAACAqpUAAAAAULUSAAAAAKpWAgAAAEDVSgAAAACoWgkAAAAAVSsBAAAAoGolAAAAAFStBAAAAICqlQAAAABQtRIAAAAAqlYCAAAAQNVKAAAAAKhaCQAAAABVKwEAAACgaiUAAAAAVK0EAAAAgKqVAAAAAFC1EgAAAACqVgIAAABA1UoAAAAAqFoJAAAAAFUrAQAAAKBqJQAAAABUrQQAAACAqpUAAAAAULUSAAAAAKpWAgAAAEDVSgAAAACoWgkAAAAAVSsBAAAAoGolAAAAAFStBAAAAICqlQAAAABQtRIAAAAAqlYCAAAAQNVKAAAAAKhaCQAAAABVKwEAAACgaiUAAAAAVK0EAAAAgKqVAAAAAFC1EgAAAACqVgIAAABA1UoAAAAAqFoJAAAAAFUrAQAAAKBqJQAAAABUrQQAAACAqpUAAAAAULUSAAAAAKpWAgAAAEDVSgAAAACoWgkAAAAAVSsBAAAAoGolAAAAAFStBAAAAICqlQAAAABQtRIAAAAAqlYCAAAAQNVKAAAAAKhaCQAAAABVKwEAAACgaiUAAAAAVK0EAAAAgKqVAAAAAFC1EgAAAACqVgIAAABA1UoAAAAAqFoJAAAAAFUrAQAAAKBqJQAAAABUrQQAAACAqpUAAAAAULUSAAAAAKpWAgAAAEDVSgAAAACoWgkAAAAAVSsBAAAAoGolAAAAAFStBAAAAICqlQAAAABQtRIAAAAAqlYCAAAAQNVKAAAAAKhaCQAAAABVKwEAAACgaiUAAAAAVK0EAAAAgKqVAAAAAFC1EgAAAACqVgIAAABA1UoAAAAAqFoJAAAAAFUrAQAAAKBqJQAAAABUrQQAAACAqpUAAAAAULUSAAAAAKpWAgAAAEDVSgAAAACoWgkAAAAAVSsBAAAAoGolAAAAAFStBAAAAICqlQAAAABQtRIAAAAAqlYCAAAAQNVKAAAAAKhaCQAAAABVKwEAAACgaiUAAAAAVK0EAAAAgKqVAAAAAFC1EgAAAACqVgIAAABA1UoAAAAAqFoJAAAAAFUrAQAAAKBqJQAAAABUrQQAAACAqpUAAAAAULUSAAAAAKpWAgAAAEDVSgAAAACoWgkAAAAAVSsBAAAAoGolAAAAAFStBAAAAICqlQAAAABQtRIAAAAAqlYCAAAAQNVKAAAAAKhaCQAAAABVKwEAAACgaiUAAAAAVK0EAAAAgKqVAAAAAFC1EgAAAACqVgIAAABA1UoAAAAAqFoJAAAAAFUrAQAAAKBqJQAAAABUrQQAAACAqpUAAAAAULUSAAAAAKpWAgAAAEDVSgAAAACoWgkAAAAAVSsBAAAAoGolAAAAAFStBAAAAICqlQAAAABQtRIAAAAAqlYCAAAAQNVKAAAAAKhaCQAAAABVKwEAAACgaiUAAAAAVK0EAAAAgKqVAAAAAFC1EgAAAACqVgIAAABA1UoAAAAAqFoJAAAAAFUrAQAAAKBqJQAAAABUrQQAAACAqpUAAAAAULUSAAAAAKpWAgAAAEDVSgAAAACoWgkAAAAAVSsBAAAAoGolAAAAAFStBAAAAICqlQAAAABQtRIAAAAAqlYCAAAAQNVKAAAAAKhaCQAAAABVKwEAAACgaiUAAAAAVK0EAAAAgKqVAAAAAFC1EgAAAACqVgIAAABA1UoAAAAAqFoJAAAAAFUrAQAAAKBqJQAAAABUrQQAAACAqpUAAAAAULUSAAAAAKpWAgAAAEDVSgAAAACoWgkAAAAAVSsBAAAAoGolAAAAAFStBAAAAICqlQAAAABQtRIAAAAAqlYCAAAAQNVKAAAAAKhaCQAAAABVKwEAAACgaiUAAAAAVK0EAAAAgKqVAAAAAFC1EgAAAACqVgIAAABA1UoAAAAAqFoJAAAAAFUrAQAAAKBqJQAAAABUrQQAAACAqpUAAAAAULUSAAAAAKpWAgAAAEDVSgAAAACoWgkAAAAAVSsBAAAAoGolAAAAAFStBAAAAICqlQAAAABQtRIAAAAAqlYCAAAAQNVKAAAAAKhaCQAAAABVKwEAAACgaiUAAAAAVK0EAAAAgKqVAAAAAFC1EgAAAACqVgIAAABA1UoAAAAAqFoJAAAAAFUrAQAAAKBqJQAAAABUrQQAAACAqpUAAAAAULUSAAAAAKpWAgAAAEDVSgAAAACoWgkAAAAAVSsBAAAAoGolAAAAAFStBAAAAICqlQAAAABQtRIAAAAAqlYCAAAAQNVKAAAAAKhaCQAAAABVKwEAAACgaiUAAAAAVK0EAAAAgKqVAAAAAFC1EgAAAACqVgIAAABA1UoAAAAAqFoJAAAAAFUrAQAAAKBqJQAAAABUrQQAAACAqpUAAAAAULUSAAAAAKpWAgAAAEDVSgAAAACoWgkAAAAAVSsBAAAAoGolAAAAAFStBAAAAICqlQAAAABQtRIAAAAAqlYCAAAAQNVKAAAAAKhaCQAAAABVKwEAAACgaiUAAAAAVK0EAAAAgKqVAAAAAFC1EgAAAACqVgIAAABA1boDALws41dcLuus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tAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABN+z/7oWY8fbpdugAAAABJRU5ErkJggg==" alt="ChatHouse"/>
+<div class="k">Documentation produit</div>
+<h1>Manuel détaillé des écrans</h1>
+<div class="s">Description enrichie — UI · données · actions · états · navigation · accès</div>
+<div class="rule"></div>
+<div class="big">53<small> écrans</small></div>
+<div class="m">14 zones · audit du code source réel (lecture seule)<br/>28 juin 2026</div>
+</div>
+<blockquote>Description <b>enrichie</b> des 53 écrans (<code>src/features/</code>). Pour chacun : <b>Rôle &amp; contexte · UI · Données (hooks/API/stores) · Actions · États · Navigation · Accès</b>.</blockquote>
+<blockquote>Basé sur l'audit du code source réel (lecture seule) · 28 juin 2026.</blockquote>
+<h2>Conventions techniques transverses</h2>
+<ul>
+<li><b>Réseau</b> : tout passe par <code>apiClient</code> (baseURL <code>/api</code>, enveloppe <code>Envelope&lt;T&gt;</code>). Les modules « core » dé-wrappent <code>res.data.data</code> ; les modules <code>extensions/api/*</code> consomment du JSON brut.</li>
+<li><b>Cache/serveur d'état</b> : TanStack Query (clés centralisées <code>roomKeys</code>, <code>houseKeys</code>, <code>profileKeys</code>, <code>notificationKeys</code>…). Mutations souvent optimistes avec rollback.</li>
+<li><b>Temps réel</b> : Socket.IO singleton, activé seulement si authentifié et <code>env.REALTIME_ENABLED</code> (sinon polling/mocks). Hooks <code>useRoomSocket</code>, <code>useChatSocket</code>, <code>useGroupSocket</code>, <code>useHallwaySocket</code>, <code>useNotificationSocket</code>, <code>useTypingIndicator</code>.</li>
+<li><b>Vocabulaire</b> : « club » (backend) = « house » (front). Mapping privacy MAJ↔min dans <code>houseService</code>.</li>
+<li><b>Rôles</b> : <code>USER(0) &lt; MODERATOR(1) &lt; ADMIN(2) &lt; SUPER_ADMIN(3)</code> (<code>isAtLeast</code>). Les écrans admin masquent l'UI selon le rôle ; <b>chaque endpoint <code>/admin/*</code> re-vérifie côté serveur</b>.</li>
+<li><b>Commun</b> : i18n <code>react-i18next</code>, thème NativeWind (Material 3 Dark), <code>safe-area-context</code>.</li>
+</ul>
+<hr/>
+<h1>1. Authentification (6)</h1>
+<h2>1. LandingScreen</h2>
+<ul>
+<li><b>Rôle &amp; contexte</b> : Accueil non authentifié (route initiale de <code>AuthNavigator</code>, après <code>WelcomeSlides</code>). Fond dégradé animé.</li>
+<li><b>UI</b> : <code>GradientView</code> + cercles déco, logo <code>mic</code> + tagline, 3 <code>FeatureItem</code> (rooms/houses/chat), <code>AvatarsPreview</code> (7 avatars), <code>LandingCTA</code> (« Get started », « Login », lien « dev skip » si <code>__DEV__</code>). Animations reanimated.</li>
+<li><b>Données</b> : <code>useAuthStore</code> (<code>devLogin</code>, <code>status</code>). Aucun réseau hors devLogin.</li>
+<li><b>Actions</b> : « Get started » / « Login » → <code>navigate('Phone')</code> ; dev skip → <code>devLogin()</code> (<code>POST /auth/dev-login</code>).</li>
+<li><b>États</b> : <code>devSkipPending</code> lié à <code>status==='authenticating'</code> (« … »).</li>
+<li><b>Navigation</b> : → Phone (devLogin court-circuite vers Main).</li>
+<li><b>Accès</b> : non authentifié.</li>
+</ul>
+<h2>2. PhoneScreen</h2>
+<ul>
+<li><b>Rôle &amp; contexte</b> : Saisie du numéro + confirmation d'âge pour demander l'OTP.</li>
+<li><b>UI</b> : <code>Input</code> téléphone (autoFocus, adornement sélecteur pays <code>flag</code>+indicatif → <code>CountryPicker</code>), checkbox « ≥ 16 ans », <code>Button</code> « Next », liens Terms/Privacy. Formatage live <code>libphonenumber-js</code>.</li>
+<li><b>Données</b> : <code>react-hook-form</code> + <code>zodResolver(phoneFormSchema)</code> (E.164, <code>ageConfirmed</code>). Pays via <code>react-native-localize</code>. <code>useAuthStore.requestOtp</code>.</li>
+<li><b>Actions</b> : submit → <code>requestOtp(phone)</code> (<code>POST /auth/send-otp</code>) → <code>navigate('Otp',{phoneNumber})</code> ; liens → Terms / PrivacyPolicy.</li>
+<li><b>États</b> : <code>isValid</code> gate le bouton ; <code>isSubmitting</code> → loading ; erreurs API mappées au champ.</li>
+<li><b>Navigation</b> : Landing → Otp / Terms / PrivacyPolicy.</li>
+<li><b>Accès</b> : non authentifié.</li>
+</ul>
+<h2>3. OtpScreen</h2>
+<ul>
+<li><b>Rôle &amp; contexte</b> : Vérification du code OTP 6 chiffres.</li>
+<li><b>UI</b> : numéro masqué, <code>OtpInput</code> 6 cellules (autoFocus, shake reanimated sur erreur), message tentatives restantes, bloc resend (bouton ou compte à rebours).</li>
+<li><b>Données</b> : <code>route.params.phoneNumber</code> ; <code>useAuthStore</code> (<code>verifyOtp</code>, <code>requestOtp</code>) ; state local <code>code/error/attempts/countdown</code>.</li>
+<li><b>Actions</b> : auto-submit à 6 chiffres → <code>verifyOtp</code> (<code>POST /auth/verify-otp</code>, renvoie <code>{isNewUser}</code>) → nouveau : <code>navigate('Name')</code> (existant : bascule app) ; resend → <code>requestOtp</code> + reset.</li>
+<li><b>États</b> : <code>MAX_ATTEMPTS=5</code> → <code>locked</code> ; <code>RESEND_COOLDOWN=60s</code> ; <code>isSubmitting</code> → « verifying » ; nouveaux comptes restent <code>authenticating</code>.</li>
+<li><b>Navigation</b> : Phone → Name (nouveau) / app (existant).</li>
+<li><b>Accès</b> : en cours d'authentification.</li>
+</ul>
+<h2>4. NameScreen</h2>
+<ul>
+<li><b>Rôle &amp; contexte</b> : Vrai nom (prénom + nom) avant le username (ordre Clubhouse).</li>
+<li><b>UI</b> : 2 <code>Input</code> (First name autoFocus, Last name, max 50), <code>Button</code> « Next ».</li>
+<li><b>Données</b> : <code>useOnboardingStore.setProfile</code> (stash local, flush ultérieur à <code>completeOnboarding</code>). Aucun réseau.</li>
+<li><b>Actions</b> : « Next » → <code>setProfile({firstName,lastName})</code> → <code>navigate('Username')</code>.</li>
+<li><b>États</b> : <code>canContinue = firstName non vide</code> (lastName optionnel).</li>
+<li><b>Navigation</b> : Otp → Username.</li>
+<li><b>Accès</b> : nouvel utilisateur, statut <code>authenticating</code>.</li>
+</ul>
+<h2>5. UsernameScreen</h2>
+<ul>
+<li><b>Rôle &amp; contexte</b> : Choix du <code>@username</code> ; promeut le compte en <code>authenticated</code>.</li>
+<li><b>UI</b> : <code>Input</code> username (adornement <code>@</code>, compteur), jusqu'à 3 puces de suggestions, <code>Button</code> « Submit ».</li>
+<li><b>Données</b> : <code>authService.suggestUsername()</code> (<code>GET /users/suggest-username</code>) ; <code>react-hook-form</code> + <code>zodResolver(usernameFormSchema)</code> (3–24, <code>[a-z0-9_]</code>) ; <code>useAuthStore.setUsername</code>.</li>
+<li><b>Actions</b> : tap suggestion → remplit ; submit → <code>setUsername</code> (<code>PATCH /users/me/username</code>) → <code>authenticated</code>.</li>
+<li><b>États</b> : <code>loadingSuggestions</code> ; <code>isValid</code> gate ; erreurs validation/API mappées.</li>
+<li><b>Navigation</b> : Name → (RootNavigator bascule vers Onboarding ou Main).</li>
+<li><b>Accès</b> : nouvel utilisateur, <code>authenticating</code>.</li>
+</ul>
+<h2>6. WaitlistScreen</h2>
+<ul>
+<li><b>Rôle &amp; contexte</b> : Écran « liste d'attente » + invitation virale. <b>Enregistré dans Auth mais jamais routé</b> (pas de gating réel).</li>
+<li><b>UI</b> : icône <code>hourglass-empty</code>, titre/sous-titre, boutons « Invite a friend » + « Back ». Écran statique.</li>
+<li><b>Données</b> : aucune (i18n seul).</li>
+<li><b>Actions</b> : « Invite a friend » → <code>Share.share</code> ; « Back » → <code>goBack</code>.</li>
+<li><b>États</b> : aucun.</li>
+<li><b>Navigation</b> : deep-link <code>auth/waitlist</code> uniquement (inatteignable par le flux).</li>
+<li><b>Accès</b> : non authentifié.</li>
+</ul>
+<hr/>
+<h1>2. Onboarding (4)</h1>
+<h2>7. WelcomeSlidesScreen</h2>
+<ul>
+<li><b>Rôle &amp; contexte</b> : Carrousel pédagogique pré-auth, affiché <b>une seule fois</b> (4 slides : welcome/rooms/clubs/topics).</li>
+<li><b>UI</b> : <code>FlatList</code> horizontale <code>pagingEnabled</code> (icône + titre + corps), dots de progression, « Skip » (caché au dernier), <code>Button</code> « Next » / « Get started ».</li>
+<li><b>Données</b> : <code>welcomeStorage</code> (AsyncStorage <code>chathouse.welcomeSlides.completed.v1</code>). Aucun réseau.</li>
+<li><b>Actions</b> : Next → slide suivant / <code>goLanding</code> ; Skip / Get started → <code>markSeen()</code> + <code>replace('Landing')</code>.</li>
+<li><b>États</b> : pas de loading ; <code>isLast</code> masque Skip.</li>
+<li><b>Navigation</b> : <code>AuthNavigator</code> (route initiale résolue par <code>welcomeStorage.hasSeen()</code>) → Landing.</li>
+<li><b>Accès</b> : non authentifié, premier lancement.</li>
+</ul>
+<h2>8. SetupProfileScreen</h2>
+<ul>
+<li><b>Rôle &amp; contexte</b> : Étape 1 onboarding post-auth : photo + nom affiché + bio.</li>
+<li><b>UI</b> : avatar <code>Pressable</code> (preview/<code>camera-alt</code>), bouton « Import from X » (si <code>twitter.configured</code>), <code>Input</code> displayName (max 60) / bio (max 150), <code>Button</code> « Continue » + « Skip ».</li>
+<li><b>Données</b> : <code>useOnboardingStore.setProfile</code> ; <code>useTwitterImport</code> → <code>twitterApi</code> (<code>GET /ext/twitter/status</code>, <code>begin</code>, <code>complete</code> via deep-link <code>chathouse://oauth/twitter</code>) ; <code>mediaService.uploadAvatar</code> (<code>POST /upload/avatar</code>) ; <code>launchImageLibrary</code> ; <code>setupProfileFormSchema</code>.</li>
+<li><b>Actions</b> : pick image ; Import X → remplit displayName/bio/avatar ; Continue → upload avatar puis <code>setProfile</code> → <code>navigate('InterestSelection')</code> ; Skip → idem sans persister.</li>
+<li><b>États</b> : <code>uploading</code>/<code>isSubmitting</code>/<code>twitter.importing</code> ; erreurs zod + <code>Alert</code>.</li>
+<li><b>Navigation</b> : <code>OnboardingNavigator</code> (route <code>Onboarding</code>) → InterestSelection.</li>
+<li><b>Accès</b> : authentifié avec <code>hasCompletedOnboarding===false</code>.</li>
+</ul>
+<h2>9. InterestSelectionScreen</h2>
+<ul>
+<li><b>Rôle &amp; contexte</b> : Sélection des centres d'intérêt (chips), <b>min 3 / max 10</b>.</li>
+<li><b>UI</b> : hint dynamique, <code>ScrollView</code> de chips toggle, <code>Button</code> « Finish » désactivé &lt; 3.</li>
+<li><b>Données</b> : <code>useOnboardingStore.setInterests</code> ; liste statique <code>INTEREST_CATEGORIES</code>. Aucun réseau.</li>
+<li><b>Actions</b> : toggle chip (cap 10) ; Finish → <code>setInterests</code> → <code>navigate('NotificationsPermission')</code>.</li>
+<li><b>États</b> : <code>canSubmit = ≥3</code> ; cap silencieux à 10.</li>
+<li><b>Navigation</b> : SetupProfile → NotificationsPermission.</li>
+<li><b>Accès</b> : onboarding en cours.</li>
+</ul>
+<h2>10. NotificationsPermissionScreen</h2>
+<ul>
+<li><b>Rôle &amp; contexte</b> : Demande la permission push (« Turn on notifications »).</li>
+<li><b>UI</b> : icône <code>notifications-active</code>, 3 bénéfices, <code>Button</code> « Enable » + lien « Not now ».</li>
+<li><b>Données</b> : <code>pushService.registerWithBackend()</code> (permission OS → <code>POST /push/register</code>, idempotent).</li>
+<li><b>Actions</b> : Enable → <code>registerWithBackend()</code> (erreurs avalées) → <code>navigate('SuggestedFollows')</code> ; Not now → idem.</li>
+<li><b>États</b> : <code>requesting</code> (loading) ; aucun blocage sur erreur.</li>
+<li><b>Navigation</b> : InterestSelection → SuggestedFollows.</li>
+<li><b>Accès</b> : onboarding en cours.</li>
+</ul>
+<hr/>
+<h1>3. Hallway &amp; Salons audio (5) — cœur de l'app</h1>
+<h2>11. RoomFeedScreen</h2>
+<ul>
+<li><b>Rôle &amp; contexte</b> : Accueil du RoomsTab (« hallway ») : feed des rooms live rankées + upcoming + strips d'extensions.</li>
+<li><b>UI</b> : Header (logo + search/event/play-circle/notifications [badge]) ; <code>FilterPill</code> (All/Following/Clubs/Tech/Music/Business/Health) ; strips ext (<code>ExtAvailablePeopleStrip</code>, <code>ExtSuggestedFollowsStrip</code>, <code>ExtUpcomingForYouStrip</code>, <code>ExtRecentlyPlayedStrip</code>) ; <code>UpcomingRow</code> ; <code>FlatList</code> de <code>RoomCard</code> (catégorie, house, amis inside, <code>ParticipantsRow</code>, compteurs, Join) ; FAB « + ».</li>
+<li><b>Données</b> : <code>useRooms(filter)</code> → <code>useInfiniteQuery</code> <code>GET /rooms/feed</code> ; <code>useQuery</code> upcoming <code>GET /rooms?filter=upcoming</code> ; <code>useHallwaySocket()</code> (invalide sur new/ended) ; <code>useUnreadNotificationCount()</code> ; <code>useExtWave()</code>.</li>
+<li><b>Actions</b> : filtre → refetch ; cartes/strips → <code>navigate('Room',{roomId})</code> ; FAB → <code>CreateRoom</code> ; icônes → Explore/Events/Replays/Notifications ; wave ; pull-to-refresh + <code>fetchNextPage</code>.</li>
+<li><b>États</b> : <code>RoomFeedSkeleton</code> (loading) ; <code>EmptyState</code> (error) ; <code>keepPreviousData</code> (pas de flash au filtre) ; temps réel socket.</li>
+<li><b>Navigation</b> : tab par défaut → Room, CreateRoom, Explore, Events, Replays, Notifications.</li>
+<li><b>Accès</b> : authentifié.</li>
+</ul>
+<h2>12. RoomScreen</h2>
+<ul>
+<li><b>Rôle &amp; contexte</b> : Salle audio live (orchestrateur ~930 lignes) : scène/écoute, LiveKit, rôles, modération, chat, réactions, captions, socket temps réel.</li>
+<li><b>UI</b> : TopBar (share/chat/tune[mod]/flag/End Room[host]) ; bannière statut audio ; en-tête room (badges house/catégorie/visibilité/REC, titre éditable si mod, <code>RoomTimer</code>/scheduled, compteurs, 🔒) ; partials <code>StageGrid</code>, <code>HandRaiseQueue</code>, <code>FollowedByListeners</code>, <code>FlatList</code> « Others » (overflow <code>+N</code>) ; <code>RoomActionBar</code> (Mute/Raise hand/Visible-Invisible/Invite/Leave) ; <code>ReactionsBar</code> ; <code>ExtCaptionsOverlay</code> ; sheets/modals <code>HostActionsSheet</code>, <code>ProfileActionSheet</code>, <code>RoomChatSidebar</code>, <code>RoomControlsSheet</code>, <code>TitleEditModal</code>.</li>
+<li><b>Données</b> : <code>useRoom(id)</code> (<code>GET /rooms/:id</code>) ; <code>useHandRaises</code> (poll 10s si realtime off) ; <code>useRoomSocket</code> (joined/hand/role/mute/kick/ended) ; <code>useRoomAudio</code> (LiveKit, scores parole) ; <code>useExtCaptions</code>/<code>useLocalCaptionPublisher</code> ; mutations <code>useLeaveRoom</code>/<code>useRaiseHand</code>/<code>useLowerHand</code>/<code>useSetMute</code>/<code>useSetHidden</code>/<code>useEndRoom</code>/<code>useReportRoom</code> ; stores <code>useAuthStore</code>, <code>useCurrentRoomStore</code>, <code>roomAudioSession</code> (singleton mini-bar).</li>
+<li><b>Actions</b> : mute (optimiste + LiveKit + rollback) ; raise/lower hand ; ghost ; tap participant → Host/Profile sheet ; promote ; End Room (Alert) ; Report ; Share (<code>app.chathouse.com/room/:id</code>) ; Invite → <code>InviteToRoom</code> ; Message → cross-tab ChatDetail ; Leave → clear+stop+<code>leaveRoom</code>+goBack.</li>
+<li><b>États</b> : Loader/EmptyState ; bannière audio (connecting/unsupported/error) ; join refusé → goBack+Alert ; events socket filtrés sur viewerId/roomId (garde <code>cancelled</code>) ; rôles dérivés <code>viewerIsHost</code>/<code>canModerate</code>/<code>canSpeak</code>.</li>
+<li><b>Navigation</b> : depuis RoomFeed/CreateRoom(<code>replace</code>)/Explore/Maps/deep-link <code>room/:id</code> → InviteToRoom, cross-tab ChatDetail ; back = mini-bar persiste.</li>
+<li><b>Accès</b> : authentifié + autorisation serveur de join (public/social/closed/ban).</li>
+</ul>
+<h2>13. CreateRoomScreen</h2>
+<ul>
+<li><b>Rôle &amp; contexte</b> : Création de room (live ou planifiée), en modal.</li>
+<li><b>UI</b> : <code>Input</code> titre (3–80) / description (≤200) ; 3 <code>VisibilityRow</code> (Open/Social/Closed) ; <code>HouseChip</code> ; <code>TopicChip</code> (max 5) ; recherche co-hosts + <code>CoHostSlot</code> (max 5) ; toggle Schedule (presets / <code>DateTimePickerInline</code>) ; toggle Recording ; <code>Button</code> « Start room ».</li>
+<li><b>Données</b> : <code>useCreateRoom()</code> (<code>POST /rooms</code>, <code>visibilityToBackend</code>) ; <code>useHouses('mine')</code> ; recherche co-hosts <code>searchService.users</code> (<code>GET /search?type=users</code>, debounce 250ms).</li>
+<li><b>Actions</b> : édition locale ; <code>handleStart</code> → calcule <code>scheduledFor</code> → <code>createRoom.mutateAsync</code> → live : <code>replace('Room')</code> / planifiée : <code>goBack</code>.</li>
+<li><b>États</b> : bouton désactivé si titre &lt;3/&gt;80 ou pending ; caps 5 topics / 5 co-hosts.</li>
+<li><b>Navigation</b> : RoomFeed FAB / deep-link <code>room/new</code> → Room ou retour.</li>
+<li><b>Accès</b> : authentifié.</li>
+</ul>
+<h2>14. InviteToRoomScreen</h2>
+<ul>
+<li><b>Rôle &amp; contexte</b> : Inviter des utilisateurs dans une room existante (param <code>roomId</code>).</li>
+<li><b>UI</b> : <code>Input</code> recherche débouncée, compteur, <code>FlatList</code> candidats (Avatar + checkbox), CTA « Envoyer (N) ».</li>
+<li><b>Données</b> : <code>searchService.users</code> (debounce 250ms) ; <code>useInviteToRoom()</code> (<code>POST /rooms/:id/invite</code>).</li>
+<li><b>Actions</b> : toggle (cap <code>MAX_INVITEES=50</code>) ; Envoyer → <code>invite.mutate</code> → Alert + goBack.</li>
+<li><b>États</b> : Loader (recherche) ; EmptyState (vide/aucun résultat) ; CTA désactivé si 0 / pending.</li>
+<li><b>Navigation</b> : RoomScreen → goBack.</li>
+<li><b>Accès</b> : authentifié (tout participant).</li>
+</ul>
+<h2>15. ReplaysScreen</h2>
+<ul>
+<li><b>Rôle &amp; contexte</b> : Replays audio récents (rooms enregistrées) lisibles in-app.</li>
+<li><b>UI</b> : <code>FlatList</code> de cartes (titre, host · date, lecteur <code>ReplayPlayer</code> play/pause/progress).</li>
+<li><b>Données</b> : <code>useRecentReplays()</code> → <code>recordingService.recent()</code>. Pas de mutation.</li>
+<li><b>Actions</b> : lecture <code>ReplayPlayer</code> ; back.</li>
+<li><b>États</b> : Loader ; EmptyState. Pas de scrub/transcript.</li>
+<li><b>Navigation</b> : RoomFeed (play-circle) → goBack.</li>
+<li><b>Accès</b> : authentifié (lecture seule).</li>
+</ul>
+<hr/>
+<h1>4. Événements (1)</h1>
+<h2>16. EventsScreen</h2>
+<ul>
+<li><b>Rôle &amp; contexte</b> : Rooms planifiées (À venir + Mes events), RSVP + reschedule/cancel host.</li>
+<li><b>UI</b> : 2 <code>TabPill</code> (upcoming/mine) ; <code>FlatList</code> de <code>EventCard</code> (host, titre, schedule + temps relatif, compteur RSVP, bouton RSVP/Annuler, <code>ExtCalendarExportButton</code> .ics, boutons host Reschedule/Cancel) ; <code>Modal</code> reschedule (<code>DateTimePickerInline</code>).</li>
+<li><b>Données</b> : <code>useUpcomingEvents()</code> (<code>GET /rooms?filter=upcoming</code>), <code>useMyEvents()</code> (<code>GET /rooms/events/mine</code>), <code>useRsvp()</code>/<code>useCancelRsvp()</code> (<code>POST|DELETE /rooms/:id/rsvp</code>), <code>eventsApi.cancel</code>/<code>reschedule</code> ; <code>useAuthStore</code> (isHost).</li>
+<li><b>Actions</b> : switch tab ; toggle RSVP (anti-double-submit) ; host Cancel (Alert + refetch) ; host Reschedule (Modal → refetch).</li>
+<li><b>États</b> : Loader / EmptyState (empty/emptyMine) ; pull-to-refresh ; boutons disabled si mutating.</li>
+<li><b>Navigation</b> : RoomFeed (event) ; reste sur l'écran.</li>
+<li><b>Accès</b> : authentifié ; actions host si <code>hostId===viewerId</code>.</li>
+</ul>
+<hr/>
+<h1>5. Clubs / « Houses » (6)</h1>
+<h2>17. HouseListScreen</h2>
+<ul>
+<li><b>Rôle &amp; contexte</b> : Liste des houses, onglets « My Houses » / « Discover ».</li>
+<li><b>UI</b> : Header, <code>TabToggle</code> (mine/discover), <code>FlatList</code> de <code>HouseRow</code> (Avatar, nom, catégorie+emoji, membersCount), FAB « + » animé.</li>
+<li><b>Données</b> : <code>useHouses(tab)</code> → <code>GET /clubs?filter=mine|discover</code>.</li>
+<li><b>Actions</b> : row → <code>HouseDetail</code> ; FAB → <code>CreateHouse</code> ; pull-to-refresh ; switch onglet.</li>
+<li><b>États</b> : Loader ; EmptyState (error). (Pas d'EmptyState liste vide dédié ; recherche club retirée.)</li>
+<li><b>Navigation</b> : depuis Profil/Réglages → HouseDetail, CreateHouse.</li>
+<li><b>Accès</b> : authentifié.</li>
+</ul>
+<h2>18. HouseDetailScreen</h2>
+<ul>
+<li><b>Rôle &amp; contexte</b> : Fiche club : cover, stats, CTA d'adhésion contextuel, inbox demandes (admin SOCIAL), rooms, membres + rôles.</li>
+<li><b>UI</b> : Header (settings si admin, more-vert) ; <code>FlatList</code> membres avec header riche (cover, avatar, description, règles, stats, CTA dynamique Invite/« Sur invitation »/« Request to join »/« Rejoindre ») ; inbox Approve/Decline ; sections rooms live/upcoming/past ; rows membres (badge rôle + more si gérable).</li>
+<li><b>Données</b> : <code>useHouse(id)</code> (<code>GET /clubs/:id</code>) ; <code>useHouseRooms(id, live|upcoming|past)</code> ; <code>clubMetaApi.get</code> (<code>GET /ext/club-meta/:id</code>) ; <code>clubReqApi.list</code> (inbox, si <code>canManageRoles &amp;&amp; isSocial</code>).</li>
+<li><b>Actions</b> : Rejoindre OPEN <code>useJoinHouse</code> (<code>POST /clubs/:id/join</code>) ; SOCIAL <code>useExtJoinHouse.join</code> (<code>POST /ext/clubreq/:id/request</code>) ; approve/decline ; <code>useLeaveHouse</code> (masqué owner) ; <code>useSetMemberRole</code>/<code>useRemoveMember</code> (Alert) ; more-vert → Share/Invite/Quitter ; settings → ManageHouse ; Invite → InviteMember ; room → Room.</li>
+<li><b>États</b> : Loader / EmptyState ; CTA selon privacy + <code>isJoinedByMe</code> ; owner ne quitte pas (CLUB_005) ; admin ne gère ni soi ni owner.</li>
+<li><b>Navigation</b> : HouseList/Notifications(house_invite)/Profil → Room, InviteMember, ManageHouse.</li>
+<li><b>Accès</b> : authentifié ; settings/inbox/rôles si admin ; inbox si SOCIAL.</li>
+</ul>
+<h2>19. CreateHouseScreen</h2>
+<ul>
+<li><b>Rôle &amp; contexte</b> : Création d'une house.</li>
+<li><b>UI</b> : upload icône (dashed/preview), <code>Input</code> nom (≤30) / description (≤200) / règles (≤2000), 3 <code>PrivacyRow</code> (Open/Social/Private), bouton « Create House ».</li>
+<li><b>Données</b> : <code>useCreateHouse()</code> (<code>POST /clubs</code>, <code>PRIVACY_TO_DB</code>) ; <code>mediaService.uploadAvatar</code> ; <code>launchImageLibrary</code>.</li>
+<li><b>Actions</b> : pick icône ; submit → upload puis <code>createHouse.mutateAsync</code> → goBack.</li>
+<li><b>États</b> : <code>canCreate = nom≥2 &amp;&amp; !pending &amp;&amp; !uploading</code> ; spinner ; Alert erreur.</li>
+<li><b>Navigation</b> : HouseList (FAB) → goBack.</li>
+<li><b>Accès</b> : authentifié.</li>
+</ul>
+<h2>20. ManageHouseScreen</h2>
+<ul>
+<li><b>Rôle &amp; contexte</b> : Édition d'une house + suppression (owner).</li>
+<li><b>UI</b> : <code>Input</code> nom/description/règles, 3 <code>PrivacyRow</code>, « Save changes », et si owner « Danger zone » + « Delete house ».</li>
+<li><b>Données</b> : <code>useHouse(id)</code> (pré-remplissage unique) ; <code>useUpdateHouse</code> (<code>PATCH /clubs/:id</code>) ; <code>useDeleteHouse</code> (<code>DELETE /clubs/:id</code>) ; <code>useAuthStore</code> (isOwner).</li>
+<li><b>Actions</b> : save → <code>updateHouse.mutate</code> → goBack ; delete → Alert → <code>deleteHouse.mutate</code> → <code>HouseList</code>.</li>
+<li><b>États</b> : Loader / EmptyState ; <code>canSave = nom≥2 &amp;&amp; !mutating</code> ; suppression owner only.</li>
+<li><b>Navigation</b> : HouseDetail (settings, si admin) → goBack / HouseList.</li>
+<li><b>Accès</b> : admin ; delete owner.</li>
+</ul>
+<h2>21. HouseInvitationScreen</h2>
+<ul>
+<li><b>Rôle &amp; contexte</b> : Acceptation d'une invitation (deep-link / notif CLUB_INVITE).</li>
+<li><b>UI</b> : Avatar 120, nom, nb membres, code tronqué (8), boutons « Accept invitation » / « Decline ».</li>
+<li><b>Données</b> : params <code>{houseId, inviteToken}</code> ; <code>useHouse(id)</code> ; <code>useAcceptInvitation</code> (<code>POST /clubs/:id/accept</code>, token non transmis).</li>
+<li><b>Actions</b> : accept → <code>accept.mutateAsync</code> → <code>replace('HouseDetail')</code> ; decline/back → goBack.</li>
+<li><b>États</b> : Loader / EmptyState ; bouton accept loading ; copie house-centric (inviteur absent).</li>
+<li><b>Navigation</b> : deep-link/route <code>HouseInvitation</code> → HouseDetail.</li>
+<li><b>Accès</b> : authentifié + houseId/token.</li>
+</ul>
+<h2>22. InviteMemberScreen</h2>
+<ul>
+<li><b>Rôle &amp; contexte</b> : Inviter dans une house par recherche ou lien partageable.</li>
+<li><b>UI</b> : bandeau lien (<code>app.chathouse.com/invite/:houseId</code> + copier), <code>Input</code> recherche, <code>FlatList</code> <code>UserRow</code> (bouton Invite/Invited).</li>
+<li><b>Données</b> : <code>useSearchUsers(q)</code> (<code>GET /users/search</code>, debounce 250ms) ; <code>useInviteToHouse</code> (<code>POST /clubs/:id/invite</code>).</li>
+<li><b>Actions</b> : copier lien → Clipboard + Share ; inviter → <code>inviteToHouse.mutate</code> (« Invited » on success, anti-double-submit).</li>
+<li><b>États</b> : Loader ; EmptyState (vide/sans résultat) ; Alert échec.</li>
+<li><b>Navigation</b> : HouseDetail / modal <code>InviteMemberModal</code> → goBack.</li>
+<li><b>Accès</b> : authentifié.</li>
+</ul>
+<hr/>
+<h1>6. Carte (1)</h1>
+<h2>23. MapsScreen</h2>
+<ul>
+<li><b>Rôle &amp; contexte</b> : Carte OSM des followers en ligne géolocalisés en temps réel (onglet MapsTab).</li>
+<li><b>UI</b> : <code>MapView</code> plein écran (tiles OSM/Voyager) ; <code>Marker</code> user (<code>UserLocationPulse</code>) + followers (<code>UserMapMarker</code>) ; <code>MapSearchBar</code> ; boutons <code>MyLocationButton</code> + <code>GhostModeToggle</code> ; <code>FollowerMiniCard</code> ; <code>MapTopAppBar</code>.</li>
+<li><b>Données</b> : <code>useCurrentLocation()</code> (permission/coords, geolocation watch 30s/25m, consentement GDPR) ; <code>useLocationBroadcast</code> (socket <code>maps:update-location</code>, sauf Ghost) ; <code>useFollowersOnMap()</code> (<code>GET /maps/followers</code> + deltas socket <code>maps:user-moved</code>/<code>user-offline</code>) ; <code>useGhostModeStore</code>. Mock si realtime off.</li>
+<li><b>Actions</b> : recherche (filtre local) ; tap pin → <code>animateToRegion</code> ; recenter ; MiniCard → Join (cross-tab Room) / Message (cross-tab ChatDetail) ; toggle Ghost.</li>
+<li><b>États</b> : EmptyState (permission denied/disabled) ; Loader (« Locating you », fallback Dakar à 8s) ; auto-center 1er fix ; temps réel socket.</li>
+<li><b>Navigation</b> : onglet Maps (deep-link <code>map</code>) → cross-tab Room / ChatDetail.</li>
+<li><b>Accès</b> : authentifié + permission localisation. Ghost coupe le broadcast.</li>
+</ul>
+<hr/>
+<h1>7. Découverte (1)</h1>
+<h2>24. ExploreScreen</h2>
+<ul>
+<li><b>Rôle &amp; contexte</b> : Recherche unifiée (users/clubs/rooms/topics) + feed tendances.</li>
+<li><b>UI</b> : Header (« Browse topics » → TopicExplorer) ; <code>Input</code> recherche (debounce 200ms) ; <code>FilterChip</code> facettes (langues fr/en/ar/es + catégories) ; vues <code>RecentSearchesView</code> / <code>SearchResultsView</code> / <code>ExploreFeedView</code>.</li>
+<li><b>Données</b> : <code>useExplore()</code> (feed) ; <code>useSearch(q)</code> (<code>GET /search?type=all</code>) ; <code>useTopicSearch(q)</code> (<code>topicsApi.flat</code>) ; <code>useExtSearchHistory()</code> ; <code>useExtSearchRooms({q,language,topic,liveOnly})</code>.</li>
+<li><b>Actions</b> : saisie → bascule feed/résultats ; submit → <code>history.commit</code> ; toggle facettes ; résultat → Room/HouseDetail/Profile/TopicExplorer ; clear historique.</li>
+<li><b>États</b> : Loader / EmptyState (searchEmpty) ; feed pull-to-refresh ; recherches récentes si focus+vide.</li>
+<li><b>Navigation</b> : RoomFeed (search) → Room, HouseDetail, Profile, TopicExplorer.</li>
+<li><b>Accès</b> : authentifié.</li>
+</ul>
+<hr/>
+<h1>8. Notifications (1)</h1>
+<h2>25. NotificationsScreen</h2>
+<ul>
+<li><b>Rôle &amp; contexte</b> : Centre de notifications, filtres, mark-read, swipe-delete, deep-link par type.</li>
+<li><b>UI</b> : Header (sous-titre « X non lues », « Tout marquer lu ») ; <code>TabPill</code> (all/rooms/social/clubs) ; <code>FlatList</code> de <code>NotificationRow</code> dans <code>Swipeable</code> (delete) : icône par <code>kind</code>, message, date, point bleu si non lu.</li>
+<li><b>Données</b> : <code>useNotifications(filter)</code> (<code>GET /notifications?filter=</code>, <code>typeToKind</code>) ; <code>useMarkNotificationRead</code>/<code>useMarkAllNotificationsRead</code>/<code>useRemoveNotification</code> ; <code>useNotificationSocket</code> (<code>notification:new</code>/<code>count</code>).</li>
+<li><b>Actions</b> : tap → mark-read + deep-link (follow/wave/new_message → Profile ; house_invite → HouseDetail ; room_* → Room) ; swipe delete ; mark-all ; pull-to-refresh.</li>
+<li><b>États</b> : Loader / EmptyState ; <code>unreadCount</code> pilote sous-titre+bouton ; live via socket. (new_message → profil expéditeur, DM hors RoomStack.)</li>
+<li><b>Navigation</b> : RoomFeed (cloche) → Profile, HouseDetail, Room.</li>
+<li><b>Accès</b> : authentifié (canal <code>user:&lt;id&gt;</code>).</li>
+</ul>
+<hr/>
+<h1>9. Profil &amp; Identité (4)</h1>
+<h2>26. ProfileScreen</h2>
+<ul>
+<li><b>Rôle &amp; contexte</b> : Profil self ou tiers (identité, stats, actions sociales, events/replays, « qui a vu » premium, sections self). Enregistré dans RoomStack ET SettingsStack.</li>
+<li><b>UI</b> : <code>ProfileHeaderBar</code> (edit si self / share / more si tiers) ; <code>ProfileIdentity</code> (avatar+online, vrai nom, @username copiable, Joined, Nominated by, bio, liens Twitter/Insta) ; <code>ExtBadgesRow</code> + <code>ExtProfileLinks</code> ; <code>ProfileStats</code> ; <code>ProfileActionButtons</code> (Follow + wave, tiers) ; bannière live ; sections Events/Replays/« Qui a vu » (self)/<code>SelfSections</code>.</li>
+<li><b>Données</b> : <code>useMe()</code> + <code>useAuthStore</code> (myId) ; <code>useProfile(userId)</code> (<code>GET /users/:id</code>) ; <code>useFollow</code>/<code>useUnfollow</code>/<code>useWave</code>/<code>useBlock</code>/<code>useReport</code> ; <code>useHouses('mine')</code> ; <code>useMyRoomHistory(10)</code> ; <code>useUserUpcomingEvents</code>/<code>useUserReplays</code> ; <code>useProfileViewers(isSelf)</code> (premium, <code>retry:false</code>).</li>
+<li><b>Actions</b> : edit → EditProfile ; share ; copy username (haptic) ; follow toggle ; wave (USER_005 rate-limit) ; report (Alert raisons) ; block (Alert) ; stats → Followers ; sections → Room/Replays/HouseList/HouseDetail.</li>
+<li><b>États</b> : Loader / EmptyState ; <code>isSelf</code> masque actions sociales + montre sections self ; « qui a vu » premium-gate (🔒) / empty / liste.</li>
+<li><b>Navigation</b> : tabs/notifications/HouseDetail/Followers → EditProfile, Followers, Room, Replays, HouseList, HouseDetail.</li>
+<li><b>Accès</b> : authentifié ; sections self + viewers réservés au propriétaire (viewers = premium serveur).</li>
+</ul>
+<h2>27. EditProfileScreen</h2>
+<ul>
+<li><b>Rôle &amp; contexte</b> : Édition du profil courant.</li>
+<li><b>UI</b> : avatar + <code>photo-camera</code> ; <code>Input</code> firstName/lastName, displayName (≤40), username (<code>@</code>), bio (≤150), twitter/instagram ; ligne DM privacy (Alert) ; « Save changes ».</li>
+<li><b>Données</b> : <code>useMe()</code> (pré-remplit) ; <code>useUpdateProfile</code> (<code>PATCH /users/me</code> + <code>PATCH /users/me/username</code> si changé) ; <code>mediaService.uploadAvatar</code> ; <code>launchImageLibrary</code> ; <code>usernameFormSchema</code>.</li>
+<li><b>Actions</b> : pick image ; DM privacy → Alert (everyone/followers/mutual/nobody) ; save → upload puis <code>updateProfile.mutateAsync</code> → goBack.</li>
+<li><b>États</b> : Loader ; <code>busy</code> (upload+PATCH) ; <code>canSave = displayName≥2 &amp;&amp; username valide &amp;&amp; !busy</code> ; Alert erreur.</li>
+<li><b>Navigation</b> : ProfileScreen (self) → goBack.</li>
+<li><b>Accès</b> : authentifié, self (<code>/users/me</code>).</li>
+</ul>
+<h2>28. FollowersScreen</h2>
+<ul>
+<li><b>Rôle &amp; contexte</b> : Abonnés / abonnements d'un utilisateur, onglets + follow inline.</li>
+<li><b>UI</b> : <code>TabToggle</code> (Followers/Following), <code>FlatList</code> de <code>UserRow</code> (bouton Follow/Following, loader par ligne).</li>
+<li><b>Données</b> : params <code>{userId, initialTab}</code> ; <code>useFollowers</code>/<code>useFollowing</code> (<code>GET /follow/:id/followers|following</code>) ; <code>useFollow</code>/<code>useUnfollow</code>.</li>
+<li><b>Actions</b> : switch onglet ; toggle ligne (Alert erreur).</li>
+<li><b>États</b> : Loader / EmptyState (error/vide) ; <code>pendingId</code> (spinner ciblé).</li>
+<li><b>Navigation</b> : ProfileScreen (compteurs) → goBack.</li>
+<li><b>Accès</b> : authentifié (self ou tiers).</li>
+</ul>
+<h2>29. TipHistoryScreen</h2>
+<ul>
+<li><b>Rôle &amp; contexte</b> : Historique des pourboires (monétisation V7) envoyés/reçus.</li>
+<li><b>UI</b> : <code>FlatList</code> de <code>TipRow</code> (icône sens, sent/received, contrepartie + date, montant <code>Intl.NumberFormat</code> signé).</li>
+<li><b>Données</b> : <code>useQuery(['ext','payments','tips'])</code> → <code>paymentsApi.tipHistory()</code> (<code>GET /ext/payments/tips</code>, staleTime 30s).</li>
+<li><b>Actions</b> : back ; pull-to-refresh.</li>
+<li><b>États</b> : Loader / EmptyState (error/vide).</li>
+<li><b>Navigation</b> : <code>SettingsTab/TipHistory</code> → goBack.</li>
+<li><b>Accès</b> : authentifié (extension payments).</li>
+</ul>
+<hr/>
+<h1>10. Messages / « Backchannel » (6)</h1>
+<h2>30. MessagesScreen</h2>
+<ul>
+<li><b>Rôle &amp; contexte</b> : Onglet Messages : conversations 1:1 + groupes.</li>
+<li><b>UI</b> : Header (bouton « nouveau ») ; <code>FlatList</code> de <code>ConvoRow</code> ; <code>ListHeader</code> = <code>OnlineUsersList</code> (rend <code>null</code> faute de présence) + section Groups (<code>GroupRow</code>). Rows : avatar, nom, dernier message (🎤 si vocal), timestamp relatif, badge non-lus.</li>
+<li><b>Données</b> : <code>useConversations()</code> (<code>GET /chat/conversations</code>) ; <code>useGroups()</code> (<code>GET /groups</code>) ; <code>useAuthStore</code> (myId) ; <code>useChatSocket()</code>+<code>useGroupSocket()</code> (invalident sur <code>chat:message</code>/<code>chat:read</code>/<code>group:message</code>).</li>
+<li><b>Actions</b> : row DM → <code>ChatDetail</code> ; groupe → <code>GroupChat</code> ; edit → <code>NewMessage</code> ; pull-to-refresh.</li>
+<li><b>États</b> : Loader / EmptyState (error/vide) ; timestamps figés au render.</li>
+<li><b>Navigation</b> : tab Messages → ChatDetail / GroupChat / NewMessage.</li>
+<li><b>Accès</b> : authentifié.</li>
+</ul>
+<h2>31. ChatDetailScreen</h2>
+<ul>
+<li><b>Rôle &amp; contexte</b> : Thread DM 1:1 (<code>conversationId</code> == id du pair == <code>receiverId</code>).</li>
+<li><b>UI</b> : <code>ChatHeader</code> (avatar, nom, dot online, « typing… », call/more) ; <code>FlatList</code> <code>inverted</code> de <code>Bubble</code> (texte <code>ExtLinkifiedText</code>, vocal <code>VoiceMessageBubble</code>, <code>done-all</code>) + <code>DateSeparator</code> ; <code>ChatInputBar</code> (emoji 16, multiline, attach, send/mic) ↔ <code>VoiceRecordingBar</code>.</li>
+<li><b>Données</b> : <code>useConversation(peerId)</code> ; <code>useConversationMessages(peerId)</code> (<code>GET /chat/:peerId</code>) ; <code>useTypingIndicator(peerId)</code> (<code>chat:typing</code>) ; <code>useVoiceMessage</code> ; mutations <code>useSendMessage</code>/<code>useSendVoiceMessage</code>/<code>useMarkConversationRead</code>/<code>useDeleteMessage</code>.</li>
+<li><b>Actions</b> : envoi texte (<code>POST /chat/:id</code>) ; frappe → <code>notifyTyping</code> ; mic → record → <code>POST /chat/:id/voice</code> ; long-press son message → Alert → delete ; auto mark-read ; <b>call/more/attach → Alert « Coming soon »</b>.</li>
+<li><b>États</b> : Loader ; typing (clear 4s) ; vocal <code>VoiceRecordingBar</code> ; <code>isOnline</code> figé <code>false</code> (présence non câblée) ; erreurs via toast.</li>
+<li><b>Navigation</b> : MessagesList/NewMessage/OnlineUsersList → goBack ; tab bar masquée.</li>
+<li><b>Accès</b> : authentifié ; DM gaté follow mutuel (403 CHAT_004).</li>
+</ul>
+<h2>32. NewMessageScreen</h2>
+<ul>
+<li><b>Rôle &amp; contexte</b> : Sélecteur de destinataires : 1 → DM, ≥2 → groupe.</li>
+<li><b>UI</b> : <code>Input</code> recherche (autoFocus), <code>FlatList</code> résultats (coche), <code>Button</code> flottant dynamique (« Message » / « Create group · N »).</li>
+<li><b>Données</b> : <code>searchService.users(q,20)</code> (debounce 250ms) ; <code>useCreateGroup()</code> (<code>POST /groups</code>).</li>
+<li><b>Actions</b> : toggle ; start : 1 → <code>replace('ChatDetail')</code> ; ≥2 → <code>createGroup.mutate</code> → <code>replace('GroupChat')</code>.</li>
+<li><b>États</b> : EmptyState (hint/noResults) ; <code>createGroup.isPending</code>.</li>
+<li><b>Navigation</b> : MessagesScreen → ChatDetail / GroupChat (replace).</li>
+<li><b>Accès</b> : authentifié.</li>
+</ul>
+<h2>33. GroupChatScreen</h2>
+<ul>
+<li><b>Rôle &amp; contexte</b> : Thread de groupe.</li>
+<li><b>UI</b> : Header (titre + memberCount → infos) ; <code>FlatList</code> <code>inverted</code> (nom expéditeur sur reçus, vocal) ; barre saisie send/mic ↔ <code>VoiceRecordingBar</code>.</li>
+<li><b>Données</b> : <code>useGroup(id)</code> ; <code>useGroupMessages(id)</code> ; mutations <code>useSendGroupMessage</code>/<code>useSendGroupVoice</code>/<code>useMarkGroupRead</code> ; <code>useVoiceMessage</code> ; <code>nameById</code>.</li>
+<li><b>Actions</b> : envoi (<code>POST /groups/:id/messages</code>, draft restauré si erreur) ; vocal (<code>/voice</code>) ; auto mark-read ; header → <code>GroupInfo</code>.</li>
+<li><b>États</b> : Loader ; <code>VoiceRecordingBar</code> ; <code>send.isPending</code>.</li>
+<li><b>Navigation</b> : MessagesScreen/NewMessage → GroupInfo.</li>
+<li><b>Accès</b> : authentifié, membre.</li>
+</ul>
+<h2>34. GroupInfoScreen</h2>
+<ul>
+<li><b>Rôle &amp; contexte</b> : Paramètres d'un groupe.</li>
+<li><b>UI</b> : icône groupe ; <code>Input</code> nom (≤80) + check ; section membres (« Add people », rows avec « remove » si owner) ; bouton « Leave group » (danger).</li>
+<li><b>Données</b> : <code>useGroup(id)</code> ; <code>useRenameGroup</code>/<code>useRemoveGroupMember</code>/<code>useLeaveGroup</code> ; <code>isOwner</code>.</li>
+<li><b>Actions</b> : save titre ; remove (Alert) ; leave (Alert → <code>popToTop</code>) ; Add people → <code>AddGroupMembers</code>.</li>
+<li><b>États</b> : Loader ; save désactivé si inchangé/pending ; remove si <code>isOwner &amp;&amp; !isMe</code>.</li>
+<li><b>Navigation</b> : GroupChat → AddGroupMembers ; <code>popToTop</code> après leave.</li>
+<li><b>Accès</b> : authentifié, membre ; rename/remove owner.</li>
+</ul>
+<h2>35. AddGroupMembersScreen</h2>
+<ul>
+<li><b>Rôle &amp; contexte</b> : Ajouter des membres à un groupe.</li>
+<li><b>UI</b> : <code>Input</code> recherche autoFocus ; <code>FlatList</code> (membres existants grisés/<code>check</code>, autres togglables) ; <code>Button</code> « Add N ».</li>
+<li><b>Données</b> : <code>useGroup(id)</code> (existingIds) ; <code>searchService.users(q,20)</code> ; <code>useAddGroupMembers()</code> (<code>POST /groups/:id/members</code>).</li>
+<li><b>Actions</b> : toggle ; « Add N » → <code>addMembers.mutate</code> → goBack.</li>
+<li><b>États</b> : EmptyState (hint/noResults) ; <code>isPending</code>.</li>
+<li><b>Navigation</b> : GroupInfo → goBack.</li>
+<li><b>Accès</b> : authentifié, membre.</li>
+</ul>
+<hr/>
+<h1>11. Réglages (3)</h1>
+<h2>36. SettingsScreen</h2>
+<ul>
+<li><b>Rôle &amp; contexte</b> : Hub profil + paramètres (onglet Settings).</li>
+<li><b>UI</b> : top-bar (Wave) ; hero avatar + stats ; Edit/Wave/More ; « Create House » ; grille « Member of » ; <code>ExtPremiumRow</code> (conditionnel) ; Tip history ; entrée Godmode (conditionnelle) ; section Privacy (toggle crash-reporting, Policy, Terms, Export, Blocked, <code>ExtThemeToggle</code>) ; section Account (Invite friends, Notifications, Extensions, Delete account).</li>
+<li><b>Données</b> : <code>useMe()</code> ; <code>useHouses('mine')</code> ; <code>useAdminWhoami()</code> (<code>GET /admin/me</code>, staleTime 60s, <code>retry:false</code>) ; <code>useAnalyticsConsentStore</code> ; <code>useQuery(['ext','invite','link'])</code> (<code>GET /ext/invites/link</code>) ; <code>useAuthStore.signOut</code>.</li>
+<li><b>Actions</b> : Edit → EditProfile ; Wave → Followers ; More → signOut ; Create/View/tuiles → RoomsTab (CreateHouse/HouseList/HouseDetail) ; stats → Followers ; toggle analytics (gate Sentry) ; routes Policy/Terms/DataExport/BlockedUsers/TipHistory/NotificationSettings/ExtSettings/DeleteAccount ; Invite → Share (Alert si remaining≤0).</li>
+<li><b>États</b> : pas de loader plein écran (valeurs par défaut) ; Godmode/Premium conditionnels.</li>
+<li><b>Navigation</b> : SettingsTab (route initiale) → routes SettingsStack + cross-tab RoomsTab.</li>
+<li><b>Accès</b> : authentifié ; Godmode si rôle ≥ MODERATOR.</li>
+</ul>
+<h2>37. NotificationSettingsScreen</h2>
+<ul>
+<li><b>Rôle &amp; contexte</b> : Préférences notifs : 9 toggles + fréquence + mute club/utilisateur.</li>
+<li><b>UI</b> : <code>PrefRow</code> (Switch) ×9 (<code>NOTIF_PREF_KEYS</code>) ; <code>FrequencySelector</code> (infrequent/normal/frequent) ; <code>MuteRow</code> par club et par utilisateur muté.</li>
+<li><b>Données</b> : <code>useNotifPrefs()</code>/<code>useUpdateNotifPrefs()</code> (<code>GET|PATCH /users/me/notification-preferences</code>, optimiste) ; <code>useNotifPrefsExt()</code> (<code>GET /ext/notif-prefs</code>) + <code>useSetNotifFrequency</code>/<code>useToggleMutedClub</code>/<code>useUnmuteUser</code> ; <code>clubsListApi.myClubs()</code> (noms de clubs).</li>
+<li><b>Actions</b> : toggle pref ; tier ; toggle club ; unmute user (le mute se fait depuis le profil).</li>
+<li><b>États</b> : Loader / EmptyState + Retry ; rows disabled si pending ; sections vides masquées.</li>
+<li><b>Navigation</b> : SettingsScreen → goBack.</li>
+<li><b>Accès</b> : authentifié.</li>
+</ul>
+<h2>38. BlockedUsersScreen</h2>
+<ul>
+<li><b>Rôle &amp; contexte</b> : Comptes bloqués + déblocage.</li>
+<li><b>UI</b> : <code>FlatList</code> de <code>BlockedRow</code> (Avatar + « Unblock » danger, loader par ligne).</li>
+<li><b>Données</b> : <code>useBlockedUsers()</code> (<code>GET /users/me/blocked</code>) ; <code>useUnblock()</code> (<code>DELETE /users/:id/block</code>).</li>
+<li><b>Actions</b> : Unblock → <code>unblock.mutate</code> (invalidation → disparaît ; Alert erreur).</li>
+<li><b>États</b> : Loader / EmptyState (error/vide) ; <code>pendingId</code>.</li>
+<li><b>Navigation</b> : SettingsScreen → goBack.</li>
+<li><b>Accès</b> : authentifié.</li>
+</ul>
+<hr/>
+<h1>12. Confidentialité &amp; Légal (4)</h1>
+<h2>39. DataExportScreen</h2>
+<ul>
+<li><b>Rôle &amp; contexte</b> : Export RGPD (art. 20) via la feuille de partage OS.</li>
+<li><b>UI</b> : carte descriptive, « Export », feedback taille (Ko), « Copy » (opt-in), « Clear clipboard ».</li>
+<li><b>Données</b> : <code>privacyService.exportMyData()</code> (<code>GET /users/me/export</code>, JSON brut, gardé en mémoire) ; <code>Clipboard</code> ; <code>Share</code>.</li>
+<li><b>Actions</b> : Export → <code>Share.share</code> ; Copy → Clipboard ; Clear → vide.</li>
+<li><b>États</b> : <code>busy</code> ; Alert erreur ; pas de file-export (expo absent).</li>
+<li><b>Navigation</b> : SettingsScreen → DataExport (header masqué).</li>
+<li><b>Accès</b> : authentifié.</li>
+</ul>
+<h2>40. DeleteAccountScreen</h2>
+<ul>
+<li><b>Rôle &amp; contexte</b> : Suppression de compte (saisie « DELETE » + délai de grâce).</li>
+<li><b>UI</b> : carte d'avertissement, étapes (export/rooms fermées/DM non rétractables), <code>TextInput</code> confirmation, « Delete » danger désactivé tant que ≠ « DELETE ».</li>
+<li><b>Données</b> : <code>privacyService.requestDeletion()</code> (<code>POST /users/me/request-deletion</code>) ; <code>useAuthStore.signOut</code>.</li>
+<li><b>Actions</b> : Delete → Alert → <code>requestDeletion()</code> → <code>signOut()</code>.</li>
+<li><b>États</b> : <code>busy</code> ; <code>canDelete = saisie === DELETE</code>.</li>
+<li><b>Navigation</b> : SettingsScreen → DeleteAccount → signOut (retour Auth).</li>
+<li><b>Accès</b> : authentifié.</li>
+</ul>
+<h2>41. PrivacyPolicyScreen</h2>
+<ul>
+<li><b>Rôle &amp; contexte</b> : Politique de confidentialité statique in-app (offline, versionnée au build).</li>
+<li><b>UI</b> : <code>LegalDoc</code> (7 <code>LegalSection</code>, email <code>LegalEmail</code> privacy@chathouse.app).</li>
+<li><b>Données</b> : aucune (i18n <code>privacy.policy.*</code>).</li>
+<li><b>Actions</b> : aucune (scroll).</li>
+<li><b>États</b> : aucun.</li>
+<li><b>Navigation</b> : monté dans Auth (pré-auth depuis Landing) ET Settings.</li>
+<li><b>Accès</b> : public + authentifié.</li>
+</ul>
+<h2>42. TermsScreen</h2>
+<ul>
+<li><b>Rôle &amp; contexte</b> : Conditions d'utilisation statiques in-app.</li>
+<li><b>UI</b> : <code>LegalDoc</code> (8 <code>LegalSection</code>).</li>
+<li><b>Données</b> : aucune (i18n <code>privacy.terms.*</code>).</li>
+<li><b>Actions</b> : aucune.</li>
+<li><b>États</b> : aucun.</li>
+<li><b>Navigation</b> : monté dans Auth ET Settings.</li>
+<li><b>Accès</b> : public + authentifié.</li>
+</ul>
+<hr/>
+<h1>13. Extensions (5)</h1>
+<h2>43. ExtActivityFeedScreen</h2>
+<ul>
+<li><b>Rôle &amp; contexte</b> : Flux d'activité (Module 12.7), filtres + live-prepend socket (réutilise <code>/notifications</code>).</li>
+<li><b>UI</b> : header (« Mark all read »), 4 onglets (all/rooms/social/clubs), <code>FlatList</code> de <code>ActivityRow</code> (memo), pull-to-refresh, empty.</li>
+<li><b>Données</b> : <code>activityApi.list(filter)</code> (<code>GET /notifications?filter=</code>) + <code>markRead</code>/<code>markAllRead</code> ; <code>useExtSocketAliases</code> (events <code>room_started_by_following</code>/<code>join_request</code>/<code>ping_user</code>, prepend <code>live-</code>, cap 200, dédup).</li>
+<li><b>Actions</b> : filtre ; tap → markRead + <code>onTapItem?</code> (undefined en prod) ; mark all ; refresh.</li>
+<li><b>États</b> : ActivityIndicator ; vide « No activity yet » ; erreur → garde liste stale.</li>
+<li><b>Navigation</b> : <b>route orpheline</b> (<code>RoomsNavigator</code>, aucun <code>navigate('ActivityFeed')</code> ni deep-link).</li>
+<li><b>Accès</b> : authentifié.</li>
+</ul>
+<h2>44. ExtSuggestedFollowsScreen</h2>
+<ul>
+<li><b>Rôle &amp; contexte</b> : « People you may know » — dernière étape d'onboarding (Module 1.5), réutilisable.</li>
+<li><b>UI</b> : <code>FlatList</code> de <code>UserRow</code> (memo : raison colorée, Follow → « Following »), pull-to-refresh.</li>
+<li><b>Données</b> : <code>useExtSuggestions(30)</code> (<code>GET /ext/suggestions?limit=30</code>, staleTime 60s ; raisons shared_interests/friends_of_friends/trending).</li>
+<li><b>Actions</b> : Follow → <code>onFollow</code> (en onboarding = <code>useFollow().mutate</code> <code>POST /follow/:id</code>, anti-doublon + rollback) ; tap → <code>onTapUser</code>.</li>
+<li><b>États</b> : ActivityIndicator / vide ; « Following » désactivé.</li>
+<li><b>Navigation</b> : via <code>SuggestedFollowsRoute</code> (OnboardingNavigator, route <code>SuggestedFollows</code>) ; footer Done/Skip → <code>completeOnboarding</code> (<code>PATCH /users/me/onboarding</code>) + redeem invite.</li>
+<li><b>Accès</b> : onboarding (étape finale).</li>
+</ul>
+<h2>45. ExtTopicExplorerScreen</h2>
+<ul>
+<li><b>Rôle &amp; contexte</b> : Explorateur de 150+ topics (2 panneaux + recherche + tendances).</li>
+<li><b>UI</b> : recherche (liste plate) ou défaut (strip tendances + panneaux catégories/sous-topics).</li>
+<li><b>Données</b> : <code>useExtTopicsTree()</code> (<code>GET /ext/topics</code>, staleTime 24h) ; <code>useExtTopicsFlat(q)</code> ; <code>useExtTopicsTrending()</code>.</li>
+<li><b>Actions</b> : recherche ; tap catégorie ; tap topic → <code>onSelectTopic?(slug)</code> (prop).</li>
+<li><b>États</b> : ActivityIndicator ; panneau droit vide « Pick a category ».</li>
+<li><b>Navigation</b> : <code>RoomsNavigator</code> (route <code>TopicExplorer</code>), depuis Explore (<code>goTopics</code>). Monté sans <code>onSelectTopic</code> → sélection sans effet de nav.</li>
+<li><b>Accès</b> : authentifié.</li>
+</ul>
+<h2>46. ExtSettingsScreen</h2>
+<ul>
+<li><b>Rôle &amp; contexte</b> : Paramètres extensions (apparence, qualité audio, moteur audio, confidentialité).</li>
+<li><b>UI</b> : Appearance (<code>ExtThemeToggle</code>) ; Audio quality (3 tiers radio standard/high/music) ; Audio engine (3 Switch : spatial audio, noise suppression, drop-in) ; Privacy (3 Switch : private profile, allow waves, show on map).</li>
+<li><b>Données</b> : <code>audioApi.get/update</code> (<code>GET|PATCH /ext/audio</code>) ; <code>privacyApi.get/update</code> (<code>GET|PATCH /ext/privacy</code>). Updates optimistes + rollback.</li>
+<li><b>Actions</b> : tap tier / switches → mutations partielles (Alert sur échec).</li>
+<li><b>États</b> : ActivityIndicator ; défauts si null.</li>
+<li><b>Navigation</b> : <code>SettingsNavigator</code> (route <code>ExtSettings</code>), depuis Settings → Extensions.</li>
+<li><b>Accès</b> : authentifié.</li>
+</ul>
+<h2>47. ExtPlaygroundScreen</h2>
+<ul>
+<li><b>Rôle &amp; contexte</b> : Banc de QA dev rendant les composants d'extension V1–V15 en isolation.</li>
+<li><b>UI</b> : sections de démo (linkified text, deep-links sociaux, available-people, upcoming, network bars, calendar export, share sheet, reaction picker, captions overlay, validateur d'intérêts, back-to-room, chat reactions, badges) + champs de test.</li>
+<li><b>Données</b> : surtout mocks ; <code>useExtWave</code>, <code>validateInterests</code> ; <code>ExtBadgesRow</code>/<code>ExtAvailablePeopleStrip</code> font des fetch réels.</li>
+<li><b>Actions</b> : ouvrir sheets/pickers, wave, deep-links, éditer inputs.</li>
+<li><b>États</b> : statut wave / validation intérêts / modals.</li>
+<li><b>Navigation</b> : <b>non câblé</b> (exporté seulement, aucune route).</li>
+<li><b>Accès</b> : aucun en prod (dev/QA).</li>
+</ul>
+<hr/>
+<h1>14. Administration / « Godmode » (6) — rôle ≥ MODERATOR</h1>
+<blockquote>Infra : <code>adminService</code> (<code>/admin/*</code>), <code>useAdmin</code> (queries/mutations), <code>types/admin.types</code> (<code>ROLE_RANK</code>, <code>isAtLeast</code>), <code>AdminHeader</code>, <code>promptForReason</code>, sous-système d'impersonation (<code>ImpersonationBanner</code> global). Entrée = tuile Godmode dans Settings (si rôle ≥ MODERATOR). <b>Chaque endpoint <code>/admin/*</code> re-vérifie le rôle serveur (<code>whoami</code> <code>retry:false</code>).</b></blockquote>
+<h2>48. AdminHomeScreen</h2>
+<ul>
+<li><b>Rôle &amp; contexte</b> : Tableau de bord Godmode : KPI globaux + tuiles + exports CSV (SUPER_ADMIN).</li>
+<li><b>UI</b> : <code>AdminHeader</code> (« Connected as {role} ») ; 6 <code>KpiCard</code> (Users/online, Live, Reports, Suspended, New 24h, Messages 24h) ; <code>NavTile</code> (Users, Reports [badge open], Rooms [si ADMIN], Audit [si SUPER_ADMIN]) ; section « CSV Exports » (conditionnelle).</li>
+<li><b>Données</b> : <code>useAdminWhoami()</code> (<code>GET /admin/me</code>) ; <code>useAdminStats()</code> (<code>GET /admin/stats</code>, <code>refetchInterval 30s</code>).</li>
+<li><b>Actions</b> : tuiles → AdminUsers/Reports/Rooms/AuditLog ; export → <code>adminService.exportCsv(kind)</code> (<code>GET /admin/export/{kind}.csv</code>) → Clipboard + Share.</li>
+<li><b>États</b> : Loader / EmptyState ; <code>exporting</code> désactive boutons ; gardes <code>canSeeAuditLog</code>(SUPER)/<code>canForceEnd</code>(ADMIN).</li>
+<li><b>Navigation</b> : Settings (tuile Godmode) → AdminUsers/Reports/Rooms/AuditLog.</li>
+<li><b>Accès</b> : MODERATOR ; Rooms = ADMIN ; Audit + CSV = SUPER_ADMIN.</li>
+</ul>
+<h2>49. AdminUsersScreen</h2>
+<ul>
+<li><b>Rôle &amp; contexte</b> : Annuaire/recherche utilisateurs, filtre rôle, liste curseur.</li>
+<li><b>UI</b> : <code>Input</code> recherche ; <code>filterChip</code> (ALL/USER/MOD/ADMIN/SUPER) ; <code>FlatList</code> de <code>UserRow</code> (Avatar+online, badge rôle coloré, badges Suspended/Deleted) ; footer pagination ; pull-to-refresh.</li>
+<li><b>Données</b> : <code>useAdminUsersInfinite({q,role,limit:50})</code> (<code>GET /admin/users</code>, curseur, debounce 250ms).</li>
+<li><b>Actions</b> : recherche/filtre → refetch ; row → <code>AdminUserDetail</code> ; <code>onEndReached</code> → <code>fetchNextPage</code>.</li>
+<li><b>États</b> : Loader / EmptyState (error/vide) ; footer <code>isFetchingNextPage</code>.</li>
+<li><b>Navigation</b> : AdminHome → AdminUserDetail.</li>
+<li><b>Accès</b> : MODERATOR.</li>
+</ul>
+<h2>50. AdminUserDetailScreen</h2>
+<ul>
+<li><b>Rôle &amp; contexte</b> : Fiche utilisateur + actions de modération (gardées par hiérarchie).</li>
+<li><b>UI</b> : héros (avatar+role+suspension) ; <code>Field</code> infos (email, tél, inscription, dernière connexion, followers) ; sections Suspension (presets 1h/24h/7d/perm ou Unsuspend), Rôles (SUPER), Investigation/Impersonate (SUPER), Danger/Delete (SUPER) ; sinon encart « noActionPerm ».</li>
+<li><b>Données</b> : <code>useAdminWhoami()</code> ; <code>useAdminUser(userId)</code> (<code>GET /admin/users/:id</code>).</li>
+<li><b>Actions</b> (Alert confirm + <code>promptForReason</code>) : <code>useSetUserRole</code> (<code>PATCH …/role</code>) ; <code>useSuspendUser</code> (<code>POST …/suspend</code>) ; <code>useUnsuspendUser</code> ; <code>useImpersonationStore().start</code> (<code>POST …/impersonate</code> → <code>popToTop</code> + bannière) ; <code>useDeleteUser</code> (<code>DELETE …</code> → goBack).</li>
+<li><b>États</b> : Loader / EmptyState ; <b><code>canActOnTarget = rang(moi) &gt; rang(cible)</code></b> ; rôle/impersonate/delete = SUPER ; masqués si <code>deletedAt</code>.</li>
+<li><b>Navigation</b> : AdminUsers → goBack/popToTop.</li>
+<li><b>Accès</b> : MODERATOR (rang strict &gt; cible) ; rôle/impersonate/delete = SUPER_ADMIN.</li>
+</ul>
+<h2>51. AdminRoomsScreen</h2>
+<ul>
+<li><b>Rôle &amp; contexte</b> : Rooms (live par défaut) + terminaison forcée.</li>
+<li><b>UI</b> : avis explicatif ; <code>FlatList</code> de <code>RoomRow</code> (host, titre, participants, badge LIVE, bouton close/« Ended », busy par room) ; pull-to-refresh.</li>
+<li><b>Données</b> : <code>useAdminRooms({live:true})</code> (<code>GET /admin/rooms?live=true</code>) ; <code>useForceEndRoom</code>.</li>
+<li><b>Actions</b> : force-end → <code>promptForReason</code> → <code>POST /admin/rooms/:id/force-end</code> (notifie + coupe LiveKit) ; invalide rooms+stats.</li>
+<li><b>États</b> : Loader / EmptyState ; bouton désactivé si non-live/busy.</li>
+<li><b>Navigation</b> : AdminHome (tuile Rooms, ADMIN+).</li>
+<li><b>Accès</b> : ADMIN.</li>
+</ul>
+<h2>52. AdminReportsScreen</h2>
+<ul>
+<li><b>Rôle &amp; contexte</b> : File de modération des signalements (USER/ROOM), onglets + résolution.</li>
+<li><b>UI</b> : <code>tabPill</code> (Open/Resolved/All) ; <code>FlatList</code> de <code>ReportRow</code> (badge type·motif, cible user/room, rapporteur+date, détails, boutons Dismiss/Resolve si ouvert) ; pull-to-refresh.</li>
+<li><b>Données</b> : <code>useAdminReports({status})</code> (<code>GET /admin/reports?status=</code>) ; <code>useResolveReport</code>.</li>
+<li><b>Actions</b> : onglet → refetch ; Dismiss/Resolve → Alert → <code>POST /admin/reports/:id/resolve {outcome}</code> ; invalide reports+stats.</li>
+<li><b>États</b> : Loader / EmptyState (selon onglet).</li>
+<li><b>Navigation</b> : AdminHome (tuile Reports).</li>
+<li><b>Accès</b> : MODERATOR.</li>
+</ul>
+<h2>53. AdminAuditLogScreen</h2>
+<ul>
+<li><b>Rôle &amp; contexte</b> : Journal lecture seule des actions privilégiées.</li>
+<li><b>UI</b> : <code>FlatList</code> de <code>Row</code> (icône action, acteur → cible avec avatars, métadonnées <code>from→to</code>/reason/until, date + IP). Pas de filtre exposé.</li>
+<li><b>Données</b> : <code>useAdminAuditLog({limit:100})</code> (<code>GET /admin/audit-log?limit=100</code>, une page de 100).</li>
+<li><b>Actions</b> : pull-to-refresh (aucune mutation).</li>
+<li><b>États</b> : Loader / EmptyState.</li>
+<li><b>Navigation</b> : AdminHome (tuile Audit, SUPER_ADMIN).</li>
+<li><b>Accès</b> : SUPER_ADMIN.</li>
+</ul>
+<hr/>
+<h2>Constats notables (factuels)</h2>
+<ul>
+<li><b>Routes orphelines / non câblées</b> : <code>WaitlistScreen</code> (deep-link seul), <code>ExtActivityFeedScreen</code> (aucun point d'entrée), <code>ExtPlaygroundScreen</code> (jamais monté, dev/QA), <code>ExtTopicExplorerScreen</code> (monté sans <code>onSelectTopic</code> → sélection sans nav).</li>
+<li><b>« Coming soon »</b> dans ChatDetail : appel vocal, pièces jointes, options de conversation.</li>
+<li><b>Présence en ligne</b> non branchée (<code>OnlineUsersList</code> rend <code>null</code> ; <code>isOnline</code> figé <code>false</code>).</li>
+<li><b>Mocks résiduels</b> : <code>CURRENT_USER</code> sert de fallback d'identité dans Messages/ChatDetail.</li>
+<li><b>Sécurité admin</b> : le masquage client (<code>isAtLeast</code>) est doublé d'un contrôle serveur sur chaque <code>/admin/*</code>.</li>
+</ul>
+<p>*Fin du manuel détaillé — 53 écrans. Document interne ChatHouse.*</p>
+
+</body></html>

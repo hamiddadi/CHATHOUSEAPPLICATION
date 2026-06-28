@@ -1,0 +1,347 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<title>ChatHouse — Manuel des écrans (53)</title>
+<style>
+  :root{
+    --navy:#0c112e; --ink:#dee0ff; --inkMut:#c2c6d7; --inkDim:#A0AEC0;
+    --primary:#558dff; --primaryLite:#b0c6ff; --secondary:#bac3ff; --lav:#2f3f92;
+    --accent:#00a754; --accent2:#00e475; --gold:#ffd700; --danger:#c0392b;
+    --text:#16204a; --muted:#5b6488; --line:#dde2ef;
+  }
+  @page{ size:A4; margin:14mm 13mm 15mm 13mm; }
+  *{ box-sizing:border-box; }
+  html{ -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  body{ font-family:"Segoe UI","Helvetica Neue",Arial,sans-serif; color:var(--text); font-size:10.5px; line-height:1.45; margin:0; }
+  h2{ font-size:15px; margin:20px 0 8px; color:var(--navy); padding-bottom:5px; border-bottom:2.5px solid var(--primary); page-break-after:avoid; }
+  h2 .z{ color:var(--muted); font-size:11px; font-weight:600; }
+  p{ margin:6px 0; } .muted{ color:var(--muted); } .small{ font-size:9.5px; }
+
+  .cover{ background:radial-gradient(120% 80% at 50% 0%, #1a2150 0%, var(--navy) 55%); color:var(--ink);
+          margin:-14mm -13mm 0; padding:38mm 13mm 26mm; text-align:center; page-break-after:always; }
+  .logo{ width:92px; height:92px; object-fit:contain; margin-bottom:16px; }
+  .kicker{ letter-spacing:4px; text-transform:uppercase; color:var(--secondary); font-weight:700; font-size:11px; }
+  .cover h1{ font-size:32px; margin:12px 0 0; color:#fff; font-weight:800; }
+  .cover .sub{ color:var(--inkMut); font-size:13px; margin-top:8px; }
+  .rule{ width:60px; height:3px; background:var(--accent2); border-radius:3px; margin:18px auto 0; }
+  .cover .big{ margin-top:24px; font-size:46px; font-weight:800; color:#fff; }
+  .cover .big small{ font-size:16px; color:var(--primaryLite); font-weight:600; }
+  .cover .meta{ margin-top:26px; color:var(--inkDim); font-size:10.5px; }
+
+  .nav{ background:#f3f6ff; border:1px solid #e2e8ff; border-radius:8px; padding:10px 14px; margin:10px 0; }
+  .nav b{ color:var(--lav); }
+  table.toc{ width:100%; border-collapse:collapse; margin:8px 0; }
+  table.toc td{ border:1px solid var(--line); padding:5px 8px; }
+  table.toc td.n{ text-align:center; width:34px; font-weight:800; color:var(--primary); background:#eef2ff; }
+  table.toc td.c{ text-align:center; width:42px; color:var(--muted); }
+
+  .screen{ border:1px solid var(--line); border-left:3px solid var(--primary); border-radius:6px;
+           padding:7px 11px; margin:8px 0; page-break-inside:avoid; background:#fcfdff; }
+  .sh{ font-weight:800; color:var(--navy); font-size:11.5px; }
+  .num{ display:inline-block; min-width:20px; height:18px; line-height:18px; text-align:center; background:var(--primary);
+        color:#fff; border-radius:5px; font-size:10px; margin-right:6px; padding:0 4px; }
+  .role{ font-style:italic; color:var(--muted); margin:2px 0 4px; }
+  .screen ul{ margin:4px 0 4px; padding-left:16px; }
+  .screen li{ margin:2px 0; }
+  .acc{ font-size:9.7px; color:var(--text); margin-top:3px; }
+  .acc b{ color:var(--accent); }
+  .gold b{ color:#9a6a00; }
+  .warn{ background:#fff5dd; border-left:3px solid var(--gold); }
+  footer{ margin-top:16px; border-top:1px solid var(--line); padding-top:6px; color:#9aa1bd; font-size:9px; }
+  .pb{ page-break-before:always; }
+</style>
+</head>
+<body>
+
+<div class="cover">
+  <img class="logo" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAABIAAAASACAYAAACHqDZaAABDOUlEQVR4AezBCZifZWEv0N/3zmSSSSbLACEgBLIQEraw7zsIIkVQULFVURRFRUALLgUqURBEvcKtoiKC1FbrhhRLRcWNCLKURRbZZZfdQAhLAmS+C899fK69JRIgCfN/55zT9PXPbAMAAABAtUoAAAAAqFoJAAAAAFUrAQAAAKBqJQAAAABUrQQAAACAqpUAAAAAULUSAAAAAKpWAgAAAEDVSgAAAACoWgkAAAAAVSsBAAAAoGolAAAAAFStBAAAAICqlQAAAABQtRIAAAAAqlYCAAAAQNVKAAAAAKhaCQAAAABVKwEAAACgaiUAAAAAVK0EAAAAgKqVAAAAAFC1EgAAAACqVgIAAABA1UoAAAAAqFoJAAAAAFUrAQAAAKBqJQAAAABUrQQAAACAqpUAAAAAULUSAAAAAKpWAgAAAEDVSgAAAACoWgkAAAAAVSsBAAAAoGolAAAAAFStBAAAAICqlQAAAABQtRIAAAAAqlYCAAAAQNVKAAAAAKhaCQAAAABVKwEAAACgaiUAAAAAVK0EAAAAgKqVAAAAAFC1EgAAAACqVgIAAABA1UoAAAAAqFoJAAAAAFUrAQAAAKBqJQAAAABUrQQAAACAqpUAAAAAULUSAAAAAKpWAgAAAEDVSgAAAACoWgkAAAAAVSsBAAAAoGolAAAAAFStBAAAAICqlQAAAABQtRIAAAAAqlYCAAAAQNVKAAAAAKhaCQAAAABVKwEAAACgaiUAAAAAVK0EAAAAgKqVAAAAAFC1EgAAAACqVgIAAABA1UoAAAAAqFoJAAAAAFUrAQAAAKBqJQAAAABUrQQAAACAqpUAAAAAULUSAAAAAKpWAgAAAEDVSgAAAACoWgkAAAAAVSsBAAAAoGolAAAAAFStBAAAAICqlQAAAABQtRIAAAAAqlYCAAAAQNVKAAAAAKhaCQAAAABVKwEAAACgaiUAAAAAVK0EAAAAgKqVAAAAAFC1EgAAAACqVgIAAABA1UoAAAAAqFoJAAAAAFUrAQAAAKBqJQAAAABUrQQAAACAqpUAAAAAULUSAAAAAKpWAgAAAEDVSgAAAACoWgkAAAAAVSsBAAAAoGolAAAAAFStBAAAAICqlQAAAABQtRIAAAAAqlYCAAAAQNVKAAAAAKhaCQAAAABVKwEAAACgaiUAAAAAVK0EAAAAgKqVAAAAAFC1EgAAAACqVgIAAABA1UoAAAAAqFoJAAAAAFUrAQAAAKBqJQAAAABUrQQAAACAqpUAAAAAULUSAAAAAKpWAgAAAEDVSgAAAACoWgkAAAAAVSsBAAAAoGolAAAAAFStBAAAAICqlQAAAABQtRIAAAAAqlYCAAAAQNVKAAAAAKhaCQAAAABVKwEAAACgaiUAAAAAVK0EAAAAgKqVAAAAAFC1EgAAAACqVgIAAABA1UoAAAAAqFoJAAAAAFUrAQAAAKBqJQAAAABUrQQAAACAqpUAAAAAULUSAAAAAKpWAgAAAEDVSgAAAACoWgkAAAAAVSsBAAAAoGolAAAAAFStBAAAAICqlQAAAABQtRIAAAAAqlYCAAAAQNVKAAAAAKhaCQAAAABVKwEAAACgaiUAAAAAVK0EAAAAgKqVAAAAAFC1EgAAAACqVgIAAABA1UoAAAAAqFoJAAAAAFUrAQAAAKBqJQAAAABUrQQAAACAqpUAAAAAULUSAAAAAKpWAgAAAEDVSgAAAACoWgkAAAAAVSsBAAAAoGolAAAAAFStBAAAAICqlQAAAABQtRIAAAAAqlYCAAAAQNVKAAAAAKhaCQAAAABVKwEAAACgaiUAAAAAVK0EAAAAgKqVAAAAAFC1EgAAAACqVgIAAABA1UoAAAAAqFoJAAAAAFUrAQAAAKBqJQAAAABUrQQAAACAqpUAAAAAULUSAAAAAKpWAgAAAEDVSgAAAACoWgkAAAAAVSsBAAAAoGolAAAAAFStBAAAAICqlQAAAABQtRIAAAAAqlYCAAAAQNVKAAAAAKhaCQAAAABVKwEAAACgaiUAAAAAVK0EAAAAgKqVAAAAAFC1EgAAAACqVgIAAABA1UoAAAAAqFoJAAAAAFUrAQAAAKBqJQAAAABUrQQAAACAqpUAAAAAULUSAAAAAKpWAgAAAEDVSgAAAACoWgkAAAAAVSsBAAAAoGolAAAAAFStBAAAAICqlQAAAABQtRIAAAAAqlYCAAAAQNVKAAAAAKhaCQAAAABVKwEAAACgaiUAAAAAVK0EAAAAgKqVAAAAAFC1EgAAAACqVgIAAABA1UoAAAAAqFoJAAAAAFUrAQAAAKBqJQAAAABUrQQAAACAqpUAAAAAULUSAAAAAKpWAgAAAEDVSgAAAACoWgkAAAAAVSsBAAAAoGolAAAAAFStBAAAAICqlQAAAABQtRIAAAAAqlYCAAAAQNVKAAAAAKhaCQAAAABVKwEAAACgaiUAAAAAVK0EAAAAgKqVAAAAAFC1EgAAAACqVgIAAABA1UoAAAAAqFoJAAAAAFUrAQAAAKBqJQAAAABUrQQAAACAqpUAAAAAULUSAAAAAKpWAgAAAEDVSgAAAACoWgkAAAAAVSsBAAAAoGolAAAAAFStBAAAAICqlQAAAABQtRIAAAAAqlYCAAAAQNVKAAAAAKhaCQAAAABVKwEAAACgaiUAAAAAVK0EAAAAgKqVAAAAAFC1EgAAAACqVgIAAABA1UoAAAAAqFoJAAAAAFUrAQAAAKBqJQAAAABUrQQAAACAqpUAAAAAULUSAAAAAKpWAgAAAEDVSgAAAACoWgkAAAAAVSsBAAAAoGolAAAAAFStBAAAAICqlQAAAABQtRIAAAAAqlYCAAAAQNVKAAAAAKhaCQAAAABVKwEAAACgaiUAAAAAVK0EAAAAgKqVAAAAAFC1EgAAAACqVgIAAABA1UoAAAAAqFoJAAAAAFUrAQAAAKBqJQAAAABUrQQAAACAqpUAAAAAULUSAAAAAKpWAgAAAEDVSgAAAACoWgkAAAAAVSsBAAAAoGolAAAAAFStBAAAAICqlQAAAABQtRIAAAAAqlYCAAAAQNVKAAAAAKhaCQAAAABVKwEAAACgaiUAAAAAVK0EAAAAgKqVAAAAAFC1EgAAAACqVgIAAABA1UoAAAAAqFoJAAAAAFUrAQAAAKBqJQAAAABUrQQAAACAqpUAAAAAULUSAAAAAKpWAgAAAEDVSgAAAACoWgkAAAAAVSsBAAAAoGolAAAAAFStBAAAAICqlQAAAABQtRIAAAAAqlYCAAAAQNVKAAAAAKhaCQAAAABVKwEAAACgaiUAAAAAVK0EAAAAgKqVAAAAAFC1EgAAAACqVgIAAABA1UoAAAAAqFoJAAAAAFUrAQAAAKBqJQAAAABUrQQAAACAqpUAAAAAULUSAAAAAKpWAgAAAEDVSgAAAACoWgkAAAAAVSsBAAAAoGolAAAAAFStBAAAAICqlQAAAABQtRIAAAAAqlYCAAAAQNVKAAAAAKhaCQAAAABVKwEAAACgaiUAAAAAVK0EAAAAgKqVAAAAAFC1EgAAAACqVgIAAABA1boDALws41dcLuus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tAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABNqwAAAADQtAoAAAAATasAAAAA0LQKAAAAAE2rAAAAANC0CgAAAABN+z/7oWY8fbpdugAAAABJRU5ErkJggg==" alt="ChatHouse" />
+  <div class="kicker">Documentation produit</div>
+  <h1>Manuel des écrans</h1>
+  <div class="sub">Guide de référence — rôle, fonctions &amp; accès de chaque écran</div>
+  <div class="rule"></div>
+  <div class="big">53<small> écrans</small></div>
+  <div class="meta">
+    14 zones fonctionnelles · sous <code>src/features/</code><br/>
+    Basé sur l'audit du code source réel (lecture seule)<br/>
+    28 juin 2026
+  </div>
+</div>
+
+<h2>Carte de navigation</h2>
+<div class="nav small">
+L'app s'articule autour de 4 navigateurs :
+<ul style="margin:6px 0;">
+  <li><b>RootNavigator</b> — aiguille selon l'état d'auth : Onboarding → Auth → Main.</li>
+  <li><b>AuthNavigator</b> — inscription/connexion (téléphone → OTP → nom → username).</li>
+  <li><b>OnboardingNavigator</b> — intro + intérêts + profil + permissions.</li>
+  <li><b>MainNavigator</b> — onglets : <b>Salons</b>, <b>Messages</b>, <b>Carte</b>, <b>Réglages</b>. Les écrans Profil, Clubs, Events, Replays, Explore, Admin, Extensions, Confidentialité sont empilés dans ces stacks.</li>
+</ul>
+<span class="muted">Hors des 53 : <code>AnimatedSplashScreen</code> (démarrage, dans <code>shared/</code>) et <code>renderScreen.tsx</code> (utilitaire de test).</span>
+</div>
+
+<table class="toc small">
+<tr><td class="n">1</td><td>Authentification</td><td class="c">6</td><td class="n">8</td><td>Notifications</td><td class="c">1</td></tr>
+<tr><td class="n">2</td><td>Onboarding</td><td class="c">4</td><td class="n">9</td><td>Profil &amp; Identité</td><td class="c">4</td></tr>
+<tr><td class="n">3</td><td>Hallway &amp; Salons audio</td><td class="c">5</td><td class="n">10</td><td>Messages / Backchannel</td><td class="c">6</td></tr>
+<tr><td class="n">4</td><td>Événements</td><td class="c">1</td><td class="n">11</td><td>Réglages</td><td class="c">3</td></tr>
+<tr><td class="n">5</td><td>Clubs / Houses</td><td class="c">6</td><td class="n">12</td><td>Confidentialité &amp; Légal</td><td class="c">4</td></tr>
+<tr><td class="n">6</td><td>Carte</td><td class="c">1</td><td class="n">13</td><td>Extensions</td><td class="c">5</td></tr>
+<tr><td class="n">7</td><td>Découverte</td><td class="c">1</td><td class="n">14</td><td>Administration / Godmode</td><td class="c">6</td></tr>
+</table>
+
+<h2 class="pb">1. Authentification <span class="z">(6 écrans)</span></h2>
+
+<div class="screen"><div class="sh"><span class="num">1</span>LandingScreen</div><div class="role">Écran d'accueil marketing pré-auth.</div>
+<ul><li>Logo animé, 3 atouts (rooms/houses/chat), CTA « Get started » et « Login » (→ Phone). Bouton dev-skip en <code>__DEV__</code> seulement.</li></ul>
+<div class="acc"><b>Accès :</b> premier écran pour un visiteur non connecté.</div></div>
+
+<div class="screen"><div class="sh"><span class="num">2</span>PhoneScreen</div><div class="role">Saisie du numéro de téléphone (étape 1, façon Clubhouse).</div>
+<ul><li>Sélecteur de pays (détection locale), formatage live, validation E.164, case obligatoire « ≥ 16 ans », liens Terms/Privacy → envoi OTP.</li></ul>
+<div class="acc"><b>Accès :</b> depuis Landing.</div></div>
+
+<div class="screen"><div class="sh"><span class="num">3</span>OtpScreen</div><div class="role">Vérification du code SMS.</div>
+<ul><li>6 cases, auto-submit, numéro masqué, 5 tentatives max, renvoi avec compte à rebours 60 s, animation shake sur erreur. Nouvel utilisateur → Name.</li></ul>
+<div class="acc"><b>Accès :</b> après PhoneScreen.</div></div>
+
+<div class="screen"><div class="sh"><span class="num">4</span>NameScreen</div><div class="role">Vrai nom (prénom + nom), avant le username (ordre Clubhouse).</div>
+<ul><li>Prénom obligatoire, nom optionnel ; stockés dans le store d'onboarding.</li></ul>
+<div class="acc"><b>Accès :</b> après OTP (nouvel utilisateur).</div></div>
+
+<div class="screen"><div class="sh"><span class="num">5</span>UsernameScreen</div><div class="role">Choix du @username (finalise la connexion).</div>
+<ul><li>Suggestions via API, validation (3–24 car., <code>[a-z0-9_]</code>) ; promeut le statut à « authentifié ».</li></ul>
+<div class="acc"><b>Accès :</b> après NameScreen.</div></div>
+
+<div class="screen warn"><div class="sh"><span class="num">6</span>WaitlistScreen</div><div class="role">Écran « liste d'attente » + invitation virale.</div>
+<ul><li>Visuel sablier, bouton « Inviter un ami » (partage natif). <b>Écran enregistré mais jamais routé</b> (pas de gating réel à l'entrée).</li></ul>
+<div class="acc gold"><b>Accès :</b> deep-link <code>auth/waitlist</code> uniquement (inatteignable par le flux normal).</div></div>
+
+<h2>2. Onboarding <span class="z">(4 écrans)</span></h2>
+
+<div class="screen"><div class="sh"><span class="num">7</span>WelcomeSlidesScreen</div><div class="role">Carrousel d'intro (4 slides : welcome/rooms/clubs/topics).</div>
+<ul><li>Pagination, dots, Skip ; « vu » persisté → bascule vers Landing.</li></ul>
+<div class="acc"><b>Accès :</b> tout premier lancement de l'app.</div></div>
+
+<div class="screen"><div class="sh"><span class="num">8</span>InterestSelectionScreen</div><div class="role">Sélection des centres d'intérêt / topics.</div>
+<ul><li>Chips multi-sélection, min 3 / max 10, persistés dans le store.</li></ul>
+<div class="acc"><b>Accès :</b> étape d'onboarding (après permission notifs).</div></div>
+
+<div class="screen"><div class="sh"><span class="num">9</span>SetupProfileScreen</div><div class="role">Photo + nom affiché + bio.</div>
+<ul><li>Photo via galerie (upload), import depuis X/Twitter (nom/bio/avatar), bio (150 car.), Skip possible.</li></ul>
+<div class="acc"><b>Accès :</b> étape d'onboarding.</div></div>
+
+<div class="screen"><div class="sh"><span class="num">10</span>NotificationsPermissionScreen</div><div class="role">Demande de permission push.</div>
+<ul><li>Bénéfices listés, bouton « Enable » (prompt OS + token) ou « Not now » (aucun ne bloque le flux).</li></ul>
+<div class="acc"><b>Accès :</b> étape d'onboarding.</div></div>
+
+<h2 class="pb">3. Hallway &amp; Salons audio <span class="z">(5 écrans — cœur de l'app)</span></h2>
+
+<div class="screen"><div class="sh"><span class="num">11</span>RoomFeedScreen</div><div class="role">Le « hallway » : fil des salons live et à venir.</div>
+<ul><li>Liste paginée (pull-to-refresh), filtres (All/Following/Clubs/Tech/Music/Business/Health), cartes salon (catégorie, house, amis présents, avatars, compteurs, Join), bande « Upcoming », strips d'extensions, updates live socket, FAB « Start a room ».</li></ul>
+<div class="acc"><b>Accès :</b> onglet Salons (écran d'accueil principal).</div></div>
+
+<div class="screen"><div class="sh"><span class="num">12</span>RoomScreen</div><div class="role">La salle audio live (cœur de l'app).</div>
+<ul>
+<li>Scène speakers/listeners avec « is speaking » (LiveKit) ; lever/baisser la main + file d'attente.</li>
+<li>Modération complète : mute autrui, inviter à parler, renvoyer au public, nommer modérateur, transférer l'hôte, mute-all, lock, restriction lever-de-main, kick+ban.</li>
+<li>Réactions emoji, captions live on-device, audio en arrière-plan (mini-bar), ping/wave/tip/partage/signalement, mode invisible (listeners).</li>
+</ul>
+<div class="acc"><b>Accès :</b> tap sur un salon (feed, club, carte, deep-link).</div></div>
+
+<div class="screen"><div class="sh"><span class="num">13</span>CreateRoomScreen</div><div class="role">Création de salon (immédiat ou planifié).</div>
+<ul><li>Titre/description, visibilité Open/Social/Closed, attacher à une House, topics (max 5), co-hôtes (max 5), planification (presets ou date/heure), toggle enregistrement.</li></ul>
+<div class="acc"><b>Accès :</b> FAB du RoomFeed.</div></div>
+
+<div class="screen"><div class="sh"><span class="num">14</span>InviteToRoomScreen</div><div class="role">Inviter des utilisateurs dans un salon existant.</div>
+<ul><li>Recherche débouncée, sélection multiple (max 50), envoi groupé qui notifie les invités.</li></ul>
+<div class="acc"><b>Accès :</b> depuis RoomScreen (action inviter).</div></div>
+
+<div class="screen"><div class="sh"><span class="num">15</span>ReplaysScreen</div><div class="role">Replays / enregistrements récents des salons.</div>
+<ul><li>Liste (titre, hôte, date), lecteur audio inline (play/pause/progression). Pas de scrub ni transcript.</li></ul>
+<div class="acc"><b>Accès :</b> header du RoomFeed / profil.</div></div>
+
+<h2>4. Événements <span class="z">(1 écran)</span></h2>
+
+<div class="screen"><div class="sh"><span class="num">16</span>EventsScreen</div><div class="role">Salons planifiés (à venir + les miens) avec RSVP.</div>
+<ul><li>Onglets Upcoming/Mine, carte événement (hôte, titre, temps relatif, nb RSVP), RSVP/annulation, ajout au calendrier (.ics), host : reprogrammer / annuler.</li></ul>
+<div class="acc"><b>Accès :</b> header du RoomFeed.</div></div>
+
+<h2>5. Clubs / « Houses » <span class="z">(6 écrans)</span></h2>
+
+<div class="screen"><div class="sh"><span class="num">17</span>HouseListScreen</div><div class="role">Liste des clubs (mes clubs + découverte).</div>
+<ul><li>Onglets Mine/Discover, rangée club (icône, nom, catégorie, nb membres), FAB création. (Recherche de clubs via Explore.)</li></ul>
+<div class="acc"><b>Accès :</b> depuis le profil / les réglages (« member of »).</div></div>
+
+<div class="screen"><div class="sh"><span class="num">18</span>HouseDetailScreen</div><div class="role">Fiche club complète.</div>
+<ul><li>Cover, règles/charte, membres + rôles admin/mod/member, CTA selon privacy (Rejoindre / Demander / Sur invitation), inbox des demandes d'adhésion (SOCIAL), rooms live/planifiées/passées, partage, inviter, quitter, « Gérer » (admins).</li></ul>
+<div class="acc"><b>Accès :</b> tap sur un club (liste, explore, deep-link <code>/h/:id</code>).</div></div>
+
+<div class="screen"><div class="sh"><span class="num">19</span>CreateHouseScreen</div><div class="role">Création d'un club.</div>
+<ul><li>Upload d'icône, nom/description/règles, privacy à 3 niveaux (Open/Social/Private).</li></ul>
+<div class="acc"><b>Accès :</b> FAB de HouseList.</div></div>
+
+<div class="screen"><div class="sh"><span class="num">20</span>ManageHouseScreen</div><div class="role">Édition d'un club (admins) + suppression (owner).</div>
+<ul><li>Édition nom/description/règles/privacy ; zone de danger « Delete » réservée à l'owner.</li></ul>
+<div class="acc"><b>Accès :</b> HouseDetail → engrenage « Gérer » (admins).</div></div>
+
+<div class="screen"><div class="sh"><span class="num">21</span>HouseInvitationScreen</div><div class="role">Acceptation d'une invitation reçue.</div>
+<ul><li>Affiche icône/nom/nb membres du club, boutons Accepter (→ HouseDetail) / Refuser.</li></ul>
+<div class="acc"><b>Accès :</b> deep-link / notification CLUB_INVITE.</div></div>
+
+<div class="screen"><div class="sh"><span class="num">22</span>InviteMemberScreen</div><div class="role">Inviter des membres dans un club.</div>
+<ul><li>Lien d'invitation copiable/partageable + recherche d'utilisateurs avec invite ciblée.</li></ul>
+<div class="acc"><b>Accès :</b> HouseDetail → « Invite members ».</div></div>
+
+<h2>6. Carte <span class="z">(1 écran)</span></h2>
+
+<div class="screen"><div class="sh"><span class="num">23</span>MapsScreen</div><div class="role">Carte géo-sociale des abonnés en ligne (exclusif ChatHouse).</div>
+<ul><li>Carte OpenStreetMap, position perso (pulse), markers followers (rôle/micro live), recherche/filtre, auto-centrage, Ghost Mode (invisibilité) + broadcast position, mini-carte au tap (rejoindre la room / envoyer un DM), gestion des permissions.</li></ul>
+<div class="acc"><b>Accès :</b> onglet Carte.</div></div>
+
+<h2>7. Découverte &amp; Recherche <span class="z">(1 écran)</span></h2>
+
+<div class="screen"><div class="sh"><span class="num">24</span>ExploreScreen</div><div class="role">Recherche unifiée + feed de tendances.</div>
+<ul><li>Feed (query vide) : Trending rooms / Popular clubs / People to follow ; Résultats : users/clubs/rooms/topics ; filtres langue + catégorie, recherches récentes, « Browse topics ».</li></ul>
+<div class="acc"><b>Accès :</b> header du RoomFeed (loupe).</div></div>
+
+<h2>8. Notifications <span class="z">(1 écran)</span></h2>
+
+<div class="screen"><div class="sh"><span class="num">25</span>NotificationsScreen</div><div class="role">Centre de notifications.</div>
+<ul><li>Onglets all/rooms/social/clubs ; 9 types (follow, room_invite, club_invite, room_starting, mention/speaker_request, wave, hand_accepted, rsvp_reminder, new_message) ; deep-link au tap, mark-as-read (un/tous), swipe-to-delete, badge non-lus.</li></ul>
+<div class="acc"><b>Accès :</b> header du RoomFeed (cloche).</div></div>
+
+<h2 class="pb">9. Profil &amp; Identité <span class="z">(4 écrans)</span></h2>
+
+<div class="screen"><div class="sh"><span class="num">26</span>ProfileScreen</div><div class="role">Profil (soi ou autrui).</div>
+<ul>
+<li>Identité complète : avatar+online, vrai nom, @username copiable, Joined, Nominated by, bio, liens Twitter/Instagram, badges, liens custom, stats following/followers.</li>
+<li>Actions autrui : Follow/Unfollow, Wave, bannière « en direct », Block/Report, Share. Self : Edit, events à venir, replays publics, « qui a vu mon profil » (premium), mes Houses, rooms récentes.</li>
+</ul>
+<div class="acc"><b>Accès :</b> tap sur un avatar/nom partout ; le sien via Réglages.</div></div>
+
+<div class="screen"><div class="sh"><span class="num">27</span>EditProfileScreen</div><div class="role">Édition du profil.</div>
+<ul><li>Photo, prénom/nom, display name, username, bio (150), handles Twitter/Instagram, DM privacy (everyone/followers/mutual/nobody).</li></ul>
+<div class="acc"><b>Accès :</b> ProfileScreen (self) / Settings → Edit.</div></div>
+
+<div class="screen"><div class="sh"><span class="num">28</span>FollowersScreen</div><div class="role">Listes Followers / Following.</div>
+<ul><li>Onglets, rangée user avec Follow/Following inline.</li></ul>
+<div class="acc"><b>Accès :</b> tap sur les compteurs followers/following.</div></div>
+
+<div class="screen"><div class="sh"><span class="num">29</span>TipHistoryScreen</div><div class="role">Historique des pourboires (monétisation).</div>
+<ul><li>Liste sent/received, montant formaté, date, sens (lecture seule ; l'envoi se fait via la feuille de tip en room).</li></ul>
+<div class="acc"><b>Accès :</b> Réglages (si paiements configurés).</div></div>
+
+<h2>10. Messages / « Backchannel » <span class="z">(6 écrans)</span></h2>
+
+<div class="screen"><div class="sh"><span class="num">30</span>MessagesScreen</div><div class="role">Liste des conversations (DM 1:1 + groupes).</div>
+<ul><li>Conversations (avatar/nom/dernier message/horodatage/badge non-lus), aperçu « voix » 🎤, section Groups séparée, updates socket, bouton nouveau message.</li></ul>
+<div class="acc"><b>Accès :</b> onglet Messages.</div></div>
+
+<div class="screen"><div class="sh"><span class="num">31</span>ChatDetailScreen</div><div class="role">Fil de discussion DM 1:1.</div>
+<ul><li>Texte + notes vocales (record→upload), liste inversée, séparateurs de date, indicateur de saisie, marquage lu auto, suppression de ses messages, emojis. (Appels/pièces jointes = « Coming soon ».)</li></ul>
+<div class="acc"><b>Accès :</b> tap sur une conversation / un profil.</div></div>
+
+<div class="screen"><div class="sh"><span class="num">32</span>NewMessageScreen</div><div class="role">Choisir un ou plusieurs destinataires.</div>
+<ul><li>Recherche débouncée ; 1 sélectionné → DM 1:1, ≥2 → crée un groupe.</li></ul>
+<div class="acc"><b>Accès :</b> MessagesScreen → crayon.</div></div>
+
+<div class="screen"><div class="sh"><span class="num">33</span>GroupChatScreen</div><div class="role">Fil de discussion de groupe.</div>
+<ul><li>Texte + notes vocales de groupe, brouillon restauré, nom de l'expéditeur, titre auto-dérivé, accès GroupInfo.</li></ul>
+<div class="acc"><b>Accès :</b> depuis MessagesScreen (groupe) / création.</div></div>
+
+<div class="screen"><div class="sh"><span class="num">34</span>GroupInfoScreen</div><div class="role">Gestion d'un groupe.</div>
+<ul><li>Renommer (owner), liste des membres, retirer un membre (owner), ajouter des personnes, quitter le groupe.</li></ul>
+<div class="acc"><b>Accès :</b> GroupChat → header/info.</div></div>
+
+<div class="screen"><div class="sh"><span class="num">35</span>AddGroupMembersScreen</div><div class="role">Ajouter des membres à un groupe.</div>
+<ul><li>Recherche débouncée, sélection multiple, membres déjà présents grisés.</li></ul>
+<div class="acc"><b>Accès :</b> GroupInfo → « Ajouter ».</div></div>
+
+<h2 class="pb">11. Réglages <span class="z">(3 écrans)</span></h2>
+
+<div class="screen"><div class="sh"><span class="num">36</span>SettingsScreen</div><div class="role">Profil personnel + hub de réglages.</div>
+<ul>
+<li>En-tête profil + stats ; éditer le profil, créer une house, « member of ».</li>
+<li>Confidentialité/RGPD (consentement analytics, Politique, CGU, Export des données, Comptes bloqués, thème) ; Compte (inviter des amis, Notifications, Extensions, Supprimer le compte) ; déconnexion.</li>
+<li>Entrées conditionnelles : Premium, Tip history, Godmode/Admin (si rôle ≥ MODERATOR).</li>
+</ul>
+<div class="acc"><b>Accès :</b> onglet Réglages.</div></div>
+
+<div class="screen"><div class="sh"><span class="num">37</span>NotificationSettingsScreen</div><div class="role">Réglages de notifications granulaires.</div>
+<ul><li>9 catégories de toggles, sélecteur de fréquence (infrequent/normal/frequent), mute par club et mute par utilisateur.</li></ul>
+<div class="acc"><b>Accès :</b> Réglages → Notifications.</div></div>
+
+<div class="screen"><div class="sh"><span class="num">38</span>BlockedUsersScreen</div><div class="role">Gérer les comptes bloqués.</div>
+<ul><li>Liste des bloqués, débloquer par ligne.</li></ul>
+<div class="acc"><b>Accès :</b> Réglages → Comptes bloqués.</div></div>
+
+<h2>12. Confidentialité &amp; Légal <span class="z">(4 écrans)</span></h2>
+
+<div class="screen"><div class="sh"><span class="num">39</span>DataExportScreen</div><div class="role">Export RGPD des données personnelles.</div>
+<ul><li>Génère l'archive JSON complète et la transmet via la feuille de partage native ; affiche la taille ; copie presse-papiers opt-in + bouton d'effacement.</li></ul>
+<div class="acc"><b>Accès :</b> Réglages → Confidentialité → Exporter mes données.</div></div>
+
+<div class="screen"><div class="sh"><span class="num">40</span>DeleteAccountScreen</div><div class="role">Demande de suppression de compte.</div>
+<ul><li>Avertissements (délai de grâce, conséquences), saisie de la phrase « DELETE », double confirmation → suppression + déconnexion.</li></ul>
+<div class="acc"><b>Accès :</b> Réglages → Supprimer mon compte.</div></div>
+
+<div class="screen"><div class="sh"><span class="num">41</span>PrivacyPolicyScreen</div><div class="role">Politique de confidentialité (statique, embarquée).</div>
+<ul><li>Document légal 7 sections (i18n), date de mise à jour, email de contact cliquable.</li></ul>
+<div class="acc"><b>Accès :</b> Réglages → Politique de confidentialité.</div></div>
+
+<div class="screen"><div class="sh"><span class="num">42</span>TermsScreen</div><div class="role">Conditions d'utilisation (statique, embarquée).</div>
+<ul><li>Document légal 8 sections (i18n), date de mise à jour.</li></ul>
+<div class="acc"><b>Accès :</b> Réglages → Conditions d'utilisation.</div></div>
+
+<h2>13. Extensions <span class="z">(5 écrans)</span></h2>
+
+<div class="screen"><div class="sh"><span class="num">43</span>ExtActivityFeedScreen</div><div class="role">Flux d'activité temps réel.</div>
+<ul><li>Notifications REST + préfixe socket (room démarrée par un suivi, demande d'adhésion, wave), dédup, plafond 200, mark-as-read, pull-to-refresh.</li></ul>
+<div class="acc gold"><b>Accès :</b> route <code>ActivityFeed</code> (programmatique/deep-link ; pas de bouton in-app direct).</div></div>
+
+<div class="screen"><div class="sh"><span class="num">44</span>ExtSuggestedFollowsScreen</div><div class="role">Suggestions de personnes à suivre.</div>
+<ul><li>Liste (jusqu'à 30) avec raison (intérêts communs / amis d'amis / followers), Follow optimiste, tap → profil.</li></ul>
+<div class="acc"><b>Accès :</b> dernière étape d'onboarding (route <code>onboarding/suggested-follows</code>).</div></div>
+
+<div class="screen"><div class="sh"><span class="num">45</span>ExtTopicExplorerScreen</div><div class="role">Explorateur de 150+ sujets.</div>
+<ul><li>Navigation 2 volets (catégories / sous-catégories), recherche fuzzy, bande de sujets tendance.</li></ul>
+<div class="acc"><b>Accès :</b> ExploreScreen → « Browse topics ».</div></div>
+
+<div class="screen"><div class="sh"><span class="num">46</span>ExtSettingsScreen</div><div class="role">Réglages additionnels.</div>
+<ul><li>Thème ; qualité audio (Standard/High/Music) ; moteur audio (audio spatial 3D, suppression de bruit, mode drop-in) ; confidentialité (profil privé, autoriser waves/pings, visibilité carte).</li></ul>
+<div class="acc"><b>Accès :</b> Réglages → Extensions.</div></div>
+
+<div class="screen warn"><div class="sh"><span class="num">47</span>ExtPlaygroundScreen</div><div class="role">Banc de QA développeur (composants en isolation).</div>
+<ul><li>Rend les composants d'extension V1–V15 avec champs de test (room id, intérêts) et actions (wave, partage, réactions).</li></ul>
+<div class="acc gold"><b>Accès :</b> aucun (écran de test, non câblé ; à monter manuellement en QA).</div></div>
+
+<h2 class="pb">14. Administration / « Godmode » <span class="z">(6 écrans — rôle ≥ MODERATOR)</span></h2>
+
+<div class="screen"><div class="sh"><span class="num">48</span>AdminHomeScreen</div><div class="role">Tableau de bord du panneau d'administration.</div>
+<ul><li>KPI temps réel (users totaux/online, salons live, signalements ouverts, suspendus, nouveaux 24h/7j, messages 24h) ; tuiles (Utilisateurs, Signalements [badge], Salons [≥ADMIN], Journal d'audit [SUPER_ADMIN]) ; exports CSV (SUPER_ADMIN).</li></ul>
+<div class="acc"><b>Accès :</b> Réglages → Godmode (visible si ≥ MODERATOR ; re-vérifié serveur, 403 sinon).</div></div>
+
+<div class="screen"><div class="sh"><span class="num">49</span>AdminUsersScreen</div><div class="role">Recherche &amp; liste paginée des utilisateurs.</div>
+<ul><li>Recherche débouncée + filtre par rôle, liste infinie (curseur), badges rôle/Suspendu/Supprimé, tap → fiche.</li></ul>
+<div class="acc"><b>Accès :</b> AdminHome → Utilisateurs.</div></div>
+
+<div class="screen"><div class="sh"><span class="num">50</span>AdminUserDetailScreen</div><div class="role">Fiche utilisateur + actions de modération.</div>
+<ul><li>Profil complet + état suspension ; suspendre (1h/24h/7j/permanent + motif) / lever ; changer rôle, supprimer, impersonation (SUPER_ADMIN) ; garde-fou de hiérarchie (cible de rang inférieur seulement).</li></ul>
+<div class="acc"><b>Accès :</b> AdminUsers → tap utilisateur.</div></div>
+
+<div class="screen"><div class="sh"><span class="num">51</span>AdminRoomsScreen</div><div class="role">Salons live + fermeture forcée (rôle ≥ ADMIN).</div>
+<ul><li>Liste des salons live (hôte, titre, participants, badge LIVE), fermer un salon avec motif (notifie + coupe LiveKit).</li></ul>
+<div class="acc"><b>Accès :</b> AdminHome → Salons (si ≥ ADMIN).</div></div>
+
+<div class="screen"><div class="sh"><span class="num">52</span>AdminReportsScreen</div><div class="role">File de modération des signalements.</div>
+<ul><li>Onglets Ouverts/Résolus/Tous, carte (type USER/ROOM, motif, cible, rapporteur, date), actions Rejeter / Résoudre.</li></ul>
+<div class="acc"><b>Accès :</b> AdminHome → Signalements.</div></div>
+
+<div class="screen"><div class="sh"><span class="num">53</span>AdminAuditLogScreen</div><div class="role">Journal d'audit en lecture seule (SUPER_ADMIN).</div>
+<ul><li>100 dernières actions privilégiées (rôle, suspension, suppression, fermeture salon, résolution signalement, accès Godmode, impersonation) avec acteur, cible, métadonnées, horodatage, IP.</li></ul>
+<div class="acc"><b>Accès :</b> AdminHome → Journal d'audit (SUPER_ADMIN uniquement).</div></div>
+
+<footer>ChatHouse — Manuel des écrans · 53 écrans · Généré le 28/06/2026 · Analyse basée sur le code source (lecture seule) · Document interne.</footer>
+
+</body>
+</html>
