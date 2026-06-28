@@ -1,8 +1,10 @@
 {
-  "java.configuration.updateBuildConfiguration": "interactive",
+  "//": "React Native app — the Android build runs via ./gradlew / the react-native CLI, NOT the VSCode Java language server. We run that server in LightWeight mode so it never imports or builds the Gradle plugins under node_modules (@react-native/gradle-plugin, expo-*-gradle-plugin, @livekit/*-expo-plugin). In Standard/Hybrid mode it imported them and reported phantom 'Missing Gradle project configuration folder: .settings' / 'missing required library …shared-testutil.jar' / 'project cannot be built' errors that NEVER affected the real Gradle build. There is no Java application code in this repo (native code is Kotlin, handled by a separate extension), so LightWeight loses nothing here. Revert java.server.launchMode to 'Hybrid' if you ever need full Java project features.",
+  "java.server.launchMode": "LightWeight",
+  "java.configuration.updateBuildConfiguration": "disabled",
   "java.compile.nullAnalysis.mode": "automatic",
-  "//": "This is a React Native app — the Android build runs via ./gradlew / react-native CLI, NOT the VSCode Java/Gradle language server. The Red Hat Java extension was auto-importing Gradle plugins under node_modules (@react-native/gradle-plugin, expo-*-gradle-plugin) and reporting missing-jar / build-path errors that DO NOT affect the real build. Excluding node_modules from import silences them.",
   "java.import.exclusions": ["**/node_modules/**", "**/.git/**", "**/build/**"],
   "java.import.gradle.enabled": false,
+  "java.import.maven.enabled": false,
   "gradle.nestedProjects": false
 }
