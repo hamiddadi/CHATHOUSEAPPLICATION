@@ -310,13 +310,22 @@ const run = async () => {
   console.log('\n▸ Phase 9 — direct messages over socket (mutual-follow gate + delivery)');
   const pairs = [];
   for (let i = 0; i + 1 < Math.min(sockets.length, 20); i += 2) pairs.push([sockets[i], sockets[i + 1]]);
-  // 9a — gate: send before mutual follow should be rejected (ack=false)
+  const byId = new Map(users.map(u => [u.id, u]));
+  // 9a — gate: a send is allowed ONLY between mutual follows (CHAT_004). Phase 3
+  //   wired a *random* follow graph, so a DM pair may ALREADY be mutual — which
+  //   would make the send legitimately succeed and look like a gate failure.
+  //   First tear down both directions (idempotent) to force a deterministic
+  //   non-mutual state, THEN the send must be rejected (ack=false).
+  await mapLimit(pairs, CONCURRENCY, async ([a, b]) => {
+    const ua = byId.get(a.userId), ub = byId.get(b.userId);
+    await http('DELETE', `/api/follow/${ub.id}`, { token: ua.token });
+    await http('DELETE', `/api/follow/${ua.id}`, { token: ub.token });
+  });
   await mapLimit(pairs, CONCURRENCY, async ([a, b]) => {
     const ok = await emitAck(a, 'chat:send', { receiverId: b.userId, content: `gated ${RUN}` });
     record('22 dm-gate (rejects non-mutual)', ok === false, `ack=${ok} (expected false)`);
   });
   // 9b — establish mutual follow for each pair (REST)
-  const byId = new Map(users.map(u => [u.id, u]));
   await mapLimit(pairs, CONCURRENCY, async ([a, b]) => {
     const ua = byId.get(a.userId), ub = byId.get(b.userId);
     await http('POST', `/api/follow/${ub.id}`, { token: ua.token });
@@ -364,7 +373,12 @@ const run = async () => {
   });
   await mapLimit(rooms, 5, async room => {
     const e = await http('POST', `/api/rooms/${room.id}/end`, { token: room.host.token });
-    record('30 room-end', e.ok, `status=${e.status} ${JSON.stringify(e.body?.error ?? '')}`);
+    // A room auto-closes (ROOM-04) when its host leaves it empty — which the
+    // socket `room:leave` above can trigger before this explicit /end. So an
+    // already-ended room (410 ROOM_004) is a valid terminal state for /end,
+    // not a failure: the goal (room is ended) is met either way.
+    const ended = e.ok || (e.status === 410 && e.body?.error?.code === 'ROOM_004');
+    record('30 room-end', ended, `status=${e.status} ${JSON.stringify(e.body?.error ?? '')}`);
   });
   sockets.forEach(s => s.disconnect());
 
