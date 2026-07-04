@@ -35,6 +35,54 @@ const toUser = (u: PublicUser) => ({
 
 const uniq = (xs: string[]): string[] => [...new Set(xs)];
 
+/**
+ * Groups must honour the Block table the same way DMs do (see
+ * chat.service `assertCanMessage`): a block is a symmetric cut, so a blocked
+ * user must not be able to reach their blocker through a group either. This
+ * asserts that `userId` shares no block (in EITHER direction) with any id in
+ * `others`. Throws GROUP_006 on the first offending pair.
+ *
+ * Without this, groups were a documented blocking bypass (audit 28/06): a
+ * blocked user could create a group with, be added to, or message their
+ * blocker. One indexed read over the Block table covers every candidate id.
+ */
+const assertNoBlockBetween = async (userId: string, others: string[]): Promise<void> => {
+  const candidates = others.filter(id => id !== userId);
+  if (candidates.length === 0) return;
+  const blocked = await prisma.block.findFirst({
+    where: {
+      OR: [
+        { blockerId: userId, blockedId: { in: candidates } },
+        { blockedId: userId, blockerId: { in: candidates } },
+      ],
+    },
+    select: { id: true },
+  });
+  if (blocked) throw new AppError('GROUP_006');
+};
+
+/**
+ * Pairwise block gate over the WHOLE membership. `assertNoBlockBetween` only
+ * tests one pivot user against the rest, so it never catches a block between
+ * two *other* members — e.g. a third party C creating a group [C, A, B] where
+ * A blocked B, or adding a batch [A, B] where A blocked B. Both slipped the
+ * pivot check and inserted a blocked pair into a shared group (audit 28/06).
+ *
+ * One indexed read fetches every Block whose blocker AND blocked are both in
+ * `members`; any such row is, by definition, a blocked pair inside the group
+ * (in either direction — `@@unique([blockerId, blockedId])` is directional, so
+ * both A→B and B→A land here). Throws GROUP_006 on the first offending pair.
+ */
+const assertNoBlockWithin = async (members: string[]): Promise<void> => {
+  const ids = uniq(members);
+  if (ids.length < 2) return;
+  const blocked = await prisma.block.findFirst({
+    where: { blockerId: { in: ids }, blockedId: { in: ids } },
+    select: { id: true },
+  });
+  if (blocked) throw new AppError('GROUP_006');
+};
+
 // A GroupMessage row joined with its sender, as returned by the Prisma queries
 // below. Voice notes carry { kind: 'VOICE', audioUrl, audioDurationMs } and a
 // null content; text messages carry content and leave the audio fields null.
@@ -92,7 +140,13 @@ export const groupsService = {
     });
     if (found.length !== others.length) throw new AppError('USER_001');
 
+    // A blocked user must not be able to open a group with their blocker — and
+    // that holds for EVERY pair in the group, not just creator↔member: a third
+    // party must not be able to force two users who blocked each other into the
+    // same group. Check the full membership pairwise.
     const allMemberIds = [userId, ...others];
+    await assertNoBlockWithin(allMemberIds);
+
     const conv = await prisma.conversation.create({
       data: {
         title: input.title,
@@ -177,6 +231,9 @@ export const groupsService = {
     const conv = await this.requireMembership(userId, conversationId);
     const memberIds = conv.members.map(m => m.userId);
 
+    // A blocked user must not reach their blocker via a shared group message.
+    await assertNoBlockBetween(userId, memberIds);
+
     const msg = await prisma.groupMessage.create({
       data: { conversationId, senderId: userId, content: input.content },
       include: { sender: { select: publicUser } },
@@ -219,6 +276,9 @@ export const groupsService = {
   async sendVoice(userId: string, conversationId: string, input: SendGroupVoiceInput) {
     const conv = await this.requireMembership(userId, conversationId);
     const memberIds = conv.members.map(m => m.userId);
+
+    // A blocked user must not reach their blocker via a shared group voice note.
+    await assertNoBlockBetween(userId, memberIds);
 
     const msg = await prisma.groupMessage.create({
       data: {
@@ -274,6 +334,11 @@ export const groupsService = {
       });
       const validIds = found.map(u => u.id);
       if (validIds.length > 0) {
+        // A blocked user must not be forced into a group with their blocker.
+        // Check the FULL resulting membership pairwise: not just each new member
+        // against the existing ones, but also the new members against EACH OTHER
+        // — adding a batch [A, B] where A blocked B was inserting both.
+        await assertNoBlockWithin([...existingIds, ...validIds]);
         await prisma.conversationMember.createMany({
           data: validIds.map(id => ({ conversationId, userId: id })),
           skipDuplicates: true,
@@ -284,7 +349,8 @@ export const groupsService = {
   },
 
   async rename(userId: string, conversationId: string, input: RenameGroupInput) {
-    // Any member can rename the thread (Clubhouse-style group chats).
+    // Any member can rename the thread (Clubhouse-style group chats). An empty
+    // title (normalised to null by the schema) reverts to the auto name.
     await this.requireMembership(userId, conversationId);
     await prisma.conversation.update({
       where: { id: conversationId },
@@ -306,12 +372,25 @@ export const groupsService = {
   },
 
   async leave(userId: string, conversationId: string) {
-    await this.requireMembership(userId, conversationId);
+    const conv = await this.requireMembership(userId, conversationId);
     await prisma.conversationMember.deleteMany({ where: { conversationId, userId } });
     // Garbage-collect an empty conversation (cascade removes its messages).
-    const remaining = await prisma.conversationMember.count({ where: { conversationId } });
-    if (remaining === 0) {
+    const remaining = await prisma.conversationMember.findMany({
+      where: { conversationId },
+      orderBy: [{ joinedAt: 'asc' }, { id: 'asc' }],
+      select: { userId: true },
+    });
+    const oldest = remaining[0];
+    if (!oldest) {
       await prisma.conversation.delete({ where: { id: conversationId } });
+    } else if (conv.ownerId === userId) {
+      // The owner left but members remain: hand ownership to the oldest
+      // remaining member so no conversation is left with an orphaned ownerId
+      // (which would strand owner-only actions like removeMember).
+      await prisma.conversation.update({
+        where: { id: conversationId },
+        data: { ownerId: oldest.userId },
+      });
     }
     return { left: true as const };
   },

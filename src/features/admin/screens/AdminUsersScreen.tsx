@@ -48,7 +48,10 @@ const UserRow: React.FC<{ user: AdminUser; onPress: (id: string) => void }> = me
       <Pressable
         onPress={() => onPress(user.id)}
         accessibilityRole="button"
-        accessibilityLabel={`Open ${user.displayName ?? user.username ?? 'user'}`}
+        accessibilityLabel={t('admin.users.openA11y', {
+          defaultValue: 'Open {{name}}',
+          name: user.displayName ?? user.username ?? t('admin.userDetail.user', 'User'),
+        })}
         className="flex-row items-center gap-md p-md rounded-md bg-overlay-white-5"
       >
         <Avatar
@@ -59,10 +62,12 @@ const UserRow: React.FC<{ user: AdminUser; onPress: (id: string) => void }> = me
         />
         <View className="flex-1">
           <View className="flex-row items-center gap-xs">
-            <Text className="text-sm font-body-bold text-white" numberOfLines={1}>
+            <Text className="text-sm font-body-bold text-white shrink" numberOfLines={1}>
               {user.displayName || user.username || '—'}
             </Text>
-            <Text className="text-xs text-ink-dim">@{user.username ?? '—'}</Text>
+            <Text className="text-xs text-ink-dim shrink" numberOfLines={1}>
+              @{user.username ?? '—'}
+            </Text>
           </View>
           <View className="flex-row items-center gap-xs mt-xxs">
             <View style={[styles.roleBadge, { borderColor: roleColor(user.appRole) }]}>
@@ -173,7 +178,12 @@ export const AdminUsersScreen: React.FC<SettingsStackScreenProps<'AdminUsers'>> 
       {isLoading ? (
         <Loader fullscreen accessibilityLabel={t('common.loading', 'Loading…')} />
       ) : isError || !data ? (
-        <EmptyState title={t('admin.users.errorTitle')} description={t('admin.users.errorBody')} />
+        <EmptyState
+          title={t('admin.users.errorTitle')}
+          description={t('admin.users.errorBody')}
+          actionLabel={t('common.retry', 'Retry')}
+          onAction={() => void refetch()}
+        />
       ) : (
         <FlatList
           data={users}

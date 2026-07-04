@@ -10,10 +10,14 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { useTranslation } from 'react-i18next';
 import { Button } from '../../../../shared/components/Button';
 import { colors, spacing } from '../../../../shared/constants/theme';
 import { errorMessage } from '../../../../shared/utils/errorMessage';
 import { useUpdateRoomTitle } from '../../hooks/useRooms';
+// Shared title bounds — CreateRoomScreen and this modal must agree so an edited
+// title can never exceed what the backend's create-time validation accepts.
+import { ROOM_TITLE_MAX as MAX_TITLE, ROOM_TITLE_MIN as MIN_TITLE } from '../../constants';
 
 interface TitleEditModalProps {
   visible: boolean;
@@ -22,11 +26,9 @@ interface TitleEditModalProps {
   onClose: () => void;
 }
 
-const MAX_TITLE = 120;
-const MIN_TITLE = 3;
-
 export const TitleEditModal: React.FC<TitleEditModalProps> = memo(
   ({ visible, roomId, initialTitle, onClose }) => {
+    const { t } = useTranslation();
     const [draft, setDraft] = useState(initialTitle);
     const updateTitle = useUpdateRoomTitle();
 
@@ -48,47 +50,57 @@ export const TitleEditModal: React.FC<TitleEditModalProps> = memo(
         { roomId, title: trimmed },
         {
           onSuccess: () => onClose(),
-          onError: e => Alert.alert('Erreur', errorMessage(e, 'Échec')),
+          onError: e =>
+            Alert.alert(
+              t('titleEdit.errorTitle', 'Error'),
+              errorMessage(e, t('titleEdit.errorBody', 'Failed to update the title.')),
+            ),
         },
       );
     };
 
     return (
       <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-        <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="Fermer">
+        <Pressable
+          style={styles.backdrop}
+          onPress={onClose}
+          accessibilityLabel={t('titleEdit.closeA11y', 'Close')}
+        >
           <Pressable style={styles.sheet} onPress={() => undefined}>
             <KeyboardAvoidingView
               behavior={Platform.OS === 'ios' ? 'padding' : undefined}
               style={styles.keyboardContent}
             >
               <View style={styles.handle} />
-              <Text style={styles.title}>Modifier le titre</Text>
+              <Text style={styles.title}>{t('titleEdit.title', 'Edit title')}</Text>
               <TextInput
                 value={draft}
                 onChangeText={setDraft}
-                placeholder="Titre de la room"
+                placeholder={t('titleEdit.placeholder', 'Room title')}
                 placeholderTextColor={colors.textMuted}
                 style={styles.input}
                 maxLength={MAX_TITLE}
                 autoFocus
-                accessibilityLabel="Nouveau titre de la room"
+                accessibilityLabel={t('titleEdit.inputA11y', 'New room title')}
               />
               <Text style={styles.counter}>
                 {trimmed.length} / {MAX_TITLE}
-                {trimmed.length < MIN_TITLE ? ` · min ${MIN_TITLE}` : ''}
+                {trimmed.length < MIN_TITLE
+                  ? ` · ${t('titleEdit.min', 'min {{count}}', { count: MIN_TITLE })}`
+                  : ''}
               </Text>
               <View style={styles.actions}>
                 <Pressable
                   onPress={onClose}
                   style={styles.cancelBtn}
                   accessibilityRole="button"
-                  accessibilityLabel="Annuler"
+                  accessibilityLabel={t('common.cancel', 'Cancel')}
                 >
-                  <Text style={styles.cancelLabel}>Annuler</Text>
+                  <Text style={styles.cancelLabel}>{t('common.cancel', 'Cancel')}</Text>
                 </Pressable>
                 <View style={styles.saveBtnWrap}>
                   <Button
-                    label="Enregistrer"
+                    label={t('common.save', 'Save')}
                     variant="primary"
                     fullWidth
                     disabled={!isValid || trimmed === initialTitle || updateTitle.isPending}

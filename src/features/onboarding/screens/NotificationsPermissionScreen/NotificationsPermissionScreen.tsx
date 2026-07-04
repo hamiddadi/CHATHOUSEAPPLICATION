@@ -1,12 +1,15 @@
 import React, { useCallback, useState } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { Alert, Linking, Pressable, Text, View } from 'react-native';
 import MaterialIcons from '@react-native-vector-icons/material-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { Button } from '../../../../shared/components/Button';
 import { colors, spacing } from '../../../../shared/constants/theme';
-import { pushService } from '../../../notifications/services/pushService';
+import {
+  pushService,
+  type PushPermissionStatus,
+} from '../../../notifications/services/pushService';
 import type { OnboardingStackScreenProps } from '../../../../core/navigation/types';
 
 type Nav = OnboardingStackScreenProps<'NotificationsPermission'>['navigation'];
@@ -34,17 +37,46 @@ export const NotificationsPermissionScreen: React.FC = () => {
 
   const handleEnable = useCallback(async () => {
     setRequesting(true);
+    let status: PushPermissionStatus | undefined;
     try {
       // Requests OS permission (once) and registers the token with the backend.
       // Idempotent and safe to call even if already granted.
-      await pushService.registerWithBackend();
+      status = await pushService.registerWithBackend();
     } catch {
       /* ignore — never block onboarding on a permission/registration failure */
     } finally {
       setRequesting(false);
+      // Always advance first — a refusal must never block the flow. The
+      // explanatory alert (below) then shows on top of the next step.
       goNext();
     }
-  }, [goNext]);
+    if (status === 'denied') {
+      Alert.alert(
+        t('onboarding.notifications.deniedTitle', 'Notifications are off'),
+        t(
+          'onboarding.notifications.deniedBody',
+          'No problem — you can turn them on anytime from your profile settings.',
+        ),
+      );
+    } else if (status === 'blocked') {
+      Alert.alert(
+        t('onboarding.notifications.deniedTitle', 'Notifications are off'),
+        t(
+          'onboarding.notifications.blockedBody',
+          'Notifications are blocked for Chathouse. Enable them in your phone settings to get notified.',
+        ),
+        [
+          { text: t('common.cancel', 'Cancel'), style: 'cancel' },
+          {
+            text: t('onboarding.notifications.openSettings', 'Open settings'),
+            onPress: () => {
+              void Linking.openSettings();
+            },
+          },
+        ],
+      );
+    }
+  }, [goNext, t]);
 
   return (
     <View className="flex-1 bg-background" style={{ paddingTop: insets.top + spacing.xl }}>
@@ -96,6 +128,7 @@ export const NotificationsPermissionScreen: React.FC = () => {
             onPress={goNext}
             accessibilityRole="button"
             disabled={requesting}
+            hitSlop={12}
             className="items-center py-sm"
           >
             <Text className="text-md text-ink-muted">

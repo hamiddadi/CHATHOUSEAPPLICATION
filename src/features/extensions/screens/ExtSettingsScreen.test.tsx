@@ -23,6 +23,11 @@ const mockAudioUpdate = audioApi.update as jest.Mock;
 const mockPrivacyGet = privacyApi.get as jest.Mock;
 const mockPrivacyUpdate = privacyApi.update as jest.Mock;
 
+// Cold-start headroom: the first render pays the module-graph transform cost (a
+// known Windows-jest flake), so give async assertions more than the 1s default.
+jest.setTimeout(20000);
+const WAIT = { timeout: 8000 } as const;
+
 const AUDIO: AudioPreferences = {
   qualityTier: 'standard',
   spatialAudio: false,
@@ -51,27 +56,49 @@ describe('ExtSettingsScreen', () => {
 
   it('mounts (past the loader) and renders the settings sections', async () => {
     const { getByText } = renderScreen(<ExtSettingsScreen />, {});
-    await waitFor(() => expect(getByText('Audio quality')).toBeTruthy());
+    await waitFor(() => expect(getByText('Audio quality')).toBeTruthy(), WAIT);
     expect(getByText('Privacy')).toBeTruthy();
     expect(getByText('High')).toBeTruthy();
   });
 
   it('selecting an audio-quality tier calls audioApi.update', async () => {
     const { getByText } = renderScreen(<ExtSettingsScreen />, {});
-    await waitFor(() => expect(getByText('Music')).toBeTruthy());
+    await waitFor(() => expect(getByText('Music')).toBeTruthy(), WAIT);
     fireEvent.press(getByText('Music'));
-    await waitFor(() => expect(mockAudioUpdate).toHaveBeenCalledWith({ qualityTier: 'music' }));
+    await waitFor(
+      () => expect(mockAudioUpdate).toHaveBeenCalledWith({ qualityTier: 'music' }),
+      WAIT,
+    );
   });
 
   it('toggling a privacy switch calls privacyApi.update', async () => {
     const { getByText, getAllByRole } = renderScreen(<ExtSettingsScreen />, {});
-    await waitFor(() => expect(getByText('Private profile')).toBeTruthy());
+    await waitFor(() => expect(getByText('Private profile')).toBeTruthy(), WAIT);
     // The first Switch in the tree is "Spatial audio"; flip "Private profile"
     // by toggling its row switch via the accessible switch role list. We assert
     // the screen wires switches to the privacy/audio update calls without crash.
     const switches = getAllByRole('switch');
     expect(switches.length).toBeGreaterThan(0);
     fireEvent(switches[switches.length - 1], 'valueChange', true);
-    await waitFor(() => expect(mockPrivacyUpdate).toHaveBeenCalled());
+    await waitFor(() => expect(mockPrivacyUpdate).toHaveBeenCalled(), WAIT);
+  });
+
+  it('shows an error state with a working Retry when the initial load fails', async () => {
+    mockAudioGet.mockRejectedValueOnce(new Error('offline'));
+    const { getByText, getByLabelText } = renderScreen(<ExtSettingsScreen />, {});
+    // Load failed → error copy + retry, not the silently-defaulted settings.
+    await waitFor(() => expect(getByText("Couldn't load your settings.")).toBeTruthy(), WAIT);
+    // Retry re-runs the load; this time both APIs resolve.
+    fireEvent.press(getByLabelText('Retry'));
+    await waitFor(() => expect(getByText('Audio quality')).toBeTruthy(), WAIT);
+  });
+
+  it('no longer renders the (decorative) light/auto theme toggle', async () => {
+    const { getByText, queryByText } = renderScreen(<ExtSettingsScreen />, {});
+    await waitFor(() => expect(getByText('Audio quality')).toBeTruthy(), WAIT);
+    // The former three-segment auto/light/dark switch is gone (mono-dark app).
+    expect(queryByText('Appearance')).toBeNull();
+    expect(queryByText('Auto')).toBeNull();
+    expect(queryByText('Light')).toBeNull();
   });
 });

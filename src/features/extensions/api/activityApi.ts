@@ -24,9 +24,19 @@ export const activityApi = {
    * `/api/notifications` endpoint — no new backend needed. The response
    * is normalized into the `ActivityItem` shape; both `{ items }` and bare
    * arrays are accepted.
+   *
+   * `cursor` is the `createdAt` ISO timestamp of the last item already loaded;
+   * the backend returns rows strictly older than it (keyset pagination). The
+   * REST surface returns the array directly (no `nextCursor` in the body), so
+   * the caller derives the next cursor from the last row's `createdAt`.
    */
-  async list(filter: 'all' | 'rooms' | 'social' | 'clubs' = 'all'): Promise<ActivityItem[]> {
-    const { data } = await apiClient.get<unknown>('/notifications', { params: { filter } });
+  async list(
+    filter: 'all' | 'rooms' | 'social' | 'clubs' = 'all',
+    cursor?: string,
+  ): Promise<ActivityItem[]> {
+    const { data } = await apiClient.get<unknown>('/notifications', {
+      params: { filter, ...(cursor ? { cursor } : {}) },
+    });
     // The backend wraps responses in the `sendOk` envelope ({ success, data }).
     // Tolerate every shape we might receive without ever returning undefined:
     // bare array, { items }, the envelope, or a paginated { data: [...] } body.

@@ -6,7 +6,9 @@ import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { useQuery } from '@tanstack/react-query';
+import { Avatar } from '../../../../shared/components/Avatar';
 import { GradientView } from '../../../../shared/components/GradientView';
+import { toast } from '../../../../shared/components/Toast';
 import { invitesApi } from '../../../extensions/api/invitesApi';
 import { ExtPremiumRow } from '../../../extensions/components/ExtPremiumRow';
 import { ExtThemeToggle } from '../../../extensions/components/ExtThemeToggle';
@@ -15,8 +17,14 @@ import { useMe } from '../../../profile/hooks/useProfile';
 import { useHouses } from '../../../houses/hooks/useHouses';
 import { isAtLeast, useAdminWhoami } from '../../../admin';
 import { useAnalyticsConsentStore } from '../../../privacy';
-import { DEFAULTS } from '../../../../shared/constants/images';
-import { colors, layout, radii, spacing, withAlpha } from '../../../../shared/constants/theme';
+import {
+  colors,
+  layout,
+  palette,
+  radii,
+  spacing,
+  withAlpha,
+} from '../../../../shared/constants/theme';
 import type { SettingsStackScreenProps } from '../../../../core/navigation/types';
 import type { HouseSummary } from '../../../../shared/types/domain';
 
@@ -28,9 +36,15 @@ const AVATAR_BORDER = 4;
 const BIO_LINE_LIMIT = 4;
 const CLUBS_TILE_COUNT = 4;
 
-const HERO_GRADIENT = ['#0c112e', '#2f3f92', '#070b28'] as const;
-const PRIMARY_GRADIENT = ['#b0c6ff', '#558dff'] as const;
-const ACCENT_GRADIENT = ['#558dff', '#0058ca'] as const;
+// Gradient stops mapped onto the design-system tokens they were hand-picked
+// from (audit QA 2026-07-02: no raw hex in components).
+const HERO_GRADIENT = [
+  colors.background,
+  palette.secondaryContainer,
+  colors.surfaceLowest,
+] as const;
+const PRIMARY_GRADIENT = [colors.primary, colors.primaryContainer] as const;
+const ACCENT_GRADIENT = [colors.primaryContainer, palette.inversePrimary] as const;
 
 const formatCount = (n: number): string => {
   if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;
@@ -111,9 +125,17 @@ export const SettingsScreen: React.FC = () => {
   // across reinstalls. Must be hydrated once at app start (see App.tsx).
   const analyticsEnabled = useAnalyticsConsentStore(s => s.enabled);
   const setAnalyticsEnabled = useAnalyticsConsentStore(s => s.setEnabled);
-  const handleToggleAnalytics = useCallback(() => {
-    void setAnalyticsEnabled(!analyticsEnabled);
-  }, [analyticsEnabled, setAnalyticsEnabled]);
+  const handleToggleAnalytics = useCallback(async () => {
+    try {
+      await setAnalyticsEnabled(!analyticsEnabled);
+    } catch {
+      // AsyncStorage write failed — the store didn't flip, so tell the user
+      // their choice wasn't persisted instead of silently ignoring the tap.
+      toast.error(
+        t('settings.analyticsToggleFailed', "Couldn't save your choice. Please try again."),
+      );
+    }
+  }, [analyticsEnabled, setAnalyticsEnabled, t]);
 
   const thumbStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: withTiming(analyticsEnabled ? 18 : 0, { duration: 200 }) }],
@@ -183,18 +205,32 @@ export const SettingsScreen: React.FC = () => {
 
   const handleToggleBio = useCallback(() => setBioExpanded(v => !v), []);
 
+  // Discoverable sign-out (account section row) — confirmed before running so
+  // a stray tap can't log the user out. The "…" header menu reuses it.
+  const handleSignOut = useCallback(() => {
+    Alert.alert(
+      t('settings.signOutConfirmTitle', 'Sign out?'),
+      t('settings.signOutConfirmBody', 'You can sign back in with your phone number.'),
+      [
+        { text: t('settings.cancel'), style: 'cancel' },
+        {
+          text: t('settings.signOut'),
+          style: 'destructive',
+          onPress: () => {
+            void signOut();
+          },
+        },
+      ],
+      { cancelable: true },
+    );
+  }, [signOut, t]);
+
   const handleMore = useCallback(() => {
     Alert.alert(t('settings.account'), undefined, [
       { text: t('settings.cancel'), style: 'cancel' },
-      {
-        text: t('settings.signOut'),
-        style: 'destructive',
-        onPress: () => {
-          void signOut();
-        },
-      },
+      { text: t('settings.signOut'), style: 'destructive', onPress: handleSignOut },
     ]);
-  }, [signOut, t]);
+  }, [handleSignOut, t]);
 
   const handleCreateHouse = useCallback(() => {
     navigation.navigate('RoomsTab', { screen: 'CreateHouse' });
@@ -261,10 +297,13 @@ export const SettingsScreen: React.FC = () => {
         </View>
         <View style={styles.avatarWrapper} pointerEvents="box-none">
           <View style={styles.avatarRing}>
-            <Image
-              source={{ uri: user?.avatarUrl ?? DEFAULTS.avatar }}
-              style={styles.avatarImage}
-              resizeMode="cover"
+            {/* No photo → neutral initials fallback. Never DEFAULTS.avatar:
+                that was a randomuser.me portrait of a stranger (audit QA
+                2026-07-02 — misleading identity + external dependency). */}
+            <Avatar
+              uri={user?.avatarUrl ?? undefined}
+              name={user?.displayName ?? user?.username ?? undefined}
+              sizeValue={AVATAR_SIZE}
             />
           </View>
         </View>
@@ -530,6 +569,12 @@ export const SettingsScreen: React.FC = () => {
             onPress={() => navigation.navigate('ExtSettings')}
           />
           <SettingsRow
+            icon="logout"
+            label={t('settings.signOut')}
+            hint={t('settings.signOutHint', 'Sign out of this device')}
+            onPress={handleSignOut}
+          />
+          <SettingsRow
             icon="delete-forever"
             label={t('settings.deleteAccount')}
             danger
@@ -598,11 +643,6 @@ const styles = StyleSheet.create({
     borderColor: colors.primary,
     backgroundColor: colors.surfaceHighest,
     overflow: 'hidden',
-  },
-  avatarImage: {
-    width: AVATAR_SIZE,
-    height: AVATAR_SIZE,
-    borderRadius: AVATAR_SIZE / 2,
   },
   statDivider: {
     width: StyleSheet.hairlineWidth,

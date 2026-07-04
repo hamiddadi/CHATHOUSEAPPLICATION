@@ -7,8 +7,11 @@ import { useTranslation } from 'react-i18next';
 import { notifySuccess } from '../../../../shared/utils/haptics';
 import { Loader } from '../../../../shared/components/Loader';
 import { EmptyState } from '../../../../shared/components/EmptyState';
+import { Button } from '../../../../shared/components/Button';
+import { isAppError } from '../../../../shared/services/api/errorHandler';
 import { spacing } from '../../../../shared/constants/theme';
 import type { SettingsStackScreenProps } from '../../../../core/navigation/types';
+import { SHARE_BASE_URL } from '../../../../core/navigation/linking';
 import { useAuthStore } from '../../../auth/store/authStore';
 import {
   useFollow,
@@ -59,7 +62,7 @@ export const ProfileScreen: React.FC = () => {
   const userId = route.params?.userId ?? myId ?? '';
   const isSelf = !!myId && userId === myId;
 
-  const { data: user, isLoading, isError } = useProfile(userId);
+  const { data: user, isLoading, isError, refetch } = useProfile(userId);
   const follow = useFollow();
   const unfollow = useUnfollow();
   const wave = useWave();
@@ -84,10 +87,11 @@ export const ProfileScreen: React.FC = () => {
   // Who viewed my profile (#76) — premium, self only.
   const viewers = useProfileViewers(isSelf);
 
-  const goEdit = useCallback(
-    () => navigation.navigate('SettingsTab', { screen: 'EditProfile' }),
-    [navigation],
-  );
+  // Navigate to EditProfile in the CURRENT host stack (EditProfile is
+  // registered in both the Rooms and Settings navigators) so editing from a
+  // profile opened inside the Rooms tab no longer forces a jump to the
+  // Settings tab.
+  const goEdit = useCallback(() => navigation.navigate('EditProfile'), [navigation]);
 
   const handleCopyUsername = useCallback(async () => {
     if (!user?.username) return;
@@ -120,14 +124,14 @@ export const ProfileScreen: React.FC = () => {
     // Surface follow/unfollow failures: the hook re-syncs the cache on
     // error, but without this the button gives no feedback on a network
     // failure (mirrors EditProfileScreen's save-error Alert).
-    const onError = (): void => Alert.alert('Error', 'Action failed. Please try again.');
+    const onError = (): void => Alert.alert(t('common.error'), t('profile.actionFailed'));
     if (user.isFollowedByMe) unfollow.mutate(user.id, { onError });
     else follow.mutate(user.id, { onError });
-  }, [follow, unfollow, user]);
+  }, [follow, t, unfollow, user]);
   const handleShare = useCallback(async () => {
     if (!user) return;
     const handle = user.username ? `@${user.username}` : user.displayName;
-    const url = `https://app.chathouse.com/u/${user.username ?? user.id}`;
+    const url = `${SHARE_BASE_URL}/u/${user.username ?? user.id}`;
     try {
       await Share.share({
         title: handle,
@@ -196,12 +200,18 @@ export const ProfileScreen: React.FC = () => {
         {
           text: t('profile.blockConfirm'),
           style: 'destructive',
-          onPress: () => block.mutate(user.id),
+          onPress: () =>
+            block.mutate(user.id, {
+              // Leave the now-inaccessible profile instead of letting the
+              // detail query settle on the generic "unavailable" empty state.
+              onSuccess: () => navigation.goBack(),
+              onError: () => Alert.alert(t('common.error'), t('profile.actionFailed')),
+            }),
         },
       ],
       { cancelable: true },
     );
-  }, [block, t, user]);
+  }, [block, navigation, t, user]);
 
   const handleMore = useCallback(() => {
     if (!user) return;
@@ -221,10 +231,17 @@ export const ProfileScreen: React.FC = () => {
   // hydrating): the detail query is disabled, so wait rather than fall
   // through to the "unavailable" empty state.
   if (userId.length === 0 || isLoading) {
-    return <Loader fullscreen accessibilityLabel="Loading profile" />;
+    return <Loader fullscreen accessibilityLabel={t('profile.loading', 'Loading profile')} />;
   }
   if (isError || !user) {
-    return <EmptyState title="Profile unavailable" description="This user may not exist." />;
+    return (
+      <EmptyState
+        title={t('profile.unavailable', 'Profile unavailable')}
+        description={t('profile.userMayNotExist', 'This user may not exist.')}
+        actionLabel={t('common.retry', 'Retry')}
+        onAction={() => void refetch()}
+      />
+    );
   }
 
   const bio = user.bio ?? '';
@@ -369,9 +386,25 @@ export const ProfileScreen: React.FC = () => {
               {t('profile.whoViewed', 'Qui a vu mon profil')}
             </Text>
             {viewers.isError ? (
-              <Text className="text-sm font-body text-ink-muted">
-                {t('profile.whoViewedPremium', '🔒 Réservé aux membres Premium.')}
-              </Text>
+              // Only a 403 means "not premium" — a network/server failure must
+              // not masquerade as a paywall (audit QA 2026-07-02).
+              isAppError(viewers.error) && viewers.error.kind === 'forbidden' ? (
+                <Text className="text-sm font-body text-ink-muted">
+                  {t('profile.whoViewedPremium', '🔒 Réservé aux membres Premium.')}
+                </Text>
+              ) : (
+                <View className="gap-sm items-start">
+                  <Text className="text-sm font-body text-ink-muted">
+                    {t('profile.whoViewedError', 'Impossible de charger les visites.')}
+                  </Text>
+                  <Button
+                    label={t('common.retry', 'Réessayer')}
+                    variant="outline"
+                    size="sm"
+                    onPress={() => void viewers.refetch()}
+                  />
+                </View>
+              )
             ) : (viewers.data?.length ?? 0) === 0 ? (
               <Text className="text-sm font-body text-ink-muted">
                 {t('profile.whoViewedEmpty', 'Personne pour le moment.')}

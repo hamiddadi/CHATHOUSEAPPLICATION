@@ -17,8 +17,9 @@
  */
 import React from 'react';
 import { Alert } from 'react-native';
-import { fireEvent } from '@testing-library/react-native';
+import { act, fireEvent } from '@testing-library/react-native';
 import { roomKeys } from '../../hooks/useRooms';
+import { roomService } from '../../services/roomService';
 import { useCurrentRoomStore } from '../../store/currentRoomStore';
 import type { Room, RoomParticipant } from '../../../../shared/types/domain';
 import {
@@ -74,10 +75,15 @@ const mountRoom = (room: Room) =>
 describe('RoomScreen', () => {
   beforeEach(() => {
     mockAuthenticated();
+    // Clear BEFORE each mount too: a prior test's still-mounted screen (RTL
+    // unmounts in its own afterEach, which may run after ours) can otherwise
+    // leave the shared store holding this room id, skipping mute hydration.
+    useCurrentRoomStore.getState().clear();
     jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
   });
   afterEach(() => {
     resetAuth();
+    useCurrentRoomStore.getState().clear();
     jest.restoreAllMocks();
   });
 
@@ -156,6 +162,56 @@ describe('RoomScreen', () => {
     it('shows the mic button (host can speak) and toggling it does not crash', () => {
       const { getByLabelText } = mountRoom(hostRoom());
       expect(() => fireEvent.press(getByLabelText('Mute microphone'))).not.toThrow();
+    });
+
+    // BLOQUANT regression guard: the mute badge is driven by the shared
+    // currentRoomStore, not screen-local state, and MUST survive a room-detail
+    // refetch (setRoom). Before the fix, a refetch reset isMuted and the mic
+    // silently re-opened while the badge still read "muted".
+    it('drives the mic button from the store and keeps mute across a refetch', () => {
+      // Backend accepts the mute so the optimistic flip is NOT rolled back.
+      jest.spyOn(roomService, 'setMute').mockResolvedValue(undefined as never);
+      // Prevent the onSuccess invalidation from firing an unmocked GET refetch.
+      jest.spyOn(roomService, 'get').mockImplementation(() => new Promise(() => undefined));
+      const { getByLabelText, queryByLabelText, queryClient } = mountRoom(hostRoom());
+
+      // Optimistic mute writes the shared store → the button flips to "Unmute".
+      fireEvent.press(getByLabelText('Mute microphone'));
+      expect(useCurrentRoomStore.getState().isMuted).toBe(true);
+      expect(getByLabelText('Unmute microphone')).toBeTruthy();
+      expect(queryByLabelText('Mute microphone')).toBeNull();
+
+      // Simulate a React Query detail refetch: a fresh room object (same id,
+      // new listenersCount) replaces the cache. This re-runs setRoom.
+      act(() => {
+        queryClient.setQueryData([...roomKeys.detail(ROOM_ID)], {
+          ...hostRoom(),
+          listenersCount: 7,
+        });
+      });
+
+      // The mute flag — and therefore the "Unmute" button — must persist.
+      expect(useCurrentRoomStore.getState().isMuted).toBe(true);
+      expect(getByLabelText('Unmute microphone')).toBeTruthy();
+    });
+
+    // Hydration: entering a room whose own participant row is already muted
+    // (server state) seeds the store so the badge matches on first paint.
+    it('hydrates isMuted from the viewer participant row on room entry', () => {
+      const mutedHostRoom = fakeRoom({
+        hostId: VIEWER_ID,
+        speakers: [
+          {
+            ...hostParticipant(VIEWER_ID),
+            username: 'tester',
+            displayName: 'Test User',
+            audio: 'muted',
+          },
+        ],
+      });
+      const { getByLabelText } = mountRoom(mutedHostRoom);
+      expect(useCurrentRoomStore.getState().isMuted).toBe(true);
+      expect(getByLabelText('Unmute microphone')).toBeTruthy();
     });
   });
 });

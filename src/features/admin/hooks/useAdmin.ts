@@ -19,8 +19,15 @@ export const adminKeys = {
     [...adminKeys.all, 'users', 'infinite', p ?? {}] as const,
   user: (id: string) => [...adminKeys.all, 'user', id] as const,
   reports: (p?: ListReportsParams) => [...adminKeys.all, 'reports', p ?? {}] as const,
+  // Distinct key so the flat useQuery and the infinite query never collide in
+  // cache (different data shapes). Still covered by the `[...all,'reports']`
+  // prefix invalidation run after resolve/dismiss mutations.
+  reportsInfinite: (p?: Omit<ListReportsParams, 'cursor'>) =>
+    [...adminKeys.all, 'reports', 'infinite', p ?? {}] as const,
   rooms: (p?: { live?: boolean }) => [...adminKeys.all, 'rooms', p ?? {}] as const,
   auditLog: (p?: ListAuditLogParams) => [...adminKeys.all, 'audit-log', p ?? {}] as const,
+  auditLogInfinite: (p?: Omit<ListAuditLogParams, 'cursor'>) =>
+    [...adminKeys.all, 'audit-log', 'infinite', p ?? {}] as const,
 };
 
 export const useAdminWhoami = () =>
@@ -124,6 +131,19 @@ export const useAdminReports = (params: ListReportsParams = {}) =>
     queryFn: () => adminService.listReports(params),
   });
 
+/**
+ * Cursor-paginated moderation queue. The screen flattens `data.pages` and
+ * fetches the next page on scroll, so reports beyond the first page are
+ * reachable (the plain `useAdminReports` capped the queue at one page).
+ */
+export const useAdminReportsInfinite = (params: Omit<ListReportsParams, 'cursor'> = {}) =>
+  useInfiniteQuery({
+    queryKey: adminKeys.reportsInfinite(params),
+    queryFn: ({ pageParam }) => adminService.listReports({ ...params, cursor: pageParam }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: last => (last.hasMore ? (last.nextCursor ?? undefined) : undefined),
+  });
+
 export const useResolveReport = () => {
   const qc = useQueryClient();
   return useMutation({
@@ -165,4 +185,17 @@ export const useAdminAuditLog = (params: ListAuditLogParams = {}) =>
   useQuery({
     queryKey: adminKeys.auditLog(params),
     queryFn: () => adminService.listAuditLog(params),
+  });
+
+/**
+ * Cursor-paginated audit log. The screen flattens `data.pages` and fetches the
+ * next page on scroll, so entries beyond the first page are reachable (the plain
+ * `useAdminAuditLog` capped at `limit` entries).
+ */
+export const useAdminAuditLogInfinite = (params: Omit<ListAuditLogParams, 'cursor'> = {}) =>
+  useInfiniteQuery({
+    queryKey: adminKeys.auditLogInfinite(params),
+    queryFn: ({ pageParam }) => adminService.listAuditLog({ ...params, cursor: pageParam }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: last => (last.hasMore ? (last.nextCursor ?? undefined) : undefined),
   });

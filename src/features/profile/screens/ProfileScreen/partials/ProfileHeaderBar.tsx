@@ -22,7 +22,7 @@ const ProfileHeaderBar: React.FC<ProfileHeaderBarProps> = memo(
         <Pressable
           onPress={onBack}
           accessibilityRole="button"
-          accessibilityLabel="Back"
+          accessibilityLabel={t('common.back', 'Back')}
           hitSlop={8}
         >
           <MaterialIcons name="arrow-back" size={24} color={colors.text} />
@@ -41,7 +41,7 @@ const ProfileHeaderBar: React.FC<ProfileHeaderBarProps> = memo(
           <Pressable
             onPress={onShare}
             accessibilityRole="button"
-            accessibilityLabel="Share profile"
+            accessibilityLabel={t('profile.shareProfileA11y', 'Share profile')}
             hitSlop={8}
           >
             <MaterialIcons name="share" size={22} color={colors.text} />

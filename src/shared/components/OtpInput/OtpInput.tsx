@@ -6,7 +6,7 @@ import Animated, {
   withRepeat,
   withTiming,
 } from 'react-native-reanimated';
-import { colors, radii, spacing } from '../../constants/theme';
+import { colors, radii, spacing, withAlpha } from '../../constants/theme';
 
 const OTP_LENGTH = 6;
 
@@ -141,11 +141,11 @@ const styles = StyleSheet.create({
   },
   cellFocused: {
     borderColor: colors.primary,
-    backgroundColor: 'rgba(176, 198, 255, 0.08)',
+    backgroundColor: withAlpha(colors.primary, 0.08),
   },
   cellFilled: {
     borderColor: colors.primary,
-    backgroundColor: 'rgba(176, 198, 255, 0.12)',
+    backgroundColor: withAlpha(colors.primary, 0.12),
   },
   cellError: {
     borderColor: colors.danger,

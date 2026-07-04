@@ -1,6 +1,7 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   profileService,
+  type FollowPage,
   type ProfileViewer,
   type UpdateProfileInput,
 } from '../services/profileService';
@@ -81,19 +82,39 @@ export const useUnfollow = () => {
   });
 };
 
+// The follow-list endpoints cap each page at 50 (follow.controller) and drive
+// the next page off the last row's createdAt cursor. `useInfiniteQuery` walks
+// those pages so the list isn't silently truncated at 50; screens flatten
+// `data.pages` and call `fetchNextPage` on scroll. `initialPageParam` is
+// `undefined` (first page → no cursor); `getNextPageParam` stops when the
+// backend reports `nextCursor: null`.
 export const useFollowers = (userId: string) =>
-  useQuery<User[]>({
+  useInfiniteQuery<FollowPage, Error, FollowPage[], readonly string[], string | undefined>({
     queryKey: profileKeys.followers(userId),
-    queryFn: () => profileService.followers(userId),
+    queryFn: ({ pageParam }) => profileService.followers(userId, pageParam),
+    initialPageParam: undefined,
+    getNextPageParam: lastPage => lastPage.nextCursor ?? undefined,
     enabled: userId.length > 0,
+    select: result => result.pages,
   });
 
 export const useFollowing = (userId: string) =>
-  useQuery<User[]>({
+  useInfiniteQuery<FollowPage, Error, FollowPage[], readonly string[], string | undefined>({
     queryKey: profileKeys.following(userId),
-    queryFn: () => profileService.following(userId),
+    queryFn: ({ pageParam }) => profileService.following(userId, pageParam),
+    initialPageParam: undefined,
+    getNextPageParam: lastPage => lastPage.nextCursor ?? undefined,
     enabled: userId.length > 0,
+    select: result => result.pages,
   });
+
+/**
+ * Flatten the paged follow-list result into a single `User[]`. Screens that
+ * only need the flat roster (NewMessage/AddGroupMembers pickers) call this on
+ * the hook's `data`; the infinite query still drives page fetching on scroll.
+ */
+export const flattenFollowPages = (pages: FollowPage[] | undefined): User[] =>
+  (pages ?? []).flatMap(p => p.items);
 
 export const useSearchUsers = (query: string) =>
   useQuery<User[]>({

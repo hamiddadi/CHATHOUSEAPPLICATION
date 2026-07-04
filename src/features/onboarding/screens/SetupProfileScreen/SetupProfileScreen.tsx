@@ -1,10 +1,12 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import {
   Alert,
   Image,
   KeyboardAvoidingView,
+  Linking,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -46,6 +48,10 @@ export const SetupProfileScreen: React.FC = () => {
   // when the user hasn't picked a local photo on top of it.
   const [remoteAvatarUrl, setRemoteAvatarUrl] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  // Remembers the last successfully-uploaded base64 → URL pair so a second
+  // submit (e.g. after coming back to this screen) doesn't re-upload the
+  // exact same image.
+  const lastUploadRef = useRef<{ base64: string; url: string } | null>(null);
   const twitter = useTwitterImport();
 
   const pickImage = async () => {
@@ -59,6 +65,26 @@ export const SetupProfileScreen: React.FC = () => {
         selectionLimit: 1,
       });
       if (result.didCancel) return;
+      if (result.errorCode) {
+        if (result.errorCode === 'permission') {
+          Alert.alert(
+            t('common.permissionDenied', 'Permission required'),
+            t('onboarding.setupProfile.photoPermission', 'Allow photo access to choose a picture.'),
+            [
+              { text: t('common.cancel', 'Cancel'), style: 'cancel' },
+              {
+                text: t('onboarding.setupProfile.openSettings', 'Open settings'),
+                onPress: () => {
+                  void Linking.openSettings();
+                },
+              },
+            ],
+          );
+        } else {
+          Alert.alert(t('common.error', 'Something went wrong'));
+        }
+        return;
+      }
       const asset = result.assets?.[0];
       if (asset?.uri) {
         setAvatarUri(asset.uri);
@@ -117,15 +143,24 @@ export const SetupProfileScreen: React.FC = () => {
         // avatarUrl. With no pick, leave it null/undefined.
         let avatarUrl: string | null = null;
         if (avatarBase64) {
-          setUploading(true);
-          avatarUrl = await mediaService.uploadAvatar(avatarBase64, avatarMime);
+          if (lastUploadRef.current?.base64 === avatarBase64) {
+            // Same image already uploaded on a previous submit — reuse its URL.
+            avatarUrl = lastUploadRef.current.url;
+          } else {
+            setUploading(true);
+            avatarUrl = await mediaService.uploadAvatar(avatarBase64, avatarMime);
+            lastUploadRef.current = { base64: avatarBase64, url: avatarUrl };
+          }
         } else if (remoteAvatarUrl) {
           // Imported from X — already a remote https URL, pass it through.
           avatarUrl = remoteAvatarUrl;
         }
+        // Pass the (trimmed) values through as-is: '' is an explicit "clear"
+        // the store understands, so a name typed on a first pass can be
+        // erased on a later one instead of silently sticking around.
         setProfile({
-          displayName: values.displayName || undefined,
-          bio: values.bio || undefined,
+          displayName: values.displayName ?? '',
+          bio: values.bio ?? '',
           avatarUrl,
         });
         notifySuccess();
@@ -157,9 +192,14 @@ export const SetupProfileScreen: React.FC = () => {
       className="flex-1 bg-background"
       style={{ paddingTop: insets.top + spacing.xl }}
     >
-      <View
-        className="flex-1 px-xxl gap-xxl"
-        style={{ paddingBottom: insets.bottom + spacing.huge }}
+      <ScrollView
+        className="flex-1"
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={[
+          setupStyles.scrollContent,
+          { paddingBottom: insets.bottom + spacing.huge },
+        ]}
       >
         <View className="gap-md">
           <Text className="text-display font-display text-ink tracking-tight">
@@ -171,6 +211,8 @@ export const SetupProfileScreen: React.FC = () => {
         <View className="items-center mb-md">
           <Pressable
             onPress={pickImage}
+            accessibilityRole="imagebutton"
+            accessibilityLabel={t('onboarding.setupProfile.addPhoto', 'Add a photo')}
             className="items-center justify-center bg-surface w-32 h-32 rounded-full overflow-hidden border border-surface-border"
           >
             {avatarUri ? (
@@ -178,6 +220,14 @@ export const SetupProfileScreen: React.FC = () => {
                 source={{ uri: avatarUri }}
                 style={setupStyles.avatarImage}
                 resizeMode="cover"
+                onError={() => {
+                  // Broken preview (revoked file / dead remote URL): drop the
+                  // avatar state so submit doesn't push an unusable image.
+                  setAvatarUri(null);
+                  setAvatarBase64(null);
+                  setAvatarMime(undefined);
+                  setRemoteAvatarUrl(null);
+                }}
               />
             ) : (
               <MaterialIcons name="camera-alt" size={40} color={colors.textMuted} />
@@ -261,12 +311,17 @@ export const SetupProfileScreen: React.FC = () => {
             <Text className="text-md text-ink-muted">{t('onboarding.setupProfile.skip')}</Text>
           </Pressable>
         </View>
-      </View>
+      </ScrollView>
     </KeyboardAvoidingView>
   );
 };
 
 const setupStyles = StyleSheet.create({
+  scrollContent: {
+    flexGrow: 1,
+    paddingHorizontal: spacing.xxl,
+    gap: spacing.xxl,
+  },
   avatarImage: {
     width: '100%',
     height: '100%',

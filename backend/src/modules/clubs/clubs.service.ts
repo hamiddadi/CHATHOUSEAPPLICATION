@@ -5,8 +5,17 @@ import { redis } from '../../config/redis';
 import { logger } from '../../config/logger';
 import { AppError } from '../../middlewares/error.middleware';
 import { notificationsService } from '../notifications/notifications.service';
-import { clubInclude, privacyToDb, toApi, toSummary } from './clubs.mapper';
+import { clubInclude, privacyToDb, publicUser, toApi, toSummary } from './clubs.mapper';
+import type { ViewerMembership } from './clubs.mapper';
+import { clubInviteToken } from './clubs.invite-token';
 import type { CreateClubInput, ListClubsInput, UpdateClubInput } from './clubs.schema';
+
+// Public base URL for house invite deep links. Aligns with the linking config
+// route `house/:houseId/invite/:inviteToken?` so a shared link is routable.
+const INVITE_LINK_BASE = 'https://app.chathouse.com';
+
+const buildInviteUrl = (clubId: string, token: string): string =>
+  `${INVITE_LINK_BASE}/house/${clubId}/invite/${token}`;
 
 /** Map the frontend's lowercase role to the Prisma ClubMemberRole enum. */
 const roleToDb = (role: 'admin' | 'moderator' | 'member'): ClubMemberRole => {
@@ -46,13 +55,69 @@ export const clubsService = {
     return clubs.map(toSummary);
   },
 
+  /**
+   * The viewer's own membership row, resolved from the authoritative unique
+   * index (clubId, userId) — NOT from `club.members`, which `clubInclude.take`
+   * truncates. A member past the display window is still a member; deriving
+   * membership from the truncated slice would wrongly lock them out of their
+   * own PRIVATE roster and hide their admin/moderator CTAs.
+   */
+  async resolveViewerMembership(viewerId: string, clubId: string): Promise<ViewerMembership> {
+    return prisma.clubMember.findUnique({
+      where: { clubId_userId: { clubId, userId: viewerId } },
+      select: {
+        role: true,
+        joinedAt: true,
+        user: { select: publicUser },
+      },
+    });
+  },
+
   async get(viewerId: string, clubId: string) {
     const club = await prisma.club.findUnique({
       where: { id: clubId },
       include: clubInclude,
     });
     if (!club) throw new AppError('CLUB_001');
-    return toApi(club, viewerId);
+    const viewerMembership = await this.resolveViewerMembership(viewerId, clubId);
+    const api = toApi(club, viewerId, viewerMembership);
+    // Surface a pending invitation for the viewer so the detail screen can show
+    // an "Accept invitation" CTA (a non-member landing on a PRIVATE house would
+    // otherwise hit a dead end). Backed by the existing CLUB_INVITE notification
+    // — no new persistence. Skip the lookup entirely when the viewer is already
+    // a member (they have nothing to accept).
+    const viewerInvite = api.isJoinedByMe ? null : await this.viewerInvite(viewerId, clubId);
+    return { ...api, viewerInvite };
+  },
+
+  /**
+   * Whether the viewer has a pending, real CLUB_INVITE for this club. Mirrors
+   * the invite discriminator used by acceptInvitation (a real invite has
+   * `inviterId` present and `kind` absent — the clubreq extension reuses the
+   * CLUB_INVITE type for its request lifecycle with a `kind` field).
+   */
+  async viewerInvite(
+    viewerId: string,
+    clubId: string,
+  ): Promise<{ pending: true; inviterId: string | null } | null> {
+    const candidates = await prisma.notification.findMany({
+      where: {
+        userId: viewerId,
+        type: 'CLUB_INVITE',
+        data: { path: ['clubId'], equals: clubId },
+      },
+      select: { data: true },
+    });
+    const invite = candidates.find(n => {
+      const d = n.data;
+      if (!d || typeof d !== 'object' || Array.isArray(d)) return false;
+      const payload = d as Record<string, unknown>;
+      return payload.kind === undefined && payload.inviterId !== undefined;
+    });
+    if (!invite) return null;
+    const payload = invite.data as Record<string, unknown>;
+    const inviterId = typeof payload.inviterId === 'string' ? payload.inviterId : null;
+    return { pending: true, inviterId };
   },
 
   async create(ownerId: string, input: CreateClubInput) {
@@ -89,7 +154,13 @@ export const clubsService = {
       });
       return created;
     });
-    return toApi(club, ownerId);
+    // The owner was just created as the sole ADMIN member and is always within
+    // the (single-member) slice; derive their membership from it directly.
+    const ownerMember = club.members.find(m => m.userId === ownerId) ?? null;
+    const viewerMembership: ViewerMembership = ownerMember
+      ? { role: ownerMember.role, joinedAt: ownerMember.joinedAt, user: ownerMember.user }
+      : null;
+    return toApi(club, ownerId, viewerMembership);
   },
 
   async join(viewerId: string, clubId: string) {
@@ -152,7 +223,7 @@ export const clubsService = {
     inviterId: string,
     clubId: string,
     userIds: readonly string[],
-  ): Promise<{ sent: number }> {
+  ): Promise<{ sent: number; token: string; url: string }> {
     const club = await prisma.club.findUnique({ where: { id: clubId } });
     if (!club) throw new AppError('CLUB_001');
 
@@ -169,6 +240,14 @@ export const clubsService = {
       inviterMember.role === 'MODERATOR';
     if (!inviterIsPrivileged) throw new AppError('CLUB_002');
 
+    // A signed, stateless invite token for this club, attributed to the
+    // inviter. Always minted (even when no direct invites are sent) so the
+    // caller gets a shareable link that recipients can accept via the
+    // accept-by-token endpoint — the notification path below is the direct,
+    // per-user complement to the link.
+    const token = clubInviteToken.sign(clubId, inviterId);
+    const url = buildInviteUrl(clubId, token);
+
     // Skip users that are already members — no point inviting them.
     const existingMembers = await prisma.clubMember.findMany({
       where: { clubId, userId: { in: [...userIds] } },
@@ -176,7 +255,7 @@ export const clubsService = {
     });
     const memberSet = new Set(existingMembers.map(m => m.userId));
     const targets = userIds.filter(id => id !== inviterId && !memberSet.has(id));
-    if (targets.length === 0) return { sent: 0 };
+    if (targets.length === 0) return { sent: 0, token, url };
 
     // Route through notificationsService.create so each invitee also
     // gets a push dispatch. Kept sequential-ish via Promise.all — the
@@ -193,52 +272,81 @@ export const clubsService = {
       ),
     );
 
-    return { sent: targets.length };
+    return { sent: targets.length, token, url };
   },
 
-  async acceptInvitation(viewerId: string, clubId: string) {
+  async acceptInvitation(viewerId: string, clubId: string, inviteToken?: string) {
     const club = await prisma.club.findUnique({ where: { id: clubId } });
     if (!club) throw new AppError('CLUB_001');
 
     const existing = await prisma.clubMember.findUnique({
       where: { clubId_userId: { clubId, userId: viewerId } },
     });
-    if (existing) return { joined: true as const };
+    // Idempotent: accepting again (or after joining another way) is a success,
+    // never a duplicate-key 500.
+    if (existing) return { joined: true as const, alreadyMember: true as const };
 
-    // SECURITY: require a real CLUB_INVITE addressed to this user for this
-    // club. Without this check any authenticated user could POST
-    // /clubs/:id/accept and join ANY club — including PRIVATE ones — bypassing
-    // the join() guard (CLUB_003). invite() materialises the invitation as a
-    // CLUB_INVITE notification carrying { clubId, inviterId } in its payload.
-    //
-    // CLUB-02: the CLUB_INVITE type is reused by the clubreq extension for the
-    // request lifecycle (join_request / join_approved / join_declined). Those
-    // carry a `kind` discriminator and must NOT be accepted as an invitation —
-    // otherwise a *declined* user could later join a (newly) PRIVATE club.
-    // A real invite has `inviterId` present and `kind` absent.
-    const candidates = await prisma.notification.findMany({
-      where: {
-        userId: viewerId,
-        type: 'CLUB_INVITE',
-        data: { path: ['clubId'], equals: clubId },
-      },
-      select: { data: true },
-    });
-    const invite = candidates.find(n => {
-      const d = n.data;
-      if (!d || typeof d !== 'object' || Array.isArray(d)) return false;
-      const payload = d as Record<string, unknown>;
-      return payload.kind === undefined && payload.inviterId !== undefined;
-    });
-    if (!invite) throw new AppError('CLUB_007');
+    // SECURITY: entry into a club (esp. PRIVATE, whose only door is an invite)
+    // requires proof the viewer was actually invited. Two independent proofs
+    // are accepted:
+    //   1. A signed invite TOKEN from a shared link (stateless — the club id +
+    //      expiry are HMAC-signed, so it can't be forged or replayed after
+    //      expiry). Differentiated errors: expired → CLUB_008, invalid → CLUB_009.
+    //   2. A real CLUB_INVITE notification addressed to this user for this club.
+    // Without either, any authenticated user could POST /accept and join any
+    // club, bypassing the join() guard (CLUB_003).
+    let authorised = false;
 
-    await prisma.$transaction([
-      prisma.clubMember.create({
-        data: { clubId, userId: viewerId, role: 'MEMBER' },
-      }),
-      prisma.club.update({ where: { id: clubId }, data: { memberCount: { increment: 1 } } }),
-    ]);
-    return { joined: true as const };
+    if (inviteToken) {
+      const result = clubInviteToken.verify(inviteToken);
+      if (!result.ok) {
+        throw new AppError(result.reason === 'expired' ? 'CLUB_008' : 'CLUB_009');
+      }
+      // A well-signed token for a *different* club must not grant entry here.
+      if (result.claims.clubId !== clubId) throw new AppError('CLUB_009');
+      authorised = true;
+    }
+
+    if (!authorised) {
+      // CLUB-02: the CLUB_INVITE type is reused by the clubreq extension for the
+      // request lifecycle (join_request / join_approved / join_declined). Those
+      // carry a `kind` discriminator and must NOT be accepted as an invitation —
+      // otherwise a *declined* user could later join a (newly) PRIVATE club.
+      // A real invite has `inviterId` present and `kind` absent.
+      const candidates = await prisma.notification.findMany({
+        where: {
+          userId: viewerId,
+          type: 'CLUB_INVITE',
+          data: { path: ['clubId'], equals: clubId },
+        },
+        select: { data: true },
+      });
+      const invite = candidates.find(n => {
+        const d = n.data;
+        if (!d || typeof d !== 'object' || Array.isArray(d)) return false;
+        const payload = d as Record<string, unknown>;
+        return payload.kind === undefined && payload.inviterId !== undefined;
+      });
+      if (!invite) throw new AppError('CLUB_007');
+      authorised = true;
+    }
+
+    try {
+      await prisma.$transaction([
+        prisma.clubMember.create({
+          data: { clubId, userId: viewerId, role: 'MEMBER' },
+        }),
+        prisma.club.update({ where: { id: clubId }, data: { memberCount: { increment: 1 } } }),
+      ]);
+    } catch (err) {
+      // Lost a race with a concurrent join/accept — the unique (clubId,userId)
+      // constraint fired. Treat as idempotent success rather than a raw 500.
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        return { joined: true as const, alreadyMember: true as const };
+      }
+      throw err;
+    }
+    return { joined: true as const, alreadyMember: false as const };
   },
 
   /**
@@ -333,7 +441,8 @@ export const clubsService = {
       data,
       include: clubInclude,
     });
-    return toApi(updated, viewerId);
+    const viewerMembership = await this.resolveViewerMembership(viewerId, clubId);
+    return toApi(updated, viewerId, viewerMembership);
   },
 
   /**

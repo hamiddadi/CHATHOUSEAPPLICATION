@@ -133,7 +133,7 @@ export const NotificationsScreen: React.FC = () => {
   const { t } = useTranslation();
 
   const [filter, setFilter] = useState<NotificationFilter>('all');
-  const { data, isLoading, isFetching, refetch } = useNotifications(filter);
+  const { data, isLoading, isError, isFetching, refetch } = useNotifications(filter);
   const markOne = useMarkNotificationRead();
   const markAll = useMarkAllNotificationsRead();
   const remove = useRemoveNotification();
@@ -149,21 +149,28 @@ export const NotificationsScreen: React.FC = () => {
       if (notif.kind === 'follow' && notif.actor.id) {
         navigation.navigate('Profile', { userId: notif.actor.id });
       } else if (notif.kind === 'house_invite' && notif.houseId) {
-        navigation.navigate('HouseDetail', { houseId: notif.houseId });
-      } else if (
-        (notif.kind === 'room_starting' ||
-          notif.kind === 'room_invite' ||
-          notif.kind === 'hand_accepted' ||
-          notif.kind === 'rsvp_reminder') &&
-        notif.roomId
-      ) {
-        navigation.navigate('Room', { roomId: notif.roomId });
+        // Route to the dedicated invitation screen (Accept/Decline) rather than
+        // straight to HouseDetail, which is a dead-end for PRIVATE houses.
+        navigation.navigate('HouseInvitation', { houseId: notif.houseId });
       } else if (notif.kind === 'new_message' && notif.actor.id) {
-        // DM deep-link: messages live outside the RoomStack (MessagesTab),
-        // so we just land on the sender's profile for now; the user can
-        // open the thread from there. A later polish pass can hop tabs.
-        navigation.navigate('Profile', { userId: notif.actor.id });
-      } else if (notif.kind === 'wave' && notif.actor.id) {
+        // DM deep-link: messages live outside the RoomStack (MessagesTab), so
+        // hop through the root 'Main' navigator to the thread (conversationId
+        // === peer userId). Same cross-tab pattern as MapsScreen/RoomScreen.
+        (navigation as unknown as { navigate: (name: string, params: object) => void }).navigate(
+          'Main',
+          {
+            screen: 'MessagesTab',
+            params: { screen: 'ChatDetail', params: { conversationId: notif.actor.id } },
+          },
+        );
+      } else if (notif.roomId) {
+        // Any room-scoped notification (room_starting / room_invite /
+        // hand_accepted / rsvp_reminder, and mention / SPEAKER_REQUEST which the
+        // service maps to `mention`) carries a roomId → open the Room.
+        navigation.navigate('Room', { roomId: notif.roomId });
+      } else if (notif.actor.id) {
+        // Fallback for actor-centric kinds (wave, mention without a roomId) →
+        // the actor's profile.
         navigation.navigate('Profile', { userId: notif.actor.id });
       }
     },
@@ -176,7 +183,12 @@ export const NotificationsScreen: React.FC = () => {
   return (
     <View className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
       <View className="flex-row items-center gap-md px-xxl py-lg">
-        <Pressable onPress={goBack} accessibilityRole="button" hitSlop={8}>
+        <Pressable
+          onPress={goBack}
+          accessibilityRole="button"
+          accessibilityLabel={t('common.back', 'Back')}
+          hitSlop={12}
+        >
           <MaterialIcons name="arrow-back" size={24} color={colors.text} />
         </Pressable>
         <View className="flex-1">
@@ -191,7 +203,8 @@ export const NotificationsScreen: React.FC = () => {
           <Pressable
             onPress={handleMarkAll}
             accessibilityRole="button"
-            hitSlop={8}
+            accessibilityLabel={t('notifications.markAllRead')}
+            hitSlop={12}
             className="px-md py-xs rounded-pill bg-overlay-white-5"
           >
             <Text className="text-xs font-body-bold text-ink-muted">
@@ -214,6 +227,13 @@ export const NotificationsScreen: React.FC = () => {
 
       {isLoading ? (
         <Loader fullscreen accessibilityLabel={t('notifications.title')} />
+      ) : isError ? (
+        <EmptyState
+          title={t('notifications.errorTitle', "Couldn't load notifications")}
+          description={t('notifications.errorBody', 'Check your connection and try again.')}
+          actionLabel={t('common.retry', 'Retry')}
+          onAction={() => void refetch()}
+        />
       ) : (data ?? []).length === 0 ? (
         <EmptyState title={t('notifications.empty')} description="" />
       ) : (

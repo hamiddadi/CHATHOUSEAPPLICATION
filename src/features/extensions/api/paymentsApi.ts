@@ -12,6 +12,14 @@ export interface PaymentAccount {
 export interface TipResult {
   url: string;
 }
+/** Minimal public identity of the other party of a tip. */
+export interface TipCounterpart {
+  id: string;
+  username: string | null;
+  displayName: string | null;
+  avatarUrl: string | null;
+}
+
 export interface TipHistoryItem {
   id: string;
   direction: 'sent' | 'received';
@@ -20,6 +28,11 @@ export interface TipHistoryItem {
   amount: number;
   currency: string;
   createdAt: string;
+  /**
+   * The other party (recipient of a sent tip / sender of a received one).
+   * Optional for resilience against older backend payloads.
+   */
+  counterpart?: TipCounterpart | null;
 }
 
 export const paymentsApi = {

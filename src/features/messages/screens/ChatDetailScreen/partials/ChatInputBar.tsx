@@ -7,6 +7,10 @@ import { colors, spacing } from '../../../../../shared/constants/theme';
 
 const INPUT_ICON_SIZE = 22;
 const SEND_BTN_SIZE = 44;
+// Matches the backend limit (chat.schema sendMessageSchema max 2000). The
+// discrete counter only appears as the user nears the ceiling.
+const MAX_MESSAGE_LEN = 2000;
+const COUNTER_THRESHOLD = 1900;
 
 const GLASS_BG = 'rgba(255,255,255,0.05)';
 const SEND_GRADIENT = ['#b0c6ff', '#558dff'] as const;
@@ -91,7 +95,7 @@ const ChatInputBar: React.FC<ChatInputBarProps> = memo(
               onPress={() => setShowEmoji(v => !v)}
               accessibilityRole="button"
               accessibilityLabel={t('chat.emojiA11y')}
-              hitSlop={8}
+              hitSlop={12}
             >
               <MaterialIcons
                 name="sentiment-satisfied"
@@ -106,13 +110,17 @@ const ChatInputBar: React.FC<ChatInputBarProps> = memo(
               value={value}
               onChangeText={onChangeText}
               onFocus={onInputFocus}
+              maxLength={MAX_MESSAGE_LEN}
               multiline
             />
+            {value.length >= COUNTER_THRESHOLD ? (
+              <Text style={styles.counter}>{`${value.length}/${MAX_MESSAGE_LEN}`}</Text>
+            ) : null}
             <Pressable
               onPress={onAttach}
               accessibilityRole="button"
               accessibilityLabel={t('chat.attachA11y')}
-              hitSlop={8}
+              hitSlop={12}
             >
               <MaterialIcons name="attach-file" size={INPUT_ICON_SIZE} color={colors.textMuted} />
             </Pressable>
@@ -139,6 +147,7 @@ const ChatInputBar: React.FC<ChatInputBarProps> = memo(
               onPress={onMic}
               accessibilityRole="button"
               accessibilityLabel={t('chat.micA11y')}
+              hitSlop={12}
               style={styles.micBtn}
             >
               <MaterialIcons name="mic" size={INPUT_ICON_SIZE} color={colors.textMuted} />
@@ -191,6 +200,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
     paddingVertical: 0,
     maxHeight: 100,
+  },
+  counter: {
+    color: colors.textMuted,
+    fontSize: 11,
+    fontVariant: ['tabular-nums'],
   },
   sendBtn: {
     width: SEND_BTN_SIZE,

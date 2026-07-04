@@ -6,6 +6,8 @@ import { useOnboardingStore } from '../../onboarding/store/onboardingStore';
 import { useInviteStore } from '../../extensions/store/inviteStore';
 import { useCurrentRoomStore } from '../../rooms/store/currentRoomStore';
 import { useImpersonationState } from '../../admin/store/impersonationState';
+import { disconnectSocket } from '../../../shared/services/realtime/socketClient';
+import { queryClient } from '../../../core/providers/QueryProvider';
 import type { AuthSession, AuthStatus, AuthUser } from '../types/auth.types';
 
 interface AuthState {
@@ -168,7 +170,14 @@ export const useAuthStore = create<AuthState>((set, _get) => ({
     }
     await authService.signOut();
     await tokenStorage.clear();
+    // Tear down the authenticated realtime connection: without this the
+    // Socket.IO singleton (whose handshake carried the old token) survives
+    // the sign-out and keeps receiving events for the previous account.
+    disconnectSocket();
     set({ user: null, session: null, status: 'unauthenticated' });
+    // Purge the react-query cache so the next account on this device never
+    // sees the previous account's data flash while its own queries load.
+    queryClient.clear();
     // Reset cross-session stores so the next user on this device can't inherit
     // the previous user's state: an onboarding draft (name/interests/avatar), a
     // pending invite code, the current-room mini-bar, or an active admin

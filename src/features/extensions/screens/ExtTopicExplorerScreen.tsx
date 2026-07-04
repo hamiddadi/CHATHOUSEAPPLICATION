@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -20,6 +20,12 @@ import { colors } from '../../../shared/constants/theme';
 
 interface Props {
   onSelectTopic?: (slug: string) => void;
+  /**
+   * Pre-select a category on mount. Matched against a top-level slug directly,
+   * or against the parent of a matching sub-topic slug, so a caller can deep
+   * into either level. Purely an initial hint — the user can still navigate.
+   */
+  initialTopic?: string;
 }
 
 /**
@@ -27,7 +33,7 @@ interface Props {
  * categories on the left, sub-categories on the right. A search bar
  * fuzz-matches across the flat list.
  */
-export const ExtTopicExplorerScreen: React.FC<Props> = ({ onSelectTopic }) => {
+export const ExtTopicExplorerScreen: React.FC<Props> = ({ onSelectTopic, initialTopic }) => {
   const { t } = useTranslation();
   const [query, setQuery] = useState('');
   const [activeParent, setActiveParent] = useState<string | null>(null);
@@ -37,6 +43,18 @@ export const ExtTopicExplorerScreen: React.FC<Props> = ({ onSelectTopic }) => {
   const trending = useExtTopicsTrending();
 
   const isSearching = query.trim().length > 0;
+
+  // Resolve `initialTopic` to a top-level category once the tree has loaded.
+  // Only seed the selection while none has been made yet, so a later user tap
+  // is never clobbered by a re-run.
+  useEffect(() => {
+    if (!initialTopic || !tree.data || activeParent !== null) return;
+    const topics = tree.data.topics;
+    const asParent = topics.find(top => top.slug === initialTopic);
+    const asChild = topics.find(top => top.children?.some(c => c.slug === initialTopic));
+    const match = asParent ?? asChild;
+    if (match) setActiveParent(match.slug);
+  }, [initialTopic, tree.data, activeParent]);
 
   const activeChildren = useMemo<Topic[]>(() => {
     if (!tree.data) return [];
@@ -62,6 +80,20 @@ export const ExtTopicExplorerScreen: React.FC<Props> = ({ onSelectTopic }) => {
 
       {tree.isLoading ? (
         <ActivityIndicator style={styles.loader} />
+      ) : tree.isError ? (
+        <View style={styles.errorWrap}>
+          <Text style={styles.errorText}>
+            {t('extensions.topics.error', "Couldn't load topics.")}
+          </Text>
+          <Pressable
+            style={styles.retryBtn}
+            onPress={() => void tree.refetch()}
+            accessibilityRole="button"
+            accessibilityLabel={t('common.retry', 'Retry')}
+          >
+            <Text style={styles.retryText}>{t('common.retry', 'Retry')}</Text>
+          </Pressable>
+        </View>
       ) : isSearching ? (
         <FlatList
           data={flat.data ?? []}
@@ -85,7 +117,7 @@ export const ExtTopicExplorerScreen: React.FC<Props> = ({ onSelectTopic }) => {
           {trending.data && trending.data.length > 0 ? (
             <View style={styles.trendingWrap}>
               <Text style={styles.trendingTitle}>
-                {t('extensions.topics.trending', 'Tendances')}
+                {t('extensions.topics.trending', 'Trending')}
               </Text>
               <FlatList
                 horizontal
@@ -97,6 +129,7 @@ export const ExtTopicExplorerScreen: React.FC<Props> = ({ onSelectTopic }) => {
                   <Pressable
                     style={styles.trendingChip}
                     onPress={() => onSelectTopic?.(item.slug)}
+                    hitSlop={8}
                     accessibilityRole="button"
                     accessibilityLabel={`${item.label} (${item.count})`}
                   >
@@ -241,4 +274,15 @@ const styles = StyleSheet.create({
   empty: { padding: 24 },
   emptyText: { color: colors.textDim },
   loader: { marginTop: 32 },
+  errorWrap: { marginTop: 48, alignItems: 'center', gap: 12, paddingHorizontal: 24 },
+  errorText: { color: colors.textDim, textAlign: 'center' },
+  retryBtn: {
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 20,
+    backgroundColor: colors.primary,
+    minHeight: 44,
+    justifyContent: 'center',
+  },
+  retryText: { color: colors.onPrimary, fontWeight: '600', fontSize: 13 },
 });

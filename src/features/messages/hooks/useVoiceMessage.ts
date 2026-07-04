@@ -2,6 +2,7 @@ import { useCallback, useState } from 'react';
 import { Alert } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { useApiErrorToast } from '../../../shared/hooks/useApiErrorToast';
+import { toAppError } from '../../../shared/services/api/errorHandler';
 import { voiceService } from '../../../shared/services/api/voiceService';
 import { useVoiceRecorder } from './useVoiceRecorder';
 
@@ -50,11 +51,25 @@ export const useVoiceMessage = (send: VoiceSender): VoiceMessageComposer => {
       const url = await voiceService.upload(clip.uri);
       await send(url, clip.durationMs);
     } catch (err) {
+      // A 403 on a DM voice note is the mutual-follow gate (CHAT_004 — the same
+      // rule the text send hits). Spell it out with the same alert instead of a
+      // raw/generic toast so voice notes behave identically to text.
+      const e = toAppError(err);
+      if (e.kind === 'forbidden') {
+        Alert.alert(
+          t('chat.cannotMessageTitle', 'Message impossible'),
+          t(
+            'chat.cannotMessageBody',
+            'Vous devez vous suivre mutuellement pour échanger des messages.',
+          ),
+        );
+        return;
+      }
       toastError(err);
     } finally {
       setIsUploading(false);
     }
-  }, [finish, send, toastError]);
+  }, [finish, send, t, toastError]);
 
   return {
     isActive: isRecording || isPreparing || isUploading,

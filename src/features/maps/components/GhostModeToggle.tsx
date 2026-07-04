@@ -2,6 +2,7 @@ import React, { useCallback } from 'react';
 import { Pressable, StyleSheet, Text } from 'react-native';
 import MaterialIcons from '@react-native-vector-icons/material-icons';
 import Animated from 'react-native-reanimated';
+import { useTranslation } from 'react-i18next';
 import { useAnimatedPress } from '../../../shared/hooks/useAnimatedPress';
 import { useGhostModeStore } from '../store/ghostModeStore';
 
@@ -17,6 +18,7 @@ const HIDDEN_COLOR = '#9CA3AF';
  * (ghost mode on — you are hidden).
  */
 export const GhostModeToggle: React.FC = () => {
+  const { t } = useTranslation();
   const isGhost = useGhostModeStore(s => s.isGhost);
   const toggle = useGhostModeStore(s => s.toggle);
   const press = useAnimatedPress({ scaleTo: 0.9 });
@@ -28,7 +30,9 @@ export const GhostModeToggle: React.FC = () => {
   const isVisible = !isGhost;
   const icon: 'visibility' | 'visibility-off' = isVisible ? 'visibility' : 'visibility-off';
   const color = isVisible ? VISIBLE_COLOR : HIDDEN_COLOR;
-  const label = isVisible ? 'SEE' : 'UNSEE';
+  const label = isVisible
+    ? t('explorer.maps.ghostSee', 'SEE')
+    : t('explorer.maps.ghostUnsee', 'UNSEE');
 
   return (
     <Animated.View style={press.animatedStyle}>
@@ -38,7 +42,9 @@ export const GhostModeToggle: React.FC = () => {
         onPressOut={press.onPressOut}
         accessibilityRole="switch"
         accessibilityLabel={
-          isVisible ? 'You are visible. Tap to hide.' : 'You are hidden. Tap to reveal.'
+          isVisible
+            ? t('explorer.maps.ghostVisibleA11y', 'You are visible. Tap to hide.')
+            : t('explorer.maps.ghostHiddenA11y', 'You are hidden. Tap to reveal.')
         }
         accessibilityState={{ checked: isGhost }}
         style={styles.button}

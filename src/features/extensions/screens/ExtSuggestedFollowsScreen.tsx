@@ -100,13 +100,12 @@ UserRow.displayName = 'UserRow';
 
 /**
  * "People you may want to follow" screen — typically presented right after
- * interest selection (Module 1.5). Reachable via deep-link
- * `chathouse://r/ext/suggested-follows` so the existing navigator stays
- * untouched.
+ * interest selection (Module 1.5). Mounted as the final onboarding step via
+ * `SuggestedFollowsRoute`; not reachable by deep-link.
  */
 export const ExtSuggestedFollowsScreen: React.FC<Props> = memo(({ onTapUser, onFollow }) => {
   const { t } = useTranslation();
-  const { data, isLoading, refetch, isRefetching } = useExtSuggestions(30);
+  const { data, isLoading, isError, refetch, isRefetching } = useExtSuggestions(30);
   // Track who we've already followed so a second tap can't fire a duplicate
   // follow and the button reflects the new state.
   const [followed, setFollowed] = useState<Set<string>>(new Set());
@@ -152,6 +151,20 @@ export const ExtSuggestedFollowsScreen: React.FC<Props> = memo(({ onTapUser, onF
       </View>
       {isLoading ? (
         <ActivityIndicator style={styles.loader} color={colors.primary} />
+      ) : isError && (data?.length ?? 0) === 0 ? (
+        <View style={styles.empty}>
+          <Text style={styles.emptyText}>
+            {t('extensions.suggested.error', "Couldn't load suggestions.")}
+          </Text>
+          <Pressable
+            style={styles.retryBtn}
+            onPress={() => void refetch()}
+            accessibilityRole="button"
+            accessibilityLabel={t('common.retry', 'Retry')}
+          >
+            <Text style={styles.retryText}>{t('common.retry', 'Retry')}</Text>
+          </Pressable>
+        </View>
       ) : (
         <FlatList
           data={data ?? []}
@@ -210,7 +223,16 @@ const styles = StyleSheet.create({
   },
   followBtnText: { color: colors.onPrimary, fontWeight: '600', fontSize: 13 },
   followBtnTextDone: { color: colors.textMuted },
-  empty: { marginTop: 48, alignItems: 'center' },
+  empty: { marginTop: 48, alignItems: 'center', gap: 12 },
   emptyText: { color: colors.textMuted },
   loader: { marginTop: 32 },
+  retryBtn: {
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 20,
+    backgroundColor: colors.primary,
+    minHeight: 44,
+    justifyContent: 'center',
+  },
+  retryText: { color: colors.onPrimary, fontWeight: '600', fontSize: 13 },
 });

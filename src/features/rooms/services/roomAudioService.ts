@@ -40,6 +40,12 @@ import { startRoomForeground, stopRoomForeground } from './foregroundAudio';
 // Re-exported for `useRoomAudio` to detect the "missing native module" path.
 export const SKELETON_SENTINEL = LIVEKIT_UNAVAILABLE_SENTINEL;
 
+// Stable error message thrown when the RECORD_AUDIO permission is refused.
+// RoomScreen matches on it to swap the raw error banner for a localized
+// "mic denied" message with an "open settings" CTA (the user stays in the
+// room as a listener — audio capture simply never starts).
+export const MIC_PERMISSION_DENIED_ERROR = 'mic permission denied';
+
 export interface PeerInfo {
   userId: string;
   /** Normalised volume: 0..1. */
@@ -119,7 +125,7 @@ export const startRoomAudio = async ({
   // Mic permission — LiveKit's connect will fail without RECORD_AUDIO
   // on Android. iOS prompts at first capture.
   const granted = await requestAudioPermission();
-  if (!granted) throw new Error('mic permission denied');
+  if (!granted) throw new Error(MIC_PERMISSION_DENIED_ERROR);
 
   // Create a new LiveKit Room instance. Throws SKELETON_SENTINEL when
   // `@livekit/react-native` isn't installed (Expo Go) — useRoomAudio

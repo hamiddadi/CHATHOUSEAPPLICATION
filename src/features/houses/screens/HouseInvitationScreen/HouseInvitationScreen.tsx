@@ -43,7 +43,19 @@ export const HouseInvitationScreen: React.FC = () => {
   const handleAccept = useCallback(async () => {
     if (accept.isPending) return;
     try {
-      await accept.mutateAsync({ houseId, inviteToken });
+      // Send the signed invite token so the backend can verify it (signature +
+      // expiry) and grant entry into a PRIVATE house without a per-user
+      // notification. Differentiated failures (expired / invalid) surface via
+      // the backend error code (CLUB_008 / CLUB_009) resolved by errorMessage.
+      const result = await accept.mutateAsync({ houseId, inviteToken });
+      // Idempotent success: the user was already a member. Reassure them rather
+      // than implying a fresh join, then land on the house.
+      if (result.alreadyMember) {
+        Alert.alert(
+          t('houses.invitation.alreadyMemberTitle', 'Déjà membre'),
+          t('houses.invitation.alreadyMemberBody', 'Vous faites déjà partie de cette house.'),
+        );
+      }
       navigation.replace('HouseDetail', { houseId });
     } catch (e) {
       Alert.alert(
@@ -106,18 +118,11 @@ export const HouseInvitationScreen: React.FC = () => {
             )}
 
             {/* The inviter isn't carried by the invite token/house payload, so we
-              keep the copy house-centric rather than showing a fabricated name. */}
+              keep the copy house-centric rather than showing a fabricated name.
+              The opaque token is never rendered — it's a bearer credential. */}
             <Text className="text-md font-body text-ink-muted text-center mt-lg">
               {t('houses.invitation.subtitle', "You've been invited to join this house.")}
             </Text>
-
-            {inviteToken && (
-              <Text className="text-xxs font-body text-ink-dim mt-md">
-                {t('houses.invitation.code', 'Invite code: {{code}}…', {
-                  code: inviteToken.slice(0, 8),
-                })}
-              </Text>
-            )}
           </View>
 
           <View className="w-full gap-sm mt-giant">

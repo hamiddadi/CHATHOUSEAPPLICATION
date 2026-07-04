@@ -10,12 +10,6 @@ import { roomSettingsExtApi } from '../../../extensions/api/roomSettingsExtApi';
 
 type HandRaiseRestriction = 'everyone' | 'followers' | 'none';
 
-const HAND_RAISE_LABELS: Record<HandRaiseRestriction, string> = {
-  everyone: 'Lever de main : tout le monde',
-  followers: 'Lever de main : abonnés',
-  none: 'Lever de main : désactivé',
-};
-
 interface RoomControlsSheetProps {
   visible: boolean;
   roomId: string;
@@ -77,6 +71,12 @@ export const RoomControlsSheet: React.FC<RoomControlsSheetProps> = memo(
       onSuccess: updated => qc.setQueryData(['ext', 'room-settings', roomId], updated),
     });
     const handRaise: HandRaiseRestriction = settings.data?.handRaiseRestriction ?? 'everyone';
+    const handRaiseLabel =
+      handRaise === 'everyone'
+        ? t('roomControls.handRaiseEveryone', 'Hand raising: everyone')
+        : handRaise === 'followers'
+          ? t('roomControls.handRaiseFollowers', 'Hand raising: followers')
+          : t('roomControls.handRaiseNone', 'Hand raising: disabled');
     const handleCycleHandRaise = useCallback(() => {
       // everyone → followers → none → everyone
       const next: HandRaiseRestriction =
@@ -177,14 +177,14 @@ export const RoomControlsSheet: React.FC<RoomControlsSheetProps> = memo(
               }
               onPress={handleToggleChatVisibility}
             />
-            <Row
-              icon="pan-tool"
-              label={HAND_RAISE_LABELS[handRaise]}
-              onPress={handleCycleHandRaise}
-            />
+            <Row icon="pan-tool" label={handRaiseLabel} onPress={handleCycleHandRaise} />
             <Row
               icon={isLocked ? 'lock' : 'lock-open'}
-              label={isLocked ? 'Déverrouiller la room' : 'Verrouiller la room'}
+              label={
+                isLocked
+                  ? t('roomControls.unlockRoom', 'Unlock the room')
+                  : t('roomControls.lockRoom', 'Lock the room')
+              }
               onPress={handleToggleLock}
             />
             {captionsConfigured && onToggleCaptions ? (

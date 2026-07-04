@@ -62,7 +62,14 @@ const Bubble: React.FC<BubbleProps> = memo(({ message, otherAvatar, showAvatar, 
         </Pressable>
         <View style={styles.metaRowRight}>
           <Text className="text-[10px] text-ink-muted">{formatTime(message.sentAt)}</Text>
-          <MaterialIcons name="done-all" size={12} color={colors.primary} />
+          {/* Read receipt: blue "done-all" only once the peer has actually read
+              the message (isRead comes from the backend). Until then show a
+              single grey "done" check so we don't over-promise a read. */}
+          {message.isRead ? (
+            <MaterialIcons name="done-all" size={12} color={colors.primary} />
+          ) : (
+            <MaterialIcons name="done" size={12} color={colors.textMuted} />
+          )}
         </View>
       </View>
     );

@@ -2,6 +2,7 @@ import React, { memo, useCallback } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { useTranslation } from 'react-i18next';
 import { colors } from '../../../shared/constants/theme';
 import type { MessageStackParamList } from '../../../core/navigation/types';
 import { PulsingAvatar } from './PulsingAvatar';
@@ -58,12 +59,16 @@ const truncate = (name: string): string =>
   name.length > MAX_NAME_CHARS ? `${name.slice(0, MAX_NAME_CHARS - 1)}…` : name;
 
 const UserItem: React.FC<UserItemProps> = memo(({ user, onPress }) => {
+  const { t } = useTranslation();
   const handlePress = useCallback(() => onPress(user), [onPress, user]);
   return (
     <Pressable
       onPress={handlePress}
       accessibilityRole="button"
-      accessibilityLabel={`Open chat with ${user.name}`}
+      accessibilityLabel={t('messages.openChatA11y', {
+        name: user.name,
+        defaultValue: 'Open chat with {{name}}',
+      })}
       style={({ pressed }) => [styles.item, pressed && styles.itemPressed]}
     >
       <PulsingAvatar avatar={user.avatar} size={ITEM_SIZE} dotBorderColor={BG_COLOR} />
@@ -79,8 +84,10 @@ UserItem.displayName = 'UserItem';
  * List
  * ========================================================== */
 export const OnlineUsersList: React.FC<OnlineUsersListProps> = memo(
-  ({ users, title = 'Online', resolveConversationId }) => {
+  ({ users, title, resolveConversationId }) => {
     const navigation = useNavigation<Nav>();
+    const { t } = useTranslation();
+    const sectionTitle = title ?? t('messages.online', 'Online');
 
     const handleOpenChat = useCallback(
       (user: OnlineUser) => {
@@ -110,7 +117,7 @@ export const OnlineUsersList: React.FC<OnlineUsersListProps> = memo(
 
     return (
       <View style={styles.block}>
-        <Text style={styles.title}>{title}</Text>
+        <Text style={styles.title}>{sectionTitle}</Text>
         <FlatList
           horizontal
           data={users}

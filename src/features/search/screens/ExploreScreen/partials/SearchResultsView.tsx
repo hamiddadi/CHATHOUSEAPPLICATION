@@ -1,8 +1,8 @@
 import React from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
 import type { TFunction } from 'i18next';
 import { EmptyState } from '../../../../../shared/components/EmptyState';
-import { spacing } from '../../../../../shared/constants/theme';
+import { colors, spacing } from '../../../../../shared/constants/theme';
 import type { SearchResults, SearchRoomHit } from '../../../services/searchService';
 import type { FlatTopic } from '../../../../extensions/api/topicsApi';
 import { ClubRow, RoomRow, Section, UserRow } from './rows';
@@ -13,6 +13,9 @@ interface SearchResultsViewProps {
   /** Server-filtered rooms (language/category facets). When set, shown first. */
   filteredRooms?: SearchRoomHit[];
   debouncedQuery: string;
+  /** True while a new query is fetching over kept-previous results — drives the
+   *  discreet inline spinner instead of the full-screen loader. */
+  isFetching?: boolean;
   bottomInset: number;
   goUser: (id: string) => void;
   goClub: (id: string) => void;
@@ -26,6 +29,7 @@ export const SearchResultsView: React.FC<SearchResultsViewProps> = ({
   topics,
   filteredRooms,
   debouncedQuery,
+  isFetching = false,
   bottomInset,
   goUser,
   goClub,
@@ -46,6 +50,11 @@ export const SearchResultsView: React.FC<SearchResultsViewProps> = ({
         paddingHorizontal: spacing.xxl,
       }}
     >
+      {isFetching ? (
+        <View className="py-sm items-center" accessibilityRole="progressbar">
+          <ActivityIndicator size="small" color={colors.primary} />
+        </View>
+      ) : null}
       {total === 0 ? (
         <EmptyState title={t('explore.searchEmpty', { q: debouncedQuery })} description="" />
       ) : (

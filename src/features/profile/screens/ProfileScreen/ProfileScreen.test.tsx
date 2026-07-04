@@ -77,14 +77,16 @@ describe('ProfileScreen', () => {
     expect(navigation.goBack).toHaveBeenCalledTimes(1);
   });
 
-  it('edit button (self) navigates to EditProfile in the Settings stack', () => {
+  it('edit button (self) navigates to EditProfile in the current stack (no cross-tab jump)', () => {
     const user = makeUser();
     const { getByLabelText, navigation } = renderScreen(<ProfileScreen />, {
       route: { name: 'Profile', params: {} },
       seedQueryData: seedProfile(user),
     });
     fireEvent.press(getByLabelText('Edit profile'));
-    expect(navigation.navigate).toHaveBeenCalledWith('SettingsTab', { screen: 'EditProfile' });
+    // Relative navigation: EditProfile is registered in whichever host stack
+    // (Rooms or Settings) the profile was opened from, so no tab switch.
+    expect(navigation.navigate).toHaveBeenCalledWith('EditProfile');
   });
 
   it('tapping a stat navigates to the Followers list with the right tab', () => {

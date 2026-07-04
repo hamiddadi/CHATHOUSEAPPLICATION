@@ -207,6 +207,17 @@ describe('SettingsScreen', () => {
     expect(() => fireEvent.press(getByLabelText('Allow anonymous crash reporting'))).not.toThrow();
   });
 
+  it('exposes a discoverable "Sign out" account row that opens a confirmation Alert', () => {
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
+    const { getByLabelText } = renderScreen(<SettingsScreen />, {
+      seedQueryData: [seedMe(makeUser())],
+    });
+    // Sign out must be reachable from a labelled account-section row, not only
+    // buried behind the "…" header menu (audit QA 2026-07-02 discoverability).
+    fireEvent.press(getByLabelText('Sign out'));
+    expect(alertSpy).toHaveBeenCalled();
+  });
+
   it('See more / less toggles the bio without throwing', () => {
     const { getByLabelText } = renderScreen(<SettingsScreen />, {
       seedQueryData: [seedMe(makeUser())],

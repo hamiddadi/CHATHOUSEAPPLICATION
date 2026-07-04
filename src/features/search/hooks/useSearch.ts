@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { searchService, type SearchResults } from '../services/searchService';
 import { exploreService, type ExploreFeed } from '../services/exploreService';
 import { topicsApi, type FlatTopic } from '../../extensions/api/topicsApi';
@@ -21,6 +21,10 @@ export const useSearch = (q: string) =>
     queryFn: () => searchService.search(q),
     enabled: q.trim().length > 0,
     staleTime: 10_000,
+    // Keep the previous query's results on screen while the next one loads so
+    // each keystroke doesn't flash the full-screen loader; the caller shows a
+    // discreet inline spinner via `isFetching`/`isPlaceholderData` instead.
+    placeholderData: keepPreviousData,
   });
 
 /** Topics facet for the search bar — matches the static topic taxonomy. */

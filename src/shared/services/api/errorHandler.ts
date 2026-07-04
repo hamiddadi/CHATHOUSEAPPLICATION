@@ -1,4 +1,5 @@
 import type { AxiosError } from 'axios';
+import { i18n } from '../../../core/i18n';
 
 // Inlined rather than imported from `axios` — `axios/lib/adapters/fetch.js`
 // eagerly probes ReadableStream at load time, which crashes under jest-expo's
@@ -21,10 +22,18 @@ export interface AppError {
     | 'forbidden'
     | 'notFound'
     | 'validation'
+    | 'rateLimited'
+    | 'conflict'
     | 'server'
     | 'unknown';
   status?: number;
   message: string;
+  /**
+   * Stable backend error code (e.g. `CLUB_006`), when the response carried
+   * one. UI layers use it to resolve a dedicated translation
+   * (`errors.codes.<CODE>`) instead of showing the raw English message.
+   */
+  code?: string;
   /** Field-level errors, filled by the backend on 422 validation failures. */
   fields?: Record<string, string>;
   /**
@@ -55,16 +64,30 @@ const safeCause = (err: AxiosError): SafeCause => ({
   url: err.config?.url,
 });
 
-const messageByKind: Record<AppError['kind'], string> = {
+/**
+ * English defaults per kind, passed to i18n as `defaultValue` so a missing
+ * `errorMessages.*` key degrades to readable English instead of leaking the
+ * raw key.
+ */
+const DEFAULT_MESSAGE_BY_KIND: Record<AppError['kind'], string> = {
   network: "We couldn't reach the server. Check your connection.",
   timeout: 'The request took too long. Please try again.',
   auth: 'Your session expired. Please sign in again.',
   forbidden: "You don't have access to this resource.",
   notFound: 'Resource not found.',
   validation: 'Some fields need attention.',
+  rateLimited: 'Too many attempts. Please try again in a moment.',
+  conflict: 'This operation conflicts with existing data.',
   server: 'Something went wrong on our end.',
   unknown: 'Unexpected error.',
 };
+
+/**
+ * Localized generic message for a kind — resolved at call time (not at module
+ * load) so language switches apply immediately.
+ */
+export const messageByKind = (kind: AppError['kind']): string =>
+  i18n.t(`errorMessages.${kind}`, DEFAULT_MESSAGE_BY_KIND[kind]);
 
 /**
  * An already-normalized AppError (a plain object with a string `kind` +
@@ -73,7 +96,7 @@ const messageByKind: Record<AppError['kind'], string> = {
  * an AxiosError nor an `instanceof Error`) collapsed every error to
  * `kind:'unknown'`/"Unexpected error.", breaking every toast + form validation.
  */
-const isAppError = (e: unknown): e is AppError =>
+export const isAppError = (e: unknown): e is AppError =>
   typeof e === 'object' &&
   e !== null &&
   'kind' in e &&
@@ -91,7 +114,7 @@ export const toAppError = (err: unknown): AppError => {
   if (err instanceof Error) {
     return { kind: 'unknown', message: err.message, cause: err };
   }
-  return { kind: 'unknown', message: messageByKind.unknown, cause: err };
+  return { kind: 'unknown', message: messageByKind('unknown'), cause: err };
 };
 
 /**
@@ -112,10 +135,10 @@ const flattenFieldErrors = (details: unknown): Record<string, string> | undefine
 const fromAxios = (err: AxiosError): AppError => {
   const cause = safeCause(err);
   if (err.code === 'ECONNABORTED') {
-    return { kind: 'timeout', message: messageByKind.timeout, cause };
+    return { kind: 'timeout', message: messageByKind('timeout'), cause };
   }
   if (!err.response) {
-    return { kind: 'network', message: messageByKind.network, cause };
+    return { kind: 'network', message: messageByKind('network'), cause };
   }
 
   const status = err.response.status;
@@ -136,22 +159,60 @@ const fromAxios = (err: AxiosError): AppError => {
     status === 422 || code === 'VALIDATION_001' || (status === 400 && fields !== undefined);
 
   if (status === 401)
-    return { kind: 'auth', status, message: backendMessage ?? messageByKind.auth, cause };
+    return { kind: 'auth', status, code, message: backendMessage ?? messageByKind('auth'), cause };
   if (status === 403)
-    return { kind: 'forbidden', status, message: backendMessage ?? messageByKind.forbidden, cause };
+    return {
+      kind: 'forbidden',
+      status,
+      code,
+      message: backendMessage ?? messageByKind('forbidden'),
+      cause,
+    };
   if (status === 404)
-    return { kind: 'notFound', status, message: backendMessage ?? messageByKind.notFound, cause };
+    return {
+      kind: 'notFound',
+      status,
+      code,
+      message: backendMessage ?? messageByKind('notFound'),
+      cause,
+    };
+  // 429: always the localized generic — the backend's raw "Too many requests"
+  // is never something we want to show verbatim. The code (e.g. USER_005) is
+  // kept so UI layers can resolve a more specific translation.
+  if (status === 429)
+    return { kind: 'rateLimited', status, code, message: messageByKind('rateLimited'), cause };
+  if (status === 409)
+    return {
+      kind: 'conflict',
+      status,
+      code,
+      message: backendMessage ?? messageByKind('conflict'),
+      cause,
+    };
   if (isValidation) {
     return {
       kind: 'validation',
       status,
-      message: backendMessage ?? messageByKind.validation,
+      code,
+      message: backendMessage ?? messageByKind('validation'),
       fields,
       cause,
     };
   }
   if (status >= 500) {
-    return { kind: 'server', status, message: backendMessage ?? messageByKind.server, cause };
+    return {
+      kind: 'server',
+      status,
+      code,
+      message: backendMessage ?? messageByKind('server'),
+      cause,
+    };
   }
-  return { kind: 'unknown', status, message: backendMessage ?? messageByKind.unknown, cause };
+  return {
+    kind: 'unknown',
+    status,
+    code,
+    message: backendMessage ?? messageByKind('unknown'),
+    cause,
+  };
 };

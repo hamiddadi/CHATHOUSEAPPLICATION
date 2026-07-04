@@ -1,6 +1,7 @@
 import React, { memo, useEffect, useMemo, useState } from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
 import { Marker } from 'react-native-maps';
+import { useTranslation } from 'react-i18next';
 import MaterialIcons, {
   type MaterialIconsIconName,
 } from '@react-native-vector-icons/material-icons';
@@ -108,6 +109,7 @@ interface UserMapMarkerProps {
  * Android for custom markers to render at all.
  */
 export const UserMapMarker: React.FC<UserMapMarkerProps> = memo(({ user, onPress }) => {
+  const { t } = useTranslation();
   const state = resolveMarkerState(user);
   const inRoom = isUserInRoom(user);
   const isSpeaking = state === 'speaking';
@@ -150,7 +152,7 @@ export const UserMapMarker: React.FC<UserMapMarkerProps> = memo(({ user, onPress
     () => getInitials(user.displayName || user.username),
     [user.displayName, user.username],
   );
-  const a11yLabel = `${user.displayName}${inRoom ? ', live' : ''}`;
+  const a11yLabel = `${user.displayName}${inRoom ? t('explorer.maps.markerLive', ', live') : ''}`;
   const hasPhoto = !!user.avatarUrl;
   const borderColor = BORDER_COLOR[state];
   const badgeColor = BADGE_COLOR[state];

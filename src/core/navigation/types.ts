@@ -49,6 +49,10 @@ export type RoomStackParamList = {
   Room: { roomId: string };
   CreateRoom: undefined;
   Profile: { userId: string };
+  // Registered here too (mirrors SettingsStack) so "edit profile" from a
+  // profile opened inside the Rooms tab stays in-tab instead of jumping to
+  // the Settings tab.
+  EditProfile: undefined;
 
   // House screens live here so they are reachable from the Rooms tab.
   HouseList: undefined;
@@ -59,7 +63,9 @@ export type RoomStackParamList = {
   ManageHouse: { houseId: string };
 
   // Module-follow-up screens (Module 3/4/6 surfaces).
-  Explore: undefined;
+  // `topic` pre-filters the Explore results by a topic slug (set when opened
+  // from the TopicExplorer). Optional so the plain tab entry stays valid.
+  Explore: { topic?: string } | undefined;
   Events: undefined;
   Notifications: undefined;
   // Room Replays — recent recorded rooms (audio-only) you can play back.
@@ -68,8 +74,9 @@ export type RoomStackParamList = {
   // In-room: invite multiple followers/contacts to join the current room.
   InviteToRoom: { roomId: string };
 
-  // Extension screens (wired in Phase 1)
-  TopicExplorer: undefined;
+  // Extension screens (wired in Phase 1). `initialTopic` lets a caller open the
+  // explorer with a topic pre-selected (forwarded to the screen by the wrapper).
+  TopicExplorer: { initialTopic?: string } | undefined;
   ActivityFeed: undefined;
 };
 

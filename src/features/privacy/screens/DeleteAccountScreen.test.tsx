@@ -82,4 +82,54 @@ describe('DeleteAccountScreen', () => {
     await waitFor(() => expect(requestSpy).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(signOutSpy).toHaveBeenCalledTimes(1));
   });
+
+  it('does NOT show "deletion failed" when signOut fails after a successful deletion', async () => {
+    // Regression: deletion succeeded, only the local sign-out cleanup threw. The
+    // user must not be told the deletion failed (it did take effect server-side).
+    const requestSpy = jest
+      .spyOn(privacyService, 'requestDeletion')
+      .mockResolvedValue({ deletedAt: 'now', permanentDeletionAt: 'later' });
+    const signOutSpy = jest.fn().mockRejectedValue(new Error('cleanup boom'));
+    useAuthStore.setState({ signOut: signOutSpy });
+
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
+    const { getByText, getByLabelText } = renderScreen(<DeleteAccountScreen />);
+
+    fireEvent.changeText(getByLabelText('Deletion confirmation input'), 'DELETE');
+    fireEvent.press(getByText('Delete my account permanently'));
+    // First Alert = the confirm dialog.
+    const confirmButtons = alertSpy.mock.calls[0]?.[2] as AlertButton[] | undefined;
+    const destructive = confirmButtons?.find(b => b.style === 'destructive');
+    await destructive?.onPress?.();
+
+    await waitFor(() => expect(requestSpy).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(signOutSpy).toHaveBeenCalledTimes(1));
+    // Only the confirm Alert (title "Delete my account") was shown — the error
+    // Alert (title "Error", from privacy.delete.errorTitle) must NOT appear.
+    expect(alertSpy).toHaveBeenCalledTimes(1);
+    expect(alertSpy.mock.calls[0]?.[0]).toBe('Delete my account');
+    expect(alertSpy.mock.calls.some(c => c[0] === 'Error')).toBe(false);
+  });
+
+  it('shows the error Alert when the deletion request itself fails', async () => {
+    const requestSpy = jest
+      .spyOn(privacyService, 'requestDeletion')
+      .mockRejectedValue(new Error('server down'));
+    const signOutSpy = jest.fn().mockResolvedValue(undefined);
+    useAuthStore.setState({ signOut: signOutSpy });
+
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
+    const { getByText, getByLabelText } = renderScreen(<DeleteAccountScreen />);
+
+    fireEvent.changeText(getByLabelText('Deletion confirmation input'), 'DELETE');
+    fireEvent.press(getByText('Delete my account permanently'));
+    const confirmButtons = alertSpy.mock.calls[0]?.[2] as AlertButton[] | undefined;
+    const destructive = confirmButtons?.find(b => b.style === 'destructive');
+    await destructive?.onPress?.();
+
+    await waitFor(() => expect(requestSpy).toHaveBeenCalledTimes(1));
+    // A failed request → the error Alert IS shown, and signOut never runs.
+    await waitFor(() => expect(alertSpy).toHaveBeenCalledTimes(2));
+    expect(signOutSpy).not.toHaveBeenCalled();
+  });
 });

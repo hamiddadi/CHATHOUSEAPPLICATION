@@ -17,6 +17,8 @@ import { Avatar } from '../../../../shared/components/Avatar';
 import { Input } from '../../../../shared/components/Input';
 import { Loader } from '../../../../shared/components/Loader';
 import { colors, spacing } from '../../../../shared/constants/theme';
+import { useApiErrorToast } from '../../../../shared/hooks/useApiErrorToast';
+import { toAppError } from '../../../../shared/services/api/errorHandler';
 import type { MessageStackParamList } from '../../../../core/navigation/types';
 import { useAuthStore } from '../../../auth/store/authStore';
 import {
@@ -43,6 +45,7 @@ export const GroupInfoScreen: React.FC = () => {
   const rename = useRenameGroup();
   const removeMember = useRemoveGroupMember();
   const leave = useLeaveGroup();
+  const toastError = useApiErrorToast();
 
   const isOwner = !!group && group.ownerId === myId;
 
@@ -59,8 +62,9 @@ export const GroupInfoScreen: React.FC = () => {
 
   const handleSaveTitle = useCallback(() => {
     if (!titleChanged) return;
-    rename.mutate({ conversationId, title: title.trim() });
-  }, [conversationId, rename, title, titleChanged]);
+    // Surface a rename failure instead of leaving the edit silently unsaved.
+    rename.mutate({ conversationId, title: title.trim() }, { onError: toastError });
+  }, [conversationId, rename, title, titleChanged, toastError]);
 
   const handleRemove = useCallback(
     (userId: string, name: string) => {
@@ -72,12 +76,12 @@ export const GroupInfoScreen: React.FC = () => {
           {
             text: t('messages.remove', 'Remove'),
             style: 'destructive',
-            onPress: () => removeMember.mutate({ conversationId, userId }),
+            onPress: () => removeMember.mutate({ conversationId, userId }, { onError: toastError }),
           },
         ],
       );
     },
-    [conversationId, removeMember, t],
+    [conversationId, removeMember, t, toastError],
   );
 
   const handleLeave = useCallback(() => {
@@ -91,8 +95,13 @@ export const GroupInfoScreen: React.FC = () => {
           style: 'destructive',
           onPress: () =>
             leave.mutate(conversationId, {
-              // Back to the conversation list — the group is gone from our side.
-              onSettled: () => navigation.popToTop(),
+              // Only navigate away once the leave actually succeeds — a failed
+              // leave must keep the user in the group, not silently pop.
+              onSuccess: () => navigation.popToTop(),
+              onError: err => {
+                const e = toAppError(err);
+                Alert.alert(t('messages.leaveErrorTitle', 'Impossible de quitter'), e.message);
+              },
             }),
         },
       ],
@@ -203,8 +212,11 @@ export const GroupInfoScreen: React.FC = () => {
                   <Pressable
                     onPress={() => handleRemove(m.id, name)}
                     accessibilityRole="button"
-                    accessibilityLabel={`Remove ${name}`}
-                    hitSlop={8}
+                    accessibilityLabel={t('messages.removeMemberA11y', {
+                      name,
+                      defaultValue: `Remove ${name}`,
+                    })}
+                    hitSlop={12}
                   >
                     <MaterialIcons name="remove-circle-outline" size={22} color={colors.danger} />
                   </Pressable>

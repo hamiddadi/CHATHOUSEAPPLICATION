@@ -8,8 +8,10 @@
  * rejects asynchronously, which the screen handles).
  */
 import React from 'react';
-import { fireEvent } from '@testing-library/react-native';
+import { Alert } from 'react-native';
+import { fireEvent, waitFor } from '@testing-library/react-native';
 import { renderScreen, mockAuthenticated, resetAuth } from '../../../../test-utils/renderScreen';
+import { houseService } from '../../services/houseService';
 import { CreateHouseScreen } from './CreateHouseScreen';
 
 describe('CreateHouseScreen', () => {
@@ -18,6 +20,7 @@ describe('CreateHouseScreen', () => {
   });
   afterEach(() => {
     resetAuth();
+    jest.restoreAllMocks();
   });
 
   it('mounts and shows its title + Create CTA', () => {
@@ -66,5 +69,43 @@ describe('CreateHouseScreen', () => {
     const matches = getAllByText('Create House');
     fireEvent.press(matches[matches.length - 1]);
     expect(toJSON()).toBeTruthy();
+  });
+
+  it('shows an inline error under the name field while it is too short', () => {
+    const { getByPlaceholderText, getByText, queryByText } = renderScreen(<CreateHouseScreen />, {
+      route: { name: 'CreateHouse' },
+    });
+    fireEvent.changeText(getByPlaceholderText('House Name'), 'A');
+    // A greyed-out button alone gives no clue WHY creation is blocked.
+    expect(getByText('The name must be at least 2 characters.')).toBeTruthy();
+    fireEvent.changeText(getByPlaceholderText('House Name'), 'AB');
+    expect(queryByText('The name must be at least 2 characters.')).toBeNull();
+  });
+
+  it('CLUB_006 quota rejection surfaces the dedicated message, not the generic one', async () => {
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
+    // The interceptors reject with a PLAIN-OBJECT AppError (not instanceof
+    // Error) — errorMessage must still resolve its code/message. When the
+    // AppError carries a stable backend code, errorMessage resolves the
+    // CURATED, localized copy (errors.codes.CLUB_006) rather than echoing the
+    // raw backend string — see AppError.code docstring in errorHandler.ts. The
+    // test harness runs in English (react-native-localize mock → 'en'), so the
+    // dedicated message is the en.json copy for CLUB_006.
+    jest.spyOn(houseService, 'create').mockRejectedValue({
+      kind: 'forbidden',
+      status: 403,
+      code: 'CLUB_006',
+      message: 'You already own the maximum number of houses.',
+    });
+    const { getAllByText, getByPlaceholderText } = renderScreen(<CreateHouseScreen />, {
+      route: { name: 'CreateHouse' },
+    });
+    fireEvent.changeText(getByPlaceholderText('House Name'), 'My House');
+    const matches = getAllByText('Create House');
+    fireEvent.press(matches[matches.length - 1]);
+    await waitFor(() => expect(alertSpy).toHaveBeenCalled());
+    // The dedicated per-code copy — NOT the generic "Couldn't create the house."
+    // fallback — proving the code path resolves errors.codes.CLUB_006.
+    expect(alertSpy).toHaveBeenCalledWith('Error', "You've reached the maximum of 3 houses.");
   });
 });

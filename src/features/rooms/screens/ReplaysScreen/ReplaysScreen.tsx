@@ -29,9 +29,10 @@ export const ReplaysScreen: React.FC = () => {
   const navigation = useNavigation<Nav>();
   const insets = useSafeAreaInsets();
   const { t } = useTranslation();
-  const { data: replays, isLoading } = useRecentReplays();
+  const { data: replays, isLoading, isError, refetch, isRefetching } = useRecentReplays();
 
   const handleBack = useCallback(() => navigation.goBack(), [navigation]);
+  const handleRefresh = useCallback(() => void refetch(), [refetch]);
 
   const renderItem = useCallback(
     ({ item }: { item: Replay }) => {
@@ -68,11 +69,22 @@ export const ReplaysScreen: React.FC = () => {
 
       {isLoading ? (
         <Loader fullscreen accessibilityLabel={t('common.loading')} />
+      ) : isError ? (
+        // A failed load must NOT read as "no replays" — surface a retry-able
+        // error state instead of the empty placeholder.
+        <EmptyState
+          title={t('replays.errorTitle', "Couldn't load replays")}
+          description={t('replays.errorBody', 'Check your connection and try again.')}
+          actionLabel={t('common.retry', 'Retry')}
+          onAction={handleRefresh}
+        />
       ) : (
         <FlatList
           data={replays ?? []}
           renderItem={renderItem}
           keyExtractor={item => item.id}
+          refreshing={isRefetching}
+          onRefresh={handleRefresh}
           contentContainerStyle={{
             padding: spacing.xxl,
             gap: spacing.md,

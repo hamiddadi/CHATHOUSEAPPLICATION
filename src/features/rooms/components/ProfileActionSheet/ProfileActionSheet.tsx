@@ -9,6 +9,7 @@ import { usePingUserToRoom } from '../../hooks/useRooms';
 import { messageService } from '../../../messages/services/messageService';
 import { errorMessage } from '../../../../shared/utils/errorMessage';
 import type { UserSummary } from '../../../../shared/types/domain';
+import { SHARE_BASE_URL } from '../../../../core/navigation/linking';
 import { useExtBackend } from '../../../extensions/hooks/useExtBackend';
 import { ExtTipSheet } from '../../../extensions/components/ExtTipSheet';
 
@@ -50,7 +51,7 @@ export const ProfileActionSheet: React.FC<ProfileActionSheetProps> = memo(
       mutationFn: (userId: string) =>
         messageService.send(
           userId,
-          `Rejoins-moi sur Chathouse 👉 https://app.chathouse.com/room/${roomId}`,
+          `Rejoins-moi sur Chathouse 👉 ${SHARE_BASE_URL}/room/${roomId}`,
         ),
     });
     const { status: extStatus } = useExtBackend();

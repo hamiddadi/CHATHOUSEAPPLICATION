@@ -47,6 +47,20 @@ describe('DataExportScreen', () => {
     await waitFor(() => expect(getByText('Copy to clipboard')).toBeTruthy());
   });
 
+  it('does NOT reveal the Copy button when the user dismisses the Share sheet', async () => {
+    jest.spyOn(privacyService, 'exportMyData').mockResolvedValue(FAKE_ARCHIVE);
+    // User dismissed the sheet → nothing left the device → no success UI.
+    jest.spyOn(Share, 'share').mockResolvedValue({ action: 'dismissedAction' } as never);
+
+    const { getByText, queryByText } = renderScreen(<DataExportScreen />);
+    fireEvent.press(getByText('Generate and share my export'));
+
+    // Wait for the share flow to settle, then assert the post-export controls
+    // never appeared (lastBytes stayed null).
+    await waitFor(() => expect(Share.share).toHaveBeenCalledTimes(1));
+    expect(queryByText('Copy to clipboard')).toBeNull();
+  });
+
   it('alerts when the export request fails (service rejects)', async () => {
     jest.spyOn(privacyService, 'exportMyData').mockRejectedValue(new Error('boom'));
     const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);

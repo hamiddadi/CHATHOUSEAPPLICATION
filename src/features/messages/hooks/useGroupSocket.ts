@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { getSocket } from '../../../shared/services/realtime/socketClient';
+import { getSocket, onReconnect } from '../../../shared/services/realtime/socketClient';
 import { useAuthStore } from '../../auth/store/authStore';
 import { groupKeys } from './useGroups';
 
@@ -15,6 +15,12 @@ export const useGroupSocket = (): void => {
 
   useEffect(() => {
     if (!isAuthed) return;
+    // Resync after a socket gap: group events emitted while disconnected are
+    // lost, so every re-connection invalidates the whole group domain
+    // (list, details, threads) to refetch what was missed.
+    const offReconnect = onReconnect(() => {
+      void qc.invalidateQueries({ queryKey: groupKeys.all });
+    });
     let cancelled = false;
     let unbind: (() => void) | undefined;
 
@@ -35,6 +41,7 @@ export const useGroupSocket = (): void => {
 
     return () => {
       cancelled = true;
+      offReconnect();
       unbind?.();
     };
   }, [isAuthed, qc]);

@@ -4,6 +4,7 @@ import { impactLight } from '../../utils/haptics';
 import { cn } from '../../utils/cn';
 import {
   sizeContainerClass,
+  sizeHitSlop,
   sizeTextClass,
   variantContainerClass,
   variantPressedClass,
@@ -16,7 +17,9 @@ import type { ButtonProps } from './types';
  *
  * - 5 `variant`s: `primary` (CTA, glow), `primaryContainer` (soft CTA), `ghost` (glass-like, filter pills),
  *   `outline`, `danger` (destructive).
- * - 3 `size`s (sm | md | lg) — all respect the 44pt minimum touch target.
+ * - 3 `size`s (sm | md | lg) — every size keeps an effective touch target of at least 44pt:
+ *   `md`/`lg` visually, `sm` (36px tall) via an automatic compensating vertical `hitSlop`
+ *   (skipped when the caller passes their own `hitSlop`).
  * - Triggers a light haptic on press-in when enabled.
  * - Either pass `label` (string) or children. Setting `loading` swaps to a spinner.
  *
@@ -37,6 +40,7 @@ export const Button: React.FC<ButtonProps> = ({
   textStyle,
   onPress,
   onPressIn,
+  hitSlop,
   ...pressableProps
 }) => {
   const isInactive = disabled || loading;
@@ -54,6 +58,7 @@ export const Button: React.FC<ButtonProps> = ({
   return (
     <Pressable
       {...pressableProps}
+      hitSlop={hitSlop === undefined ? sizeHitSlop[size] : hitSlop}
       onPress={isInactive ? undefined : onPress}
       onPressIn={handlePressIn}
       disabled={isInactive}

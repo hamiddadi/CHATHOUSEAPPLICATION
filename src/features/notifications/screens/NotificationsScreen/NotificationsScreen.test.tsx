@@ -8,6 +8,7 @@
 import React from 'react';
 import { fireEvent, waitFor } from '@testing-library/react-native';
 import { notificationKeys } from '../../hooks/useNotifications';
+import { notificationService } from '../../services/notificationService';
 import type { AppNotification, NotificationKind } from '../../../../shared/types/domain';
 import { renderScreen, mockAuthenticated, resetAuth } from '../../../../test-utils/renderScreen';
 import { NotificationsScreen } from './NotificationsScreen';
@@ -133,7 +134,7 @@ describe('NotificationsScreen', () => {
     );
   });
 
-  it('tapping a house_invite notification deep-links to the HouseDetail', async () => {
+  it('tapping a house_invite notification deep-links to the HouseInvitation screen', async () => {
     const { getByText, navigation } = renderScreen(<NotificationsScreen />, {
       route: { name: 'Notifications', params: {} },
       seedQueryData: seedNotifs([
@@ -146,9 +147,63 @@ describe('NotificationsScreen', () => {
       ]),
     });
     fireEvent.press(getByText('You were invited to a House.'));
+    // Route to the Accept/Decline invitation screen (not the dead-end HouseDetail).
     await waitFor(() =>
-      expect(navigation.navigate).toHaveBeenCalledWith('HouseDetail', { houseId: 'house-3' }),
+      expect(navigation.navigate).toHaveBeenCalledWith('HouseInvitation', { houseId: 'house-3' }),
     );
+  });
+
+  it('tapping a mention notification (roomId present) deep-links to the Room', async () => {
+    const { getByText, navigation } = renderScreen(<NotificationsScreen />, {
+      route: { name: 'Notifications', params: {} },
+      seedQueryData: seedNotifs([
+        makeNotif({
+          id: 'notif-mention',
+          kind: 'mention',
+          roomId: 'room-mention-1',
+          message: 'You were mentioned in a room.',
+        }),
+      ]),
+    });
+    fireEvent.press(getByText('You were mentioned in a room.'));
+    await waitFor(() =>
+      expect(navigation.navigate).toHaveBeenCalledWith('Room', { roomId: 'room-mention-1' }),
+    );
+  });
+
+  it('tapping a new_message notification hops cross-tab to the DM thread', async () => {
+    const { getByText, navigation } = renderScreen(<NotificationsScreen />, {
+      route: { name: 'Notifications', params: {} },
+      seedQueryData: seedNotifs([
+        makeNotif({
+          id: 'notif-dm',
+          kind: 'new_message',
+          actor: { id: 'peer-7', username: 'peer', displayName: 'Peer', avatarUrl: null },
+          message: 'Peer sent you a message.',
+        }),
+      ]),
+    });
+    fireEvent.press(getByText('Peer sent you a message.'));
+    await waitFor(() =>
+      expect(navigation.navigate).toHaveBeenCalledWith('Main', {
+        screen: 'MessagesTab',
+        params: { screen: 'ChatDetail', params: { conversationId: 'peer-7' } },
+      }),
+    );
+  });
+
+  it('load failure shows an error state whose Retry refetches the list', async () => {
+    const listSpy = jest
+      .spyOn(notificationService, 'list')
+      .mockRejectedValue({ kind: 'network', message: 'down' });
+    const { findByText } = renderScreen(<NotificationsScreen />, {
+      route: { name: 'Notifications', params: {} },
+    });
+    // Error state — not the misleading "You're all caught up." empty state.
+    expect(await findByText("Couldn't load notifications")).toBeTruthy();
+    expect(listSpy).toHaveBeenCalledTimes(1);
+    fireEvent.press(await findByText('Retry'));
+    await waitFor(() => expect(listSpy).toHaveBeenCalledTimes(2));
   });
 
   it('renders the loader while the query is pending (no seed, authed)', () => {

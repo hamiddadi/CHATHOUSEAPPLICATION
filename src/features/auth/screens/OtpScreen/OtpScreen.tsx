@@ -13,6 +13,11 @@ import Animated, {
 } from 'react-native-reanimated';
 import { OtpInput } from '../../../../shared/components/OtpInput';
 import { useAuthStore } from '../../store/authStore';
+import {
+  messageByKind,
+  toAppError,
+  type AppError,
+} from '../../../../shared/services/api/errorHandler';
 import { colors, spacing } from '../../../../shared/constants/theme';
 import type { AuthStackParamList } from '../../../../core/navigation/types';
 
@@ -22,6 +27,18 @@ type Route = RouteProp<AuthStackParamList, 'Otp'>;
 const OTP_LENGTH = 6;
 const RESEND_COOLDOWN_SECONDS = 60;
 const MAX_ATTEMPTS = 5;
+
+/**
+ * Failure kinds that never mean "wrong code": the request didn't reach a
+ * verdict (offline, 5xx, timeout) or was throttled (429). Those show the
+ * localized transport message and do NOT burn an attempt.
+ */
+const TRANSIENT_KINDS: ReadonlySet<AppError['kind']> = new Set([
+  'network',
+  'timeout',
+  'server',
+  'rateLimited',
+]);
 
 /** Mask a phone number: +33612345678 → +33 ••• ••• 678 */
 const maskPhone = (phone: string): string => {
@@ -89,6 +106,9 @@ export const OtpScreen: React.FC = () => {
   // Auto-submit when 6 digits entered
   const handleCodeChange = useCallback(
     async (newCode: string) => {
+      // A verify is already in flight — swallow extra input until it settles
+      // so a fast paste/typo can't double-submit the same code.
+      if (isSubmitting) return;
       // Once the attempt budget is exhausted, stop accepting submissions
       // client-side (backend also rate-limits). The user must resend a code,
       // which resets `attempts` below.
@@ -102,23 +122,33 @@ export const OtpScreen: React.FC = () => {
         setIsSubmitting(true);
         try {
           const { isNewUser } = await verifyOtp(phoneNumber, newCode);
-          // New users pick a real name first (Clubhouse order), then a username.
-          if (isNewUser) navigation.navigate('Name', { phoneNumber });
-        } catch {
-          // Almost every verify failure is a wrong/expired code. Show the
-          // localized message instead of leaking the raw HTTP error string
-          // (e.g. "Request failed with status code 401"); the attempt budget +
-          // "too many attempts" copy are tracked/surfaced separately.
-          setError(t('auth.otp.errors.invalid'));
-          setAttempts(prev => prev + 1);
-          triggerShake();
-          setCode('');
+          // New users pick a real name first (Clubhouse order), then a
+          // username. `replace` (not `navigate`) so backing out of Name lands
+          // on Phone instead of this already-consumed OTP.
+          if (isNewUser) navigation.replace('Name', { phoneNumber });
+        } catch (err) {
+          const e = toAppError(err);
+          if (TRANSIENT_KINDS.has(e.kind)) {
+            // The code was never judged wrong — show the localized transport
+            // message and keep the attempt budget intact. Clearing the code
+            // lets a re-entry re-trigger the auto-submit.
+            setError(messageByKind(e.kind));
+            setCode('');
+          } else {
+            // Auth/validation failure = wrong/expired code. Show the localized
+            // message instead of leaking the raw HTTP error string; the attempt
+            // budget + "too many attempts" copy are tracked/surfaced separately.
+            setError(t('auth.otp.errors.invalid'));
+            setAttempts(prev => prev + 1);
+            triggerShake();
+            setCode('');
+          }
         } finally {
           setIsSubmitting(false);
         }
       }
     },
-    [locked, navigation, phoneNumber, t, triggerShake, verifyOtp],
+    [isSubmitting, locked, navigation, phoneNumber, t, triggerShake, verifyOtp],
   );
 
   const handleResend = useCallback(async () => {
@@ -131,12 +161,19 @@ export const OtpScreen: React.FC = () => {
       setAttempts(0);
       setError(undefined);
       setCode('');
-    } catch {
-      // Silent — rate limit error surfaces via the store
+    } catch (err) {
+      // Surface the failure — a silent catch left users believing a new code
+      // was sent. 429 gets its dedicated localized message.
+      const e = toAppError(err);
+      setError(
+        e.kind === 'rateLimited'
+          ? messageByKind('rateLimited')
+          : t('auth.otp.errors.resendFailed', "We couldn't resend the code. Try again."),
+      );
     } finally {
       setIsResending(false);
     }
-  }, [countdown, isResending, phoneNumber, requestOtp]);
+  }, [countdown, isResending, phoneNumber, requestOtp, t]);
 
   const remainingAttempts = MAX_ATTEMPTS - attempts;
   const canResend = countdown === 0 && !isResending;
@@ -152,8 +189,8 @@ export const OtpScreen: React.FC = () => {
         <Pressable
           onPress={handleBack}
           accessibilityRole="button"
-          accessibilityLabel={t('common.close')}
-          hitSlop={8}
+          accessibilityLabel={t('common.back', 'Back')}
+          hitSlop={12}
         >
           <MaterialIcons name="arrow-back" size={24} color={colors.text} />
         </Pressable>
@@ -174,7 +211,20 @@ export const OtpScreen: React.FC = () => {
 
         {/* 6-cell OTP input with shake animation */}
         <Animated.View style={shakeStyle}>
-          <OtpInput value={code} onChange={handleCodeChange} error={error} autoFocus />
+          <OtpInput
+            value={code}
+            onChange={handleCodeChange}
+            error={error}
+            autoFocus
+            accessibilityLabel={t('auth.otp.inputA11yLabel', {
+              defaultValue: 'Verification code, {{length}} digits',
+              length: OTP_LENGTH,
+            })}
+            accessibilityHint={t(
+              'auth.otp.inputA11yHint',
+              'Enter the code you received by text message.',
+            )}
+          />
         </Animated.View>
 
         {/* Remaining attempts warning */}

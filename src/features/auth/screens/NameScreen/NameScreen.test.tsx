@@ -34,10 +34,32 @@ describe('NameScreen', () => {
     const { navigation, getByLabelText } = renderScreen(<NameScreen />, {
       route: { name: 'Name', params: { phoneNumber: PHONE } },
     });
-    // Header back uses t('common.close', 'Back') — the 'common.close' key
-    // exists in en.json ("Close"), so the inline 'Back' default is never used.
-    fireEvent.press(getByLabelText('Close'));
+    // Header back is labelled t('common.back', 'Back') — resolves to "Back"
+    // from en.json (audit fix: was mislabelled with the 'common.close' key).
+    fireEvent.press(getByLabelText('Back'));
     expect(navigation.goBack).toHaveBeenCalledTimes(1);
+  });
+
+  it('strips Unicode control/format characters from the name inputs', () => {
+    const { getByText, getByPlaceholderText } = renderScreen(<NameScreen />, {
+      route: { name: 'Name', params: { phoneNumber: PHONE } },
+    });
+    // BEL (Cc, U+0007), RTL-override (Cf, U+202E) and zero-width space
+    // (Cf, U+200B) must be filtered; visible letters pass through untouched.
+    // Built via fromCharCode so no invisible/bidi literal sits in the source.
+    const BEL = String.fromCharCode(0x07);
+    const RLO = String.fromCharCode(0x202e);
+    const ZWSP = String.fromCharCode(0x200b);
+    fireEvent.changeText(getByPlaceholderText('Jane'), `Ja${BEL}ne${RLO}`);
+    expect(getByPlaceholderText('Jane').props.value).toBe('Jane');
+
+    fireEvent.changeText(getByPlaceholderText('Doe'), `D${ZWSP}oe`);
+    expect(getByPlaceholderText('Doe').props.value).toBe('Doe');
+
+    fireEvent.press(getByText('Next'));
+    const store = useOnboardingStore.getState();
+    expect(store.firstName).toBe('Jane');
+    expect(store.lastName).toBe('Doe');
   });
 
   it('does not navigate while the first name is empty (CTA disabled)', () => {

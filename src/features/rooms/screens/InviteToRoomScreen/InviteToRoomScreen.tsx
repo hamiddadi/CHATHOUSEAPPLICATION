@@ -1,5 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import MaterialIcons from '@react-native-vector-icons/material-icons';
 import { useRoute, useNavigation, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -9,7 +17,6 @@ import { Avatar } from '../../../../shared/components/Avatar';
 import { Button } from '../../../../shared/components/Button';
 import { Input } from '../../../../shared/components/Input';
 import { EmptyState } from '../../../../shared/components/EmptyState';
-import { Loader } from '../../../../shared/components/Loader';
 import { colors, radii, spacing, withAlpha } from '../../../../shared/constants/theme';
 import { searchService } from '../../../search/services/searchService';
 import { useInviteToRoom } from '../../hooks/useRooms';
@@ -40,6 +47,9 @@ export const InviteToRoomScreen: React.FC = () => {
   const [debounced, setDebounced] = useState('');
   const [results, setResults] = useState<Candidate[]>([]);
   const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState(false);
+  // Bumped by the retry button to re-run the search effect for the same term.
+  const [retryTick, setRetryTick] = useState(0);
   const [selected, setSelected] = useState<Candidate[]>([]);
   const invite = useInviteToRoom();
 
@@ -51,10 +61,12 @@ export const InviteToRoomScreen: React.FC = () => {
   useEffect(() => {
     if (debounced.length === 0) {
       setResults([]);
+      setSearchError(false);
       return;
     }
     let cancelled = false;
     setSearching(true);
+    setSearchError(false);
     void searchService
       .users(debounced, 20)
       .then(rows => {
@@ -68,13 +80,23 @@ export const InviteToRoomScreen: React.FC = () => {
           })),
         );
       })
+      .catch(() => {
+        // Search failed — surface a retry-able error state instead of an
+        // indistinguishable "no results" empty list.
+        if (cancelled) return;
+        setResults([]);
+        setSearchError(true);
+      })
       .finally(() => {
         if (!cancelled) setSearching(false);
       });
     return () => {
       cancelled = true;
     };
-  }, [debounced]);
+  }, [debounced, retryTick]);
+
+  // Manual retry: bump the tick so the search effect re-runs for the same term.
+  const retrySearch = useCallback(() => setRetryTick(n => n + 1), []);
 
   const toggle = useCallback((c: Candidate) => {
     setSelected(prev => {
@@ -138,6 +160,26 @@ export const InviteToRoomScreen: React.FC = () => {
     [selectedIds, toggle],
   );
 
+  // Empty/error placeholder shown only when the list itself is empty. Error
+  // wins (offers a retry), then the "type something" prompt, then — while a
+  // search is in-flight the inline loader covers the gap so we render nothing,
+  // and finally the genuine "no results".
+  const emptyComponent = searchError ? (
+    <EmptyState
+      title={t('rooms.invite.searchErrorTitle', 'Search failed')}
+      description={t('rooms.invite.searchErrorBody', 'Check your connection and try again.')}
+      actionLabel={t('common.retry', 'Retry')}
+      onAction={retrySearch}
+    />
+  ) : debounced.length === 0 ? (
+    <EmptyState
+      title={t('rooms.invite.emptyTitle', "Cherchez quelqu'un")}
+      description={t('rooms.invite.emptyBody', 'Tapez un nom ou pseudo pour inviter dans la room.')}
+    />
+  ) : searching ? null : (
+    <EmptyState title={t('rooms.invite.noResultsTitle', 'Aucun résultat')} description="" />
+  );
+
   return (
     <View className="flex-1 bg-background" style={{ paddingTop: insets.top + spacing.lg }}>
       <View className="px-xxl gap-md">
@@ -172,38 +214,31 @@ export const InviteToRoomScreen: React.FC = () => {
         ) : null}
       </View>
 
-      {searching && results.length === 0 ? (
-        <Loader fullscreen accessibilityLabel={t('rooms.invite.searchingA11y', 'Recherche…')} />
-      ) : (
-        <FlatList
-          data={results}
-          renderItem={renderItem}
-          keyExtractor={r => r.id}
-          ItemSeparatorComponent={() => <View style={{ height: spacing.xs }} />}
-          contentContainerStyle={{
-            paddingHorizontal: spacing.xxl,
-            paddingTop: spacing.lg,
-            paddingBottom: insets.bottom + 96,
-          }}
-          ListEmptyComponent={
-            debounced.length === 0 ? (
-              <EmptyState
-                title={t('rooms.invite.emptyTitle', "Cherchez quelqu'un")}
-                description={t(
-                  'rooms.invite.emptyBody',
-                  'Tapez un nom ou pseudo pour inviter dans la room.',
-                )}
-              />
-            ) : (
-              <EmptyState
-                title={t('rooms.invite.noResultsTitle', 'Aucun résultat')}
-                description=""
-              />
-            )
-          }
-          showsVerticalScrollIndicator={false}
-        />
-      )}
+      {/* Inline loader on top of the (preserved) list so the previous results
+          don't blink out during a fresh keystroke search. */}
+      {searching ? (
+        <View
+          className="flex-row items-center justify-center gap-sm py-sm"
+          accessibilityRole="progressbar"
+          accessibilityLabel={t('rooms.invite.searchingA11y', 'Searching…')}
+        >
+          <ActivityIndicator size="small" color={colors.primary} />
+          <Text className="text-xs text-ink-dim">{t('rooms.invite.searching', 'Searching…')}</Text>
+        </View>
+      ) : null}
+      <FlatList
+        data={results}
+        renderItem={renderItem}
+        keyExtractor={r => r.id}
+        ItemSeparatorComponent={() => <View style={{ height: spacing.xs }} />}
+        contentContainerStyle={{
+          paddingHorizontal: spacing.xxl,
+          paddingTop: spacing.lg,
+          paddingBottom: insets.bottom + 96,
+        }}
+        ListEmptyComponent={emptyComponent}
+        showsVerticalScrollIndicator={false}
+      />
 
       <View
         style={[

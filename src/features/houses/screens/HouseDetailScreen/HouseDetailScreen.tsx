@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo } from 'react';
+import React, { memo, useCallback, useMemo } from 'react';
 import { Alert, FlatList, Image, Pressable, Share, Text, View } from 'react-native';
 import MaterialIcons from '@react-native-vector-icons/material-icons';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
@@ -18,12 +18,14 @@ import { Loader } from '../../../../shared/components/Loader';
 import { EmptyState } from '../../../../shared/components/EmptyState';
 import { colors, spacing } from '../../../../shared/constants/theme';
 import type { RoomStackParamList } from '../../../../core/navigation/types';
+import { SHARE_BASE_URL } from '../../../../core/navigation/linking';
 import { errorMessage } from '../../../../shared/utils/errorMessage';
 import { useAuthStore } from '../../../auth/store/authStore';
-import type { HouseMember } from '../../../../shared/types/domain';
+import type { House, HouseMember } from '../../../../shared/types/domain';
 import type { HouseMemberRole, HouseRoom } from '../../services/houseService';
 import {
   houseKeys,
+  useAcceptInvitation,
   useHouse,
   useHouseRooms,
   useJoinHouse,
@@ -35,11 +37,66 @@ import {
 type Nav = NativeStackNavigationProp<RoomStackParamList, 'HouseDetail'>;
 type Route = RouteProp<RoomStackParamList, 'HouseDetail'>;
 
-const ROLE_LABEL: Record<HouseMemberRole, string> = {
-  admin: 'Admin',
-  moderator: 'Modérateur',
-  member: 'Membre',
+/**
+ * Defensive read of the pending-invitation marker the detail API may expose
+ * for an invited viewer of a PRIVATE house (`viewerInvite` / `pendingInvite`,
+ * added server-side). Both the field and its shape are optional — absence
+ * simply means "no pending invite" and the legacy "invite only" text shows.
+ */
+type ViewerInviteMarker = boolean | { token?: string; inviteToken?: string } | null;
+type HouseWithInvite = House & {
+  viewerInvite?: ViewerInviteMarker;
+  pendingInvite?: ViewerInviteMarker;
 };
+
+interface MemberRowProps {
+  member: HouseMember;
+  manageable: boolean;
+  disabled: boolean;
+  onManage: (member: HouseMember) => void;
+}
+
+/** Memoised member row — the members FlatList re-renders on every house
+ *  refetch, so keeping the row pure avoids re-rendering the whole list. */
+const MemberRow: React.FC<MemberRowProps> = memo(
+  ({ member: m, manageable, disabled, onManage }) => {
+    const { t } = useTranslation();
+    const handle = useCallback(() => onManage(m), [m, onManage]);
+    const row = (
+      <>
+        <Avatar uri={m.avatarUrl ?? undefined} name={m.displayName} size="md" />
+        <View className="flex-1">
+          <Text className="text-md font-body-bold text-ink" numberOfLines={1}>
+            {m.displayName}
+          </Text>
+          <Text className="text-xs font-body text-ink-muted capitalize">{m.role}</Text>
+        </View>
+        {m.role !== 'member' && (
+          <View className="bg-accent-container px-sm py-xxs rounded-xs">
+            <Text className="text-xxs font-body-bold text-accent uppercase">{m.role}</Text>
+          </View>
+        )}
+        {manageable && <MaterialIcons name="more-horiz" size={20} color={colors.textMuted} />}
+      </>
+    );
+    return manageable ? (
+      <Pressable
+        onPress={handle}
+        disabled={disabled}
+        accessibilityRole="button"
+        accessibilityLabel={t('house.manageMemberA11y', 'Manage role for {{name}}', {
+          name: m.displayName,
+        })}
+        className="flex-row items-center gap-md p-md rounded-md bg-overlay-white-5"
+      >
+        {row}
+      </Pressable>
+    ) : (
+      <View className="flex-row items-center gap-md p-md rounded-md bg-overlay-white-5">{row}</View>
+    );
+  },
+);
+MemberRow.displayName = 'MemberRow';
 
 export const HouseDetailScreen: React.FC = () => {
   const navigation = useNavigation<Nav>();
@@ -47,10 +104,16 @@ export const HouseDetailScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const { t } = useTranslation();
   const houseId = route.params.houseId;
-  const { data: house, isLoading, isError } = useHouse(houseId);
-  const { data: liveRooms } = useHouseRooms(houseId, 'live');
-  const { data: upcomingRooms } = useHouseRooms(houseId, 'upcoming');
-  const { data: pastRooms } = useHouseRooms(houseId, 'past');
+  const {
+    data: house,
+    isLoading,
+    isError,
+    isRefetching: houseRefetching,
+    refetch: refetchHouse,
+  } = useHouse(houseId);
+  const { data: liveRooms, refetch: refetchLiveRooms } = useHouseRooms(houseId, 'live');
+  const { data: upcomingRooms, refetch: refetchUpcomingRooms } = useHouseRooms(houseId, 'upcoming');
+  const { data: pastRooms, refetch: refetchPastRooms } = useHouseRooms(houseId, 'past');
   const { data: clubMeta } = useQuery({
     queryKey: [...houseKeys.detail(houseId), 'meta'],
     queryFn: () => clubMetaApi.get(houseId),
@@ -74,6 +137,42 @@ export const HouseDetailScreen: React.FC = () => {
       !!viewerId && (house?.members.some(m => m.id === viewerId && m.role === 'admin') ?? false),
     [house?.members, viewerId],
   );
+
+  // Mirror of the backend invite gate (CLUB_002): only the owner or an
+  // ADMIN/MODERATOR member may invite. Offering the CTA to anyone else just
+  // funnels them into a guaranteed server rejection.
+  const canInvite = useMemo(() => {
+    if (!viewerId || !house) return false;
+    if (house.ownerId === viewerId) return true;
+    const me = house.members.find(m => m.id === viewerId);
+    return me?.role === 'admin' || me?.role === 'moderator';
+  }, [house, viewerId]);
+
+  // Pending invitation for the viewer (PRIVATE houses) — see HouseWithInvite.
+  const inviteMarker = useMemo<ViewerInviteMarker | undefined>(() => {
+    if (!house) return undefined;
+    const h = house as HouseWithInvite;
+    return h.viewerInvite ?? h.pendingInvite;
+  }, [house]);
+  const hasPendingInvite = !!inviteMarker;
+  const pendingInviteToken =
+    typeof inviteMarker === 'object' && inviteMarker !== null
+      ? (inviteMarker.token ?? inviteMarker.inviteToken)
+      : undefined;
+
+  const acceptInvitation = useAcceptInvitation();
+  const handleAcceptInvite = useCallback(() => {
+    acceptInvitation.mutate(
+      { houseId, inviteToken: pendingInviteToken },
+      {
+        onError: e =>
+          Alert.alert(
+            t('house.actionErrorTitle', 'Action failed'),
+            errorMessage(e, t('house.acceptInviteError', "Couldn't accept the invitation.")),
+          ),
+      },
+    );
+  }, [acceptInvitation, houseId, pendingInviteToken, t]);
 
   // The viewer (OWNER/ADMIN of a SOCIAL house) sees a pending-requests inbox.
   const isSocial = house?.privacy === 'social';
@@ -140,24 +239,39 @@ export const HouseDetailScreen: React.FC = () => {
   );
   const handleJoin = useCallback(() => {
     joinHouse.mutate(houseId, {
-      onError: e => Alert.alert('Erreur', errorMessage(e, 'Impossible de rejoindre cette house.')),
+      onError: e =>
+        Alert.alert(
+          t('house.actionErrorTitle', 'Action failed'),
+          errorMessage(e, t('house.joinError', "Couldn't join this house.")),
+        ),
     });
-  }, [houseId, joinHouse]);
+  }, [houseId, joinHouse, t]);
+
+  // Pull-to-refresh: re-pull the house AND its room bands in one gesture.
+  const handleRefresh = useCallback(() => {
+    void refetchHouse();
+    void refetchLiveRooms();
+    void refetchUpcomingRooms();
+    void refetchPastRooms();
+  }, [refetchHouse, refetchLiveRooms, refetchUpcomingRooms, refetchPastRooms]);
 
   const handleLeave = useCallback(() => {
     Alert.alert(
-      t('house.leaveTitle', 'Quitter la house'),
-      t('house.leaveBody', 'Vous ne recevrez plus ses rooms et events.'),
+      t('house.leaveTitle', 'Leave the house'),
+      t('house.leaveBody', 'You will no longer get its rooms and events.'),
       [
-        { text: t('common.cancel', 'Annuler'), style: 'cancel' },
+        { text: t('common.cancel', 'Cancel'), style: 'cancel' },
         {
-          text: t('house.leaveConfirm', 'Quitter'),
+          text: t('house.leaveConfirm', 'Leave'),
           style: 'destructive',
           onPress: () =>
             leaveHouse.mutate(houseId, {
               onSuccess: () => navigation.goBack(),
               onError: e =>
-                Alert.alert('Erreur', errorMessage(e, 'Impossible de quitter cette house.')),
+                Alert.alert(
+                  t('house.actionErrorTitle', 'Action failed'),
+                  errorMessage(e, t('house.leaveError', "Couldn't leave this house.")),
+                ),
             }),
         },
       ],
@@ -165,47 +279,97 @@ export const HouseDetailScreen: React.FC = () => {
   }, [houseId, leaveHouse, navigation, t]);
 
   const handleOptions = useCallback(() => {
-    const shareUrl = `https://app.chathouse.com/h/${houseId}`;
+    // Must match the declared deep link (`house/:houseId` in linking.ts) so a
+    // shared link actually opens the house. `…/h/<id>` was a dead URL.
+    const shareUrl = `${SHARE_BASE_URL}/house/${houseId}`;
     const buttons: {
       text: string;
       style?: 'cancel' | 'destructive';
       onPress?: () => void;
     }[] = [
       {
-        text: 'Partager la house',
+        text: t('house.share', 'Share the house'),
         onPress: () => {
           void Share.share({
             title: 'Chathouse',
-            message: `Découvre cette house sur Chathouse — ${shareUrl}`,
+            message: t('house.shareMessage', 'Check out this house on Chathouse — {{url}}', {
+              url: shareUrl,
+            }),
             url: shareUrl,
           }).catch(() => undefined);
         },
       },
-      { text: 'Inviter des membres', onPress: handleInvite },
     ];
+    // Inviting is gated by the backend (CLUB_002) to the owner / admins /
+    // moderators — only offer it when the call can succeed.
+    if (canInvite) {
+      buttons.push({ text: t('house.inviteMembers', 'Invite members'), onPress: handleInvite });
+    }
     // A member who isn't the owner can leave (the owner deletes instead).
     if (house?.isJoinedByMe && !viewerIsOwner) {
       buttons.push({
-        text: t('house.leave', 'Quitter la house'),
+        text: t('house.leave', 'Leave the house'),
         style: 'destructive',
         onPress: handleLeave,
       });
     }
-    buttons.push({ text: 'Annuler', style: 'cancel' });
-    Alert.alert('Options de la house', undefined, buttons);
-  }, [handleInvite, houseId, house?.isJoinedByMe, viewerIsOwner, handleLeave, t]);
+    buttons.push({ text: t('common.cancel', 'Cancel'), style: 'cancel' });
+    Alert.alert(t('house.optionsTitle', 'House options'), undefined, buttons);
+  }, [canInvite, handleInvite, houseId, house?.isJoinedByMe, viewerIsOwner, handleLeave, t]);
 
   const applyRole = useCallback(
     (userId: string, role: HouseMemberRole) => {
       setMemberRole.mutate(
         { houseId, userId, role },
         {
-          onError: () =>
-            Alert.alert('Action impossible', 'Impossible de modifier le rôle de ce membre.'),
+          onError: e =>
+            Alert.alert(
+              t('house.actionErrorTitle', 'Action failed'),
+              errorMessage(e, t('house.roleError', "Couldn't change this member's role.")),
+            ),
         },
       );
     },
-    [houseId, setMemberRole],
+    [houseId, setMemberRole, t],
+  );
+
+  // Kick is destructive and irreversible from this screen — always route
+  // through an explicit confirmation Alert before firing the mutation.
+  const confirmKick = useCallback(
+    (member: HouseMember) => {
+      Alert.alert(
+        t('house.kickConfirmTitle', 'Remove {{name}}?', { name: member.displayName }),
+        t('house.kickConfirmBody', 'They will lose access to this house and its rooms.'),
+        [
+          { text: t('common.cancel', 'Cancel'), style: 'cancel' },
+          {
+            text: t('house.kickConfirm', 'Remove'),
+            style: 'destructive',
+            onPress: () =>
+              removeMember.mutate(
+                { houseId, userId: member.id },
+                {
+                  onError: e =>
+                    Alert.alert(
+                      t('house.actionErrorTitle', 'Action failed'),
+                      errorMessage(e, t('house.kickError', "Couldn't remove this member.")),
+                    ),
+                },
+              ),
+          },
+        ],
+      );
+    },
+    [houseId, removeMember, t],
+  );
+
+  const roleLabels: Record<HouseMemberRole, string> = useMemo(
+    () => ({
+      admin: t('house.roles.admin', 'Admin'),
+      moderator: t('house.roles.moderator', 'Moderator'),
+      member: t('house.roles.member', 'Member'),
+    }),
+    [t],
   );
 
   const handleManageMember = useCallback(
@@ -216,26 +380,27 @@ export const HouseDetailScreen: React.FC = () => {
       )
         .filter(role => role !== member.role)
         .map(role => ({
-          text: role === 'member' ? 'Rétrograder en Membre' : `Promouvoir ${ROLE_LABEL[role]}`,
+          text:
+            role === 'member'
+              ? t('house.demoteToMember', 'Demote to Member')
+              : t('house.promoteTo', 'Promote to {{role}}', { role: roleLabels[role] }),
           onPress: () => applyRole(member.id, role),
         }));
-      Alert.alert(member.displayName, `Rôle actuel : ${ROLE_LABEL[member.role]}`, [
-        ...options,
-        {
-          text: 'Retirer de la house',
-          style: 'destructive',
-          onPress: () =>
-            removeMember.mutate(
-              { houseId, userId: member.id },
-              {
-                onError: () => Alert.alert('Action impossible', 'Impossible de retirer ce membre.'),
-              },
-            ),
-        },
-        { text: 'Annuler', style: 'cancel' },
-      ]);
+      Alert.alert(
+        member.displayName,
+        t('house.currentRole', 'Current role: {{role}}', { role: roleLabels[member.role] }),
+        [
+          ...options,
+          {
+            text: t('house.kick', 'Remove from house'),
+            style: 'destructive',
+            onPress: () => confirmKick(member),
+          },
+          { text: t('common.cancel', 'Cancel'), style: 'cancel' },
+        ],
+      );
     },
-    [applyRole, houseId, removeMember],
+    [applyRole, confirmKick, roleLabels, t],
   );
 
   // Admins can manage every member except themselves and the owner — the
@@ -251,45 +416,27 @@ export const HouseDetailScreen: React.FC = () => {
 
   const memberKeyExtractor = useCallback((item: HouseMember) => item.id, []);
   const renderMemberItem = useCallback(
-    ({ item: m }: { item: HouseMember }) => {
-      const manageable = isManageable(m);
-      const row = (
-        <>
-          <Avatar uri={m.avatarUrl ?? undefined} name={m.displayName} size="md" />
-          <View className="flex-1">
-            <Text className="text-md font-body-bold text-ink">{m.displayName}</Text>
-            <Text className="text-xs font-body text-ink-muted capitalize">{m.role}</Text>
-          </View>
-          {m.role !== 'member' && (
-            <View className="bg-accent-container px-sm py-xxs rounded-xs">
-              <Text className="text-xxs font-body-bold text-accent uppercase">{m.role}</Text>
-            </View>
-          )}
-          {manageable && <MaterialIcons name="more-horiz" size={20} color={colors.textMuted} />}
-        </>
-      );
-      return manageable ? (
-        <Pressable
-          onPress={() => handleManageMember(m)}
-          disabled={setMemberRole.isPending}
-          accessibilityRole="button"
-          accessibilityLabel={`Manage role for ${m.displayName}`}
-          className="flex-row items-center gap-md p-md rounded-md bg-overlay-white-5"
-        >
-          {row}
-        </Pressable>
-      ) : (
-        <View className="flex-row items-center gap-md p-md rounded-md bg-overlay-white-5">
-          {row}
-        </View>
-      );
-    },
+    ({ item: m }: { item: HouseMember }) => (
+      <MemberRow
+        member={m}
+        manageable={isManageable(m)}
+        disabled={setMemberRole.isPending}
+        onManage={handleManageMember}
+      />
+    ),
     [handleManageMember, isManageable, setMemberRole.isPending],
   );
 
-  if (isLoading) return <Loader fullscreen accessibilityLabel="Loading house" />;
+  if (isLoading) {
+    return <Loader fullscreen accessibilityLabel={t('house.loading', 'Loading house')} />;
+  }
   if (isError || !house) {
-    return <EmptyState title="House unavailable" description="This house may have been deleted." />;
+    return (
+      <EmptyState
+        title={t('house.unavailableTitle', 'House unavailable')}
+        description={t('house.unavailableBody', 'This house may have been deleted.')}
+      />
+    );
   }
 
   const renderRoomSection = (title: string, rooms: HouseRoom[] | undefined, live: boolean) => {
@@ -304,7 +451,9 @@ export const HouseDetailScreen: React.FC = () => {
             key={room.id}
             onPress={() => navigation.navigate('Room', { roomId: room.id })}
             accessibilityRole="button"
-            accessibilityLabel={`Open room ${room.title}`}
+            accessibilityLabel={t('house.openRoomA11y', 'Open room {{title}}', {
+              title: room.title,
+            })}
             className="flex-row items-center gap-md p-md rounded-md bg-overlay-white-5"
           >
             <View className={`h-2 w-2 rounded-full ${live ? 'bg-success' : 'bg-ink-muted'}`} />
@@ -314,10 +463,12 @@ export const HouseDetailScreen: React.FC = () => {
               </Text>
               <Text className="text-xs font-body text-ink-muted">
                 {live
-                  ? `${room.participantCount} en ligne`
+                  ? t('house.roomOnlineCount', '{{count}} online', {
+                      count: room.participantCount,
+                    })
                   : room.scheduledFor
                     ? new Date(room.scheduledFor).toLocaleString()
-                    : 'Planifiée'}
+                    : t('house.roomScheduled', 'Scheduled')}
               </Text>
             </View>
             <MaterialIcons name="chevron-right" size={20} color={colors.textMuted} />
@@ -388,8 +539,9 @@ export const HouseDetailScreen: React.FC = () => {
         <Pressable
           onPress={handleBack}
           accessibilityRole="button"
-          accessibilityLabel="Back"
-          hitSlop={8}
+          accessibilityLabel={t('common.back', 'Back')}
+          // 24px icon + 2×10 hitSlop = 44px touch target.
+          hitSlop={10}
         >
           <MaterialIcons name="arrow-back" size={24} color={colors.text} />
         </Pressable>
@@ -407,7 +559,7 @@ export const HouseDetailScreen: React.FC = () => {
           <Pressable
             onPress={handleOptions}
             accessibilityRole="button"
-            accessibilityLabel="House options"
+            accessibilityLabel={t('house.optionsA11y', 'House options')}
             hitSlop={8}
           >
             <MaterialIcons name="more-vert" size={24} color={colors.text} />
@@ -420,6 +572,8 @@ export const HouseDetailScreen: React.FC = () => {
         data={house.members}
         keyExtractor={memberKeyExtractor}
         renderItem={renderMemberItem}
+        refreshing={houseRefetching}
+        onRefresh={handleRefresh}
         contentContainerStyle={{
           paddingHorizontal: spacing.xxl,
           paddingBottom: insets.bottom + spacing.giant,
@@ -444,7 +598,10 @@ export const HouseDetailScreen: React.FC = () => {
                 sizeValue={96}
                 shape="squircle"
               />
-              <Text className="text-display font-display text-ink tracking-tight">
+              <Text
+                className="text-display font-display text-ink tracking-tight text-center"
+                numberOfLines={2}
+              >
                 {house.name}
               </Text>
               <Text className="text-sm font-body text-ink-muted text-center">
@@ -453,7 +610,7 @@ export const HouseDetailScreen: React.FC = () => {
               {house.rules ? (
                 <View className="self-stretch gap-xs">
                   <Text className="text-xxs font-body-bold text-ink-muted tracking-widest uppercase">
-                    {t('house.rules', 'Règles')}
+                    {t('house.rules', 'Rules')}
                   </Text>
                   <Text className="text-sm font-body text-ink-muted">{house.rules}</Text>
                 </View>
@@ -475,16 +632,33 @@ export const HouseDetailScreen: React.FC = () => {
                 </View>
               </View>
               {house.isJoinedByMe ? (
-                <Button
-                  label={t('house.inviteMembers', 'Invite members')}
-                  variant="primaryContainer"
-                  size="md"
-                  onPress={handleInvite}
-                />
+                // The invite CTA mirrors the backend CLUB_002 gate: owner /
+                // admin / moderator only. A plain member sees no CTA here.
+                canInvite ? (
+                  <Button
+                    label={t('house.inviteMembers', 'Invite members')}
+                    variant="primaryContainer"
+                    size="md"
+                    onPress={handleInvite}
+                  />
+                ) : null
               ) : house.privacy === 'private' ? (
-                <Text className="text-xs font-body text-ink-muted">
-                  {t('house.inviteOnly', 'Sur invitation uniquement')}
-                </Text>
+                hasPendingInvite ? (
+                  // Invited viewer of a PRIVATE house: surface the accept CTA
+                  // instead of the "invite only" dead-end.
+                  <Button
+                    label={t('house.acceptInvite', 'Accept invitation')}
+                    variant="primary"
+                    size="md"
+                    loading={acceptInvitation.isPending}
+                    disabled={acceptInvitation.isPending}
+                    onPress={handleAcceptInvite}
+                  />
+                ) : (
+                  <Text className="text-xs font-body text-ink-muted">
+                    {t('house.inviteOnly', 'Invite only')}
+                  </Text>
+                )
               ) : house.privacy === 'social' ? (
                 // SOCIAL houses are approval-gated: the legacy direct join now
                 // rejects them (CLUB-01), so route through the clubreq request
@@ -503,7 +677,7 @@ export const HouseDetailScreen: React.FC = () => {
                 />
               ) : (
                 <Button
-                  label={t('house.join', 'Rejoindre')}
+                  label={t('house.join', 'Join')}
                   variant="primary"
                   size="md"
                   loading={joinHouse.isPending}
@@ -515,9 +689,9 @@ export const HouseDetailScreen: React.FC = () => {
 
             {renderRequestInbox()}
 
-            {renderRoomSection(t('house.liveRooms', 'En direct'), liveRooms, true)}
-            {renderRoomSection(t('house.upcomingRooms', 'Planifiées'), upcomingRooms, false)}
-            {renderRoomSection(t('house.pastRooms', 'Rooms passées'), pastRooms, false)}
+            {renderRoomSection(t('house.liveRooms', 'Live now'), liveRooms, true)}
+            {renderRoomSection(t('house.upcomingRooms', 'Scheduled'), upcomingRooms, false)}
+            {renderRoomSection(t('house.pastRooms', 'Past rooms'), pastRooms, false)}
 
             <Text className="text-xxs font-body-bold text-ink-muted tracking-widest uppercase mt-lg">
               {t('house.membersList', 'Members')}

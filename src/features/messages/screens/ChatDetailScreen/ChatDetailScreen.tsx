@@ -1,17 +1,20 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   FlatList,
   Keyboard,
   KeyboardAvoidingView,
   Platform,
   StyleSheet,
+  View,
 } from 'react-native';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { Loader } from '../../../../shared/components/Loader';
+import { EmptyState } from '../../../../shared/components/EmptyState';
 import { useApiErrorToast } from '../../../../shared/hooks/useApiErrorToast';
 import { toAppError } from '../../../../shared/services/api/errorHandler';
 import { colors, spacing } from '../../../../shared/constants/theme';
@@ -27,6 +30,7 @@ import {
   useMarkConversationRead,
   useDeleteMessage,
 } from '../../hooks/useMessages';
+import { useChatSocket } from '../../hooks/useChatSocket';
 import { useTypingIndicator } from '../../hooks/useTypingIndicator';
 import { useVoiceMessage } from '../../hooks/useVoiceMessage';
 import VoiceRecordingBar from '../../components/VoiceRecordingBar';
@@ -106,6 +110,13 @@ export const ChatDetailScreen: React.FC = () => {
   // unauthenticated render) so the participant resolution stays stable.
   const myId = useAuthStore(s => s.user?.id) ?? CURRENT_USER.id;
 
+  // Subscribe to realtime chat events for as long as THIS screen is mounted,
+  // so the thread stays live regardless of the entry point (deep link, Room,
+  // Maps…) — it must not depend on MessagesScreen being in the stack. The
+  // socket is a singleton and the hook dedupes handlers, so double-mounting
+  // alongside MessagesScreen is safe.
+  useChatSocket();
+
   // Inverted list: the latest message lives at offset 0 (the visual bottom),
   // so "scroll to bottom" is a scroll-to-offset-0, not scrollToEnd.
   const scrollToBottom = useCallback(() => {
@@ -127,7 +138,15 @@ export const ChatDetailScreen: React.FC = () => {
   // doubles as the `receiverId` for the typing relay.
   const peerId = route.params.conversationId;
   const { data: conversation } = useConversation(peerId);
-  const { data: messages, isLoading } = useConversationMessages(peerId);
+  const {
+    data: messages,
+    isLoading,
+    isError,
+    refetch,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useConversationMessages(peerId);
   const sendMessage = useSendMessage();
   const sendVoice = useSendVoiceMessage();
   const markRead = useMarkConversationRead();
@@ -210,16 +229,25 @@ export const ChatDetailScreen: React.FC = () => {
   // broken — we surface a single "Coming soon" alert so the user gets
   // immediate feedback. Replace each handler when the underlying feature ships.
   // (Voice messages now ship for real — see handleMic/handleVoiceSend above.)
-  const showComingSoon = useCallback((label: string) => {
-    Alert.alert(label, 'Cette fonctionnalité arrive bientôt.');
-  }, []);
-
-  const handleCall = useCallback(() => showComingSoon('Appel vocal'), [showComingSoon]);
-  const handleMore = useCallback(
-    () => showComingSoon('Options de la conversation'),
-    [showComingSoon],
+  const showComingSoon = useCallback(
+    (label: string) => {
+      Alert.alert(label, t('chat.comingSoon', 'Cette fonctionnalité arrive bientôt.'));
+    },
+    [t],
   );
-  const handleAttach = useCallback(() => showComingSoon('Pièce jointe'), [showComingSoon]);
+
+  const handleCall = useCallback(
+    () => showComingSoon(t('chat.callLabel', 'Appel vocal')),
+    [showComingSoon, t],
+  );
+  const handleMore = useCallback(
+    () => showComingSoon(t('chat.moreLabel', 'Options de la conversation')),
+    [showComingSoon, t],
+  );
+  const handleAttach = useCallback(
+    () => showComingSoon(t('chat.attachLabel', 'Pièce jointe')),
+    [showComingSoon, t],
+  );
 
   const other: UserSummary | undefined =
     conversation?.participants.find(p => p.id !== myId) ?? conversation?.participants[0];
@@ -283,6 +311,20 @@ export const ChatDetailScreen: React.FC = () => {
 
   const keyExtractor = useCallback((item: ChatListItem) => item.id, []);
 
+  // Inverted list: "end" = the visual TOP = the oldest loaded message. Reaching
+  // it pulls the next (older) page via the `before` cursor.
+  const handleEndReached = useCallback(() => {
+    if (hasNextPage && !isFetchingNextPage) void fetchNextPage();
+  }, [fetchNextPage, hasNextPage, isFetchingNextPage]);
+
+  // Rendered at the end of the data = the visual top, right where the older
+  // page will appear.
+  const listFooter = isFetchingNextPage ? (
+    <View style={styles.pageLoader}>
+      <ActivityIndicator size="small" color={colors.primary} />
+    </View>
+  ) : null;
+
   // Presence is not yet wired into the DM thread. The conversation payload
   // carries no per-peer online flag, so we must not assert a green "online"
   // dot unconditionally — that was a misleading indicator. Until a real
@@ -312,7 +354,22 @@ export const ChatDetailScreen: React.FC = () => {
       />
 
       {isLoading ? (
-        <Loader fullscreen accessibilityLabel="Loading messages" />
+        <Loader fullscreen accessibilityLabel={t('common.loading')} />
+      ) : isError ? (
+        <EmptyState
+          title={t('chat.loadErrorTitle', 'Impossible de charger les messages')}
+          description={t('chat.loadErrorHint', 'Vérifiez votre connexion puis réessayez.')}
+          actionLabel={t('common.retry', 'Retry')}
+          onAction={() => void refetch()}
+        />
+      ) : items.length === 0 ? (
+        // Brand-new thread (e.g. opened from a profile): invite the first
+        // message instead of a blank scroll area. Rendered OUTSIDE the inverted
+        // FlatList — an inverted ListEmptyComponent renders upside down.
+        <EmptyState
+          title={t('chat.emptyTitle', 'Aucun message pour le moment')}
+          description={t('chat.emptyHint', 'Envoyez un message pour démarrer la conversation.')}
+        />
       ) : (
         <FlatList
           ref={listRef}
@@ -325,6 +382,10 @@ export const ChatDetailScreen: React.FC = () => {
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
           showsVerticalScrollIndicator={false}
+          onEndReached={handleEndReached}
+          onEndReachedThreshold={0.5}
+          ListFooterComponent={listFooter}
+          testID="chat-thread-list"
         />
       )}
 
@@ -364,5 +425,9 @@ const styles = StyleSheet.create({
     paddingTop: spacing.md,
     paddingBottom: spacing.xxl,
     gap: spacing.xl,
+  },
+  pageLoader: {
+    paddingVertical: spacing.md,
+    alignItems: 'center',
   },
 });

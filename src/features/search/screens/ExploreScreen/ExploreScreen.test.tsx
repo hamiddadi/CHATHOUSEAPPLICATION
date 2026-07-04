@@ -6,9 +6,11 @@
  * results view. Native modules are globally mocked in jest-setup.
  */
 import React from 'react';
-import { fireEvent } from '@testing-library/react-native';
+import { fireEvent, waitFor } from '@testing-library/react-native';
 import { searchKeys } from '../../hooks/useSearch';
-import type { ExploreFeed } from '../../services/exploreService';
+import { exploreService, type ExploreFeed } from '../../services/exploreService';
+import type { SearchResults } from '../../services/searchService';
+import type { FlatTopic } from '../../../extensions/api/topicsApi';
 import { renderScreen, mockAuthenticated, resetAuth } from '../../../../test-utils/renderScreen';
 import { ExploreScreen } from './ExploreScreen';
 
@@ -52,6 +54,16 @@ const makeFeed = (overrides: Partial<ExploreFeed> = {}): ExploreFeed => ({
 });
 
 const seedExplore = (feed: ExploreFeed) => [{ key: [...searchKeys.explore()], data: feed }];
+
+const emptyResults = (): SearchResults => ({ users: [], clubs: [], rooms: [] });
+
+const makeTopic = (overrides: Partial<FlatTopic> = {}): FlatTopic => ({
+  slug: 'tech',
+  label: 'Tech',
+  emoji: '💻',
+  parent: null,
+  ...overrides,
+});
 
 describe('ExploreScreen', () => {
   beforeEach(() => {
@@ -136,5 +148,55 @@ describe('ExploreScreen', () => {
     });
     const input = getByPlaceholderText('Search rooms, clubs, people');
     expect(() => fireEvent.changeText(input, 'design')).not.toThrow();
+  });
+
+  it('a `topic` route param pre-fills the search and shows its results immediately', () => {
+    // useDebouncedValue seeds its state from the initial value, so a `topic`
+    // param makes debouncedQuery non-empty on the very first render → the search
+    // view (not the explore feed) renders straight away.
+    const { getByText, getByDisplayValue } = renderScreen(<ExploreScreen />, {
+      route: { name: 'Explore', params: { topic: 'tech' } },
+      seedQueryData: [
+        ...seedExplore(makeFeed()),
+        {
+          key: [...searchKeys.query('tech')],
+          data: { ...emptyResults(), rooms: makeFeed().rooms },
+        },
+        { key: [...searchKeys.topics('tech')], data: [] },
+      ],
+    });
+    // The bar shows the pre-filled query and the seeded room result renders.
+    expect(getByDisplayValue('tech')).toBeTruthy();
+    expect(getByText('Scaling to 10M users')).toBeTruthy();
+  });
+
+  it('tapping a topic hit navigates to TopicExplorer WITH its slug', async () => {
+    const { getByText, navigation } = renderScreen(<ExploreScreen />, {
+      route: { name: 'Explore', params: { topic: 'tech' } },
+      seedQueryData: [
+        ...seedExplore(makeFeed()),
+        { key: [...searchKeys.query('tech')], data: emptyResults() },
+        {
+          key: [...searchKeys.topics('tech')],
+          data: [makeTopic({ slug: 'startups', label: 'Startups' })],
+        },
+      ],
+    });
+    fireEvent.press(await waitFor(() => getByText('Startups')));
+    // The slug must be forwarded (previously dropped → bare TopicExplorer).
+    expect(navigation.navigate).toHaveBeenCalledWith('TopicExplorer', { initialTopic: 'startups' });
+  });
+
+  it('explore feed load failure shows an error state whose Retry refetches', async () => {
+    const feedSpy = jest
+      .spyOn(exploreService, 'feed')
+      .mockRejectedValue({ kind: 'network', message: 'down' });
+    const { findByText } = renderScreen(<ExploreScreen />, {
+      route: { name: 'Explore', params: {} },
+    });
+    expect(await findByText("Couldn't load Explore")).toBeTruthy();
+    expect(feedSpy).toHaveBeenCalledTimes(1);
+    fireEvent.press(await findByText('Retry'));
+    await waitFor(() => expect(feedSpy).toHaveBeenCalledTimes(2));
   });
 });

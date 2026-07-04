@@ -1,6 +1,7 @@
 import React, { memo, useCallback } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import MaterialIcons from '@react-native-vector-icons/material-icons';
+import { useTranslation } from 'react-i18next';
 import { Avatar } from '../../../shared/components/Avatar';
 import { Button } from '../../../shared/components/Button';
 import { colors } from '../../../shared/constants/theme';
@@ -19,6 +20,7 @@ interface FollowerMiniCardProps {
  */
 export const FollowerMiniCard: React.FC<FollowerMiniCardProps> = memo(
   ({ follower, onJoinRoom, onSendMessage, onClose }) => {
+    const { t } = useTranslation();
     const handleJoinRoom = useCallback(() => {
       if (follower.liveRoomId) onJoinRoom(follower.liveRoomId);
     }, [follower.liveRoomId, onJoinRoom]);
@@ -27,6 +29,15 @@ export const FollowerMiniCard: React.FC<FollowerMiniCardProps> = memo(
       () => onSendMessage(follower.id),
       [follower.id, onSendMessage],
     );
+
+    // Presence line: live room title > online > "last seen" relative minutes.
+    const presenceLabel = follower.liveRoomTitle
+      ? t('explorer.maps.miniCardInRoom', '🎙️ In "{{title}}"', { title: follower.liveRoomTitle })
+      : follower.presence === 'online'
+        ? t('explorer.maps.miniCardOnline', '🟢 Online')
+        : t('explorer.maps.miniCardLastSeen', '{{count}}m ago', {
+            count: follower.lastSeenMinutesAgo,
+          });
 
     return (
       <View className="bg-surface-highest/95 border border-overlay-white-10 rounded-xl p-lg gap-md shadow-glow-primary">
@@ -42,17 +53,13 @@ export const FollowerMiniCard: React.FC<FollowerMiniCardProps> = memo(
               {follower.displayName}
             </Text>
             <Text className="text-xs font-body text-ink-muted" numberOfLines={1}>
-              {follower.liveRoomTitle
-                ? `🎙️ In "${follower.liveRoomTitle}"`
-                : follower.presence === 'online'
-                  ? '🟢 Online'
-                  : `${follower.lastSeenMinutesAgo}m ago`}
+              {presenceLabel}
             </Text>
           </View>
           <Pressable
             onPress={onClose}
             accessibilityRole="button"
-            accessibilityLabel="Close"
+            accessibilityLabel={t('common.close', 'Close')}
             hitSlop={8}
           >
             <MaterialIcons name="close" size={20} color={colors.textMuted} />
@@ -63,7 +70,7 @@ export const FollowerMiniCard: React.FC<FollowerMiniCardProps> = memo(
           {follower.liveRoomId && (
             <View className="flex-1">
               <Button
-                label="Join Room"
+                label={t('explorer.maps.joinRoom', 'Join Room')}
                 variant="primary"
                 size="sm"
                 fullWidth
@@ -74,7 +81,7 @@ export const FollowerMiniCard: React.FC<FollowerMiniCardProps> = memo(
           )}
           <View className="flex-1">
             <Button
-              label="Message"
+              label={t('explorer.maps.message', 'Message')}
               variant={follower.liveRoomId ? 'ghost' : 'primary'}
               size="sm"
               fullWidth

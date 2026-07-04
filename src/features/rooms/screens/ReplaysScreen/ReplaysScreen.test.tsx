@@ -6,9 +6,9 @@
  * exercises the only primary control on the screen: the header back button.
  */
 import React from 'react';
-import { fireEvent } from '@testing-library/react-native';
+import { fireEvent, waitFor } from '@testing-library/react-native';
 import { recordingKeys } from '../../hooks/useRecordings';
-import type { Replay } from '../../services/recordingService';
+import { recordingService, type Replay } from '../../services/recordingService';
 import { renderScreen, mockAuthenticated, resetAuth } from '../../../../test-utils/renderScreen';
 import { ReplaysScreen } from './ReplaysScreen';
 
@@ -29,6 +29,7 @@ describe('ReplaysScreen', () => {
   });
   afterEach(() => {
     resetAuth();
+    jest.restoreAllMocks();
   });
 
   it('mounts and renders the populated replay list when data is primed', () => {
@@ -49,6 +50,22 @@ describe('ReplaysScreen', () => {
     });
     // Empty-state title (replays.emptyTitle) renders past the loader.
     expect(getByText('Replays')).toBeTruthy();
+  });
+
+  it('shows a retry-able error state (not "no replays") when the load fails', async () => {
+    // A failed load must surface an error EmptyState with a Retry button, so it
+    // does not read as an empty library. The retry re-invokes the service.
+    const recentSpy = jest
+      .spyOn(recordingService, 'recent')
+      .mockRejectedValueOnce(new Error('network'))
+      .mockResolvedValueOnce([]);
+    const { getByText } = renderScreen(<ReplaysScreen />, { route: { name: 'Replays' } });
+
+    // Error copy renders once the query settles into isError.
+    await waitFor(() => expect(getByText("Couldn't load replays")).toBeTruthy());
+    // Retry button re-runs the fetch (second call resolves to an empty list).
+    fireEvent.press(getByText('Retry'));
+    await waitFor(() => expect(recentSpy).toHaveBeenCalledTimes(2));
   });
 
   it('fires navigation.goBack when the header back button is pressed', () => {

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import {
   Alert,
   KeyboardAvoidingView,
+  Linking,
   Platform,
   Pressable,
   ScrollView,
@@ -20,6 +21,7 @@ import { Input } from '../../../../shared/components/Input';
 import { Loader } from '../../../../shared/components/Loader';
 import { colors, spacing } from '../../../../shared/constants/theme';
 import { mediaService } from '../../../../shared/services/api/mediaService';
+import { isAppError } from '../../../../shared/services/api/errorHandler';
 import { errorMessage } from '../../../../shared/utils/errorMessage';
 import { usernameFormSchema } from '../../../auth/schemas';
 import { useMe, useUpdateProfile } from '../../hooks/useProfile';
@@ -42,13 +44,17 @@ export const EditProfileScreen: React.FC = () => {
   const { t } = useTranslation();
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
-  const { data: me, isLoading } = useMe();
+  const { data: me, isLoading, refetch } = useMe();
   const updateProfile = useUpdateProfile();
 
   const [displayName, setDisplayName] = useState('');
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [username, setUsername] = useState('');
+  // Server-side rejection of the handle (409 USER_002 "already taken") —
+  // surfaced inline under the username Input. Cleared as soon as the user
+  // edits the field again.
+  const [usernameServerError, setUsernameServerError] = useState<string | null>(null);
   const [bio, setBio] = useState('');
   const [twitter, setTwitter] = useState('');
   const [instagram, setInstagram] = useState('');
@@ -85,21 +91,48 @@ export const EditProfileScreen: React.FC = () => {
   }, [t]);
 
   const handlePickImage = async () => {
-    const result = await launchImageLibrary({
-      mediaType: 'photo',
-      includeBase64: true,
-      quality: 0.8,
-      maxWidth: 1024,
-      maxHeight: 1024,
-      selectionLimit: 1,
-    });
-    if (result.didCancel) return;
-    const asset = result.assets?.[0];
-    if (asset?.uri) {
-      setAvatarUri(asset.uri);
-      setAvatarBase64(asset.base64 ?? null);
-      setAvatarMime(asset.type);
-      impactLight();
+    try {
+      const result = await launchImageLibrary({
+        mediaType: 'photo',
+        includeBase64: true,
+        quality: 0.8,
+        maxWidth: 1024,
+        maxHeight: 1024,
+        selectionLimit: 1,
+      });
+      if (result.didCancel) return;
+      // Surface picker failures instead of silently doing nothing — a denied
+      // photo permission gets a deep link to the app settings (mirrors
+      // SetupProfileScreen's handling).
+      if (result.errorCode) {
+        if (result.errorCode === 'permission') {
+          Alert.alert(
+            t('common.permissionDenied', 'Permission required'),
+            t('profile.edit.photoPermission', 'Allow photo access to choose a picture.'),
+            [
+              { text: t('common.cancel', 'Cancel'), style: 'cancel' },
+              {
+                text: t('profile.edit.openSettings', 'Open settings'),
+                onPress: () => {
+                  void Linking.openSettings();
+                },
+              },
+            ],
+          );
+        } else {
+          Alert.alert(t('common.error', 'Something went wrong'));
+        }
+        return;
+      }
+      const asset = result.assets?.[0];
+      if (asset?.uri) {
+        setAvatarUri(asset.uri);
+        setAvatarBase64(asset.base64 ?? null);
+        setAvatarMime(asset.type);
+        impactLight();
+      }
+    } catch {
+      Alert.alert(t('common.error', 'Something went wrong'));
     }
   };
 
@@ -116,11 +149,16 @@ export const EditProfileScreen: React.FC = () => {
         setUploading(true);
         avatarUrl = await mediaService.uploadAvatar(avatarBase64, avatarMime);
       }
+      // Only send the username when it actually changed: the service PATCHes
+      // it FIRST on a dedicated endpoint (all-or-nothing on the common
+      // "already taken" failure), and re-submitting the unchanged handle
+      // would be a pointless extra request.
+      const nextUsername = username.trim();
       await updateProfile.mutateAsync({
         displayName,
         firstName,
         lastName,
-        username,
+        username: me && nextUsername !== me.username ? nextUsername : undefined,
         bio,
         avatarUrl,
         twitter,
@@ -130,13 +168,25 @@ export const EditProfileScreen: React.FC = () => {
       notifySuccess();
       navigation.goBack();
     } catch (err) {
-      Alert.alert(
-        t('profile.edit.error', 'Error'),
-        errorMessage(
-          err,
-          t('profile.edit.failedToUpdate', 'Failed to update profile. Please try again.'),
-        ),
-      );
+      // 409 USER_002 = handle already taken. The service sends the username
+      // first, so nothing else was saved — tell the user exactly what to fix
+      // (inline + alert) instead of the generic "failed to update".
+      if (isAppError(err) && (err.code === 'USER_002' || err.kind === 'conflict')) {
+        const taken = t('profile.edit.usernameTaken', 'This username is already taken.');
+        setUsernameServerError(taken);
+        Alert.alert(t('profile.edit.error', 'Error'), taken);
+      } else {
+        Alert.alert(
+          t('profile.edit.error', 'Error'),
+          errorMessage(
+            err,
+            t('profile.edit.failedToUpdate', 'Failed to update profile. Please try again.'),
+          ),
+        );
+      }
+      // Re-sync `me` regardless of the failure point: a partial save (e.g.
+      // username PATCHed, profile PATCH failed) must not leave a stale cache.
+      void refetch();
     } finally {
       setUploading(false);
     }
@@ -147,6 +197,8 @@ export const EditProfileScreen: React.FC = () => {
     displayName,
     firstName,
     lastName,
+    me,
+    refetch,
     twitter,
     instagram,
     dmPrivacy,
@@ -159,7 +211,19 @@ export const EditProfileScreen: React.FC = () => {
   // Validate the username against the same schema the auth flow uses
   // (3–24 chars, [a-z0-9_]) instead of the laxer `length >= 2` check, so
   // an invalid handle (spaces, symbols, too short) can't reach update().
-  const usernameOk = usernameFormSchema.shape.username.safeParse(username).success;
+  // Zod issue messages are i18n keys (auth.username.errors.*), rendered
+  // inline via the Input's `error` prop so a greyed-out Save explains itself.
+  const usernameParse = usernameFormSchema.shape.username.safeParse(username);
+  const usernameOk = usernameParse.success;
+  const usernameZodError = !usernameParse.success
+    ? t(usernameParse.error.issues[0]?.message ?? 'auth.username.errors.format')
+    : undefined;
+  const usernameError = usernameServerError ?? usernameZodError;
+
+  const handleUsernameChange = useCallback((next: string) => {
+    setUsernameServerError(null);
+    setUsername(next);
+  }, []);
   // `busy` covers both the avatar upload and the profile PATCH so the button
   // shows a spinner and stays disabled across the whole save flow.
   const busy = uploading || updateProfile.isPending;
@@ -264,9 +328,10 @@ export const EditProfileScreen: React.FC = () => {
         <Input
           label={t('profile.edit.username', 'Username')}
           value={username}
-          onChangeText={setUsername}
+          onChangeText={handleUsernameChange}
           autoCapitalize="none"
           autoCorrect={false}
+          error={usernameError}
           leftAdornment={<Text className="text-md text-ink-muted">@</Text>}
         />
 

@@ -14,15 +14,15 @@ import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import { audioApi, type AudioPreferences, type AudioQualityTier } from '../api/audioApi';
 import { privacyApi, type PrivacySettings } from '../api/privacyApi';
-import { ExtThemeToggle } from '../components/ExtThemeToggle';
 import { colors } from '../../../shared/constants/theme';
 
 /**
- * Consolidated Settings screen that ties together Vague 3 (privacy), Vague
- * 4 (audio quality tiers + drop-in + spatial), and Vague 2 (theme toggle).
+ * Consolidated Settings screen that ties together Vague 3 (privacy) and Vague
+ * 4 (audio quality tiers + drop-in + spatial).
  *
- * Pure additive — independent from the legacy SettingsScreen. Mount under
- * its own navigator route or sub-screen.
+ * The app is mono-dark, so the former light/auto theme toggle is intentionally
+ * gone (it only ever moved the StatusBar). Pure additive — independent from the
+ * legacy SettingsScreen. Mount under its own navigator route or sub-screen.
  */
 
 const getTiers = (t: TFunction): { value: AudioQualityTier; label: string; hint: string }[] => [
@@ -48,9 +48,14 @@ export const ExtSettingsScreen: React.FC = () => {
   const [audio, setAudio] = useState<AudioPreferences | null>(null);
   const [privacy, setPrivacy] = useState<PrivacySettings | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  // Bump to re-trigger the load effect from the retry button.
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
+    setLoading(true);
+    setLoadError(false);
     void (async () => {
       try {
         const [a, p] = await Promise.all([audioApi.get(), privacyApi.get()]);
@@ -58,6 +63,11 @@ export const ExtSettingsScreen: React.FC = () => {
           setAudio(a);
           setPrivacy(p);
         }
+      } catch {
+        // Surface a retryable error instead of leaving an unhandled rejection
+        // and rendering the screen with silently-defaulted (possibly wrong)
+        // toggle values.
+        if (!cancelled) setLoadError(true);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -65,7 +75,7 @@ export const ExtSettingsScreen: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [reloadKey]);
 
   // Optimistically reflect the toggle, then reconcile with the server. On
   // failure, roll back to the previous value and surface the error rather than
@@ -108,14 +118,27 @@ export const ExtSettingsScreen: React.FC = () => {
     );
   }
 
+  if (loadError) {
+    return (
+      <SafeAreaView style={styles.center}>
+        <Text style={styles.errorText}>
+          {t('extensions.settings.loadError', "Couldn't load your settings.")}
+        </Text>
+        <Pressable
+          style={styles.retryBtn}
+          onPress={() => setReloadKey(k => k + 1)}
+          accessibilityRole="button"
+          accessibilityLabel={t('common.retry', 'Retry')}
+        >
+          <Text style={styles.retryText}>{t('common.retry', 'Retry')}</Text>
+        </Pressable>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.scroll}>
-        {/* THEME */}
-        <Section title={t('extensions.settings.appearance', 'Appearance')}>
-          <ExtThemeToggle />
-        </Section>
-
         {/* AUDIO */}
         <Section title={t('extensions.settings.audioQuality', 'Audio quality')}>
           {getTiers(t).map(tier => (
@@ -201,7 +224,19 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: colors.background,
+    gap: 12,
+    paddingHorizontal: 24,
   },
+  errorText: { color: colors.textMuted, textAlign: 'center' },
+  retryBtn: {
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 20,
+    backgroundColor: colors.primary,
+    minHeight: 44,
+    justifyContent: 'center',
+  },
+  retryText: { color: colors.onPrimary, fontWeight: '600', fontSize: 13 },
   scroll: { padding: 20, gap: 16 },
   section: { gap: 8 },
   sectionTitle: {

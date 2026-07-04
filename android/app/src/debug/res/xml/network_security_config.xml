@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  DEBUG-ONLY network security config.
+  Overrides src/main/res/xml/network_security_config.xml for the debug variant
+  so the Metro dev server / backend can be reached over cleartext HTTP from any
+  host on the dev machine's LAN or hotspot (e.g. 192.168.137.1), not just
+  localhost. Release builds keep the strict main config.
+-->
+<network-security-config>
+  <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

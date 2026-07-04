@@ -2,6 +2,7 @@ import React, { memo } from 'react';
 import { Pressable, StyleSheet } from 'react-native';
 import MaterialIcons from '@react-native-vector-icons/material-icons';
 import Animated from 'react-native-reanimated';
+import { useTranslation } from 'react-i18next';
 import { useAnimatedPress } from '../../../shared/hooks/useAnimatedPress';
 import { GOOGLE_MAPS_COLORS } from '../constants/mapColors';
 
@@ -21,6 +22,7 @@ interface MyLocationButtonProps {
  */
 export const MyLocationButton: React.FC<MyLocationButtonProps> = memo(
   ({ onPress, disabled = false }) => {
+    const { t } = useTranslation();
     const press = useAnimatedPress({ scaleTo: 0.9 });
 
     return (
@@ -31,8 +33,11 @@ export const MyLocationButton: React.FC<MyLocationButtonProps> = memo(
           onPressOut={press.onPressOut}
           disabled={disabled}
           accessibilityRole="button"
-          accessibilityLabel="Recenter map on my location"
-          accessibilityHint="Re-centers the map on your current GPS position"
+          accessibilityLabel={t('explorer.maps.recenterA11y', 'Recenter map on my location')}
+          accessibilityHint={t(
+            'explorer.maps.recenterHint',
+            'Re-centers the map on your current GPS position',
+          )}
           accessibilityState={{ disabled }}
           style={[styles.button, disabled && styles.buttonDisabled]}
         >

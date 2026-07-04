@@ -68,6 +68,7 @@ const toMessage = (raw: RawMessage, viewerId: string, peerId: string): Message =
   durationMs: raw.audioDurationMs ?? null,
   sentAt: raw.createdAt,
   isMine: raw.senderId === viewerId,
+  isRead: raw.isRead,
 });
 
 const toConversation = (raw: RawConversation, viewerId: string): Conversation => {
@@ -114,8 +115,19 @@ export const messageService = {
     };
   },
 
-  async messages(peerId: string): Promise<Message[]> {
-    const res = await apiClient.get<Envelope<RawMessage[]>>(`/chat/${peerId}`);
+  /**
+   * One page of the thread, newest page first. `before` is an ISO createdAt
+   * cursor — the backend returns messages strictly older than it (see
+   * chat.schema listMessagesSchema), each page sorted ascending.
+   */
+  async messages(
+    peerId: string,
+    opts: { before?: string; limit?: number } = {},
+  ): Promise<Message[]> {
+    const params: Record<string, string | number> = {};
+    if (opts.before) params.before = opts.before;
+    if (opts.limit) params.limit = opts.limit;
+    const res = await apiClient.get<Envelope<RawMessage[]>>(`/chat/${peerId}`, { params });
     const me = currentUserId();
     return res.data.data.map(m => toMessage(m, me, peerId));
   },

@@ -57,6 +57,7 @@ export const ERROR_CODES = {
   GROUP_003: { status: 400, message: 'A group needs at least two other members' },
   GROUP_004: { status: 403, message: 'Only the group owner can do that' },
   GROUP_005: { status: 400, message: 'Use leave to remove yourself' },
+  GROUP_006: { status: 403, message: 'Blocked: cannot share a group with this user' },
 
   CLUB_001: { status: 404, message: 'Club not found' },
   CLUB_002: { status: 403, message: 'Not a club admin' },
@@ -65,6 +66,8 @@ export const ERROR_CODES = {
   CLUB_005: { status: 403, message: 'Owner cannot leave their own club' },
   CLUB_006: { status: 403, message: 'Club creation limit reached' },
   CLUB_007: { status: 403, message: 'A valid invitation is required to join this club' },
+  CLUB_008: { status: 410, message: 'This invitation link has expired' },
+  CLUB_009: { status: 403, message: 'This invitation link is invalid' },
 
   ACCOUNT_001: { status: 409, message: 'Account already scheduled for deletion' },
 

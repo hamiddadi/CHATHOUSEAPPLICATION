@@ -1,5 +1,6 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   FlatList,
   KeyboardAvoidingView,
@@ -22,7 +23,8 @@ import { colors, spacing } from '../../../../shared/constants/theme';
 import type { MessageStackParamList } from '../../../../core/navigation/types';
 import type { User } from '../../../../shared/types/domain';
 import { useAuthStore } from '../../../auth/store/authStore';
-import { useFollowing } from '../../../profile/hooks/useProfile';
+import { flattenFollowPages, useFollowing } from '../../../profile/hooks/useProfile';
+import { SelectedPeopleChips } from '../../components/SelectedPeopleChips';
 import { useAddGroupMembers, useGroup } from '../../hooks/useGroups';
 
 type Nav = NativeStackNavigationProp<MessageStackParamList, 'AddGroupMembers'>;
@@ -30,9 +32,15 @@ type Route = RouteProp<MessageStackParamList, 'AddGroupMembers'>;
 
 /**
  * Add people to an existing group. Candidates are restricted to the people you
- * follow (same DM follow-gate as a 1:1 — see NewMessageScreen / chatService),
- * minus the members already in the group. The old global user search let you
- * pick anyone, which the backend would then silently reject.
+ * follow (mirrors NewMessageScreen's compose picker), minus the members already
+ * in the group. The old global user search let you pick anyone, which the
+ * backend would then reject.
+ *
+ * NOTE: the *server* gate here is a Block check, NOT a follow-gate. Groups now
+ * enforce the Block table symmetrically (groups.service `assertNoBlockBetween`
+ * in create/addMembers/send), so a blocked user can't reach their blocker via a
+ * group — GROUP_006 on the add. Scoping the picker to who you follow is a UX
+ * convenience, not the security boundary.
  */
 export const AddGroupMembersScreen: React.FC = () => {
   const navigation = useNavigation<Nav>();
@@ -43,7 +51,11 @@ export const AddGroupMembersScreen: React.FC = () => {
   const myId = useAuthStore(s => s.user?.id) ?? '';
 
   const { data: group } = useGroup(conversationId);
-  const { data: following, isLoading } = useFollowing(myId);
+  // Who I follow, paged server-side (limit 50/page); the infinite query pulls
+  // the next page on scroll so followers past the 50th are still addable.
+  const followingQuery = useFollowing(myId);
+  const { isLoading, hasNextPage, isFetchingNextPage, fetchNextPage } = followingQuery;
+  const following = useMemo(() => flattenFollowPages(followingQuery.data), [followingQuery.data]);
   const addMembers = useAddGroupMembers();
   // Existing members can't be re-added — drop them from the candidate list.
   const existingIds = useMemo(
@@ -56,7 +68,7 @@ export const AddGroupMembersScreen: React.FC = () => {
 
   // People I follow who aren't already in the group, narrowed by the filter.
   const candidates = useMemo(
-    () => (following ?? []).filter(u => !existingIds.has(u.id)),
+    () => following.filter(u => !existingIds.has(u.id)),
     [following, existingIds],
   );
   const results = useMemo(() => {
@@ -75,6 +87,12 @@ export const AddGroupMembersScreen: React.FC = () => {
       return next;
     });
   }, []);
+
+  const selectedPeople = useMemo(() => [...selected.values()], [selected]);
+
+  const handleEndReached = useCallback(() => {
+    if (hasNextPage && !isFetchingNextPage) void fetchNextPage();
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
   const handleAdd = useCallback(() => {
     const userIds = [...selected.keys()];
@@ -98,6 +116,7 @@ export const AddGroupMembersScreen: React.FC = () => {
           onPress={() => toggle(item)}
           accessibilityRole="checkbox"
           accessibilityState={{ checked: isSelected }}
+          accessibilityLabel={item.displayName || item.username}
           className="flex-row items-center gap-md px-xxl py-md active:opacity-70"
         >
           <Avatar uri={item.avatarUrl ?? undefined} name={item.displayName} size="lg" />
@@ -118,6 +137,19 @@ export const AddGroupMembersScreen: React.FC = () => {
       );
     },
     [selected, toggle],
+  );
+
+  const renderFooter = useCallback(
+    () =>
+      isFetchingNextPage ? (
+        <View className="py-lg items-center">
+          <ActivityIndicator
+            color={colors.primary}
+            accessibilityLabel={t('common.loadingMore', 'Loading more')}
+          />
+        </View>
+      ) : null,
+    [isFetchingNextPage, t],
   );
 
   const selectedCount = selected.size;
@@ -160,6 +192,8 @@ export const AddGroupMembersScreen: React.FC = () => {
         </View>
       )}
 
+      <SelectedPeopleChips people={selectedPeople} onRemove={toggle} />
+
       {isLoading ? (
         <Loader fullscreen accessibilityLabel={t('common.loading', 'Loading')} />
       ) : (
@@ -170,6 +204,9 @@ export const AddGroupMembersScreen: React.FC = () => {
           keyboardShouldPersistTaps="handled"
           ItemSeparatorComponent={() => <View className="h-px bg-overlay-white-5 ml-[76px]" />}
           contentContainerStyle={{ paddingBottom: insets.bottom + spacing.giant }}
+          onEndReached={handleEndReached}
+          onEndReachedThreshold={0.4}
+          ListFooterComponent={renderFooter}
           ListEmptyComponent={
             !hasCandidates ? (
               <EmptyState

@@ -1,3 +1,4 @@
+import type { Insets } from 'react-native';
 import type { ButtonSize, ButtonVariant } from './types';
 
 /**
@@ -33,6 +34,17 @@ export const sizeContainerClass: Record<ButtonSize, string> = {
   sm: 'px-xl py-sm min-h-[36px]',
   md: 'px-xxl py-[10px] min-h-[44px]',
   lg: 'px-xxxl py-md min-h-[52px]',
+};
+
+/**
+ * `sm` renders 36px tall (min-h above), so it gets an automatic compensating
+ * hitSlop stretching the effective touch target to the 44pt minimum without
+ * changing the visual size. `md`/`lg` already meet 44pt visually.
+ */
+export const sizeHitSlop: Record<ButtonSize, Insets | undefined> = {
+  sm: { top: 4, bottom: 4 },
+  md: undefined,
+  lg: undefined,
 };
 
 export const sizeTextClass: Record<ButtonSize, string> = {

@@ -226,8 +226,18 @@ export const MapsScreen: React.FC = () => {
         ))}
       </MapView>
 
-      {/* Attribution hide overlay — covers any native platform watermark strip at the screen bottom. */}
-      <View style={styles.attributionOverlay} pointerEvents="none" />
+      {/* OSM/CARTO tile-policy attribution — the ODbL + CARTO ToS require a
+          visible, legible credit. Kept in the bottom-left corner, out of the way
+          of the floating controls (bottom-right). */}
+      <View
+        style={[styles.attribution, { bottom: insets.bottom + 4 }]}
+        pointerEvents="none"
+        accessibilityRole="text"
+      >
+        <Text style={styles.attributionText}>
+          {t('explorer.maps.attribution', '© OpenStreetMap contributors © CARTO')}
+        </Text>
+      </View>
 
       <View
         pointerEvents="box-none"
@@ -312,14 +322,19 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
   },
-  // Attribution hide overlay — covers native platform watermark strip at the screen bottom.
-  attributionOverlay: {
+  // OSM/CARTO tile-policy attribution — small but legible credit in the
+  // bottom-left corner, on a translucent chip so it stays readable over any tile.
+  attribution: {
     position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: Platform.select({ ios: 18, android: 22, default: 20 }),
-    backgroundColor: GOOGLE_MAPS_COLORS.landSoft, // Google Maps color style — blends with Voyager light tiles
+    left: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    backgroundColor: 'rgba(255,255,255,0.7)',
     zIndex: 999,
+  },
+  attributionText: {
+    fontSize: 10,
+    color: '#3C4043',
   },
 });

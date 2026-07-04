@@ -81,4 +81,42 @@ describe('UsernameScreen', () => {
       expect(setUsername).toHaveBeenCalledWith('janedoe');
     });
   });
+
+  it('shows a localized field error when the username is already taken (409)', async () => {
+    // The interceptors reject with a plain-object AppError; kind 'conflict'
+    // maps HTTP 409. The screen must surface it under the field, not a toast.
+    const setUsername = jest.fn().mockRejectedValue({
+      kind: 'conflict',
+      status: 409,
+      code: 'USER_002',
+      message: 'Username already taken',
+    });
+    useAuthStore.setState({ setUsername });
+
+    const { getByText, getByPlaceholderText, findByText } = renderScreen(<UsernameScreen />);
+    await waitFor(() => expect(mockedService.suggestUsername).toHaveBeenCalled());
+
+    fireEvent.changeText(getByPlaceholderText('jane_doe'), 'janedoe');
+    await waitFor(() => {
+      fireEvent.press(getByText('Continue'));
+      expect(setUsername).toHaveBeenCalledWith('janedoe');
+    });
+
+    // Localized copy (auth.username.errors.taken), not the raw backend string.
+    expect(await findByText('This username is already taken.')).toBeTruthy();
+  });
+
+  it('offers a retry link when the suggestion fetch fails, and retries on tap', async () => {
+    mockedService.suggestUsername
+      .mockRejectedValueOnce({ kind: 'network', message: 'Network Error' })
+      .mockResolvedValueOnce({ suggestions: ['second_try'] });
+
+    const { findByText } = renderScreen(<UsernameScreen />);
+
+    const retry = await findByText("Couldn't load suggestions — tap to retry");
+    fireEvent.press(retry);
+
+    expect(await findByText('@second_try')).toBeTruthy();
+    expect(mockedService.suggestUsername).toHaveBeenCalledTimes(2);
+  });
 });

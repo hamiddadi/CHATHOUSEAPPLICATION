@@ -8,11 +8,12 @@
  * tap, a club mute toggle, and the retry button on the error state.
  */
 import React from 'react';
-import { fireEvent } from '@testing-library/react-native';
+import { fireEvent, waitFor } from '@testing-library/react-native';
 import { notifPrefsKeys } from '../../hooks/useNotifPrefs';
 import { notifPrefsExtKeys } from '../../hooks/useNotifPrefsExt';
-import type { NotifPrefs } from '../../services/notifPrefsService';
+import { notifPrefsService, type NotifPrefs } from '../../services/notifPrefsService';
 import type { NotifPrefsExt } from '../../../extensions/api/notifPrefsExtApi';
+import { useToastStore } from '../../../../shared/components/Toast';
 import { renderScreen, mockAuthenticated, resetAuth } from '../../../../test-utils/renderScreen';
 import { NotificationSettingsScreen } from './NotificationSettingsScreen';
 
@@ -52,6 +53,7 @@ describe('NotificationSettingsScreen', () => {
   });
   afterEach(() => {
     resetAuth();
+    useToastStore.getState().clear();
     jest.restoreAllMocks();
   });
 
@@ -109,13 +111,30 @@ describe('NotificationSettingsScreen', () => {
     expect(() => fireEvent(muteRow, 'valueChange', false)).not.toThrow();
   });
 
-  it('renders muted-user rows when present', () => {
+  it('renders muted-user rows with a readable fallback label (no raw hex)', () => {
     const userId = 'user-abcdef12345';
-    const { getByLabelText } = renderScreen(<NotificationSettingsScreen />, {
+    const { getByLabelText, queryByLabelText } = renderScreen(<NotificationSettingsScreen />, {
       seedQueryData: [seedPrefs(makePrefs()), seedExt(makeExt({ mutedUsers: [userId] }))],
     });
-    // MuteRow label for a user = userId.slice(0, 8).
-    expect(getByLabelText(userId.slice(0, 8))).toBeTruthy();
+    // No batch user-lookup endpoint yet → the row shows "Muted person · <short
+    // id>" instead of a bare 8-char hex fragment (audit QA 2026-07-02).
+    expect(getByLabelText(`Muted person · ${userId.slice(0, 8)}`)).toBeTruthy();
+    // The old bare-slice label must no longer be used on its own.
+    expect(queryByLabelText(userId.slice(0, 8))).toBeNull();
+  });
+
+  it('surfaces an error toast (and rolls the switch back) when a toggle PATCH fails', async () => {
+    // The optimistic switch flips immediately, then the PATCH rejects → the
+    // hook rolls it back AND the screen shows a toast so the revert is
+    // explained (audit QA 2026-07-02: rollback-without-feedback).
+    jest.spyOn(notifPrefsService, 'update').mockRejectedValue(new Error('network down'));
+    const { getByLabelText } = renderScreen(<NotificationSettingsScreen />, {
+      seedQueryData: [seedPrefs(makePrefs({ newFollower: false })), seedExt(makeExt())],
+    });
+    fireEvent(getByLabelText('New followers'), 'valueChange', true);
+    await waitFor(() => {
+      expect(useToastStore.getState().toasts.some(x => x.tone === 'error')).toBe(true);
+    });
   });
 
   it('shows the error state with a working Retry button when prefs error', () => {

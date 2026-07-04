@@ -3,7 +3,7 @@ import { Alert, ScrollView, StyleSheet, Text, TextInput, View } from 'react-nati
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { Button } from '../../../shared/components/Button';
-import { colors, radii, spacing } from '../../../shared/constants/theme';
+import { colors, radii, spacing, withAlpha } from '../../../shared/constants/theme';
 import { useAuthStore } from '../../auth/store/authStore';
 import { privacyService } from '../services/privacyService';
 import { errorMessage } from '../../../shared/utils/errorMessage';
@@ -30,13 +30,23 @@ export const DeleteAccountScreen: React.FC = () => {
           onPress: async () => {
             setBusy(true);
             try {
+              // Only a failed deletion request should surface "deletion failed".
               await privacyService.requestDeletion();
-              await signOut();
             } catch (e) {
               Alert.alert(
                 t('privacy.delete.errorTitle'),
                 errorMessage(e, t('privacy.delete.errorBody')),
               );
+              setBusy(false);
+              return;
+            }
+            // Deletion succeeded. signOut is a separate concern: a failure here
+            // must NOT show "deletion failed" (the account IS scheduled for
+            // deletion). Worst case the local session lingers until next launch.
+            try {
+              await signOut();
+            } catch {
+              /* best-effort local cleanup — deletion already took effect */
             } finally {
               setBusy(false);
             }
@@ -117,18 +127,23 @@ export const DeleteAccountScreen: React.FC = () => {
   );
 };
 
+// Vivid "danger zone" red for the deletion warning card. Kept as a local
+// constant (not a theme token) so it doesn't leak into the mono-dark palette;
+// alpha variants are derived via withAlpha at use-site.
+const DANGER_ZONE_RED = '#ef4444';
+
 const styles = StyleSheet.create({
   h1: { color: colors.text, fontSize: 24, fontWeight: '700' },
-  // Saturated-red literals (NOT withAlpha(colors.danger,…)). colors.danger is
+  // 'Danger zone' fill for this irreversible-deletion warning. colors.danger is
   // the pale error *foreground* role (#ffb4ab) and stays as the warningTitle/
-  // confirmPhrase text color; the card fill + border keep the vivid #ef4444
-  // 'danger zone' affordance for this irreversible-deletion warning.
+  // confirmPhrase text color; the card fill + border derive from the vivid
+  // #ef4444 red via withAlpha (no more raw rgba() literals).
   warningCard: {
-    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+    backgroundColor: withAlpha(DANGER_ZONE_RED, 0.1),
     borderRadius: radii.md,
     padding: spacing.lg,
     borderWidth: 1,
-    borderColor: 'rgba(239, 68, 68, 0.4)',
+    borderColor: withAlpha(DANGER_ZONE_RED, 0.4),
     gap: spacing.sm,
   },
   warningTitle: { color: colors.danger, fontSize: 14, fontWeight: '700' },

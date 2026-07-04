@@ -45,12 +45,15 @@ export const BlockedUsersScreen: React.FC = () => {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
 
-  const { data, isLoading, isError } = useBlockedUsers();
+  const { data, isLoading, isError, refetch } = useBlockedUsers();
   const unblock = useUnblock();
 
   const handleBack = useCallback(() => navigation.goBack(), [navigation]);
+  const handleRetry = useCallback(() => {
+    void refetch();
+  }, [refetch]);
 
-  const handleUnblock = useCallback(
+  const runUnblock = useCallback(
     (user: UserSummary) => {
       // Surface failures so the destructive action gives feedback on a network
       // error (mirrors FollowersScreen's toggle-error Alert). The mutation
@@ -64,6 +67,27 @@ export const BlockedUsersScreen: React.FC = () => {
       });
     },
     [unblock, t],
+  );
+
+  const handleUnblock = useCallback(
+    (user: UserSummary) => {
+      // Confirm before re-exposing the viewer to a blocked account: a single
+      // accidental tap must not silently undo a block (audit QA 2026-07-02).
+      Alert.alert(
+        t('blockedUsers.unblockConfirmTitle', { handle: user.username ?? user.displayName }),
+        t('blockedUsers.unblockConfirmBody', 'They will be able to contact you again.'),
+        [
+          { text: t('common.cancel', 'Cancel'), style: 'cancel' },
+          {
+            text: t('blockedUsers.unblock', 'Unblock'),
+            style: 'destructive',
+            onPress: () => runUnblock(user),
+          },
+        ],
+        { cancelable: true },
+      );
+    },
+    [runUnblock, t],
   );
 
   const pendingId = unblock.isPending ? unblock.variables : null;
@@ -99,6 +123,8 @@ export const BlockedUsersScreen: React.FC = () => {
         <EmptyState
           title={t('blockedUsers.loadError', "Couldn't load blocked accounts")}
           description={t('profile.pleaseTryAgain', 'Please try again.')}
+          actionLabel={t('common.retry', 'Retry')}
+          onAction={handleRetry}
         />
       ) : (
         <FlatList

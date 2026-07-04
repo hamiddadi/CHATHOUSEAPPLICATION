@@ -6,6 +6,8 @@
  * is caught.
  */
 import React from 'react';
+import { Linking } from 'react-native';
+import { fireEvent } from '@testing-library/react-native';
 import { renderScreen, mockAuthenticated, resetAuth } from '../../../test-utils/renderScreen';
 import { PrivacyPolicyScreen } from './PrivacyPolicyScreen';
 
@@ -35,5 +37,12 @@ describe('PrivacyPolicyScreen', () => {
   it('renders the contact e-mail address', () => {
     const { getByText } = renderScreen(<PrivacyPolicyScreen />);
     expect(getByText('privacy@chathouse.app')).toBeTruthy();
+  });
+
+  it('opens a mailto: link when the contact e-mail is tapped', () => {
+    const openSpy = jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined as never);
+    const { getByText } = renderScreen(<PrivacyPolicyScreen />);
+    fireEvent.press(getByText('privacy@chathouse.app'));
+    expect(openSpy).toHaveBeenCalledWith('mailto:privacy@chathouse.app');
   });
 });

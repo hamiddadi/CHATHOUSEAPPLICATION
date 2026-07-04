@@ -17,7 +17,10 @@
     "test:ci": "jest --ci --coverage --passWithNoTests",
     "quality": "npm run lint -- --max-warnings 0 && npm run format:check && npm run typecheck",
     "prepare": "husky",
-    "postinstall": "patch-package"
+    "postinstall": "patch-package",
+    "backend:up": "docker compose -f backend/docker-compose.yml up -d",
+    "backend:down": "docker compose -f backend/docker-compose.yml down",
+    "apk:build": "docker compose -f docker-compose.apk.yml run --rm apk-builder"
   },
   "lint-staged": {
     "*.{ts,tsx}": [

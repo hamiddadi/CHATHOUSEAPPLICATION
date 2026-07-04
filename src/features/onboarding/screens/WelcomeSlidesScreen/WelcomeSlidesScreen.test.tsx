@@ -42,6 +42,34 @@ describe('WelcomeSlidesScreen', () => {
     expect(AsyncStorage.setItem).toHaveBeenCalledWith('chathouse.welcomeSlides.completed.v1', '1');
   });
 
+  it('a double-tap on Skip only finishes the flow once', async () => {
+    const { getByText, navigation } = renderScreen(<WelcomeSlidesScreen />, {
+      route: { name: 'WelcomeSlides' },
+    });
+    const skip = getByText('Skip');
+    // Two rapid taps before the async markSeen resolves: the latch must make
+    // the second one a no-op so `replace` fires exactly once.
+    fireEvent.press(skip);
+    fireEvent.press(skip);
+    await waitFor(() => {
+      expect(navigation.replace).toHaveBeenCalledWith('Landing');
+    });
+    expect(navigation.replace).toHaveBeenCalledTimes(1);
+    expect(AsyncStorage.setItem).toHaveBeenCalledTimes(1);
+  });
+
+  it('announces the slide progress to screen readers and updates it on Next', async () => {
+    const { getByLabelText, getByText } = renderScreen(<WelcomeSlidesScreen />, {
+      route: { name: 'WelcomeSlides' },
+    });
+    // The progress dots are exposed as a single "slide x of y" announcement.
+    expect(getByLabelText('Slide 1 of 4')).toBeTruthy();
+    fireEvent.press(getByText('Next'));
+    await waitFor(() => {
+      expect(getByLabelText('Slide 2 of 4')).toBeTruthy();
+    });
+  });
+
   it('Next advances slides and the final Get-started finishes the flow', async () => {
     const { getByText, navigation } = renderScreen(<WelcomeSlidesScreen />, {
       route: { name: 'WelcomeSlides' },

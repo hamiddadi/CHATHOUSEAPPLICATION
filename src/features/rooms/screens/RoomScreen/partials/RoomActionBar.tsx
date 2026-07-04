@@ -8,6 +8,11 @@ import { colors, spacing } from '../../../../../shared/constants/theme';
 
 const ACTION_BAR_ICON_SIZE = 18;
 
+// The pill buttons are ~34px tall (py-sm + 18px icon) — extend the touch area
+// vertically to reach the 44px minimum. Horizontal slop is deliberately 0 so
+// adjacent buttons (gap = spacing.sm) don't fight over the same touch.
+const ACTION_HIT_SLOP = { top: 6, bottom: 6 } as const;
+
 interface RoomActionBarProps {
   /** Mic button only renders for users with publishing rights. */
   viewerCanSpeak: boolean;
@@ -51,8 +56,13 @@ const RoomActionBar: React.FC<RoomActionBarProps> = memo(
               onPressIn={muteBtn.onPressIn}
               onPressOut={muteBtn.onPressOut}
               accessibilityRole="button"
-              accessibilityLabel={isMuted ? 'Unmute microphone' : 'Mute microphone'}
+              accessibilityLabel={
+                isMuted
+                  ? t('room.unmuteA11y', 'Unmute microphone')
+                  : t('room.muteA11y', 'Mute microphone')
+              }
               accessibilityState={{ selected: isMuted }}
+              hitSlop={ACTION_HIT_SLOP}
               className="flex-row items-center gap-sm bg-danger rounded-pill py-sm px-xl"
             >
               <MaterialIcons
@@ -73,8 +83,13 @@ const RoomActionBar: React.FC<RoomActionBarProps> = memo(
             onPressIn={raiseBtn.onPressIn}
             onPressOut={raiseBtn.onPressOut}
             accessibilityRole="button"
-            accessibilityLabel={isHandRaised ? 'Lower hand' : 'Raise hand'}
+            accessibilityLabel={
+              isHandRaised
+                ? t('room.lowerHandA11y', 'Lower hand')
+                : t('room.raiseHandA11y', 'Raise hand')
+            }
             accessibilityState={{ selected: isHandRaised }}
+            hitSlop={ACTION_HIT_SLOP}
             className="flex-row items-center gap-sm bg-primary/20 rounded-pill py-sm px-lg"
           >
             <MaterialIcons name="pan-tool" size={ACTION_BAR_ICON_SIZE} color={colors.primary} />
@@ -91,8 +106,13 @@ const RoomActionBar: React.FC<RoomActionBarProps> = memo(
               onPressIn={hideBtn.onPressIn}
               onPressOut={hideBtn.onPressOut}
               accessibilityRole="button"
-              accessibilityLabel={isHidden ? 'Redevenir visible' : 'Passer invisible'}
+              accessibilityLabel={
+                isHidden
+                  ? t('room.showSelfA11y', 'Become visible again')
+                  : t('room.hideSelfA11y', 'Go invisible')
+              }
               accessibilityState={{ selected: isHidden }}
+              hitSlop={ACTION_HIT_SLOP}
               className="flex-row items-center gap-sm bg-overlay-white-5 rounded-pill py-sm px-lg"
             >
               <MaterialIcons
@@ -103,7 +123,7 @@ const RoomActionBar: React.FC<RoomActionBarProps> = memo(
               <Text
                 className={`text-sm font-body-bold ${isHidden ? 'text-danger' : 'text-primary'}`}
               >
-                {isHidden ? 'Invisible' : 'Visible'}
+                {isHidden ? t('room.invisible', 'Invisible') : t('room.visible', 'Visible')}
               </Text>
             </Pressable>
           </Animated.View>
@@ -116,6 +136,7 @@ const RoomActionBar: React.FC<RoomActionBarProps> = memo(
             onPressOut={inviteBtn.onPressOut}
             accessibilityRole="button"
             accessibilityLabel={t('room.invite')}
+            hitSlop={ACTION_HIT_SLOP}
             className="flex-row items-center gap-sm bg-overlay-white-5 rounded-pill py-sm px-lg"
           >
             <MaterialIcons name="person-add" size={ACTION_BAR_ICON_SIZE} color={colors.primary} />
@@ -130,6 +151,7 @@ const RoomActionBar: React.FC<RoomActionBarProps> = memo(
             onPressOut={leaveBtn.onPressOut}
             accessibilityRole="button"
             accessibilityLabel={t('room.leaveQuietly')}
+            hitSlop={ACTION_HIT_SLOP}
             className="flex-row items-center gap-sm border border-overlay-white-20 rounded-pill py-sm px-xl"
           >
             <MaterialIcons name="logout" size={ACTION_BAR_ICON_SIZE} color={colors.danger} />

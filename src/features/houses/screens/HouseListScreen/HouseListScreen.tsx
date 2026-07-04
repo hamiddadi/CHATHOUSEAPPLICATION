@@ -27,6 +27,7 @@ interface HouseRowProps {
 }
 
 const HouseRow: React.FC<HouseRowProps> = memo(({ house, onPress }) => {
+  const { t } = useTranslation();
   const press = useAnimatedPress({ scaleTo: 0.98 });
   const handle = useCallback(() => onPress(house.id), [house.id, onPress]);
   return (
@@ -36,7 +37,7 @@ const HouseRow: React.FC<HouseRowProps> = memo(({ house, onPress }) => {
         onPressIn={press.onPressIn}
         onPressOut={press.onPressOut}
         accessibilityRole="button"
-        accessibilityLabel={`Open house ${house.name}`}
+        accessibilityLabel={t('houses.openHouseA11y', 'Open house {{name}}', { name: house.name })}
         className="flex-row items-center gap-md p-lg rounded-md bg-overlay-white-5 border border-overlay-white-10"
       >
         <Avatar
@@ -50,12 +51,13 @@ const HouseRow: React.FC<HouseRowProps> = memo(({ house, onPress }) => {
             {house.name}
           </Text>
           <View className="flex-row items-center gap-sm">
-            <Text className="text-xs font-body-medium text-ink-muted">
-              {house.categoryEmoji} {house.category}
-            </Text>
-            <Text className="text-ink-dim">•</Text>
+            {/* The category chip is hidden until house creation actually offers
+                a category choice — today every house is created with the
+                backend default ('tech'), so showing it was pure noise. */}
             <Text className="text-xs font-body text-ink-muted">
-              {house.membersCount.toLocaleString()} members
+              {t('houses.membersCount', '{{countStr}} members', {
+                countStr: house.membersCount.toLocaleString(),
+              })}
             </Text>
           </View>
         </View>
@@ -81,6 +83,7 @@ const TabToggle: React.FC<TabToggleProps> = memo(({ value, onChange }) => {
         onPress={setMine}
         accessibilityRole="tab"
         accessibilityState={{ selected: value === 'mine' }}
+        hitSlop={{ top: 8, bottom: 8 }}
         className={
           value === 'mine'
             ? 'flex-1 py-sm rounded-pill bg-primary items-center'
@@ -101,6 +104,7 @@ const TabToggle: React.FC<TabToggleProps> = memo(({ value, onChange }) => {
         onPress={setDiscover}
         accessibilityRole="tab"
         accessibilityState={{ selected: value === 'discover' }}
+        hitSlop={{ top: 8, bottom: 8 }}
         className={
           value === 'discover'
             ? 'flex-1 py-sm rounded-pill bg-primary items-center'
@@ -150,8 +154,9 @@ export const HouseListScreen: React.FC = () => {
         <Pressable
           onPress={handleBack}
           accessibilityRole="button"
-          accessibilityLabel="Back"
-          hitSlop={8}
+          accessibilityLabel={t('common.back', 'Back')}
+          // 24px icon + 2×10 hitSlop = 44px touch target.
+          hitSlop={10}
         >
           <MaterialIcons name="arrow-back" size={24} color={colors.text} />
         </Pressable>
@@ -172,6 +177,8 @@ export const HouseListScreen: React.FC = () => {
         <EmptyState
           title={t('houses.errorTitle', "Couldn't load houses")}
           description={t('houses.errorBody', 'Check your connection.')}
+          actionLabel={t('common.retry', 'Retry')}
+          onAction={() => void refetch()}
         />
       ) : (
         <FlatList
@@ -181,6 +188,22 @@ export const HouseListScreen: React.FC = () => {
           ItemSeparatorComponent={renderSeparator}
           refreshing={isFetching}
           onRefresh={() => void refetch()}
+          ListEmptyComponent={
+            <EmptyState
+              title={
+                tab === 'mine'
+                  ? t('houses.emptyMineTitle', 'No houses yet')
+                  : t('houses.emptyDiscoverTitle', 'Nothing to discover')
+              }
+              description={
+                tab === 'mine'
+                  ? t('houses.emptyMineBody', 'Join a house or create your own community.')
+                  : t('houses.emptyDiscoverBody', 'Be the first — create a house.')
+              }
+              actionLabel={t('houses.emptyCreateCta', 'Create a house')}
+              onAction={handleCreate}
+            />
+          }
           contentContainerStyle={[
             styles.list,
             { paddingBottom: insets.bottom + FAB_BOTTOM_OFFSET + spacing.giant },
@@ -197,7 +220,7 @@ export const HouseListScreen: React.FC = () => {
           onPressIn={fab.onPressIn}
           onPressOut={fab.onPressOut}
           accessibilityRole="button"
-          accessibilityLabel="Create a new house"
+          accessibilityLabel={t('houses.createA11y', 'Create a new house')}
           className="w-16 h-16 rounded-pill bg-primary items-center justify-center shadow-glow-primary"
         >
           <MaterialIcons name="add" size={28} color={colors.onPrimary} />
@@ -208,6 +231,7 @@ export const HouseListScreen: React.FC = () => {
 };
 
 const styles = StyleSheet.create({
-  list: { paddingHorizontal: spacing.xxl },
+  // flexGrow lets the centered EmptyState fill the viewport when the list is empty.
+  list: { paddingHorizontal: spacing.xxl, flexGrow: 1 },
   fab: { position: 'absolute', right: spacing.xxl },
 });

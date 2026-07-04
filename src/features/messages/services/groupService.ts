@@ -9,7 +9,7 @@ import type { MessageKind, UserSummary } from '../../../shared/types/domain';
  *   GET   /groups                 → GroupConversation[]
  *   POST  /groups                 → GroupConversation   { title?, memberIds[] }
  *   GET   /groups/:id             → GroupConversation
- *   GET   /groups/:id/messages    → GroupMessage[]
+ *   GET   /groups/:id/messages?limit&before → GroupMessage[]
  *   POST  /groups/:id/messages    → GroupMessage        { content }
  *   PATCH /groups/:id/read        → { read: true }
  */
@@ -136,8 +136,21 @@ export const groupService = {
     return toConversation(res.data.data);
   },
 
-  async messages(id: string): Promise<GroupMessage[]> {
-    const res = await apiClient.get<Envelope<RawGroupMessage[]>>(`/groups/${id}/messages`);
+  /**
+   * One page of the group thread, newest page first. `before` is an ISO
+   * createdAt cursor — the backend returns messages strictly older than it
+   * (see groups.schema listGroupMessagesSchema), each page sorted ascending.
+   */
+  async messages(
+    id: string,
+    opts: { before?: string; limit?: number } = {},
+  ): Promise<GroupMessage[]> {
+    const params: Record<string, string | number> = {};
+    if (opts.before) params.before = opts.before;
+    if (opts.limit) params.limit = opts.limit;
+    const res = await apiClient.get<Envelope<RawGroupMessage[]>>(`/groups/${id}/messages`, {
+      params,
+    });
     return res.data.data.map(toMessage);
   },
 

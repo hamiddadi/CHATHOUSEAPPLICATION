@@ -1,6 +1,7 @@
 import React from 'react';
 import { StyleSheet, TextInput, View } from 'react-native';
 import MaterialIcons from '@react-native-vector-icons/material-icons';
+import { useTranslation } from 'react-i18next';
 
 const BRAND_NAVY = '#1E3A8A';
 const PLACEHOLDER_COLOR = 'rgba(30,58,138,0.55)';
@@ -14,20 +15,23 @@ interface MapSearchBarProps {
  * Outlined "Find a friend" pill — navy border, transparent fill, navy ink.
  * Parent (MapsScreen) owns the filtering to keep marker centering logic colocated.
  */
-export const MapSearchBar: React.FC<MapSearchBarProps> = ({ value, onChangeText }) => (
-  <View style={styles.container}>
-    <MaterialIcons name="search" size={20} color={BRAND_NAVY} />
-    <TextInput
-      style={styles.input}
-      value={value}
-      onChangeText={onChangeText}
-      placeholder="Find a friend..."
-      placeholderTextColor={PLACEHOLDER_COLOR}
-      accessibilityLabel="Find a friend"
-      returnKeyType="search"
-    />
-  </View>
-);
+export const MapSearchBar: React.FC<MapSearchBarProps> = ({ value, onChangeText }) => {
+  const { t } = useTranslation();
+  return (
+    <View style={styles.container}>
+      <MaterialIcons name="search" size={20} color={BRAND_NAVY} />
+      <TextInput
+        style={styles.input}
+        value={value}
+        onChangeText={onChangeText}
+        placeholder={t('explorer.maps.searchPlaceholder', 'Find a friend...')}
+        placeholderTextColor={PLACEHOLDER_COLOR}
+        accessibilityLabel={t('explorer.maps.searchA11y', 'Find a friend')}
+        returnKeyType="search"
+      />
+    </View>
+  );
+};
 
 const styles = StyleSheet.create({
   container: {

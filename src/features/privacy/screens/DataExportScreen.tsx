@@ -31,9 +31,14 @@ export const DataExportScreen: React.FC = () => {
     try {
       const json = await privacyService.exportMyData();
       archiveRef.current = json;
-      setLastBytes(json.length);
       // Share sheet carries the full archive (not truncated) — no clipboard.
-      await Share.share({ message: json, title: t('privacy.export.title') });
+      const result = await Share.share({ message: json, title: t('privacy.export.title') });
+      // Only report success if the archive was actually shared. Dismissing the
+      // sheet (Share.dismissedAction) means nothing left the device, so we must
+      // not show the "exported" confirmation + copy affordances.
+      if (result.action === Share.sharedAction) {
+        setLastBytes(json.length);
+      }
     } catch (e) {
       Alert.alert(
         t('privacy.export.errorExportTitle'),

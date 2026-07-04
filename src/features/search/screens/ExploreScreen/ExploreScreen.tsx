@@ -1,13 +1,14 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import MaterialIcons from '@react-native-vector-icons/material-icons';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
 import { Input } from '../../../../shared/components/Input';
 import { Loader } from '../../../../shared/components/Loader';
+import { EmptyState } from '../../../../shared/components/EmptyState';
 import { colors, spacing } from '../../../../shared/constants/theme';
 import type { RoomStackParamList } from '../../../../core/navigation/types';
 import { useExtSearchHistory, useExtSearchRooms } from '../../../extensions';
@@ -18,6 +19,7 @@ import { SearchResultsView } from './partials/SearchResultsView';
 import { ExploreFeedView } from './partials/ExploreFeedView';
 
 type Nav = NativeStackNavigationProp<RoomStackParamList, 'Explore'>;
+type ExploreRoute = RouteProp<RoomStackParamList, 'Explore'>;
 
 /**
  * One search bar + trending feed. While the user types we switch to
@@ -34,10 +36,13 @@ const FILTER_CATS = ['tech', 'music', 'business', 'health', 'design', 'ai'] as c
 
 export const ExploreScreen: React.FC = () => {
   const navigation = useNavigation<Nav>();
+  const route = useRoute<ExploreRoute>();
   const insets = useSafeAreaInsets();
   const { t } = useTranslation();
 
-  const [rawQuery, setRawQuery] = useState('');
+  // When opened from the TopicExplorer wrapper with a `topic` slug, pre-fill the
+  // search bar so results land already filtered by that topic.
+  const [rawQuery, setRawQuery] = useState(route.params?.topic ?? '');
   const [searchFocused, setSearchFocused] = useState(false);
   const debouncedQuery = useDebouncedValue(rawQuery.trim(), DEBOUNCE_MS);
 
@@ -59,7 +64,13 @@ export const ExploreScreen: React.FC = () => {
     [navigation],
   );
   const goBack = useCallback(() => navigation.goBack(), [navigation]);
+  // Header CTA — open the topic explorer with nothing pre-selected.
   const goTopics = useCallback(() => navigation.navigate('TopicExplorer'), [navigation]);
+  // A topic hit tap carries its slug through so the explorer opens pre-filtered.
+  const goTopic = useCallback(
+    (slug: string) => navigation.navigate('TopicExplorer', { initialTopic: slug }),
+    [navigation],
+  );
 
   // Persist a meaningful search (on submit) and replay a recent one on tap.
   const recordSearch = useCallback(() => history.commit(rawQuery), [history, rawQuery]);
@@ -185,23 +196,41 @@ export const ExploreScreen: React.FC = () => {
         />
       ) : isSearching ? (
         search.isLoading ? (
+          // Only the very first search (no cached data) shows the full-screen
+          // loader; keepPreviousData means subsequent keystrokes keep the prior
+          // results on screen and surface a discreet inline spinner instead.
           <Loader fullscreen accessibilityLabel={t('explore.searchResults')} />
+        ) : search.isError ? (
+          <EmptyState
+            title={t('explore.searchErrorTitle', "Couldn't run your search")}
+            description={t('explore.searchErrorBody', 'Check your connection and try again.')}
+            actionLabel={t('common.retry', 'Retry')}
+            onAction={() => void search.refetch()}
+          />
         ) : (
           <SearchResultsView
             data={search.data}
             topics={topicHits.data}
             filteredRooms={filterActive ? filteredRooms : undefined}
             debouncedQuery={debouncedQuery}
+            isFetching={search.isFetching}
             bottomInset={insets.bottom}
             goUser={goUser}
             goClub={goClub}
             goRoom={goRoom}
-            goTopic={goTopics}
+            goTopic={goTopic}
             t={t}
           />
         )
       ) : explore.isLoading ? (
         <Loader fullscreen accessibilityLabel={t('explore.title')} />
+      ) : explore.isError ? (
+        <EmptyState
+          title={t('explore.errorTitle', "Couldn't load Explore")}
+          description={t('explore.errorBody', 'Check your connection and try again.')}
+          actionLabel={t('common.retry', 'Retry')}
+          onAction={() => void explore.refetch()}
+        />
       ) : (
         <ExploreFeedView
           data={explore.data}
@@ -222,29 +251,32 @@ const FilterChip: React.FC<{ label: string; active: boolean; onPress: () => void
   label,
   active,
   onPress,
-}) => (
-  <Pressable
-    onPress={onPress}
-    accessibilityRole="button"
-    accessibilityState={{ selected: active }}
-    accessibilityLabel={`Filtre ${label}`}
-    className={
-      active
-        ? 'px-md py-xs rounded-pill bg-primary'
-        : 'px-md py-xs rounded-pill bg-overlay-white-5 border border-overlay-white-10'
-    }
-  >
-    <Text
+}) => {
+  const { t } = useTranslation();
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityState={{ selected: active }}
+      accessibilityLabel={t('explore.filterChipA11y', 'Filter {{label}}', { label })}
       className={
         active
-          ? 'text-xs font-body-bold text-primary-on-container uppercase'
-          : 'text-xs font-body-bold text-ink-muted uppercase'
+          ? 'px-md py-xs rounded-pill bg-primary'
+          : 'px-md py-xs rounded-pill bg-overlay-white-5 border border-overlay-white-10'
       }
     >
-      {label}
-    </Text>
-  </Pressable>
-);
+      <Text
+        className={
+          active
+            ? 'text-xs font-body-bold text-primary-on-container uppercase'
+            : 'text-xs font-body-bold text-ink-muted uppercase'
+        }
+      >
+        {label}
+      </Text>
+    </Pressable>
+  );
+};
 
 interface RecentSearchesViewProps {
   items: readonly string[];

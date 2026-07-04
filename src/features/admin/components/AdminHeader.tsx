@@ -26,9 +26,9 @@ interface AdminHeaderProps {
  * screen had no visible navigation control beyond the system back gesture.
  * That's a poor UX for moderation surfaces where flow control matters.
  *
- * The header sits flush to the safe-area top inset; embed it as the FIRST
- * child of the screen's root View. The screen's own `paddingTop: insets.top`
- * is incompatible — drop it when adopting this component.
+ * The component does NOT apply the safe-area top inset itself. Embed it as the
+ * FIRST child of the screen's root View and let that root View own the inset
+ * (`style={{ paddingTop: insets.top }}`), exactly as every admin screen does.
  */
 export const AdminHeader: React.FC<AdminHeaderProps> = ({
   title,

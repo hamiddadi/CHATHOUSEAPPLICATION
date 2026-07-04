@@ -1,5 +1,5 @@
 import React from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, radii, spacing } from '../../../shared/constants/theme';
 
@@ -34,10 +34,34 @@ export const LegalParagraph: React.FC<{ children: React.ReactNode }> = ({ childr
   <Text style={styles.body}>{children}</Text>
 );
 
-/** Inline-styled e-mail address (primary colour), used inside a paragraph. */
-export const LegalEmail: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <Text style={styles.email}>{children}</Text>
-);
+/**
+ * Inline tappable e-mail address (primary colour), used inside a paragraph.
+ * Opens the device mail composer via a `mailto:` link. When the child is a
+ * plain string it's used verbatim as the address; otherwise pass an explicit
+ * `address` prop.
+ */
+export const LegalEmail: React.FC<{ children: React.ReactNode; address?: string }> = ({
+  children,
+  address,
+}) => {
+  const email = address ?? (typeof children === 'string' ? children : undefined);
+  return (
+    <Text
+      style={styles.email}
+      accessibilityRole="link"
+      onPress={
+        email
+          ? () => {
+              // Best-effort: no mail client → openURL rejects, which we swallow.
+              void Linking.openURL(`mailto:${email}`).catch(() => undefined);
+            }
+          : undefined
+      }
+    >
+      {children}
+    </Text>
+  );
+};
 
 interface LegalDocProps {
   /** Document heading (h1). */
@@ -93,7 +117,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginBottom: 4,
   },
-  body: { color: colors.textMuted, fontSize: 13, lineHeight: 19 },
+  body: { color: colors.textMuted, fontSize: 14, lineHeight: 21 },
   sectionBody: { gap: 6 },
   email: { color: colors.primary },
 });

@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, FlatList, Pressable, Share, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Alert, FlatList, Linking, Pressable, Share, StyleSheet, Text, View } from 'react-native';
 import MaterialIcons from '@react-native-vector-icons/material-icons';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -10,6 +10,7 @@ import { Loader } from '../../../../shared/components/Loader';
 import { EmptyState } from '../../../../shared/components/EmptyState';
 import { colors, layout, spacing } from '../../../../shared/constants/theme';
 import type { RoomStackParamList } from '../../../../core/navigation/types';
+import { SHARE_BASE_URL } from '../../../../core/navigation/linking';
 import type { RoomParticipant, UserSummary } from '../../../../shared/types/domain';
 import {
   useEndRoom,
@@ -23,6 +24,7 @@ import {
   useSetMute,
 } from '../../hooks/useRooms';
 import type { RoomListener } from '../../services/roomService';
+import { MIC_PERMISSION_DENIED_ERROR } from '../../services/roomAudioService';
 import { useRoomSocket } from '../../hooks/useRoomSocket';
 import {
   SPEAKING_SCORE_THRESHOLD,
@@ -60,8 +62,9 @@ import RoomActionBar from './partials/RoomActionBar';
 // App Links (Android) on this domain redirect to chathouse:// when the
 // app is installed. The path MUST match the route declared in
 // core/navigation/linking.ts (Room: 'room/:roomId') — `/r/<id>` matched no
-// screen and silently failed to open the room.
-const ROOM_SHARE_BASE_URL = 'https://app.chathouse.com/room';
+// screen and silently failed to open the room. Host comes from the shared
+// SHARE_BASE_URL so profile/room/house links can't drift apart.
+const ROOM_SHARE_BASE_URL = `${SHARE_BASE_URL}/room`;
 
 type Nav = NativeStackNavigationProp<RoomStackParamList, 'Room'>;
 type Route = RouteProp<RoomStackParamList, 'Room'>;
@@ -80,9 +83,23 @@ export const RoomScreen: React.FC = () => {
   const route = useRoute<Route>();
   const insets = useSafeAreaInsets();
   const { t } = useTranslation();
-  const [isMuted, setIsMuted] = useState(false);
+  // SINGLE source of truth for the viewer's mute state (see currentRoomStore):
+  // roomAudioService re-applies it after a LiveKit token renew/rejoin, so a
+  // screen-local copy would silently re-open the mic while the badge still
+  // showed "muted". The screen only READS it; writes go through the store.
+  const isMuted = useCurrentRoomStore(s => s.isMuted);
   const [isHandRaised, setIsHandRaised] = useState(false);
   const [isHidden, setIsHidden] = useState(false);
+  // Captured once at mount: was the viewer ALREADY in this room (mini-bar
+  // return)? Only then can "absent from the participant lists" be read as
+  // "ghost mode on" — on a fresh entry we're simply not joined yet.
+  const wasInRoomAtMountRef = useRef(
+    useCurrentRoomStore.getState().room?.id === route.params.roomId,
+  );
+  // The viewer is the actor of the room end (pressed "End Room"): ignore the
+  // `room:ended` broadcast echo, which would otherwise pop the screen a second
+  // time and show the "Room ended" alert to the very host who closed it.
+  const selfEndedRef = useRef(false);
 
   const { data: room, isLoading, isError } = useRoom(route.params.roomId);
   const leaveRoom = useLeaveRoom();
@@ -147,14 +164,21 @@ export const RoomScreen: React.FC = () => {
   useExtSocketAliases({
     speak_invite_sent: ({ roomId: invitedRoomId }) => {
       if (invitedRoomId !== route.params.roomId) return;
-      Alert.alert('Invitation à parler', 'Un hôte t’invite à monter sur scène.', [
-        {
-          text: 'Refuser',
-          style: 'cancel',
-          onPress: () => void speakInviteApi.respond(invitedRoomId, false),
-        },
-        { text: 'Accepter', onPress: () => void speakInviteApi.respond(invitedRoomId, true) },
-      ]);
+      Alert.alert(
+        t('room.speakInvite.title', 'Invitation to speak'),
+        t('room.speakInvite.body', 'A host invites you on stage.'),
+        [
+          {
+            text: t('room.speakInvite.decline', 'Decline'),
+            style: 'cancel',
+            onPress: () => void speakInviteApi.respond(invitedRoomId, false),
+          },
+          {
+            text: t('room.speakInvite.accept', 'Accept'),
+            onPress: () => void speakInviteApi.respond(invitedRoomId, true),
+          },
+        ],
+      );
     },
   });
 
@@ -164,7 +188,17 @@ export const RoomScreen: React.FC = () => {
   // leave / kick / room-end — a plain back minimises to the mini-bar.
   useEffect(() => {
     if (!room) return;
-    useCurrentRoomStore.getState().setRoom({
+    const store = useCurrentRoomStore.getState();
+    // ENTRY into a room the store didn't hold yet: hydrate the mute flag from
+    // the viewer's own participant row so the badge matches the server state.
+    // On refetches (same id) the flag is left alone — setRoom deliberately
+    // never touches isMuted (see currentRoomStore), so a detail refetch can no
+    // longer silently re-open the mic after a LiveKit token renew/rejoin.
+    if (store.room?.id !== room.id) {
+      const self = room.speakers.find(s => s.id === viewerId);
+      store.setMuted(self?.audio === 'muted');
+    }
+    store.setRoom({
       id: room.id,
       title: room.title,
       speakers: room.speakers,
@@ -173,7 +207,32 @@ export const RoomScreen: React.FC = () => {
     // Record this room in the viewer's "recently played" zset (resume parity).
     // Fire-and-forget: the touch is best-effort and must never block the join.
     void recentlyPlayedApi.touch(room.id).catch(() => undefined);
-  }, [room]);
+  }, [room, viewerId]);
+
+  // Hydrate the hand-raise badge from the server queue on (re)mount: the
+  // local `useState(false)` was never seeded, so returning via the mini-bar
+  // showed "Raise hand" even while the viewer was queued. One-shot on the
+  // first non-empty queue payload so later optimistic toggles aren't clobbered
+  // by a stale refetch.
+  const handHydratedRef = useRef(false);
+  useEffect(() => {
+    if (handHydratedRef.current || !viewerId || handRaises.length === 0) return;
+    handHydratedRef.current = true;
+    if (handRaises.some(h => h.id === viewerId)) setIsHandRaised(true);
+  }, [handRaises, viewerId]);
+
+  // Hydrate ghost mode on a mini-bar RETURN: we were already joined (the store
+  // still held this room at mount), so being absent from BOTH participant
+  // lists means the server-side hidden flag is on. Never inferred on a fresh
+  // entry, where absence just means the join isn't reflected yet.
+  const hiddenHydratedRef = useRef(false);
+  useEffect(() => {
+    if (hiddenHydratedRef.current || !wasInRoomAtMountRef.current || !room || !viewerId) return;
+    hiddenHydratedRef.current = true;
+    const visible =
+      room.speakers.some(s => s.id === viewerId) || room.listeners.some(l => l.id === viewerId);
+    if (!visible) setIsHidden(true);
+  }, [room, viewerId]);
 
   // Capture mic + start producing once we're in the room. The LiveKit
   // engine auto-activates if `@livekit/react-native` is installed; in Expo
@@ -217,7 +276,9 @@ export const RoomScreen: React.FC = () => {
       }): void => {
         if (payload.userId !== viewerId) return;
         if (payload.roomId && payload.roomId !== roomId) return;
-        setIsMuted(payload.isMuted);
+        // Force-mute by a host/mod: write the shared store, not local state —
+        // the store is what roomAudioService re-applies after a token renew.
+        useCurrentRoomStore.getState().setMuted(payload.isMuted);
       };
       const kickHandler = (payload: {
         userId: string;
@@ -254,6 +315,10 @@ export const RoomScreen: React.FC = () => {
       // we're viewing. Pop the screen and tell the user it's over.
       const endedHandler = (payload: { roomId?: string; endedByName?: string | null }): void => {
         if (payload.roomId && payload.roomId !== roomId) return;
+        // We ARE the actor (host pressed "End Room"): handleEndRoom already
+        // pops the screen in onSettled — swallowing the broadcast echo avoids
+        // a double goBack and a nonsensical "Room ended" alert to the host.
+        if (selfEndedRef.current) return;
         useCurrentRoomStore.getState().clear();
         void roomAudioSession.stop();
         navigation.goBack();
@@ -307,22 +372,25 @@ export const RoomScreen: React.FC = () => {
 
   const handleToggleMute = useCallback(async () => {
     if (!room) return;
-    const next = !isMuted;
-    // Optimistic flip — the badge follows the press immediately. Backend
-    // is the source of truth: if it rejects, we roll back. The LiveKit
-    // mute is fire-and-forget and not awaited because it's local — its
-    // failure shouldn't drag down the API success.
-    setIsMuted(next);
+    const store = useCurrentRoomStore.getState();
+    const next = !store.isMuted;
+    // Optimistic flip — written to the SHARED store (not local state) so the
+    // badge follows the press immediately AND survives detail refetches /
+    // LiveKit token renews (roomAudioService re-applies getState().isMuted).
+    // Backend is the source of truth: if it rejects, we roll back. The
+    // LiveKit mute is fire-and-forget and not awaited because it's local —
+    // its failure shouldn't drag down the API success.
+    store.setMuted(next);
     void audio.setMuted(next);
     try {
       await setMute.mutateAsync({ roomId: room.id, isMuted: next });
     } catch {
       // Backend refused — undo both the badge AND LiveKit to keep them
       // consistent.
-      setIsMuted(!next);
+      useCurrentRoomStore.getState().setMuted(!next);
       void audio.setMuted(!next);
     }
-  }, [audio, isMuted, room, setMute]);
+  }, [audio, room, setMute]);
   const handleToggleHand = useCallback(() => {
     if (!room) return;
     const next = !isHandRaised;
@@ -358,14 +426,19 @@ export const RoomScreen: React.FC = () => {
         {
           text: t('room.closeRoom', 'End Room'),
           style: 'destructive',
-          onPress: () =>
+          onPress: () => {
+            // Mark ourselves as the actor BEFORE the mutation: the server's
+            // `room:ended` broadcast can land before onSettled, and the
+            // screen-level listener must ignore it (see endedHandler).
+            selfEndedRef.current = true;
             endRoom.mutate(room.id, {
               onSettled: () => {
                 useCurrentRoomStore.getState().clear();
                 void roomAudioSession.stop();
                 navigation.goBack();
               },
-            }),
+            });
+          },
         },
       ],
     );
@@ -556,6 +629,15 @@ export const RoomScreen: React.FC = () => {
     return map;
   }, [room, viewerId, audio.scores]);
 
+  // RECORD_AUDIO refused → the raw engine error is swapped for a localized
+  // explanation + an "Open settings" CTA. The user stays in the room as a
+  // listener (capture simply never started), so this is a warning, not an
+  // error state.
+  const micDenied = audio.status === 'error' && audio.error === MIC_PERMISSION_DENIED_ERROR;
+  const handleOpenSettings = useCallback(() => {
+    void Linking.openSettings();
+  }, []);
+
   if (isLoading) return <Loader fullscreen accessibilityLabel={t('common.loading')} />;
   if (isError || !room) {
     return <EmptyState title={t('room.unavailable')} description={t('room.mayHaveEnded')} />;
@@ -647,35 +729,55 @@ export const RoomScreen: React.FC = () => {
             {audio.status !== 'live' && audio.status !== 'idle' ? (
               <View
                 accessibilityRole="alert"
-                accessibilityLiveRegion={audio.status === 'error' ? 'assertive' : 'polite'}
+                accessibilityLiveRegion={
+                  audio.status === 'error' && !micDenied ? 'assertive' : 'polite'
+                }
                 className={
-                  audio.status === 'error'
-                    ? 'mb-xl px-md py-sm rounded-md bg-danger/10 border border-danger/30'
-                    : audio.status === 'unsupported'
-                      ? 'mb-xl px-md py-sm rounded-md bg-warning/10 border border-warning/30'
+                  micDenied || audio.status === 'unsupported'
+                    ? 'mb-xl px-md py-sm rounded-md bg-warning/10 border border-warning/30'
+                    : audio.status === 'error'
+                      ? 'mb-xl px-md py-sm rounded-md bg-danger/10 border border-danger/30'
                       : 'mb-xl px-md py-sm rounded-md bg-primary/10 border border-primary/20'
                 }
               >
                 <Text
                   className={
-                    audio.status === 'error'
-                      ? 'text-xs font-body-medium text-danger text-center'
-                      : audio.status === 'unsupported'
-                        ? 'text-xs font-body-medium text-warning text-center'
+                    micDenied || audio.status === 'unsupported'
+                      ? 'text-xs font-body-medium text-warning text-center'
+                      : audio.status === 'error'
+                        ? 'text-xs font-body-medium text-danger text-center'
                         : 'text-xs font-body-medium text-primary text-center'
                   }
                 >
-                  {audio.status === 'connecting'
-                    ? t('room.audioConnecting', '🔊 Connecting audio…')
-                    : audio.status === 'unsupported'
-                      ? t(
-                          'room.audioUnsupported',
-                          '⚠️ Audio requires an EAS dev-client (@livekit/react-native is unavailable in Expo Go).',
-                        )
-                      : audio.status === 'error'
-                        ? `❌ ${audio.error ?? t('room.audioError', 'Audio error')}`
-                        : t('room.audioBanner')}
+                  {micDenied
+                    ? t(
+                        'room.micDenied',
+                        '🎙️ Microphone access denied — you stay in the room as a listener.',
+                      )
+                    : audio.status === 'connecting'
+                      ? t('room.audioConnecting', '🔊 Connecting audio…')
+                      : audio.status === 'unsupported'
+                        ? t(
+                            'room.audioUnsupported',
+                            '⚠️ Audio requires an EAS dev-client (@livekit/react-native is unavailable in Expo Go).',
+                          )
+                        : audio.status === 'error'
+                          ? `❌ ${audio.error ?? t('room.audioError', 'Audio error')}`
+                          : t('room.audioBanner')}
                 </Text>
+                {micDenied ? (
+                  <Pressable
+                    onPress={handleOpenSettings}
+                    accessibilityRole="button"
+                    accessibilityLabel={t('room.openSettings', 'Open settings')}
+                    hitSlop={8}
+                    className="self-center mt-sm bg-warning/20 rounded-pill px-lg py-sm min-h-[36px] items-center justify-center"
+                  >
+                    <Text className="text-xs font-body-bold text-warning">
+                      {t('room.openSettings', 'Open settings')}
+                    </Text>
+                  </Pressable>
+                ) : null}
               </View>
             ) : null}
 

@@ -54,12 +54,19 @@ interface RawSearchUser {
 }
 
 // Follow list endpoints return a paginated envelope: { data, nextCursor,
-// hasMore }. We only consume the first page here (the hooks expose a flat
-// `User[]`), so cursor/hasMore are read but not surfaced.
+// hasMore }. `nextCursor` is the createdAt ISO timestamp of the last row —
+// pass it back as the `cursor` query param to fetch the next page.
 interface RawFollowList {
   data: RawSearchUser[];
   nextCursor: string | null;
   hasMore: boolean;
+}
+
+// A mapped page of a follow list, surfaced to the hooks (useInfiniteQuery).
+// `items` is the domain shape; `nextCursor` is null on the last page.
+export interface FollowPage {
+  items: User[];
+  nextCursor: string | null;
 }
 
 // Fields shared by `mapUser` and `mapSummary`: the username/displayName/
@@ -167,6 +174,19 @@ export const profileService = {
   },
 
   async update(input: UpdateProfileInput): Promise<User> {
+    // Username FIRST (audit QA 2026-07-02): it rides a dedicated endpoint
+    // with its own uniqueness check (409 USER_002). Sending it before the
+    // profile PATCH keeps the common failure mode (handle already taken)
+    // all-or-nothing instead of leaving the other fields silently saved.
+    // Callers must omit `username` when it hasn't changed, otherwise the
+    // backend may reject a no-op rename against the user's own handle.
+    const nextUsername = input.username?.trim();
+    if (nextUsername) {
+      await apiClient.patch<Envelope<RawUser>>('/users/me/username', {
+        username: nextUsername,
+      });
+    }
+
     // PATCH /users/me is `.strict()` and only accepts displayName/bio/
     // avatarUrl — `username` lives on a dedicated endpoint. Omit undefined
     // keys so we never send a key the schema would reject, and skip
@@ -195,18 +215,9 @@ export const profileService = {
     if (typeof input.avatarUrl === 'string' && /^https?:\/\//i.test(input.avatarUrl)) {
       body.avatarUrl = input.avatarUrl;
     }
+    // Runs after the username PATCH, so the response already reflects the
+    // fresh handle — safe to return as the single source of truth.
     const res = await apiClient.patch<Envelope<RawUser>>('/users/me', body);
-
-    // Username changes go through the dedicated endpoint (separate
-    // uniqueness check). Only call it when the value actually changed to
-    // avoid a redundant USER_002 conflict against the user's own handle.
-    const nextUsername = input.username?.trim();
-    if (nextUsername && nextUsername !== res.data.data.username) {
-      const userRes = await apiClient.patch<Envelope<RawUser>>('/users/me/username', {
-        username: nextUsername,
-      });
-      return mapUser(userRes.data.data);
-    }
     return mapUser(res.data.data);
   },
 
@@ -220,18 +231,24 @@ export const profileService = {
     return { unfollowed: true } as const;
   },
 
-  async followers(userId: string): Promise<User[]> {
+  async followers(userId: string, cursor?: string): Promise<FollowPage> {
     // Parameterized endpoint returns the target user's followers (works for
     // self too). Backend: GET /follow/:userId/followers → { data, nextCursor }.
-    const res = await apiClient.get<Envelope<RawFollowList>>(`/follow/${userId}/followers`);
-    const { data } = res.data.data;
-    return data.map(mapSummary);
+    // The backend caps `limit` at 50 and drives paging off the createdAt
+    // cursor, so we thread `cursor` through for infinite scroll.
+    const res = await apiClient.get<Envelope<RawFollowList>>(`/follow/${userId}/followers`, {
+      params: cursor ? { cursor } : undefined,
+    });
+    const { data, nextCursor } = res.data.data;
+    return { items: data.map(mapSummary), nextCursor };
   },
 
-  async following(userId: string): Promise<User[]> {
-    const res = await apiClient.get<Envelope<RawFollowList>>(`/follow/${userId}/following`);
-    const { data } = res.data.data;
-    return data.map(mapSummary);
+  async following(userId: string, cursor?: string): Promise<FollowPage> {
+    const res = await apiClient.get<Envelope<RawFollowList>>(`/follow/${userId}/following`, {
+      params: cursor ? { cursor } : undefined,
+    });
+    const { data, nextCursor } = res.data.data;
+    return { items: data.map(mapSummary), nextCursor };
   },
 
   async search(query: string): Promise<User[]> {

@@ -82,6 +82,11 @@ const ProfileIdentity: React.FC<ProfileIdentityProps> = memo(
           <Pressable
             onPress={onCopyUsername}
             accessibilityRole="button"
+            accessibilityLabel={t('profile.copyUsernameA11y', {
+              handle: username ?? '',
+              defaultValue: `Copy username @${username ?? ''}`,
+            })}
+            hitSlop={8}
             className="active:opacity-60"
           >
             <Text className="text-sm font-body text-ink-muted">@{username}</Text>
@@ -108,7 +113,12 @@ const ProfileIdentity: React.FC<ProfileIdentityProps> = memo(
               {bio}
             </Text>
             {isBioLong && (
-              <Pressable onPress={onToggleBio}>
+              <Pressable
+                onPress={onToggleBio}
+                accessibilityRole="button"
+                accessibilityLabel={bioExpanded ? t('profile.seeLess') : t('profile.seeMore')}
+                hitSlop={8}
+              >
                 <Text className="text-xs font-body-bold text-primary">
                   {bioExpanded ? t('profile.seeLess') : t('profile.seeMore')}
                 </Text>

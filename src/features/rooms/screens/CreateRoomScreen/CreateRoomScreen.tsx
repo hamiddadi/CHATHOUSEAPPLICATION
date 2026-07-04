@@ -16,6 +16,9 @@ import { DateTimePickerInline } from '../../components/DateTimePickerInline';
 import { searchService } from '../../../search/services/searchService';
 import { INTEREST_CATEGORIES } from '../../../onboarding/schemas';
 import { useHouses } from '../../../houses/hooks/useHouses';
+// Shared title bounds — must match TitleEditModal so a title valid on creation
+// stays valid on edit (and vice versa).
+import { ROOM_TITLE_MAX as TITLE_MAX, ROOM_TITLE_MIN as TITLE_MIN } from '../../constants';
 
 type Nav = NativeStackNavigationProp<RoomStackParamList, 'CreateRoom'>;
 
@@ -24,21 +27,28 @@ type Visibility = 'public' | 'social' | 'closed';
 interface VisibilityOption {
   id: Visibility;
   icon: 'public' | 'people' | 'lock';
-  label: string;
-  description: string;
+  /** i18n key suffix under createRoom.visibility.* for label + description. */
+  key: 'public' | 'social' | 'closed';
 }
 
 const VISIBILITY_OPTIONS: readonly VisibilityOption[] = [
-  { id: 'public', icon: 'public', label: 'Open', description: 'Anyone in Chathouse can join' },
+  { id: 'public', icon: 'public', key: 'public' },
   // 'Social' is enforced server-side: rooms.service gates join on the follow
   // graph (roomType=SOCIAL) — only the host and people who follow the host can
   // enter. Mapping lives in roomService.visibilityToBackend.
-  { id: 'social', icon: 'people', label: 'Social', description: 'Only people you follow can join' },
-  { id: 'closed', icon: 'lock', label: 'Closed', description: 'Only people you invite' },
+  { id: 'social', icon: 'people', key: 'social' },
+  { id: 'closed', icon: 'lock', key: 'closed' },
 ];
 
-const TITLE_MIN = 3;
-const TITLE_MAX = 80;
+// Inline t() fallbacks for the visibility labels/descriptions (the keys live in
+// createRoom.visibility.*). Kept beside the options so the two stay in sync.
+const VISIBILITY_DEFAULTS: Record<VisibilityOption['key'], { label: string; description: string }> =
+  {
+    public: { label: 'Open', description: 'Anyone in Chathouse can join' },
+    social: { label: 'Social', description: 'Only people you follow can join' },
+    closed: { label: 'Closed', description: 'Only people you invite' },
+  };
+
 const DESCRIPTION_MAX = 200;
 const MAX_TOPICS = 5;
 const MAX_COHOSTS = 5;
@@ -46,12 +56,13 @@ const SEARCH_DEBOUNCE_MS = 250;
 
 // Presets keep the UX one-tap without pulling a native date picker (which
 // would need EAS dev-client). The "custom" mode swaps in DateTimePickerInline,
-// a JS-only date+time selector — still no native module required.
+// a JS-only date+time selector — still no native module required. `labelKey` /
+// `labelDefault` feed t() so the "+30 min / +1 h" chips are localisable.
 const SCHEDULE_PRESETS = [
-  { id: '30min', label: '+30 min', minutes: 30 },
-  { id: '1h', label: '+1 h', minutes: 60 },
-  { id: '3h', label: '+3 h', minutes: 180 },
-  { id: '1d', label: '+1 j', minutes: 60 * 24 },
+  { id: '30min', labelKey: 'createRoom.preset30min', labelDefault: '+30 min', minutes: 30 },
+  { id: '1h', labelKey: 'createRoom.preset1h', labelDefault: '+1 h', minutes: 60 },
+  { id: '3h', labelKey: 'createRoom.preset3h', labelDefault: '+3 h', minutes: 180 },
+  { id: '1d', labelKey: 'createRoom.preset1d', labelDefault: '+1 d', minutes: 60 * 24 },
 ] as const;
 type SchedulePresetId = (typeof SCHEDULE_PRESETS)[number]['id'];
 
@@ -61,53 +72,57 @@ const DEFAULT_CUSTOM_LEAD_MS = 60 * 60 * 1000;
 
 interface VisibilityRowProps {
   option: VisibilityOption;
+  label: string;
+  description: string;
   selected: boolean;
   onPress: (id: Visibility) => void;
 }
 
-const VisibilityRow: React.FC<VisibilityRowProps> = memo(({ option, selected, onPress }) => {
-  const handlePress = useCallback(() => onPress(option.id), [option.id, onPress]);
-  return (
-    <Pressable
-      onPress={handlePress}
-      accessibilityRole="radio"
-      accessibilityLabel={`${option.label}: ${option.description}`}
-      accessibilityState={{ selected }}
-      className={
-        selected
-          ? 'flex-row items-center gap-md p-lg rounded-md bg-primary-container'
-          : 'flex-row items-center gap-md p-lg rounded-md bg-overlay-white-5 border border-overlay-white-10'
-      }
-    >
-      <MaterialIcons
-        name={option.icon}
-        size={24}
-        color={selected ? colors.onPrimaryContainer : colors.text}
-      />
-      <View className="flex-1">
-        <Text
-          className={
-            selected
-              ? 'text-md font-body-bold text-primary-on-container'
-              : 'text-md font-body-bold text-ink'
-          }
-        >
-          {option.label}
-        </Text>
-        <Text
-          className={
-            selected
-              ? 'text-xs font-body text-primary-on-container opacity-80'
-              : 'text-xs font-body text-ink-muted'
-          }
-        >
-          {option.description}
-        </Text>
-      </View>
-      {selected && <MaterialIcons name="check" size={20} color={colors.onPrimaryContainer} />}
-    </Pressable>
-  );
-});
+const VisibilityRow: React.FC<VisibilityRowProps> = memo(
+  ({ option, label, description, selected, onPress }) => {
+    const handlePress = useCallback(() => onPress(option.id), [option.id, onPress]);
+    return (
+      <Pressable
+        onPress={handlePress}
+        accessibilityRole="radio"
+        accessibilityLabel={`${label}: ${description}`}
+        accessibilityState={{ selected }}
+        className={
+          selected
+            ? 'flex-row items-center gap-md p-lg rounded-md bg-primary-container'
+            : 'flex-row items-center gap-md p-lg rounded-md bg-overlay-white-5 border border-overlay-white-10'
+        }
+      >
+        <MaterialIcons
+          name={option.icon}
+          size={24}
+          color={selected ? colors.onPrimaryContainer : colors.text}
+        />
+        <View className="flex-1">
+          <Text
+            className={
+              selected
+                ? 'text-md font-body-bold text-primary-on-container'
+                : 'text-md font-body-bold text-ink'
+            }
+          >
+            {label}
+          </Text>
+          <Text
+            className={
+              selected
+                ? 'text-xs font-body text-primary-on-container opacity-80'
+                : 'text-xs font-body text-ink-muted'
+            }
+          >
+            {description}
+          </Text>
+        </View>
+        {selected && <MaterialIcons name="check" size={20} color={colors.onPrimaryContainer} />}
+      </Pressable>
+    );
+  },
+);
 VisibilityRow.displayName = 'VisibilityRow';
 
 interface TopicChipProps {
@@ -208,6 +223,7 @@ export const CreateRoomScreen: React.FC = () => {
   const [debouncedQuery, setDebouncedQuery] = useState('');
   const [searchResults, setSearchResults] = useState<SearchHit[]>([]);
   const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState(false);
 
   useEffect(() => {
     const id = setTimeout(() => setDebouncedQuery(query.trim()), SEARCH_DEBOUNCE_MS);
@@ -217,10 +233,12 @@ export const CreateRoomScreen: React.FC = () => {
   useEffect(() => {
     if (debouncedQuery.length === 0) {
       setSearchResults([]);
+      setSearchError(false);
       return;
     }
     let cancelled = false;
     setSearching(true);
+    setSearchError(false);
     void searchService
       .users(debouncedQuery, 8)
       .then(rows => {
@@ -233,6 +251,13 @@ export const CreateRoomScreen: React.FC = () => {
             avatarUrl: r.avatarUrl,
           })),
         );
+      })
+      .catch(() => {
+        // Network / server error — surface an inline "search failed" hint
+        // rather than silently showing an empty list forever.
+        if (cancelled) return;
+        setSearchResults([]);
+        setSearchError(true);
       })
       .finally(() => {
         if (!cancelled) setSearching(false);
@@ -280,7 +305,12 @@ export const CreateRoomScreen: React.FC = () => {
     let scheduledFor: string | undefined;
     if (isScheduled) {
       if (scheduleMode === 'custom') {
-        scheduledFor = customScheduledFor;
+        // The custom date was picked earlier and may now sit in the past (the
+        // sheet stayed open a while) — re-clamp it to at least one minute out so
+        // the backend never rejects a "scheduled in the past" room.
+        const picked = new Date(customScheduledFor).getTime();
+        const floor = Date.now() + 60_000;
+        scheduledFor = new Date(Math.max(picked, floor)).toISOString();
       } else {
         const preset = SCHEDULE_PRESETS.find(p => p.id === schedulePreset);
         if (preset) {
@@ -396,6 +426,14 @@ export const CreateRoomScreen: React.FC = () => {
               <VisibilityRow
                 key={opt.id}
                 option={opt}
+                label={t(
+                  `createRoom.visibility.${opt.key}.label`,
+                  VISIBILITY_DEFAULTS[opt.key].label,
+                )}
+                description={t(
+                  `createRoom.visibility.${opt.key}.description`,
+                  VISIBILITY_DEFAULTS[opt.key].description,
+                )}
                 selected={visibility === opt.id}
                 onPress={setVisibility}
               />
@@ -492,7 +530,14 @@ export const CreateRoomScreen: React.FC = () => {
             </View>
           )}
           {searching && debouncedQuery.length > 0 && (
-            <Text className="text-xs text-ink-dim ml-xs">…</Text>
+            <Text className="text-xs text-ink-dim ml-xs">
+              {t('createRoom.coHostsSearching', 'Searching…')}
+            </Text>
+          )}
+          {searchError && !searching && debouncedQuery.length > 0 && (
+            <Text className="text-xs text-danger ml-xs">
+              {t('createRoom.coHostsSearchError', 'Search failed. Check your connection.')}
+            </Text>
           )}
         </View>
 
@@ -574,19 +619,22 @@ export const CreateRoomScreen: React.FC = () => {
               <View className="flex-row flex-wrap gap-sm" accessibilityRole="radiogroup">
                 {SCHEDULE_PRESETS.map(preset => {
                   const selected = schedulePreset === preset.id;
+                  const presetLabel = t(preset.labelKey, preset.labelDefault);
                   return (
                     <Pressable
                       key={preset.id}
                       onPress={() => setSchedulePreset(preset.id)}
                       accessibilityRole="radio"
-                      accessibilityLabel={`Schedule ${preset.label}`}
+                      accessibilityLabel={t('createRoom.schedulePresetA11y', 'Schedule {{label}}', {
+                        label: presetLabel,
+                      })}
                       accessibilityState={{ selected }}
                       style={[styles.chip, selected ? styles.chipSelected : styles.chipUnselected]}
                     >
                       <Text
                         style={selected ? styles.chipLabelSelected : styles.chipLabelUnselected}
                       >
-                        {preset.label}
+                        {presetLabel}
                       </Text>
                     </Pressable>
                   );

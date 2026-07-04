@@ -40,6 +40,18 @@ type Nav = NativeStackNavigationProp<RoomStackParamList, 'RoomFeed'>;
 const FILTERS = ['All', 'Following', 'Clubs', 'Tech', 'Music', 'Business', 'Health'] as const;
 type Filter = (typeof FILTERS)[number];
 
+// i18n key + English default for each filter label (the value is also the
+// backend param — see filterToParams — so the enum stays in English).
+const FILTER_I18N: Record<Filter, { key: string; def: string }> = {
+  All: { key: 'feed.filterAll', def: 'All' },
+  Following: { key: 'feed.filterFollowing', def: 'Following' },
+  Clubs: { key: 'feed.filterClubs', def: 'Clubs' },
+  Tech: { key: 'feed.filterTech', def: 'Tech' },
+  Music: { key: 'feed.filterMusic', def: 'Music' },
+  Business: { key: 'feed.filterBusiness', def: 'Business' },
+  Health: { key: 'feed.filterHealth', def: 'Health' },
+};
+
 // Map UI labels to the backend's topic / following / clubs params. `All` is
 // the no-filter case (sends nothing), `Following` flips the following flag,
 // `Clubs` restricts to club-attached rooms, the rest become a `topic` query
@@ -70,18 +82,21 @@ const CATEGORY_COLOR_CLASS: Record<string, string> = {
 
 interface FilterPillProps {
   label: Filter;
+  displayLabel: string;
   active: boolean;
   onPress: (f: Filter) => void;
 }
 
-const FilterPill: React.FC<FilterPillProps> = memo(({ label, active, onPress }) => {
+const FilterPill: React.FC<FilterPillProps> = memo(({ label, displayLabel, active, onPress }) => {
+  const { t } = useTranslation();
   const handlePress = useCallback(() => onPress(label), [label, onPress]);
   return (
     <Pressable
       onPress={handlePress}
       accessibilityRole="button"
-      accessibilityLabel={`Filter: ${label}`}
+      accessibilityLabel={t('feed.filterA11y', 'Filter: {{label}}', { label: displayLabel })}
       accessibilityState={{ selected: active }}
+      hitSlop={8}
       className={
         active
           ? 'px-xl py-sm rounded-pill bg-primary'
@@ -95,7 +110,7 @@ const FilterPill: React.FC<FilterPillProps> = memo(({ label, active, onPress }) 
             : 'text-sm font-body-bold text-ink-muted'
         }
       >
-        {label}
+        {displayLabel}
       </Text>
     </Pressable>
   );
@@ -239,6 +254,7 @@ interface HeaderProps {
   onSearch: () => void;
   onEvents: () => void;
   onReplays: () => void;
+  onActivity: () => void;
   onNotifications: () => void;
   unreadCount: number;
 }
@@ -248,27 +264,34 @@ const HeaderIcon: React.FC<{
   label: string;
   onPress: () => void;
   badge?: number;
-}> = ({ name, label, onPress, badge }) => (
-  <Pressable
-    onPress={onPress}
-    accessibilityRole="button"
-    accessibilityLabel={label}
-    hitSlop={8}
-    className="w-10 h-10 items-center justify-center rounded-pill bg-overlay-white-5"
-  >
-    <MaterialIcons name={name} size={20} color={colors.text} />
-    {typeof badge === 'number' && badge > 0 && (
-      <View
-        className="absolute -top-1 -right-1 min-w-4 h-4 px-1 rounded-pill bg-primary items-center justify-center"
-        accessibilityLabel={`${badge} unread`}
-      >
-        <Text className="text-xxs font-body-bold text-primary-on-container">
-          {badge > 99 ? '99+' : badge}
-        </Text>
-      </View>
-    )}
-  </Pressable>
-);
+}> = ({ name, label, onPress, badge }) => {
+  const { t } = useTranslation();
+  const hasBadge = typeof badge === 'number' && badge > 0;
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      // Fold the unread count into the icon's own label so a screen reader
+      // announces "Notifications, 3 unread" as a single, coherent element.
+      accessibilityLabel={
+        hasBadge
+          ? `${label}, ${t('feed.unreadCount', '{{count}} unread', { count: badge })}`
+          : label
+      }
+      hitSlop={8}
+      className="w-10 h-10 items-center justify-center rounded-pill bg-overlay-white-5"
+    >
+      <MaterialIcons name={name} size={20} color={colors.text} />
+      {hasBadge && (
+        <View className="absolute -top-1 -right-1 min-w-4 h-4 px-1 rounded-pill bg-primary items-center justify-center">
+          <Text className="text-xxs font-body-bold text-primary-on-container">
+            {badge > 99 ? '99+' : badge}
+          </Text>
+        </View>
+      )}
+    </Pressable>
+  );
+};
 
 interface UpcomingRowProps {
   rooms: readonly RoomSummary[];
@@ -329,7 +352,7 @@ const UpcomingRow: React.FC<UpcomingRowProps> = memo(({ rooms, onOpen }) => {
 UpcomingRow.displayName = 'UpcomingRow';
 
 const Header: React.FC<HeaderProps> = memo(
-  ({ onSearch, onEvents, onReplays, onNotifications, unreadCount }) => {
+  ({ onSearch, onEvents, onReplays, onActivity, onNotifications, unreadCount }) => {
     const { t } = useTranslation();
     return (
       <View className="flex-row items-center justify-between px-xxl py-lg">
@@ -346,6 +369,13 @@ const Header: React.FC<HeaderProps> = memo(
             name="play-circle-outline"
             label={t('replays.title', 'Replays')}
             onPress={onReplays}
+          />
+          {/* Activity bell — opens the extension ActivityFeed (waves, invites,
+              follow-backs) distinct from the system Notifications list. */}
+          <HeaderIcon
+            name="notifications-none"
+            label={t('feed.activityA11y', 'Activity')}
+            onPress={onActivity}
           />
           <HeaderIcon
             name="notifications"
@@ -372,7 +402,6 @@ export const RoomFeedScreen: React.FC = () => {
     isLoading,
     isError,
     refetch,
-    isRefetching,
     fetchNextPage,
     hasNextPage,
     isFetchingNextPage,
@@ -381,6 +410,17 @@ export const RoomFeedScreen: React.FC = () => {
   const handleEndReached = useCallback(() => {
     if (hasNextPage && !isFetchingNextPage) void fetchNextPage();
   }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+
+  // Drive the pull-to-refresh spinner from a LOCAL flag, not react-query's
+  // `isRefetching`. `isRefetching` also flips true on background/window-focus
+  // refetches (and on the hallway-socket invalidations below), which made the
+  // spinner appear spontaneously without any user gesture. This flag is set
+  // only by the manual pull and cleared when the refetch settles.
+  const [pullRefreshing, setPullRefreshing] = useState(false);
+  const handlePullRefresh = useCallback(() => {
+    setPullRefreshing(true);
+    void refetch().finally(() => setPullRefreshing(false));
+  }, [refetch]);
 
   // Scheduled rooms shown as a horizontal "Upcoming" band above Live Now.
   // Backend's `upcoming` filter already orders by scheduledFor ascending.
@@ -403,6 +443,7 @@ export const RoomFeedScreen: React.FC = () => {
   const handleSearch = useCallback(() => navigation.navigate('Explore'), [navigation]);
   const handleEvents = useCallback(() => navigation.navigate('Events'), [navigation]);
   const handleReplays = useCallback(() => navigation.navigate('Replays'), [navigation]);
+  const handleActivity = useCallback(() => navigation.navigate('ActivityFeed'), [navigation]);
   const handleNotifications = useCallback(() => navigation.navigate('Notifications'), [navigation]);
 
   // Extension: wave to a user from the available-people strip
@@ -437,6 +478,7 @@ export const RoomFeedScreen: React.FC = () => {
         onSearch={handleSearch}
         onEvents={handleEvents}
         onReplays={handleReplays}
+        onActivity={handleActivity}
         onNotifications={handleNotifications}
         unreadCount={unreadCount}
       />
@@ -447,6 +489,8 @@ export const RoomFeedScreen: React.FC = () => {
         <EmptyState
           title={t('feed.couldNotLoad', "Couldn't load rooms")}
           description={t('feed.checkConnection', 'Check your connection and try again.')}
+          actionLabel={t('common.retry', 'Retry')}
+          onAction={handlePullRefresh}
         />
       ) : (
         <FlatList
@@ -454,8 +498,8 @@ export const RoomFeedScreen: React.FC = () => {
           renderItem={renderItem}
           keyExtractor={keyExtractor}
           ItemSeparatorComponent={renderSeparator}
-          refreshing={isRefetching}
-          onRefresh={refetch}
+          refreshing={pullRefreshing}
+          onRefresh={handlePullRefresh}
           onEndReached={handleEndReached}
           onEndReachedThreshold={0.6}
           ListFooterComponent={
@@ -476,6 +520,7 @@ export const RoomFeedScreen: React.FC = () => {
                   <FilterPill
                     key={f}
                     label={f}
+                    displayLabel={t(FILTER_I18N[f].key, FILTER_I18N[f].def)}
                     active={activeFilter === f}
                     onPress={setActiveFilter}
                   />
@@ -490,6 +535,17 @@ export const RoomFeedScreen: React.FC = () => {
                 {t('feed.liveNow', 'Live Now')}
               </Text>
             </View>
+          }
+          ListEmptyComponent={
+            <EmptyState
+              title={t('feed.emptyTitle', 'No live rooms right now')}
+              description={t(
+                'feed.emptyBody',
+                'Be the first — start a room and get the room talking.',
+              )}
+              actionLabel={t('feed.emptyCta', 'Start a room')}
+              onAction={handleStartRoom}
+            />
           }
           showsVerticalScrollIndicator={false}
         />

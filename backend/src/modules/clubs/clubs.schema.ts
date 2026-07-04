@@ -21,7 +21,21 @@ export const listClubsSchema = z.object({
 });
 
 export const inviteSchema = z.object({
-  userIds: z.array(z.string().min(1)).min(1).max(50),
+  // Empty array is allowed: the endpoint doubles as "mint a shareable invite
+  // link" (returns a signed token/URL) with no direct per-user invitations.
+  userIds: z.array(z.string().min(1)).max(50).default([]),
+});
+
+// Accepting an invitation may carry a signed, stateless invite token (from a
+// shared invite link) OR rely on a CLUB_INVITE notification addressed to the
+// user. The token is opaque (base64url `<payload>.<sig>`); bound the length so
+// a malformed/oversized value is rejected before it reaches the verifier.
+export const acceptInviteSchema = z.object({
+  inviteToken: z
+    .string()
+    .max(512)
+    .regex(/^[A-Za-z0-9._~-]+$/)
+    .optional(),
 });
 
 export const updateClubSchema = z.object({
@@ -41,5 +55,6 @@ export const setMemberRoleSchema = z.object({
 export type CreateClubInput = z.infer<typeof createClubSchema>;
 export type ListClubsInput = z.infer<typeof listClubsSchema>;
 export type InviteInput = z.infer<typeof inviteSchema>;
+export type AcceptInviteInput = z.infer<typeof acceptInviteSchema>;
 export type UpdateClubInput = z.infer<typeof updateClubSchema>;
 export type SetMemberRoleInput = z.infer<typeof setMemberRoleSchema>;

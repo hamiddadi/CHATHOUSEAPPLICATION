@@ -9,7 +9,8 @@ import React from 'react';
 import { Alert } from 'react-native';
 import { fireEvent } from '@testing-library/react-native';
 import { houseKeys } from '../../hooks/useHouses';
-import type { House } from '../../../../shared/types/domain';
+import { houseService } from '../../services/houseService';
+import type { House, HouseMember } from '../../../../shared/types/domain';
 import {
   renderScreen,
   mockAuthenticated,
@@ -35,6 +36,15 @@ const fakeHouse = (overrides: Partial<House> = {}): House => ({
   members: [],
   createdAt: new Date(0).toISOString(),
   ...overrides,
+});
+
+const memberOf = (id: string, role: HouseMember['role']): HouseMember => ({
+  id,
+  username: 'someone',
+  displayName: 'Someone',
+  avatarUrl: null,
+  role,
+  joinedAt: new Date(0).toISOString(),
 });
 
 const seed = (house: House) => [{ key: [...houseKeys.detail(house.id)], data: house }];
@@ -103,13 +113,56 @@ describe('ManageHouseScreen', () => {
     expect(alertSpy).toHaveBeenCalled();
   });
 
-  it('hides the danger zone when the viewer is not the owner', () => {
-    const house = fakeHouse({ ownerId: 'someone-else' });
-    const { queryByText } = renderScreen(<ManageHouseScreen />, {
+  it('hides the danger zone from an admin who is not the owner', () => {
+    // Viewer is an ADMIN member (form allowed) but NOT the owner (no delete).
+    const house = fakeHouse({
+      ownerId: 'someone-else',
+      members: [memberOf(VIEWER_ID, 'admin')],
+    });
+    const { queryByText, getByText } = renderScreen(<ManageHouseScreen />, {
       route: { name: 'ManageHouse', params: { houseId: house.id } },
       seedQueryData: seed(house),
     });
+    expect(getByText('Save changes')).toBeTruthy();
     expect(queryByText('Delete house')).toBeNull();
+  });
+
+  it('blocks a non-admin viewer with a message and a working Back action', () => {
+    // Local mirror of the backend CLUB_002 gate: a plain member must not get
+    // an editable form whose save can only end in a server rejection.
+    const house = fakeHouse({
+      ownerId: 'someone-else',
+      members: [memberOf(VIEWER_ID, 'member')],
+    });
+    const { navigation, getByText, queryByText } = renderScreen(<ManageHouseScreen />, {
+      route: { name: 'ManageHouse', params: { houseId: house.id } },
+      seedQueryData: seed(house),
+    });
+    expect(getByText('Admins only')).toBeTruthy();
+    expect(queryByText('Save changes')).toBeNull();
+    fireEvent.press(getByText('Back'));
+    expect(navigation.goBack).toHaveBeenCalledTimes(1);
+  });
+
+  it('offers the icon editor and pressing it is crash-free', () => {
+    const house = fakeHouse();
+    const { getByLabelText, toJSON } = renderScreen(<ManageHouseScreen />, {
+      route: { name: 'ManageHouse', params: { houseId: house.id } },
+      seedQueryData: seed(house),
+    });
+    // iconUrl is null → the "upload" affordance shows (picker is mocked).
+    fireEvent.press(getByLabelText('Upload house icon'));
+    expect(toJSON()).toBeTruthy();
+  });
+
+  it('load failure shows an error state with a Back way out (no modal dead-end)', async () => {
+    jest.spyOn(houseService, 'get').mockRejectedValue({ kind: 'network', message: 'down' });
+    const { navigation, findByText } = renderScreen(<ManageHouseScreen />, {
+      route: { name: 'ManageHouse', params: { houseId: 'broken' } },
+    });
+    expect(await findByText('House unavailable')).toBeTruthy();
+    fireEvent.press(await findByText('Back'));
+    expect(navigation.goBack).toHaveBeenCalledTimes(1);
   });
 
   it('shows the loader (crash-free) when the house is not yet cached', () => {

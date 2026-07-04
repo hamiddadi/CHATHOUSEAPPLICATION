@@ -5,13 +5,13 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import { Avatar } from '../../../../shared/components/Avatar';
 import { Loader } from '../../../../shared/components/Loader';
 import { EmptyState } from '../../../../shared/components/EmptyState';
 import { colors, layout, spacing } from '../../../../shared/constants/theme';
 import type { MessageStackParamList } from '../../../../core/navigation/types';
 import type { Conversation, UserSummary } from '../../../../shared/types/domain';
-import { CURRENT_USER } from '../../../../shared/mocks/users.mock';
 import { useAuthStore } from '../../../auth/store/authStore';
 import { useConversations } from '../../hooks/useMessages';
 import { useChatSocket } from '../../hooks/useChatSocket';
@@ -22,32 +22,35 @@ import { OnlineUsersList } from '../../components/OnlineUsersList';
 
 type Nav = NativeStackNavigationProp<MessageStackParamList, 'MessagesList'>;
 
-const otherParticipant = (c: Conversation): UserSummary => {
-  const other = c.participants.find(p => p.id !== CURRENT_USER.id);
-  return other ?? c.participants[0] ?? CURRENT_USER;
+// Resolve the peer from the REAL session id (not a mock): the backend includes
+// only the peer in `participants`, but stay defensive if both ever appear.
+const otherParticipant = (c: Conversation, myId: string | null): UserSummary | undefined => {
+  const other = c.participants.find(p => p.id !== myId);
+  return other ?? c.participants[0];
 };
 
-const relativeTime = (iso: string): string => {
+const relativeTime = (iso: string, t: TFunction): string => {
   const diffMs = Date.now() - new Date(iso).getTime();
   const mins = Math.floor(diffMs / 60000);
-  if (mins < 1) return 'now';
-  if (mins < 60) return `${mins}m`;
+  if (mins < 1) return t('messages.timeNow', 'now');
+  if (mins < 60) return t('messages.timeMinutes', { count: mins, defaultValue: '{{count}}m' });
   const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h`;
+  if (hours < 24) return t('messages.timeHours', { count: hours, defaultValue: '{{count}}h' });
   const days = Math.floor(hours / 24);
-  return `${days}d`;
+  return t('messages.timeDays', { count: days, defaultValue: '{{count}}d' });
 };
 
 interface ConvoRowProps {
   convo: Conversation;
+  myId: string | null;
   onPress: (id: string) => void;
 }
 
-const ConvoRow: React.FC<ConvoRowProps> = memo(({ convo, onPress }) => {
+const ConvoRow: React.FC<ConvoRowProps> = memo(({ convo, myId, onPress }) => {
   const { t } = useTranslation();
   const handle = useCallback(() => onPress(convo.id), [convo.id, onPress]);
   // Voice notes have no text body — show a 🎤 marker instead of an empty line.
-  let lastText = 'No messages yet';
+  let lastText = t('messages.noMessagesYet', 'No messages yet');
   if (convo.lastMessage) {
     lastText = convo.lastMessage.kind === 'voice' ? t('voice.preview') : convo.lastMessage.text;
   }
@@ -57,13 +60,17 @@ const ConvoRow: React.FC<ConvoRowProps> = memo(({ convo, onPress }) => {
   // the conversation updates (which is what reshuffles the list anyway), not on
   // a wall-clock tick. A global "now" ticker would be needed for live "2m → 3m"
   // counting; that is deliberately out of scope here.
-  const other = useMemo(() => otherParticipant(convo), [convo]);
-  const timeLabel = useMemo(() => relativeTime(convo.updatedAt), [convo.updatedAt]);
+  const other = useMemo(() => otherParticipant(convo, myId), [convo, myId]);
+  const timeLabel = useMemo(() => relativeTime(convo.updatedAt, t), [convo.updatedAt, t]);
+  if (!other) return null;
   return (
     <Pressable
       onPress={handle}
       accessibilityRole="button"
-      accessibilityLabel={`Open chat with ${other.displayName}`}
+      accessibilityLabel={t('messages.openChatA11y', {
+        name: other.displayName,
+        defaultValue: 'Open chat with {{name}}',
+      })}
       className="flex-row items-center gap-md px-xxl py-md"
     >
       <Avatar uri={other.avatarUrl ?? undefined} name={other.displayName} size="lg" />
@@ -108,7 +115,7 @@ interface GroupRowProps {
 const GroupRow: React.FC<GroupRowProps> = memo(({ group, myId, onPress }) => {
   const { t } = useTranslation();
   const handle = useCallback(() => onPress(group.id), [group.id, onPress]);
-  let lastText = 'No messages yet';
+  let lastText = t('messages.noMessagesYet', 'No messages yet');
   if (group.lastMessage) {
     lastText =
       group.lastMessage.kind === 'voice' ? t('voice.preview') : (group.lastMessage.content ?? '');
@@ -116,14 +123,17 @@ const GroupRow: React.FC<GroupRowProps> = memo(({ group, myId, onPress }) => {
   const title = useMemo(() => {
     if (group.title) return group.title;
     const others = group.members.filter(m => m.id !== myId);
-    return others.map(m => m.displayName || m.username).join(', ') || 'Group';
-  }, [group.members, group.title, myId]);
-  const timeLabel = useMemo(() => relativeTime(group.updatedAt), [group.updatedAt]);
+    return others.map(m => m.displayName || m.username).join(', ') || t('messages.group', 'Group');
+  }, [group.members, group.title, myId, t]);
+  const timeLabel = useMemo(() => relativeTime(group.updatedAt, t), [group.updatedAt, t]);
   return (
     <Pressable
       onPress={handle}
       accessibilityRole="button"
-      accessibilityLabel={`Open group ${title}`}
+      accessibilityLabel={t('messages.openGroupA11y', {
+        name: title,
+        defaultValue: 'Open group {{name}}',
+      })}
       className="flex-row items-center gap-md px-xxl py-md"
     >
       <View className="w-12 h-12 rounded-full bg-primary/15 items-center justify-center">
@@ -171,8 +181,15 @@ export const MessagesScreen: React.FC = () => {
   useChatSocket();
   useGroupSocket();
   const myId = useAuthStore(s => s.user?.id ?? null);
-  const { data: conversations, isLoading, isError, refetch, isFetching } = useConversations();
-  const { data: groups } = useGroups();
+  const { data: conversations, isLoading, isError, refetch, isRefetching } = useConversations();
+  const { data: groups, refetch: refetchGroups, isRefetching: isRefetchingGroups } = useGroups();
+
+  // Pull-to-refresh (and the error retry) must resync BOTH sources rendered on
+  // this screen: the 1:1 conversations and the group threads in the header.
+  const handleRefresh = useCallback(() => {
+    void refetch();
+    void refetchGroups();
+  }, [refetch, refetchGroups]);
 
   const handleOpen = useCallback(
     (conversationId: string) => navigation.navigate('ChatDetail', { conversationId }),
@@ -189,8 +206,10 @@ export const MessagesScreen: React.FC = () => {
   const handleNewChat = useCallback(() => navigation.navigate('NewMessage'), [navigation]);
 
   const renderItem = useCallback(
-    ({ item }: { item: Conversation }) => <ConvoRow convo={item} onPress={handleOpen} />,
-    [handleOpen],
+    ({ item }: { item: Conversation }) => (
+      <ConvoRow convo={item} myId={myId} onPress={handleOpen} />
+    ),
+    [handleOpen, myId],
   );
   const keyExtractor = useCallback((item: Conversation) => item.id, []);
   const renderSeparator = useCallback(
@@ -234,9 +253,15 @@ export const MessagesScreen: React.FC = () => {
       {isLoading ? (
         <Loader fullscreen accessibilityLabel={t('common.loading')} />
       ) : isError ? (
-        <EmptyState title={t('messages.couldNotLoad')} description={t('messages.pullToRetry')} />
+        <EmptyState
+          title={t('messages.couldNotLoad')}
+          description={t('messages.loadErrorHint', 'Check your connection and try again.')}
+          actionLabel={t('common.retry', 'Retry')}
+          onAction={handleRefresh}
+        />
       ) : (
         <FlatList
+          testID="messages-list"
           data={conversations ?? []}
           renderItem={renderItem}
           keyExtractor={keyExtractor}
@@ -247,8 +272,8 @@ export const MessagesScreen: React.FC = () => {
               <EmptyState title={t('messages.empty')} description={t('messages.startHint')} />
             ) : null
           }
-          refreshing={isFetching}
-          onRefresh={refetch}
+          refreshing={isRefetching || isRefetchingGroups}
+          onRefresh={handleRefresh}
           contentContainerStyle={[
             styles.list,
             {

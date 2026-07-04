@@ -7,7 +7,7 @@ import { useTranslation } from 'react-i18next';
 import { useQuery } from '@tanstack/react-query';
 import { Loader } from '../../../../shared/components/Loader';
 import { EmptyState } from '../../../../shared/components/EmptyState';
-import { colors, spacing } from '../../../../shared/constants/theme';
+import { colors, spacing, withAlpha } from '../../../../shared/constants/theme';
 import { paymentsApi, type TipHistoryItem } from '../../../extensions';
 
 // Stripe stores amounts in the currency's minor units (cents). Format back to
@@ -39,6 +39,12 @@ const TipRow: React.FC<TipRowProps> = memo(({ item }) => {
   const { t } = useTranslation();
   const sent = item.direction === 'sent';
   const counterpartId = sent ? item.toUserId : item.fromUserId;
+  // Prefer the readable identity the backend now sends; fall back to the
+  // short-id copy for older payloads that only carry raw user ids.
+  const counterpartLabel =
+    item.counterpart?.displayName ||
+    (item.counterpart?.username ? `@${item.counterpart.username}` : null) ||
+    t('tipHistory.counterpart', { id: counterpartId.slice(0, 8) });
   return (
     <View className="flex-row items-center gap-md p-md rounded-md bg-overlay-white-5">
       <View
@@ -55,8 +61,8 @@ const TipRow: React.FC<TipRowProps> = memo(({ item }) => {
         <Text className="text-md font-body-bold text-ink">
           {sent ? t('tipHistory.sent', 'Tip sent') : t('tipHistory.received', 'Tip received')}
         </Text>
-        <Text className="text-xs font-body text-ink-muted">
-          {t('tipHistory.counterpart', { id: counterpartId.slice(0, 8) })}
+        <Text className="text-xs font-body text-ink-muted" numberOfLines={1}>
+          {counterpartLabel}
           {' · '}
           {formatDate(item.createdAt)}
         </Text>
@@ -123,6 +129,8 @@ export const TipHistoryScreen: React.FC = () => {
         <EmptyState
           title={t('tipHistory.loadError', "Couldn't load tips")}
           description={t('tipHistory.pleaseTryAgain', 'Please try again.')}
+          actionLabel={t('common.retry', 'Retry')}
+          onAction={handleRefresh}
         />
       ) : (
         <FlatList
@@ -158,7 +166,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  iconWrapSent: { backgroundColor: 'rgba(239, 68, 68, 0.12)' },
+  iconWrapSent: { backgroundColor: withAlpha(colors.danger, 0.12) },
   iconWrapReceived: { backgroundColor: colors.overlayWhite4 },
   amountSent: { color: colors.danger },
   amountReceived: { color: colors.primary },

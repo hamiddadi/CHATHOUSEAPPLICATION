@@ -3,6 +3,12 @@ import type { LinkingOptions } from '@react-navigation/native';
 import { useInviteStore } from '../../features/extensions/store/inviteStore';
 import type { RootStackParamList } from './types';
 
+// Public web host for shareable deep links (profile / room / house). This is
+// the single source of truth: the HTTPS `prefixes` entry below is derived from
+// it, and feature screens import it instead of re-declaring their own
+// `…_SHARE_BASE_URL` constant so a host change never leaves a stale link behind.
+export const SHARE_BASE_URL = 'https://app.chathouse.com';
+
 // Referral deep link: `…/invite/<code>` where <code> = <base64url>.<sig>.
 // We capture the code into the invite store (redeemed after onboarding) and
 // then let navigation fall through to the default screen rather than routing
@@ -11,6 +17,14 @@ import type { RootStackParamList } from './types';
 const CAPTURE_INVITE = /(?:^|\/)invite\/([^/?#]+)/i;
 // Codes are url-safe base64url with a single '.' separator. Bound the length.
 const SAFE_INVITE_CODE = /^[A-Za-z0-9._~-]{1,512}$/;
+
+// House-invite deep link: `house/:houseId/invite/:token`. This ALSO contains an
+// `/invite/<…>` segment, so the referral capture above would otherwise swallow
+// it and the link would never reach HouseInvitationScreen. Detect it up front
+// (variable-length lookbehind isn't reliable on Hermes, so we use a plain
+// forward pattern) and let it route through to the navigator instead of being
+// captured as a referral code.
+const HOUSE_INVITE_PATH = /(?:^|\/)house\/[^/]+\/invite\//i;
 
 // Defense-in-depth for the `house/:houseId/invite/:inviteToken?` deep link.
 // The invite token arrives in the URL in clear text. Authoritative
@@ -21,7 +35,11 @@ const SAFE_INVITE_CODE = /^[A-Za-z0-9._~-]{1,512}$/;
 // invite segment carrying characters outside [A-Za-z0-9._~-] or longer than
 // a sane bound. The screen then either gets a clean token or none (the param
 // is optional) and stays in charge of surfacing an "invalid invite" state.
-const INVITE_PATH = /(\/house\/[^/]+\/invite\/)([^/?#]+)/i;
+// The prefix is anchored with `(?:^|\/)` (NOT a hard leading slash): after the
+// scheme/host are stripped, a deep link path can arrive without a leading
+// slash (e.g. `house/h1/invite/<token>`), so anchoring on `\/house` would let
+// an unsanitized token through in exactly that common case.
+const INVITE_PATH = /((?:^|\/)house\/[^/]+\/invite\/)([^/?#]+)/i;
 const SAFE_TOKEN = /^[A-Za-z0-9._~-]{1,256}$/;
 
 const sanitizeInvitePath = (path: string): string =>
@@ -37,15 +55,21 @@ const sanitizeInvitePath = (path: string): string =>
   });
 
 export const linking: LinkingOptions<RootStackParamList> = {
-  prefixes: ['chathouse://', 'https://app.chathouse.com'],
+  prefixes: ['chathouse://', SHARE_BASE_URL],
   // Normalize/sanitize the invite token before the navigator parses params.
   getStateFromPath: (path, options) => {
-    // Referral link → stash the code for post-onboarding redemption, then fall
-    // through to the default screen (no explicit navigation target).
-    const inviteCode = path.match(CAPTURE_INVITE)?.[1];
-    if (inviteCode && SAFE_INVITE_CODE.test(inviteCode)) {
-      useInviteStore.getState().setPendingCode(inviteCode);
-      return undefined;
+    // A house-invite link (`house/:houseId/invite/:token`) must reach
+    // HouseInvitationScreen — never be treated as a referral code. Bypass the
+    // referral capture entirely for it and let the navigator parse the route
+    // (after sanitizing the opaque token).
+    if (!HOUSE_INVITE_PATH.test(path)) {
+      // Referral link → stash the code for post-onboarding redemption, then fall
+      // through to the default screen (no explicit navigation target).
+      const inviteCode = path.match(CAPTURE_INVITE)?.[1];
+      if (inviteCode && SAFE_INVITE_CODE.test(inviteCode)) {
+        useInviteStore.getState().setPendingCode(inviteCode);
+        return undefined;
+      }
     }
     return getStateFromPath(sanitizeInvitePath(path), options);
   },

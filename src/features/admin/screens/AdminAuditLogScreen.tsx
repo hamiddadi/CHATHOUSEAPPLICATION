@@ -1,5 +1,5 @@
-import React, { memo } from 'react';
-import { FlatList, StyleSheet, Text, View } from 'react-native';
+import React, { memo, useMemo, useState } from 'react';
+import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import MaterialIcons from '@react-native-vector-icons/material-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
@@ -9,7 +9,7 @@ import { EmptyState } from '../../../shared/components/EmptyState';
 import { Loader } from '../../../shared/components/Loader';
 import { colors, radii, spacing, withAlpha } from '../../../shared/constants/theme';
 import { AdminHeader } from '../components/AdminHeader';
-import { useAdminAuditLog } from '../hooks/useAdmin';
+import { useAdminAuditLogInfinite } from '../hooks/useAdmin';
 import type { AdminAuditLogEntry, AuditAction } from '../types/admin.types';
 import { formatDateTime } from '../../../shared/utils/intl';
 
@@ -125,22 +125,93 @@ const Row: React.FC<{ entry: AdminAuditLogEntry }> = memo(({ entry }) => {
 });
 Row.displayName = 'Row';
 
+const FILTER_ACTIONS: AuditAction[] = [
+  'USER_ROLE_CHANGED',
+  'USER_SUSPENDED',
+  'USER_UNSUSPENDED',
+  'USER_DELETED',
+  'ROOM_FORCE_ENDED',
+  'REPORT_RESOLVED',
+  'REPORT_DISMISSED',
+  'GODMODE_ACCESS',
+  'IMPERSONATION_STARTED',
+  'IMPERSONATION_ENDED',
+];
+
 export const AdminAuditLogScreen: React.FC = () => {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
-  const { data, isLoading, isError, refetch, isRefetching } = useAdminAuditLog({ limit: 100 });
+  const [action, setAction] = useState<AuditAction | 'ALL'>('ALL');
+  const {
+    data,
+    isLoading,
+    isError,
+    refetch,
+    isRefetching,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useAdminAuditLogInfinite({
+    limit: 100,
+    action: action === 'ALL' ? undefined : action,
+  });
+  // Flatten cursor pages so entries beyond the first page are reachable.
+  const entries = useMemo(() => data?.pages.flatMap(p => p.data) ?? [], [data]);
+  const handleEndReached = (): void => {
+    if (hasNextPage && !isFetchingNextPage) void fetchNextPage();
+  };
 
   return (
     <View className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
       <AdminHeader title={t('admin.audit.title')} subtitle={t('admin.audit.subtitle')} />
 
+      <View style={styles.filterBar}>
+        <FlatList
+          data={['ALL' as const, ...FILTER_ACTIONS]}
+          keyExtractor={a => a}
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.filterRow}
+          renderItem={({ item }) => {
+            const selected = action === item;
+            const label =
+              item === 'ALL' ? t('admin.audit.filterAll', 'All') : getActionLabel(item, t);
+            return (
+              <Pressable
+                onPress={() => setAction(item)}
+                accessibilityRole="radio"
+                accessibilityState={{ selected }}
+                accessibilityLabel={label}
+                style={[styles.filterChip, selected ? styles.filterChipOn : styles.filterChipOff]}
+              >
+                <Text
+                  className={
+                    selected
+                      ? 'text-xs font-body-bold text-primary-on-container'
+                      : 'text-xs font-body-bold text-ink-muted'
+                  }
+                >
+                  {label}
+                </Text>
+              </Pressable>
+            );
+          }}
+        />
+      </View>
+
       {isLoading ? (
         <Loader fullscreen accessibilityLabel={t('common.loading', 'Loading…')} />
       ) : isError || !data ? (
-        <EmptyState title={t('admin.audit.errorTitle')} description={t('admin.audit.errorBody')} />
+        <EmptyState
+          title={t('admin.audit.errorTitle')}
+          description={t('admin.audit.errorBody')}
+          actionLabel={t('common.retry', 'Retry')}
+          onAction={() => void refetch()}
+        />
       ) : (
         <FlatList
-          data={data.data}
+          testID="admin-audit-list"
+          data={entries}
           renderItem={({ item }) => <Row entry={item} />}
           keyExtractor={e => e.id}
           ItemSeparatorComponent={() => <View style={{ height: spacing.xs }} />}
@@ -155,6 +226,15 @@ export const AdminAuditLogScreen: React.FC = () => {
               description={t('admin.audit.emptyBody')}
             />
           }
+          onEndReached={handleEndReached}
+          onEndReachedThreshold={0.5}
+          ListFooterComponent={
+            isFetchingNextPage ? (
+              <View style={{ paddingVertical: spacing.lg }}>
+                <Loader accessibilityLabel={t('common.loading', 'Loading…')} />
+              </View>
+            ) : null
+          }
           onRefresh={refetch}
           refreshing={isRefetching}
           showsVerticalScrollIndicator={false}
@@ -165,6 +245,21 @@ export const AdminAuditLogScreen: React.FC = () => {
 };
 
 const styles = StyleSheet.create({
+  filterBar: {
+    paddingHorizontal: spacing.xxl,
+    paddingTop: spacing.sm,
+  },
+  filterRow: { gap: spacing.xs, paddingRight: spacing.xxl },
+  filterChip: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: radii.pill,
+    borderWidth: 1,
+    minHeight: 44,
+    justifyContent: 'center',
+  },
+  filterChipOn: { borderColor: colors.primary, backgroundColor: colors.primary },
+  filterChipOff: { borderColor: colors.overlayWhite15, backgroundColor: 'transparent' },
   row: {
     flexDirection: 'row',
     gap: spacing.sm,

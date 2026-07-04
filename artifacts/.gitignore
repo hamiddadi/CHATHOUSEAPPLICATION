@@ -1,0 +1,3 @@
+# Built APKs land here — keep the folder, ignore the binaries.
+*.apk
+!.gitignore

@@ -26,11 +26,19 @@ const formatRelative = (iso: string, t: TFunction): string => {
   const delta = new Date(iso).getTime() - Date.now();
   if (delta <= 0) return t('events.startsNow');
   const minutes = Math.round(delta / 60_000);
-  if (minutes < 60) return t('events.scheduledIn', { label: `${minutes}m` });
+  if (minutes < 60)
+    return t('events.scheduledIn', {
+      label: t('events.unit.minutes', { count: minutes, defaultValue: '{{count}}m' }),
+    });
   const hours = Math.round(minutes / 60);
-  if (hours < 24) return t('events.scheduledIn', { label: `${hours}h` });
+  if (hours < 24)
+    return t('events.scheduledIn', {
+      label: t('events.unit.hours', { count: hours, defaultValue: '{{count}}h' }),
+    });
   const days = Math.round(hours / 24);
-  return t('events.scheduledIn', { label: `${days}d` });
+  return t('events.scheduledIn', {
+    label: t('events.unit.days', { count: days, defaultValue: '{{count}}d' }),
+  });
 };
 
 interface CardProps {
@@ -164,6 +172,9 @@ export const EventsScreen: React.FC = () => {
   const mineIds = useMemo(() => new Set((mine.data ?? []).map(e => e.id)), [mine.data]);
 
   const goBack = useCallback(() => navigation.goBack(), [navigation]);
+  // Events are created via the standard room-creation flow (scheduled rooms),
+  // so the header "+" routes there rather than to a dedicated event composer.
+  const goCreate = useCallback(() => navigation.navigate('CreateRoom'), [navigation]);
 
   const mutating = rsvp.isPending || cancelRsvp.isPending || canceling;
 
@@ -267,6 +278,15 @@ export const EventsScreen: React.FC = () => {
           <MaterialIcons name="arrow-back" size={24} color={colors.text} />
         </Pressable>
         <Text className="text-xl font-display text-ink flex-1">{t('events.title')}</Text>
+        <Pressable
+          onPress={goCreate}
+          accessibilityRole="button"
+          accessibilityLabel={t('events.create')}
+          hitSlop={8}
+          className="w-11 h-11 rounded-pill bg-primary items-center justify-center"
+        >
+          <MaterialIcons name="add" size={24} color={colors.onPrimary} />
+        </Pressable>
       </View>
 
       <View className="flex-row gap-md px-xxl pb-md">
@@ -284,6 +304,13 @@ export const EventsScreen: React.FC = () => {
 
       {activeList.isLoading ? (
         <Loader fullscreen accessibilityLabel={t('events.title')} />
+      ) : activeList.isError ? (
+        <EmptyState
+          title={t('events.errorTitle', "Couldn't load events")}
+          description={t('events.errorBody', 'Check your connection and try again.')}
+          actionLabel={t('common.retry', 'Retry')}
+          onAction={() => void activeList.refetch()}
+        />
       ) : events.length === 0 ? (
         <EmptyState
           title={tab === 'mine' ? t('events.emptyMine') : t('events.empty')}

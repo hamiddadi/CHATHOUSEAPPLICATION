@@ -20,7 +20,11 @@ const ProfileActionButtons: React.FC<ProfileActionButtonsProps> = memo(
       <View className="flex-row items-center gap-sm mt-md w-full">
         <View className="flex-1">
           <Button
-            label={isFollowedByMe ? 'Following' : 'Follow'}
+            label={
+              isFollowedByMe
+                ? t('profile.followingState', 'Following')
+                : t('profile.follow', 'Follow')
+            }
             variant={isFollowedByMe ? 'ghost' : 'primary'}
             size="md"
             fullWidth

@@ -1,3 +1,4 @@
+import { i18n } from '../../../core/i18n';
 import { toAppError } from './errorHandler';
 
 /**
@@ -90,6 +91,61 @@ describe('toAppError', () => {
     const again = toAppError(appError);
     expect(again).toBe(appError);
     expect(again.kind).toBe('forbidden');
+  });
+
+  it('maps 429 to kind:rateLimited with the localized generic, never the raw backend text', () => {
+    const res = toAppError(
+      axiosErr({
+        response: {
+          status: 429,
+          data: { success: false, error: { code: 'RATE_LIMIT_001', message: 'Too many requests' } },
+        },
+      }),
+    );
+    expect(res.kind).toBe('rateLimited');
+    expect(res.code).toBe('RATE_LIMIT_001');
+    expect(res.message).toBe('Too many attempts. Please try again in a moment.');
+  });
+
+  it('maps 409 to kind:conflict and surfaces the backend message + code', () => {
+    const res = toAppError(
+      axiosErr({
+        response: {
+          status: 409,
+          data: { success: false, error: { code: 'AUTH_006', message: 'Username already taken' } },
+        },
+      }),
+    );
+    expect(res.kind).toBe('conflict');
+    expect(res.code).toBe('AUTH_006');
+    expect(res.message).toBe('Username already taken');
+  });
+
+  it('propagates the stable backend code so UI layers can localize it', () => {
+    const res = toAppError(
+      axiosErr({
+        response: {
+          status: 403,
+          data: {
+            success: false,
+            error: { code: 'CLUB_006', message: 'Club creation limit reached' },
+          },
+        },
+      }),
+    );
+    expect(res.kind).toBe('forbidden');
+    expect(res.code).toBe('CLUB_006');
+  });
+
+  it('localizes generic kind messages through i18n (fr)', async () => {
+    await i18n.changeLanguage('fr');
+    try {
+      const res = toAppError(axiosErr({ message: 'fetch failed' }));
+      expect(res.kind).toBe('network');
+      expect(res.message).toBe('Impossible de joindre le serveur. Vérifie ta connexion.');
+    } finally {
+      await i18n.changeLanguage('en');
+    }
   });
 
   it('maps 5xx to kind:server', () => {

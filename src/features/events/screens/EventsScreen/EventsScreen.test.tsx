@@ -7,9 +7,9 @@
  */
 import React from 'react';
 import { Alert } from 'react-native';
-import { fireEvent } from '@testing-library/react-native';
+import { fireEvent, waitFor } from '@testing-library/react-native';
 import { eventKeys } from '../../hooks/useEvents';
-import type { ScheduledEvent } from '../../services/eventService';
+import { eventService, type ScheduledEvent } from '../../services/eventService';
 import { renderScreen, mockAuthenticated, resetAuth } from '../../../../test-utils/renderScreen';
 import { EventsScreen } from './EventsScreen';
 
@@ -122,5 +122,28 @@ describe('EventsScreen', () => {
       route: { name: 'Events', params: {} },
     });
     expect(getByLabelText('Events')).toBeTruthy();
+  });
+
+  it('header "+" CTA navigates to CreateRoom', () => {
+    const { getByLabelText, navigation } = renderScreen(<EventsScreen />, {
+      route: { name: 'Events', params: {} },
+      seedQueryData: seedUpcoming([makeEvent()]),
+    });
+    fireEvent.press(getByLabelText('Create Event'));
+    expect(navigation.navigate).toHaveBeenCalledWith('CreateRoom');
+  });
+
+  it('load failure shows an error state whose Retry refetches the list', async () => {
+    const upcomingSpy = jest
+      .spyOn(eventService, 'listUpcoming')
+      .mockRejectedValue({ kind: 'network', message: 'down' });
+    const { findByText } = renderScreen(<EventsScreen />, {
+      route: { name: 'Events', params: {} },
+    });
+    // Error state, not the misleading "No upcoming events" empty state.
+    expect(await findByText("Couldn't load events")).toBeTruthy();
+    expect(upcomingSpy).toHaveBeenCalledTimes(1);
+    fireEvent.press(await findByText('Retry'));
+    await waitFor(() => expect(upcomingSpy).toHaveBeenCalledTimes(2));
   });
 });

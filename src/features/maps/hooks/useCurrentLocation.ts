@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, PermissionsAndroid } from 'react-native';
 import Geolocation from '@react-native-community/geolocation';
+import { i18n } from '../../../core/i18n';
 
 const UPDATE_INTERVAL_MS = 30_000;
 const UPDATE_DISTANCE_M = 25;
@@ -68,14 +69,25 @@ export const useCurrentLocation = (): UseCurrentLocationReturn => {
       );
 
       if (!already) {
-        // GDPR consent pre-prompt before the OS dialog.
+        // GDPR consent pre-prompt before the OS dialog. Localised — the legal
+        // body text lives in the locale bundle (explorer.maps.consent*).
         const userConsented = await new Promise<boolean>(resolve => {
           Alert.alert(
-            'Location Consent',
-            'ChatHouse uses your location to show you friends nearby on the map. Your location data will be stored securely on our servers and automatically deleted after 30 days of inactivity. You can turn this off anytime using Ghost Mode.',
+            i18n.t('explorer.maps.consentTitle', 'Location Consent'),
+            i18n.t(
+              'explorer.maps.consentBody',
+              'ChatHouse uses your location to show you friends nearby on the map. Your location data will be stored securely on our servers and automatically deleted after 30 days of inactivity. You can turn this off anytime using Ghost Mode.',
+            ),
             [
-              { text: 'Not Now', style: 'cancel', onPress: () => resolve(false) },
-              { text: 'I Understand', onPress: () => resolve(true) },
+              {
+                text: i18n.t('explorer.maps.consentDecline', 'Not Now'),
+                style: 'cancel',
+                onPress: () => resolve(false),
+              },
+              {
+                text: i18n.t('explorer.maps.consentAccept', 'I Understand'),
+                onPress: () => resolve(true),
+              },
             ],
           );
         });

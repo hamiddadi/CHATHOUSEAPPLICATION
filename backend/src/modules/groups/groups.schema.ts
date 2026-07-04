@@ -31,7 +31,13 @@ export const addGroupMembersSchema = z.object({
 });
 
 export const renameGroupSchema = z.object({
-  title: z.string().trim().min(1).max(80),
+  // An empty (or whitespace-only) title clears the custom name and reverts the
+  // group to its auto-generated member-name label (title column is nullable).
+  title: z
+    .string()
+    .trim()
+    .max(80)
+    .transform(t => (t.length === 0 ? null : t)),
 });
 
 export type CreateGroupInput = z.infer<typeof createGroupSchema>;

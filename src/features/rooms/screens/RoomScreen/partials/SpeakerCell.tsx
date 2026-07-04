@@ -11,12 +11,14 @@ import type { RoomAudioState, RoomParticipant, RoomRole } from '../../../../../s
 const ROLE_ICON_SIZE = 10;
 const SPEAKER_AVATAR = 56;
 
-const GREEN = '#00e475';
+// Speaking ring/badge — the theme's emerald "speaker/active" accent token
+// (same value as the previous hardcoded #00e475).
+const GREEN = colors.accent;
 
 const ROLE_COLORS = {
-  shield: '#22C55E',
-  mic: '#22C55E',
-  micOff: '#EF4444',
+  shield: colors.success,
+  mic: colors.success,
+  micOff: colors.danger,
 } as const;
 
 type RoleIconName = 'shield' | 'mic' | 'mic-off';
@@ -27,7 +29,7 @@ const getRoleIconProps = (
 ): { icon: RoleIconName; color: string } => {
   if (audio === 'muted') return { icon: 'mic-off', color: ROLE_COLORS.micOff };
   if (role === 'host') return { icon: 'shield', color: ROLE_COLORS.shield };
-  if (role === 'moderator') return { icon: 'shield', color: '#3B82F6' };
+  if (role === 'moderator') return { icon: 'shield', color: colors.primaryContainer };
   return { icon: 'mic', color: ROLE_COLORS.mic };
 };
 
@@ -60,7 +62,9 @@ const SpeakerCell: React.FC<{ speaker: RoomParticipant; isSpeakingLive?: boolean
           />
           {isSpeaking && (
             <View style={styles.speakerMicBadge}>
-              <MaterialIcons name="graphic-eq" size={10} color="#00210b" />
+              {/* Dark-on-emerald foreground — onAccent is the closest theme
+                  token to the previous hardcoded #00210b. */}
+              <MaterialIcons name="graphic-eq" size={10} color={colors.onAccent} />
             </View>
           )}
         </Animated.View>

@@ -1,4 +1,11 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type InfiniteData,
+  type QueryClient,
+} from '@tanstack/react-query';
 import { messageService } from '../services/messageService';
 import type { Conversation, Message } from '../../../shared/types/domain';
 
@@ -9,6 +16,13 @@ export const messageKeys = {
   messages: (id: string) => [...messageKeys.all, 'messages', id] as const,
   unread: () => [...messageKeys.all, 'unread'] as const,
 };
+
+// Matches the backend default (chat.schema listMessagesSchema limit=30). A
+// short page (< PAGE_SIZE) means the start of the history was reached.
+export const MESSAGES_PAGE_SIZE = 30;
+
+/** Cache shape of a paginated thread: pages of ascending messages, page 0 = newest. */
+type MessagesCache = InfiniteData<Message[], string | undefined>;
 
 export const useUnreadMessageCount = () =>
   useQuery<number>({
@@ -30,12 +44,35 @@ export const useConversation = (id: string) =>
     enabled: id.length > 0,
   });
 
+/**
+ * Cursor-paginated thread history. Page 0 holds the latest messages; each
+ * `fetchNextPage` loads strictly OLDER ones via the `before` cursor (the ISO
+ * `sentAt` of the oldest message loaded so far). `select` flattens the pages
+ * back into one chronological Message[] so consumers keep the plain shape.
+ */
 export const useConversationMessages = (id: string) =>
-  useQuery<Message[]>({
+  useInfiniteQuery({
     queryKey: messageKeys.messages(id),
-    queryFn: () => messageService.messages(id),
+    queryFn: ({ pageParam }: { pageParam: string | undefined }) =>
+      messageService.messages(id, { before: pageParam, limit: MESSAGES_PAGE_SIZE }),
+    initialPageParam: undefined as string | undefined,
+    // A full page means older history may remain; its first (oldest) message
+    // becomes the next cursor. A short page ends the scroll.
+    getNextPageParam: (lastPage: Message[]) =>
+      lastPage.length === MESSAGES_PAGE_SIZE ? lastPage[0]?.sentAt : undefined,
+    select: (data: MessagesCache) => [...data.pages].reverse().flat(),
     enabled: id.length > 0,
   });
+
+// Append a just-sent message to the newest page (page 0 = latest chunk, each
+// page ascending), so the flattened thread stays chronological.
+const appendToThread = (qc: QueryClient, message: Message): void => {
+  qc.setQueryData<MessagesCache>(messageKeys.messages(message.conversationId), prev =>
+    prev
+      ? { ...prev, pages: prev.pages.map((page, i) => (i === 0 ? [...page, message] : page)) }
+      : { pages: [[message]], pageParams: [undefined] },
+  );
+};
 
 export const useSendMessage = () => {
   const qc = useQueryClient();
@@ -43,9 +80,7 @@ export const useSendMessage = () => {
     mutationFn: ({ conversationId, text }: { conversationId: string; text: string }) =>
       messageService.send(conversationId, text),
     onSuccess: message => {
-      qc.setQueryData<Message[]>(messageKeys.messages(message.conversationId), prev =>
-        prev ? [...prev, message] : [message],
-      );
+      appendToThread(qc, message);
       void qc.invalidateQueries({ queryKey: messageKeys.conversations() });
     },
   });
@@ -60,8 +95,10 @@ export const useDeleteMessage = () => {
     mutationFn: ({ messageId }: { messageId: string; conversationId: string }) =>
       messageService.remove(messageId),
     onSuccess: (_res, { messageId, conversationId }) => {
-      qc.setQueryData<Message[]>(messageKeys.messages(conversationId), prev =>
-        prev ? prev.filter(m => m.id !== messageId) : prev,
+      qc.setQueryData<MessagesCache>(messageKeys.messages(conversationId), prev =>
+        prev
+          ? { ...prev, pages: prev.pages.map(page => page.filter(m => m.id !== messageId)) }
+          : prev,
       );
       void qc.invalidateQueries({ queryKey: messageKeys.conversations() });
     },
@@ -81,9 +118,7 @@ export const useSendVoiceMessage = () => {
       durationMs: number;
     }) => messageService.sendVoice(conversationId, audioUrl, durationMs),
     onSuccess: message => {
-      qc.setQueryData<Message[]>(messageKeys.messages(message.conversationId), prev =>
-        prev ? [...prev, message] : [message],
-      );
+      appendToThread(qc, message);
       void qc.invalidateQueries({ queryKey: messageKeys.conversations() });
     },
   });

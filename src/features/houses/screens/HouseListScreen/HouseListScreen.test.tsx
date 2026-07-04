@@ -5,8 +5,9 @@
  * mine/discover tabs, and opening a house row.
  */
 import React from 'react';
-import { fireEvent } from '@testing-library/react-native';
+import { fireEvent, waitFor } from '@testing-library/react-native';
 import { houseKeys } from '../../hooks/useHouses';
+import { houseService } from '../../services/houseService';
 import type { HouseSummary } from '../../../../shared/types/domain';
 import { renderScreen, mockAuthenticated, resetAuth } from '../../../../test-utils/renderScreen';
 import { HouseListScreen } from './HouseListScreen';
@@ -28,6 +29,7 @@ describe('HouseListScreen', () => {
   });
   afterEach(() => {
     resetAuth();
+    jest.restoreAllMocks();
   });
 
   it('mounts with a seeded house list without crashing', () => {
@@ -64,6 +66,30 @@ describe('HouseListScreen', () => {
     });
     fireEvent.press(getByLabelText('Open house Indie Hackers'));
     expect(navigation.navigate).toHaveBeenCalledWith('HouseDetail', { houseId: 'house-42' });
+  });
+
+  it('empty "mine" list shows an EmptyState whose CTA navigates to CreateHouse', () => {
+    const { navigation, getByText } = renderScreen(<HouseListScreen />, {
+      route: { name: 'HouseList' },
+      seedQueryData: [{ key: [...houseKeys.list('mine')], data: [] }],
+    });
+    // A brand-new user must not face a blank screen.
+    expect(getByText('No houses yet')).toBeTruthy();
+    fireEvent.press(getByText('Create a house'));
+    expect(navigation.navigate).toHaveBeenCalledWith('CreateHouse');
+  });
+
+  it('load failure shows an error state whose Retry refetches the list', async () => {
+    const listSpy = jest
+      .spyOn(houseService, 'list')
+      .mockRejectedValue({ kind: 'network', message: 'down' });
+    const { findByText } = renderScreen(<HouseListScreen />, {
+      route: { name: 'HouseList' },
+    });
+    expect(await findByText("Couldn't load houses")).toBeTruthy();
+    expect(listSpy).toHaveBeenCalledTimes(1);
+    fireEvent.press(await findByText('Retry'));
+    await waitFor(() => expect(listSpy).toHaveBeenCalledTimes(2));
   });
 
   it('switching to the Discover tab does not crash', () => {

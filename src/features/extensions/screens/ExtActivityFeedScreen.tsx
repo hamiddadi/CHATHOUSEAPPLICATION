@@ -41,36 +41,38 @@ const prependCapped = (prev: ActivityItem[], next: ActivityItem): ActivityItem[]
  * Memoized feed row. Extracted + `React.memo`'d so that a state change driven
  * by a single incoming socket event doesn't force every row to re-render.
  */
-const ActivityRow = memo<{ item: ActivityItem; onTap: (item: ActivityItem) => void }>(
-  ({ item, onTap }) => (
-    <Pressable
-      style={[styles.row, !item.isRead && styles.rowUnread]}
-      onPress={() => onTap(item)}
-      accessibilityRole="button"
-      accessibilityLabel={`${item.title} — ${item.body}`}
-    >
-      {item.actor?.avatarUrl ? (
-        <Image source={{ uri: item.actor.avatarUrl }} style={styles.avatar} />
-      ) : (
-        <View style={[styles.avatar, styles.avatarFallback]}>
-          <Text style={styles.avatarText}>
-            {(item.actor?.displayName ?? item.title).slice(0, 1).toUpperCase()}
-          </Text>
-        </View>
-      )}
-      <View style={styles.body}>
-        <Text style={styles.itemTitle} numberOfLines={1}>
-          {item.title}
+const ActivityRow = memo<{
+  item: ActivityItem;
+  onTap: (item: ActivityItem) => void;
+  t: TFunction;
+}>(({ item, onTap, t }) => (
+  <Pressable
+    style={[styles.row, !item.isRead && styles.rowUnread]}
+    onPress={() => onTap(item)}
+    accessibilityRole="button"
+    accessibilityLabel={`${item.title} — ${item.body}`}
+  >
+    {item.actor?.avatarUrl ? (
+      <Image source={{ uri: item.actor.avatarUrl }} style={styles.avatar} />
+    ) : (
+      <View style={[styles.avatar, styles.avatarFallback]}>
+        <Text style={styles.avatarText}>
+          {(item.actor?.displayName ?? item.title).slice(0, 1).toUpperCase()}
         </Text>
-        <Text style={styles.itemBody} numberOfLines={2}>
-          {item.body}
-        </Text>
-        <Text style={styles.when}>{formatRelative(item.createdAt)}</Text>
       </View>
-      {!item.isRead ? <View style={styles.dot} /> : null}
-    </Pressable>
-  ),
-);
+    )}
+    <View style={styles.body}>
+      <Text style={styles.itemTitle} numberOfLines={1}>
+        {item.title}
+      </Text>
+      <Text style={styles.itemBody} numberOfLines={2}>
+        {item.body}
+      </Text>
+      <Text style={styles.when}>{formatRelative(item.createdAt, t)}</Text>
+    </View>
+    {!item.isRead ? <View style={styles.dot} testID={`unread-dot-${item.id}`} /> : null}
+  </Pressable>
+));
 ActivityRow.displayName = 'ActivityRow';
 
 /**
@@ -89,16 +91,30 @@ export const ExtActivityFeedScreen: React.FC<{ onTapItem?: (item: ActivityItem) 
   const [items, setItems] = useState<ActivityItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  // First-load failed and there's nothing to show → surface an error state with
+  // a retry, instead of an empty list that reads like "no activity".
+  const [error, setError] = useState(false);
+  // Keyset pagination: `null` = no more pages; `undefined` = not yet fetched.
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   // Monotonic request id: tab-switching fires overlapping fetches with no
   // cancellation, so a slow earlier response could overwrite the current tab.
   // Only the most recent request is allowed to commit.
   const reqIdRef = useRef(0);
+
+  // Page size mirrors the backend default (50). A full page means there may be
+  // more; a short page means we've reached the end.
+  const PAGE_SIZE = 50;
 
   const fetchItems = useCallback(async () => {
     const myId = ++reqIdRef.current;
     try {
       const next = await activityApi.list(filter);
       if (reqIdRef.current !== myId) return; // a newer filter request superseded this one
+      setError(false);
+      // A full page means older entries may remain; derive the next cursor from
+      // the oldest server row's createdAt (the REST body carries no cursor).
+      setNextCursor(next.length >= PAGE_SIZE ? (next[next.length - 1]?.createdAt ?? null) : null);
       // Merge: server entries win, but keep live socket entries the server
       // hasn't persisted yet — deduping by targetType+targetId so a live entry
       // and its later server counterpart don't both appear.
@@ -110,9 +126,35 @@ export const ExtActivityFeedScreen: React.FC<{ onTapItem?: (item: ActivityItem) 
         return [...survivingLive, ...next].slice(0, MAX_ITEMS);
       });
     } catch {
-      /* keep stale list */
+      if (reqIdRef.current !== myId) return;
+      // Only flag the error state when we have nothing to show — a transient
+      // refresh failure keeps the existing list rather than blanking it.
+      setItems(prev => {
+        if (prev.length === 0) setError(true);
+        return prev;
+      });
     }
   }, [filter]);
+
+  const loadMore = useCallback(async () => {
+    if (loadingMore || nextCursor === null) return;
+    const myId = reqIdRef.current;
+    setLoadingMore(true);
+    try {
+      const page = await activityApi.list(filter, nextCursor);
+      if (reqIdRef.current !== myId) return; // a filter change superseded this page
+      setNextCursor(page.length >= PAGE_SIZE ? (page[page.length - 1]?.createdAt ?? null) : null);
+      setItems(prev => {
+        const seen = new Set(prev.map(i => i.id));
+        const fresh = page.filter(i => !seen.has(i.id));
+        return [...prev, ...fresh].slice(0, MAX_ITEMS);
+      });
+    } catch {
+      /* keep the current page; onEndReached will retry on the next scroll */
+    } finally {
+      if (reqIdRef.current === myId) setLoadingMore(false);
+    }
+  }, [filter, nextCursor, loadingMore]);
 
   useEffect(() => {
     setLoading(true);
@@ -127,8 +169,12 @@ export const ExtActivityFeedScreen: React.FC<{ onTapItem?: (item: ActivityItem) 
         prependCapped(prev, {
           id: `${LIVE_PREFIX}${payload.roomId}-${Date.now()}`,
           type: 'ROOM_STARTED',
-          title: payload.hostName ?? 'Someone you follow',
-          body: `started "${payload.title}"`,
+          title:
+            payload.hostName ??
+            t('extensions.activity.live.someoneYouFollow', 'Someone you follow'),
+          body: t('extensions.activity.live.startedRoom', 'started "{{title}}"', {
+            title: payload.title,
+          }),
           data: { roomId: payload.roomId },
           targetId: payload.roomId,
           targetType: 'room',
@@ -149,8 +195,9 @@ export const ExtActivityFeedScreen: React.FC<{ onTapItem?: (item: ActivityItem) 
         prependCapped(prev, {
           id: `${LIVE_PREFIX}jr-${payload.clubId}-${Date.now()}`,
           type: 'CLUB_INVITE',
-          title: 'Join request',
-          body: payload.message ?? 'New request to join',
+          title: t('extensions.activity.live.joinRequestTitle', 'Join request'),
+          body:
+            payload.message ?? t('extensions.activity.live.joinRequestBody', 'New request to join'),
           data: { clubId: payload.clubId, requesterId: payload.requesterId },
           targetId: payload.clubId,
           targetType: 'club',
@@ -166,8 +213,8 @@ export const ExtActivityFeedScreen: React.FC<{ onTapItem?: (item: ActivityItem) 
         prependCapped(prev, {
           id: `${LIVE_PREFIX}ping-${payload.fromUserId}-${Date.now()}`,
           type: 'WAVE',
-          title: 'Wave received',
-          body: 'Someone is waving at you',
+          title: t('extensions.activity.live.waveTitle', 'Wave received'),
+          body: t('extensions.activity.live.waveBody', 'Someone is waving at you'),
           data: { roomId: payload.roomId, kind: payload.type },
           targetId: payload.fromUserId,
           targetType: 'user',
@@ -197,9 +244,28 @@ export const ExtActivityFeedScreen: React.FC<{ onTapItem?: (item: ActivityItem) 
   );
 
   const renderItem = useCallback(
-    ({ item }: { item: ActivityItem }) => <ActivityRow item={item} onTap={handleTap} />,
-    [handleTap],
+    ({ item }: { item: ActivityItem }) => <ActivityRow item={item} onTap={handleTap} t={t} />,
+    [handleTap, t],
   );
+
+  const handleMarkAll = useCallback(() => {
+    // Optimistically flip every row read, but snapshot the prior read-state so a
+    // failed markAllRead can roll back instead of lying that everything's read.
+    let prevSnapshot: ActivityItem[] = [];
+    setItems(prev => {
+      prevSnapshot = prev;
+      return prev.map(i => ({ ...i, isRead: true }));
+    });
+    void activityApi.markAllRead().catch(() => {
+      setItems(prevSnapshot);
+    });
+  }, []);
+
+  const handleRetry = useCallback(() => {
+    setError(false);
+    setLoading(true);
+    void fetchItems().finally(() => setLoading(false));
+  }, [fetchItems]);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -211,10 +277,8 @@ export const ExtActivityFeedScreen: React.FC<{ onTapItem?: (item: ActivityItem) 
             'extensions.activity.markAllA11y',
             'Mark all notifications as read',
           )}
-          onPress={() => {
-            setItems(prev => prev.map(i => ({ ...i, isRead: true })));
-            void activityApi.markAllRead().catch(() => undefined);
-          }}
+          hitSlop={12}
+          onPress={handleMarkAll}
         >
           <Text style={styles.markAll}>{t('extensions.activity.markAll', 'Mark all read')}</Text>
         </Pressable>
@@ -227,6 +291,7 @@ export const ExtActivityFeedScreen: React.FC<{ onTapItem?: (item: ActivityItem) 
             accessibilityState={{ selected: filter === f.value }}
             accessibilityLabel={`${t('extensions.activity.filterA11y', 'Filter')}: ${f.label}`}
             onPress={() => setFilter(f.value)}
+            hitSlop={8}
             style={[styles.tab, filter === f.value && styles.tabActive]}
           >
             <Text style={[styles.tabText, filter === f.value && styles.tabTextActive]}>
@@ -237,14 +302,35 @@ export const ExtActivityFeedScreen: React.FC<{ onTapItem?: (item: ActivityItem) 
       </View>
       {loading ? (
         <ActivityIndicator style={styles.loader} />
+      ) : error ? (
+        <View style={styles.empty}>
+          <Text style={styles.emptyText}>
+            {t('extensions.activity.error', "Couldn't load your activity.")}
+          </Text>
+          <Pressable
+            style={styles.retryBtn}
+            onPress={handleRetry}
+            accessibilityRole="button"
+            accessibilityLabel={t('common.retry', 'Retry')}
+          >
+            <Text style={styles.retryText}>{t('common.retry', 'Retry')}</Text>
+          </Pressable>
+        </View>
       ) : (
         <FlatList
           data={items}
           keyExtractor={i => i.id}
           refreshing={refreshing}
           onRefresh={onRefresh}
+          // Only wire pagination when there's a next page — avoids the
+          // empty/short-list FlatList firing onEndReached in a tight loop.
+          onEndReached={nextCursor !== null ? loadMore : undefined}
+          onEndReachedThreshold={0.4}
           contentContainerStyle={styles.list}
           renderItem={renderItem}
+          ListFooterComponent={
+            loadingMore ? <ActivityIndicator style={styles.footerLoader} /> : null
+          }
           ListEmptyComponent={
             <View style={styles.empty}>
               <Text style={styles.emptyText}>
@@ -258,15 +344,15 @@ export const ExtActivityFeedScreen: React.FC<{ onTapItem?: (item: ActivityItem) 
   );
 };
 
-const formatRelative = (iso: string): string => {
+const formatRelative = (iso: string, t: TFunction): string => {
   const ms = Date.now() - new Date(iso).getTime();
-  if (ms < 60_000) return 'just now';
+  if (ms < 60_000) return t('extensions.activity.relative.justNow', 'just now');
   const min = Math.floor(ms / 60_000);
-  if (min < 60) return `${min}m`;
+  if (min < 60) return t('extensions.activity.relative.minutes', '{{count}}m', { count: min });
   const h = Math.floor(min / 60);
-  if (h < 24) return `${h}h`;
+  if (h < 24) return t('extensions.activity.relative.hours', '{{count}}h', { count: h });
   const d = Math.floor(h / 24);
-  return `${d}d`;
+  return t('extensions.activity.relative.days', '{{count}}d', { count: d });
 };
 
 const styles = StyleSheet.create({
@@ -291,6 +377,7 @@ const styles = StyleSheet.create({
   tabText: { fontSize: 12, color: colors.textMuted, fontWeight: '600' },
   tabTextActive: { color: colors.onPrimary },
   loader: { marginTop: 24 },
+  footerLoader: { marginVertical: 16 },
   list: { paddingHorizontal: 16, paddingBottom: 32 },
   row: {
     flexDirection: 'row',
@@ -313,6 +400,15 @@ const styles = StyleSheet.create({
   itemBody: { fontSize: 13, color: colors.textMuted, marginTop: 1 },
   when: { fontSize: 11, color: colors.textDim, marginTop: 4 },
   dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.primary },
-  empty: { marginTop: 60, alignItems: 'center' },
+  empty: { marginTop: 60, alignItems: 'center', gap: 12 },
   emptyText: { color: colors.textDim },
+  retryBtn: {
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 20,
+    backgroundColor: colors.primary,
+    minHeight: 44,
+    justifyContent: 'center',
+  },
+  retryText: { color: colors.onPrimary, fontWeight: '600', fontSize: 13 },
 });

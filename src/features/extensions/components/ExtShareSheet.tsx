@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Linking, Pressable, Share, StyleSheet, Text } from 'react-native';
+import { useTranslation } from 'react-i18next';
 import { shareApi, type ShareLinks } from '../api/shareApi';
 import { colors } from '../../../shared/constants/theme';
 import { ExtBottomSheet } from './ExtBottomSheet';
@@ -10,11 +11,13 @@ interface Props {
   onClose: () => void;
 }
 
+// Brand names stay verbatim; only the generic "system" fallback is localized
+// (its label is resolved at render via i18n, see `optionLabel`).
 const OPTIONS = [
   { key: 'twitter', label: 'Twitter / X', emoji: '🐦' },
   { key: 'whatsapp', label: 'WhatsApp', emoji: '💬' },
   { key: 'telegram', label: 'Telegram', emoji: '✈️' },
-  { key: 'system', label: 'More…', emoji: '⋯' },
+  { key: 'system', label: null, emoji: '⋯' },
 ] as const;
 
 /**
@@ -24,6 +27,7 @@ const OPTIONS = [
  * Caller controls visibility via the `visible` prop.
  */
 export const ExtShareSheet: React.FC<Props> = ({ roomId, visible, onClose }) => {
+  const { t } = useTranslation();
   const [links, setLinks] = useState<ShareLinks | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -68,13 +72,18 @@ export const ExtShareSheet: React.FC<Props> = ({ roomId, visible, onClose }) => 
     }
   };
 
+  const optionLabel = (opt: (typeof OPTIONS)[number]): string =>
+    opt.label ?? t('extensions.share.more', 'More…');
+
   return (
     <ExtBottomSheet visible={visible} onClose={onClose} sheetStyle={styles.sheet}>
-      <Text style={styles.title}>Share this room</Text>
+      <Text style={styles.title}>{t('extensions.share.title', 'Share this room')}</Text>
       {loading ? (
         <ActivityIndicator style={styles.loader} />
       ) : !links ? (
-        <Text style={styles.error}>Failed to build share links.</Text>
+        <Text style={styles.error}>
+          {t('extensions.share.error', 'Failed to build share links.')}
+        </Text>
       ) : (
         <>
           {OPTIONS.map(opt => (
@@ -83,14 +92,16 @@ export const ExtShareSheet: React.FC<Props> = ({ roomId, visible, onClose }) => 
               style={styles.row}
               onPress={() => void handleOpen(opt.key)}
               accessibilityRole="button"
-              accessibilityLabel={`Share via ${opt.label}`}
+              accessibilityLabel={t('extensions.share.shareViaA11y', 'Share via {{target}}', {
+                target: optionLabel(opt),
+              })}
             >
               <Text style={styles.emoji}>{opt.emoji}</Text>
-              <Text style={styles.label}>{opt.label}</Text>
+              <Text style={styles.label}>{optionLabel(opt)}</Text>
             </Pressable>
           ))}
           <Pressable style={styles.cancel} onPress={onClose}>
-            <Text style={styles.cancelText}>Cancel</Text>
+            <Text style={styles.cancelText}>{t('common.cancel', 'Cancel')}</Text>
           </Pressable>
         </>
       )}

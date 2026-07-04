@@ -8,6 +8,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Button } from '../../../../shared/components/Button';
 import { EmptyState } from '../../../../shared/components/EmptyState';
 import { Loader } from '../../../../shared/components/Loader';
+import { useApiErrorToast } from '../../../../shared/hooks/useApiErrorToast';
 import { colors, spacing, radii, fontSizes } from '../../../../shared/constants/theme';
 import { clubsListApi } from '../../../extensions/api/clubsListApi';
 import type { FrequencyTier } from '../../../extensions/api/notifPrefsExtApi';
@@ -125,6 +126,10 @@ export const NotificationSettingsScreen: React.FC = () => {
   const { t } = useTranslation();
   const { data: prefs, isLoading, isError, refetch } = useNotifPrefs();
   const updatePrefs = useUpdateNotifPrefs();
+  // Localized toast on any mutation failure. The hooks already roll the
+  // optimistic switch back on error; without this the switch reverts with no
+  // explanation (audit QA 2026-07-02).
+  const showErrorToast = useApiErrorToast();
 
   // Extended prefs (frequency tier + per-club / per-user mute). Resolve the
   // user's own clubs so muted-club ids render as names; clubs they belong to
@@ -142,31 +147,49 @@ export const NotificationSettingsScreen: React.FC = () => {
 
   const handleBack = useCallback(() => navigation.goBack(), [navigation]);
 
+  const onMutationError = useCallback(
+    (err: unknown) => {
+      showErrorToast(err);
+    },
+    [showErrorToast],
+  );
+
   const handleToggle = useCallback(
     (key: PrefKey, value: boolean) => {
-      updatePrefs.mutate({ [key]: value });
+      updatePrefs.mutate({ [key]: value }, { onError: onMutationError });
     },
-    [updatePrefs],
+    [updatePrefs, onMutationError],
   );
 
   const handleSelectFrequency = useCallback(
-    (tier: FrequencyTier) => setFrequency.mutate(tier),
-    [setFrequency],
+    (tier: FrequencyTier) => setFrequency.mutate(tier, { onError: onMutationError }),
+    [setFrequency, onMutationError],
   );
 
   const handleToggleClub = useCallback(
-    (clubId: string, muted: boolean) => toggleMutedClub.mutate({ clubId, muted }),
-    [toggleMutedClub],
+    (clubId: string, muted: boolean) =>
+      toggleMutedClub.mutate({ clubId, muted }, { onError: onMutationError }),
+    [toggleMutedClub, onMutationError],
   );
 
   // The user mute list only offers UN-mute (muting a user happens from their
   // profile). Toggling the switch off (muted=false) drops them from the set.
   const handleUnmuteUser = useCallback(
     (userId: string, muted: boolean) => {
-      if (!muted) unmuteUser.mutate(userId);
+      if (!muted) unmuteUser.mutate(userId, { onError: onMutationError });
     },
-    [unmuteUser],
+    [unmuteUser, onMutationError],
   );
+
+  // Only the row whose write is in flight is disabled (not every switch). React
+  // Query exposes the last-submitted variable on `.variables` while pending, so
+  // we derive the touched key/id from it rather than freezing the whole screen.
+  const pendingPrefKey =
+    updatePrefs.isPending && updatePrefs.variables
+      ? (Object.keys(updatePrefs.variables)[0] as PrefKey | undefined)
+      : undefined;
+  const pendingClubId = toggleMutedClub.isPending ? toggleMutedClub.variables?.clubId : undefined;
+  const pendingUserId = unmuteUser.isPending ? unmuteUser.variables : undefined;
 
   // Union of the user's clubs and any muted-club id that isn't in that list
   // (a club they left while keeping the mute). Names resolve from the club
@@ -223,7 +246,7 @@ export const NotificationSettingsScreen: React.FC = () => {
               prefKey={key}
               label={t(`notificationSettings.${key}`)}
               value={prefs[key]}
-              disabled={updatePrefs.isPending}
+              disabled={pendingPrefKey === key}
               onToggle={handleToggle}
             />
           ))}
@@ -251,7 +274,7 @@ export const NotificationSettingsScreen: React.FC = () => {
                   id={club.id}
                   label={club.name}
                   muted={mutedClubSet.has(club.id)}
-                  disabled={!extPrefs || toggleMutedClub.isPending}
+                  disabled={!extPrefs || pendingClubId === club.id}
                   onToggle={handleToggleClub}
                 />
               ))}
@@ -268,9 +291,15 @@ export const NotificationSettingsScreen: React.FC = () => {
                 <MuteRow
                   key={userId}
                   id={userId}
-                  label={userId.slice(0, 8)}
+                  // No batch user-lookup endpoint exists yet, so a raw id is the
+                  // only identity available. "Muted person · <short id>" reads
+                  // better than a bare 8-char hex fragment while keeping each row
+                  // distinguishable. DEFERRED: resolve real display names once a
+                  // /users/by-ids endpoint + profileService.getUsersByIds are
+                  // added (audit QA 2026-07-02).
+                  label={`${t('notificationSettings.mutedUsers.userFallback', 'Muted person')} · ${userId.slice(0, 8)}`}
                   muted
-                  disabled={unmuteUser.isPending}
+                  disabled={pendingUserId === userId}
                   onToggle={handleUnmuteUser}
                 />
               ))}

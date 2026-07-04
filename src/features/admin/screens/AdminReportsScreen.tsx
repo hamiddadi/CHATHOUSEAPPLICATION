@@ -1,4 +1,4 @@
-import React, { memo, useState } from 'react';
+import React, { memo, useMemo, useState } from 'react';
 import { Alert, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
@@ -8,7 +8,7 @@ import { EmptyState } from '../../../shared/components/EmptyState';
 import { Loader } from '../../../shared/components/Loader';
 import { colors, radii, spacing, withAlpha } from '../../../shared/constants/theme';
 import { AdminHeader } from '../components/AdminHeader';
-import { useAdminReports, useResolveReport } from '../hooks/useAdmin';
+import { useAdminReportsInfinite, useResolveReport } from '../hooks/useAdmin';
 import type { AdminReport } from '../types/admin.types';
 import { formatDateTime } from '../../../shared/utils/intl';
 import { errorMessage } from '../../../shared/utils/errorMessage';
@@ -124,8 +124,22 @@ export const AdminReportsScreen: React.FC = () => {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const [tab, setTab] = useState<'open' | 'resolved' | 'all'>('open');
-  const { data, isLoading, isError, refetch, isRefetching } = useAdminReports({ status: tab });
+  const {
+    data,
+    isLoading,
+    isError,
+    refetch,
+    isRefetching,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useAdminReportsInfinite({ status: tab });
   const resolve = useResolveReport();
+  // Flatten cursor pages into a single list for the FlatList.
+  const reports = useMemo(() => data?.pages.flatMap(p => p.data) ?? [], [data]);
+  const handleEndReached = (): void => {
+    if (hasNextPage && !isFetchingNextPage) void fetchNextPage();
+  };
 
   const handleResolve = (reportId: string, outcome: 'resolved' | 'dismissed') => {
     const isResolve = outcome === 'resolved';
@@ -191,10 +205,13 @@ export const AdminReportsScreen: React.FC = () => {
         <EmptyState
           title={t('admin.reports.errorTitle')}
           description={t('admin.reports.errorBody')}
+          actionLabel={t('common.retry', 'Retry')}
+          onAction={() => void refetch()}
         />
       ) : (
         <FlatList
-          data={data.data}
+          testID="admin-reports-list"
+          data={reports}
           renderItem={({ item }) => (
             <ReportRow
               report={item}
@@ -216,6 +233,15 @@ export const AdminReportsScreen: React.FC = () => {
                 tab === 'open' ? t('admin.reports.emptyOpen') : t('admin.reports.emptyAll')
               }
             />
+          }
+          onEndReached={handleEndReached}
+          onEndReachedThreshold={0.5}
+          ListFooterComponent={
+            isFetchingNextPage ? (
+              <View style={{ paddingVertical: spacing.lg }}>
+                <Loader accessibilityLabel={t('common.loading', 'Loading…')} />
+              </View>
+            ) : null
           }
           onRefresh={refetch}
           refreshing={isRefetching}

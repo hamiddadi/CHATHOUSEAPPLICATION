@@ -1,38 +1,23 @@
 import React from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { useExtThemeMode, type ExtThemeMode } from '../providers/ExtThemeProvider';
+import { StyleSheet, Text, View } from 'react-native';
+import { useTranslation } from 'react-i18next';
 import { colors } from '../../../shared/constants/theme';
 
-const OPTIONS: { value: ExtThemeMode; label: string; emoji: string }[] = [
-  { value: 'auto', label: 'Auto', emoji: '🌓' },
-  { value: 'light', label: 'Light', emoji: '☀️' },
-  { value: 'dark', label: 'Dark', emoji: '🌙' },
-];
-
 /**
- * Three-segment toggle (auto / light / dark) for the Settings screen.
- * Pure addition — the host screen opts in by rendering this component.
+ * Appearance indicator for the Settings screen.
+ *
+ * The app ships a single, mono-dark theme. The former three-segment
+ * auto/light/dark switch was decorative — only the StatusBar reacted while the
+ * rest of the UI (static color tokens) stayed dark, so it lied to the user.
+ * It's been replaced by a static, non-interactive "Dark" indicator that states
+ * the actual appearance without offering unreachable light/auto modes.
  */
 export const ExtThemeToggle: React.FC = () => {
-  const { mode, setMode } = useExtThemeMode();
+  const { t } = useTranslation();
   return (
-    <View style={styles.row} accessibilityRole="radiogroup">
-      {OPTIONS.map(opt => {
-        const active = mode === opt.value;
-        return (
-          <Pressable
-            key={opt.value}
-            onPress={() => setMode(opt.value)}
-            style={[styles.segment, active && styles.segmentActive]}
-            accessibilityRole="radio"
-            accessibilityState={{ selected: active }}
-            accessibilityLabel={`Theme mode ${opt.label}`}
-          >
-            <Text style={styles.emoji}>{opt.emoji}</Text>
-            <Text style={[styles.label, active && styles.labelActive]}>{opt.label}</Text>
-          </Pressable>
-        );
-      })}
+    <View style={styles.row}>
+      <Text style={styles.emoji}>🌙</Text>
+      <Text style={styles.label}>{t('extensions.theme.dark', 'Dark')}</Text>
     </View>
   );
 };
@@ -40,26 +25,10 @@ export const ExtThemeToggle: React.FC = () => {
 const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
-    backgroundColor: colors.overlayWhite5,
-    borderRadius: 12,
-    padding: 4,
-    gap: 4,
-  },
-  segment: {
-    flex: 1,
-    paddingVertical: 10,
     alignItems: 'center',
-    borderRadius: 8,
+    gap: 8,
+    paddingVertical: 8,
   },
-  segmentActive: {
-    backgroundColor: colors.overlayWhite10,
-    shadowColor: '#000000',
-    shadowOpacity: 0.06,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 1 },
-    elevation: 1,
-  },
-  emoji: { fontSize: 18, color: colors.text },
-  label: { fontSize: 12, marginTop: 2, color: colors.textMuted },
-  labelActive: { color: colors.text, fontWeight: '600' },
+  emoji: { fontSize: 16, color: colors.text },
+  label: { fontSize: 13, color: colors.textMuted, fontWeight: '600' },
 });

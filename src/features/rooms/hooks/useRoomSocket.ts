@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { getSocket } from '../../../shared/services/realtime/socketClient';
+import { getSocket, onReconnect } from '../../../shared/services/realtime/socketClient';
 import { roomKeys } from './useRooms';
 
 interface RoomEventPayload {
@@ -37,9 +37,12 @@ export const useRoomSocket = (roomId: string | null, onJoinDenied?: () => void):
       const socket = await getSocket();
       if (!socket || cancelled) return;
 
-      socket.emit('room:join', { roomId }, (ok: boolean) => {
-        if (!ok && !cancelled) onJoinDeniedRef.current?.();
-      });
+      const emitJoin = (): void => {
+        socket.emit('room:join', { roomId }, (ok: boolean) => {
+          if (!ok && !cancelled) onJoinDeniedRef.current?.();
+        });
+      };
+      emitJoin();
 
       const refreshDetail = (): void => {
         void qc.invalidateQueries({ queryKey: roomKeys.detail(roomId) });
@@ -68,7 +71,17 @@ export const useRoomSocket = (roomId: string | null, onJoinDenied?: () => void):
       // Triggered by host actions in RoomControlsSheet / TitleEditModal.
       socket.on('room:meta_updated', refreshIfMatches);
 
+      // After a socket RE-connection the server has dropped our per-room
+      // channel membership (a fresh connection joins nothing), so every
+      // room:* broadcast above would stay silent forever. Re-join the room
+      // channel and resync the detail + hand queue for the gap we missed.
+      const unsubscribeReconnect = onReconnect(() => {
+        emitJoin();
+        refreshHandQueue(undefined);
+      });
+
       cleanup = () => {
+        unsubscribeReconnect();
         socket.emit('room:leave', { roomId });
         socket.off('room:user-joined', refreshIfMatches);
         socket.off('room:user-left', refreshIfMatches);

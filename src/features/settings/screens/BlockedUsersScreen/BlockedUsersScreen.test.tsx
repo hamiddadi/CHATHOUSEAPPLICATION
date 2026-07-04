@@ -7,11 +7,15 @@
  * throw synchronously).
  */
 import React from 'react';
-import { fireEvent } from '@testing-library/react-native';
+import { Alert } from 'react-native';
+import { fireEvent, waitFor } from '@testing-library/react-native';
 import { socialKeys } from '../../../social/hooks/useSocial';
+import { socialService } from '../../../social/services/socialService';
 import type { UserSummary } from '../../../../shared/types/domain';
 import { renderScreen, mockAuthenticated, resetAuth } from '../../../../test-utils/renderScreen';
 import { BlockedUsersScreen } from './BlockedUsersScreen';
+
+type AlertButton = { text?: string; style?: string; onPress?: () => void };
 
 const makeBlocked = (overrides: Partial<UserSummary> = {}): UserSummary => ({
   id: 'blocked-1',
@@ -56,13 +60,51 @@ describe('BlockedUsersScreen', () => {
     expect(navigation.goBack).toHaveBeenCalledTimes(1);
   });
 
-  it('Unblock button press dispatches the mutation without throwing', () => {
+  it('Unblock button asks for confirmation before unblocking (no immediate mutation)', () => {
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
+    const unblockSpy = jest.spyOn(socialService, 'unblock').mockResolvedValue({ unblocked: true });
     const { getByText } = renderScreen(<BlockedUsersScreen />, {
       seedQueryData: [seedBlocked([makeBlocked()])],
     });
-    // The Button renders its label as text; the unblock.mutate dispatch must
-    // not throw synchronously (the network layer is not mocked).
-    expect(() => fireEvent.press(getByText('Unblock'))).not.toThrow();
+    // Tapping the row's Unblock button must NOT unblock straight away — it opens
+    // a confirmation Alert first (audit QA 2026-07-02: a single accidental tap
+    // could re-expose the viewer to a harasser).
+    fireEvent.press(getByText('Unblock'));
+    expect(alertSpy).toHaveBeenCalledTimes(1);
+    expect(unblockSpy).not.toHaveBeenCalled();
+  });
+
+  it('unblocks only after the destructive confirm button is pressed', async () => {
+    let captured: AlertButton[] = [];
+    jest.spyOn(Alert, 'alert').mockImplementation((_t, _m, buttons) => {
+      captured = (buttons as AlertButton[]) ?? [];
+    });
+    const unblockSpy = jest.spyOn(socialService, 'unblock').mockResolvedValue({ unblocked: true });
+    const { getByText } = renderScreen(<BlockedUsersScreen />, {
+      seedQueryData: [seedBlocked([makeBlocked()])],
+    });
+    fireEvent.press(getByText('Unblock'));
+    const confirm = captured.find(b => b.style === 'destructive');
+    expect(confirm).toBeDefined();
+    // Simulate the user confirming → the mutation fires (async) with the id.
+    confirm?.onPress?.();
+    await waitFor(() => expect(unblockSpy).toHaveBeenCalledWith('blocked-1'));
+  });
+
+  it('shows an error state with a Retry button that refetches when the list fails to load', async () => {
+    const listSpy = jest
+      .spyOn(socialService, 'listBlocked')
+      .mockRejectedValue(new Error('network down'));
+    const { getByText } = renderScreen(<BlockedUsersScreen />);
+    // Error branch → EmptyState with a retry action (audit QA 2026-07-02: an
+    // error must not masquerade as an empty "No blocked accounts" state).
+    await waitFor(() => expect(getByText("Couldn't load blocked accounts")).toBeTruthy());
+    const retry = getByText('Retry');
+    expect(retry).toBeTruthy();
+    expect(listSpy).toHaveBeenCalledTimes(1);
+    fireEvent.press(retry);
+    // Pressing Retry triggers refetch → a second call to listBlocked.
+    await waitFor(() => expect(listSpy).toHaveBeenCalledTimes(2));
   });
 
   it('shows the loader header (pending) when nothing is seeded', () => {

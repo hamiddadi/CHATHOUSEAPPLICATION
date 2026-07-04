@@ -1,5 +1,14 @@
-import React, { useCallback, useState } from 'react';
-import { Alert, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useRef, useState } from 'react';
+import {
+  Alert,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  Share,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import MaterialIcons from '@react-native-vector-icons/material-icons';
 import Clipboard from '@react-native-clipboard/clipboard';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -33,11 +42,15 @@ const KpiCard: React.FC<KpiCardProps> = ({ label, value, hint, tone = 'default' 
           ? 'border-primary/40 bg-primary/10'
           : 'border-overlay-white-10 bg-overlay-white-5';
   return (
-    <View className={`flex-1 rounded-md border ${toneClass} p-md gap-xs min-w-[140px]`}>
+    // flexBasis 48% keeps two cards per row without overflowing narrow (320dp)
+    // screens — the old min-w-[140px] forced 140×2 + gap > 320.
+    <View className={`rounded-md border ${toneClass} p-md gap-xs`} style={styles.kpiCard}>
       <Text className="text-xxs font-body-bold uppercase tracking-widest text-ink-muted">
         {label}
       </Text>
-      <Text className="text-3xl font-display text-white">{value}</Text>
+      <Text className="text-3xl font-display text-white" numberOfLines={1} adjustsFontSizeToFit>
+        {value}
+      </Text>
       {hint ? <Text className="text-xxs font-body text-ink-dim">{hint}</Text> : null}
     </View>
   );
@@ -82,7 +95,7 @@ export const AdminHomeScreen: React.FC<SettingsStackScreenProps<'AdminHome'>> = 
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const { data: me } = useAdminWhoami();
-  const { data: stats, isLoading, isError } = useAdminStats();
+  const { data: stats, isLoading, isError, refetch, isRefetching } = useAdminStats();
 
   const goUsers = useCallback(() => navigation.navigate('AdminUsers'), [navigation]);
   const goReports = useCallback(() => navigation.navigate('AdminReports'), [navigation]);
@@ -90,21 +103,23 @@ export const AdminHomeScreen: React.FC<SettingsStackScreenProps<'AdminHome'>> = 
   const goAuditLog = useCallback(() => navigation.navigate('AdminAuditLog'), [navigation]);
 
   const [exporting, setExporting] = useState<null | 'users' | 'audit-log' | 'reports'>(null);
+  // Last exported CSV, kept in memory for the explicit opt-in clipboard copy.
+  // It is NEVER auto-copied: PII (emails/phones) must not silently persist in
+  // the system clipboard where other apps can read it. Sharing is the default.
+  const lastExportRef = useRef<{ kind: string; csv: string } | null>(null);
+  const [copied, setCopied] = useState(false);
+
   const handleExport = useCallback(
     async (kind: 'users' | 'audit-log' | 'reports') => {
       setExporting(kind);
+      setCopied(false);
       try {
         const csv = await adminService.exportCsv(kind);
-        // Two-step UX: copy to clipboard immediately, offer Share for
-        // operators who want to forward the dump out of the device. For a
-        // future iteration: write via expo-file-system + expo-sharing for
-        // an actual file attachment.
-        await Clipboard.setString(csv);
+        lastExportRef.current = { kind, csv };
+        // Default hand-off is the native Share sheet, which carries the export
+        // to a destination the operator picks — no silent clipboard write.
         await Share.share({
-          message:
-            csv.length > 50_000
-              ? csv.slice(0, 50_000) + '\n…(truncated, full copy in clipboard)'
-              : csv,
+          message: csv,
           title: `Chathouse · export ${kind}`,
         });
       } catch (e) {
@@ -119,6 +134,36 @@ export const AdminHomeScreen: React.FC<SettingsStackScreenProps<'AdminHome'>> = 
     [t],
   );
 
+  // Explicit, opt-in clipboard copy — gated behind a confirmation that warns
+  // the CSV contains PII and stays readable by other apps until cleared.
+  const handleCopyLastExport = useCallback(() => {
+    const last = lastExportRef.current;
+    if (!last) return;
+    Alert.alert(
+      t('admin.home.copyWarnTitle', 'Copy to clipboard?'),
+      t(
+        'admin.home.copyWarnBody',
+        'This CSV contains personal data (emails, phone numbers). It will stay readable by other apps until you clear the clipboard.',
+      ),
+      [
+        { text: t('common.cancel', 'Cancel'), style: 'cancel' },
+        {
+          text: t('admin.home.copyConfirm', 'Copy'),
+          style: 'destructive',
+          onPress: () => {
+            Clipboard.setString(last.csv);
+            setCopied(true);
+          },
+        },
+      ],
+    );
+  }, [t]);
+
+  const handleClearClipboard = useCallback(() => {
+    Clipboard.setString('');
+    setCopied(false);
+  }, []);
+
   if (isLoading)
     return (
       <Loader fullscreen accessibilityLabel={t('admin.home.loading', 'Loading admin stats')} />
@@ -128,6 +173,8 @@ export const AdminHomeScreen: React.FC<SettingsStackScreenProps<'AdminHome'>> = 
       <EmptyState
         title={t('common.error', 'Error')}
         description={t('admin.home.errorStats', 'Unable to load stats.')}
+        actionLabel={t('common.retry', 'Retry')}
+        onAction={() => void refetch()}
       />
     );
   }
@@ -142,6 +189,13 @@ export const AdminHomeScreen: React.FC<SettingsStackScreenProps<'AdminHome'>> = 
         subtitle={t('admin.home.subtitle', 'Connected as {{role}}', { role: me?.appRole ?? '—' })}
       />
       <ScrollView
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefetching}
+            onRefresh={() => void refetch()}
+            tintColor={colors.primary}
+          />
+        }
         contentContainerStyle={{
           paddingHorizontal: spacing.xxl,
           paddingTop: spacing.lg,
@@ -280,9 +334,37 @@ export const AdminHomeScreen: React.FC<SettingsStackScreenProps<'AdminHome'>> = 
             <Text className="text-xxs text-ink-dim">
               {t(
                 'admin.home.csvHint',
-                'Content is copied to clipboard then opens the native share sheet.',
+                'Opens the native share sheet. Copying to the clipboard is optional (contains personal data).',
               )}
             </Text>
+            <Pressable
+              onPress={handleCopyLastExport}
+              style={styles.copyBtn}
+              accessibilityRole="button"
+              accessibilityLabel={t('admin.home.csvCopyA11y', 'Copy the last export to clipboard')}
+              accessibilityHint={t(
+                'admin.home.copyWarnBody',
+                'This CSV contains personal data (emails, phone numbers). It will stay readable by other apps until you clear the clipboard.',
+              )}
+            >
+              <MaterialIcons name="content-copy" size={16} color={colors.textMuted} />
+              <Text className="text-xs font-body-bold text-ink-muted ml-xs">
+                {t('admin.home.csvCopyLabel', 'Copy last export')}
+              </Text>
+            </Pressable>
+            {copied ? (
+              <Pressable
+                onPress={handleClearClipboard}
+                style={styles.copyBtn}
+                accessibilityRole="button"
+                accessibilityLabel={t('admin.home.csvClearA11y', 'Clear the clipboard')}
+              >
+                <MaterialIcons name="delete-outline" size={16} color={colors.textMuted} />
+                <Text className="text-xs font-body-bold text-ink-muted ml-xs">
+                  {t('admin.home.csvClearLabel', 'Clear clipboard')}
+                </Text>
+              </Pressable>
+            ) : null}
           </View>
         ) : null}
       </ScrollView>
@@ -293,7 +375,15 @@ export const AdminHomeScreen: React.FC<SettingsStackScreenProps<'AdminHome'>> = 
 const styles = StyleSheet.create({
   kpiRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
     gap: spacing.md,
+  },
+  // flexBasis (not flex-1 + min-width) so two cards fit any width down to 320dp.
+  kpiCard: {
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: '48%',
   },
   exportRow: {
     flexDirection: 'row',
@@ -313,4 +403,14 @@ const styles = StyleSheet.create({
     borderColor: withAlpha(colors.accent, 0.3),
   },
   exportBtnBusy: { opacity: 0.5 },
+  copyBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    minHeight: 44,
+    paddingHorizontal: spacing.md,
+    borderRadius: radii.pill,
+    borderWidth: 1,
+    borderColor: colors.overlayWhite15,
+    alignSelf: 'flex-start',
+  },
 });

@@ -7,11 +7,11 @@
  * and tapping a room row.
  */
 import React from 'react';
-import { Alert } from 'react-native';
-import { fireEvent } from '@testing-library/react-native';
+import { Alert, FlatList, Share } from 'react-native';
+import { fireEvent, waitFor } from '@testing-library/react-native';
 import { houseKeys } from '../../hooks/useHouses';
 import type { House, HouseMember } from '../../../../shared/types/domain';
-import type { HouseRoom } from '../../services/houseService';
+import { houseService, type HouseRoom } from '../../services/houseService';
 import {
   renderScreen,
   mockAuthenticated,
@@ -131,7 +131,7 @@ describe('HouseDetailScreen', () => {
     expect(alertSpy).toHaveBeenCalled();
   });
 
-  it('"Rejoindre" CTA (open, not joined) fires the join mutation without crashing', () => {
+  it('"Join" CTA (open, not joined) fires the join mutation without crashing', () => {
     // Viewer is NOT a member here → not an admin, so the join CTA is shown.
     const house = fakeHouse({
       isJoinedByMe: false,
@@ -142,8 +142,129 @@ describe('HouseDetailScreen', () => {
       route: { name: 'HouseDetail', params: { houseId: house.id } },
       seedQueryData: seedHouse(house),
     });
-    fireEvent.press(getByText('Rejoindre'));
+    fireEvent.press(getByText('Join'));
     expect(toJSON()).toBeTruthy();
+  });
+
+  it('share option shares the canonical house/:houseId deep link', () => {
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
+    const shareSpy = jest
+      .spyOn(Share, 'share')
+      .mockResolvedValue({ action: 'dismissedAction' } as Awaited<ReturnType<typeof Share.share>>);
+    const house = fakeHouse();
+    const { getByLabelText } = renderScreen(<HouseDetailScreen />, {
+      route: { name: 'HouseDetail', params: { houseId: house.id } },
+      seedQueryData: seedHouse(house),
+    });
+    fireEvent.press(getByLabelText('House options'));
+    const buttons = alertSpy.mock.calls[0]![2] as { text: string; onPress?: () => void }[];
+    const shareBtn = buttons.find(b => b.text === 'Share the house');
+    expect(shareBtn).toBeTruthy();
+    shareBtn?.onPress?.();
+    // Must match the linking declaration `house/:houseId` — NOT the dead /h/ URL.
+    expect(shareSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ url: 'https://app.chathouse.com/house/house-1' }),
+    );
+  });
+
+  it('hides "Invite members" from a plain member (backend CLUB_002 mirror)', () => {
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
+    // Viewer is a joined plain MEMBER; someone else owns/administers the house.
+    const house = fakeHouse({
+      ownerId: 'owner-9',
+      isJoinedByMe: true,
+      members: [
+        { ...adminMember(), id: 'owner-9', username: 'owner', displayName: 'Owner' },
+        { ...otherMember(), id: VIEWER_ID, username: 'tester', displayName: 'Test User' },
+      ],
+    });
+    const { queryByText, getByLabelText } = renderScreen(<HouseDetailScreen />, {
+      route: { name: 'HouseDetail', params: { houseId: house.id } },
+      seedQueryData: seedHouse(house),
+    });
+    expect(queryByText('Invite members')).toBeNull();
+    fireEvent.press(getByLabelText('House options'));
+    const buttons = alertSpy.mock.calls[0]![2] as { text: string }[];
+    expect(buttons.find(b => b.text === 'Invite members')).toBeUndefined();
+  });
+
+  it('invited viewer of a PRIVATE house gets an Accept CTA that calls the accept endpoint', async () => {
+    const acceptSpy = jest
+      .spyOn(houseService, 'acceptInvitation')
+      .mockResolvedValue({ joined: true });
+    const house: House & { viewerInvite: { token: string } } = {
+      ...fakeHouse({
+        privacy: 'private',
+        isJoinedByMe: false,
+        ownerId: 'someone-else',
+        members: [otherMember()],
+      }),
+      viewerInvite: { token: 'tok-1' },
+    };
+    const { getByText, queryByText } = renderScreen(<HouseDetailScreen />, {
+      route: { name: 'HouseDetail', params: { houseId: house.id } },
+      seedQueryData: seedHouse(house),
+    });
+    // The invited viewer must NOT land on the "invite only" dead-end.
+    expect(queryByText('Invite only')).toBeNull();
+    fireEvent.press(getByText('Accept invitation'));
+    await waitFor(() => expect(acceptSpy).toHaveBeenCalledWith('house-1', 'tok-1'));
+  });
+
+  it('non-invited viewer of a PRIVATE house sees the invite-only notice (no CTA)', () => {
+    const house = fakeHouse({
+      privacy: 'private',
+      isJoinedByMe: false,
+      ownerId: 'someone-else',
+      members: [otherMember()],
+    });
+    const { getByText, queryByText } = renderScreen(<HouseDetailScreen />, {
+      route: { name: 'HouseDetail', params: { houseId: house.id } },
+      seedQueryData: seedHouse(house),
+    });
+    expect(getByText('Invite only')).toBeTruthy();
+    expect(queryByText('Accept invitation')).toBeNull();
+  });
+
+  it('kicking a member requires an explicit confirmation before the mutation fires', async () => {
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
+    const removeSpy = jest.spyOn(houseService, 'removeMember').mockResolvedValue(fakeHouse());
+    const house = fakeHouse();
+    const { getByLabelText } = renderScreen(<HouseDetailScreen />, {
+      route: { name: 'HouseDetail', params: { houseId: house.id } },
+      seedQueryData: seedHouse(house),
+    });
+    fireEvent.press(getByLabelText('Manage role for Alice'));
+    // 1st Alert: the role sheet — pick the destructive "Remove from house".
+    const roleButtons = alertSpy.mock.calls[0]![2] as { text: string; onPress?: () => void }[];
+    roleButtons.find(b => b.text === 'Remove from house')?.onPress?.();
+    // The kick must NOT fire yet: a 2nd, explicit confirmation is required.
+    expect(removeSpy).not.toHaveBeenCalled();
+    expect(alertSpy).toHaveBeenCalledTimes(2);
+    expect(alertSpy.mock.calls[1]![0]).toBe('Remove Alice?');
+    const confirmButtons = alertSpy.mock.calls[1]![2] as { text: string; onPress?: () => void }[];
+    confirmButtons.find(b => b.text === 'Remove')?.onPress?.();
+    // react-query's mutate schedules the mutationFn on a microtask, so wait for
+    // the service call rather than asserting synchronously.
+    await waitFor(() => expect(removeSpy).toHaveBeenCalledWith('house-1', 'user-2'));
+  });
+
+  it('pull-to-refresh refetches the house and every room band', async () => {
+    const getSpy = jest.spyOn(houseService, 'get').mockResolvedValue(fakeHouse());
+    const roomsSpy = jest.spyOn(houseService, 'listRooms').mockResolvedValue([]);
+    const house = fakeHouse();
+    const { UNSAFE_getByType } = renderScreen(<HouseDetailScreen />, {
+      route: { name: 'HouseDetail', params: { houseId: house.id } },
+      seedQueryData: [
+        ...seedHouse(house),
+        { key: [...houseKeys.rooms(house.id, 'past')], data: [] as HouseRoom[] },
+      ],
+    });
+    expect(getSpy).not.toHaveBeenCalled();
+    fireEvent(UNSAFE_getByType(FlatList), 'refresh');
+    await waitFor(() => expect(getSpy).toHaveBeenCalledWith('house-1'));
+    // live + upcoming + past — one gesture refreshes everything on screen.
+    await waitFor(() => expect(roomsSpy).toHaveBeenCalledTimes(3));
   });
 
   it('tapping a live room row navigates to Room with its id', () => {

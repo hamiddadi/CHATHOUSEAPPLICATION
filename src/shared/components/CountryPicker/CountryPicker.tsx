@@ -59,7 +59,13 @@ export const CountryPicker: React.FC<CountryPickerProps> = ({ visible, onClose, 
     >
       <SafeAreaView className="flex-1 bg-background">
         <View className="px-lg py-md flex-row items-center border-b border-surface-border">
-          <Pressable onPress={onClose} hitSlop={10} className="mr-md">
+          <Pressable
+            onPress={onClose}
+            accessibilityRole="button"
+            accessibilityLabel={t('common.close', 'Close')}
+            hitSlop={12}
+            className="mr-md"
+          >
             <MaterialIcons name="close" size={24} color={colors.text} />
           </Pressable>
           <Text className="text-h3 font-display text-ink flex-1">
@@ -71,6 +77,7 @@ export const CountryPicker: React.FC<CountryPickerProps> = ({ visible, onClose, 
           <TextInput
             className="bg-surface px-md py-sm rounded-lg text-ink font-body"
             placeholder={t('common.search', 'Search')}
+            accessibilityLabel={t('common.search', 'Search')}
             placeholderTextColor={colors.textMuted}
             value={search}
             onChangeText={setSearch}
@@ -90,6 +97,8 @@ export const CountryPicker: React.FC<CountryPickerProps> = ({ visible, onClose, 
                 onClose();
                 setSearch('');
               }}
+              accessibilityRole="button"
+              accessibilityLabel={`${item.name}, ${item.callingCode}`}
               className="flex-row items-center px-lg py-md border-b border-surface/50 active:bg-surface"
             >
               <Text className="text-display text-2xl mr-md">{item.flag}</Text>

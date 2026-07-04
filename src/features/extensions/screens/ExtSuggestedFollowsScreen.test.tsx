@@ -5,11 +5,14 @@
  * state). Native modules are globally mocked in jest-setup.
  */
 import React from 'react';
-import { fireEvent } from '@testing-library/react-native';
+import { fireEvent, waitFor } from '@testing-library/react-native';
 import { extSuggestionsKey } from '../hooks/useSuggestions';
-import type { SuggestedUser } from '../api/suggestionsApi';
+import { suggestionsApi, type SuggestedUser } from '../api/suggestionsApi';
 import { renderScreen, mockAuthenticated, resetAuth } from '../../../test-utils/renderScreen';
 import { ExtSuggestedFollowsScreen } from './ExtSuggestedFollowsScreen';
+
+jest.setTimeout(20000);
+const WAIT = { timeout: 8000 } as const;
 
 const makeUser = (overrides: Partial<SuggestedUser> = {}): SuggestedUser => ({
   id: 'u-1',
@@ -28,7 +31,10 @@ const seed = (users: SuggestedUser[]) => [{ key: [...extSuggestionsKey(30)], dat
 
 describe('ExtSuggestedFollowsScreen', () => {
   beforeEach(() => mockAuthenticated());
-  afterEach(() => resetAuth());
+  afterEach(() => {
+    resetAuth();
+    jest.restoreAllMocks();
+  });
 
   it('mounts with the header and renders a seeded suggestion row', () => {
     const { getByText, toJSON } = renderScreen(<ExtSuggestedFollowsScreen />, {
@@ -65,5 +71,31 @@ describe('ExtSuggestedFollowsScreen', () => {
       seedQueryData: seed([]),
     });
     expect(getByText('No suggestions yet. Come back later.')).toBeTruthy();
+  });
+
+  it('rolls the Follow button back to "Follow" when the follow promise rejects', async () => {
+    // The route passes a promise-returning onFollow (mutateAsync). Simulate a
+    // rejecting API so the screen's `.catch` rollback fires and the optimistic
+    // "Following" label reverts to "Follow".
+    const onFollow = jest.fn().mockRejectedValue(new Error('network'));
+    const { getByText, getByLabelText } = renderScreen(
+      <ExtSuggestedFollowsScreen onFollow={onFollow} />,
+      { seedQueryData: seed([makeUser()]) },
+    );
+    fireEvent.press(getByLabelText('Follow Ada Lovelace'));
+    // Optimistic flip.
+    expect(getByText('Following')).toBeTruthy();
+    // After the rejection settles, the rollback restores "Follow".
+    await waitFor(() => expect(getByText('Follow')).toBeTruthy(), WAIT);
+    expect(onFollow).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows an error state with a working Retry when suggestions fail to load', async () => {
+    const spy = jest.spyOn(suggestionsApi, 'list').mockRejectedValue(new Error('offline'));
+    const { getByText, getByLabelText } = renderScreen(<ExtSuggestedFollowsScreen />, {});
+    await waitFor(() => expect(getByText("Couldn't load suggestions.")).toBeTruthy(), WAIT);
+    spy.mockResolvedValueOnce([makeUser()]);
+    fireEvent.press(getByLabelText('Retry'));
+    await waitFor(() => expect(getByText('Ada Lovelace')).toBeTruthy(), WAIT);
   });
 });

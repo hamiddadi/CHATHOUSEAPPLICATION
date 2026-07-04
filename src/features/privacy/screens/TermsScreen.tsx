@@ -12,6 +12,8 @@ export const TermsScreen: React.FC = () => {
 
       <Section title={t('privacy.terms.s2.title')}>
         <P>{t('privacy.terms.s2.p1')}</P>
+        <P>{t('privacy.terms.s2.p2')}</P>
+        <P>{t('privacy.terms.s2.p3')}</P>
       </Section>
 
       <Section title={t('privacy.terms.s3.title')}>

@@ -3,6 +3,7 @@ import { sendOk } from '../../utils/response';
 import { AppError } from '../../middlewares/error.middleware';
 import { authedUserId as requireUserId } from '../../utils/authedUserId';
 import {
+  acceptInviteSchema,
   createClubSchema,
   inviteSchema,
   listClubsSchema,
@@ -53,7 +54,12 @@ export const clubsController = {
   },
 
   async accept(req: Request, res: Response) {
-    const result = await clubsService.acceptInvitation(requireUserId(req), paramId(req, 'id'));
+    const { inviteToken } = acceptInviteSchema.parse(req.body ?? {});
+    const result = await clubsService.acceptInvitation(
+      requireUserId(req),
+      paramId(req, 'id'),
+      inviteToken,
+    );
     sendOk(res, result);
   },
 

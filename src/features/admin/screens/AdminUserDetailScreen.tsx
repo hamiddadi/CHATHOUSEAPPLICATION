@@ -1,5 +1,6 @@
 import React, { useCallback } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import Clipboard from '@react-native-clipboard/clipboard';
 import MaterialIcons from '@react-native-vector-icons/material-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
@@ -19,7 +20,7 @@ import {
   useSuspendUser,
   useUnsuspendUser,
 } from '../hooks/useAdmin';
-import { promptForReason } from '../promptForReason';
+import { useReasonPrompt } from '../hooks/useReasonPrompt';
 import { useImpersonationStore } from '../store/impersonationStore';
 import { isAtLeast, ROLE_RANK, type AppRole } from '../types/admin.types';
 import { formatDate, formatDateTime } from '../../../shared/utils/intl';
@@ -42,15 +43,15 @@ export const AdminUserDetailScreen: React.FC<SettingsStackScreenProps<'AdminUser
   const insets = useSafeAreaInsets();
   const { userId } = route.params;
   const { data: me } = useAdminWhoami();
-  const { data: user, isLoading, isError } = useAdminUser(userId);
+  const { data: user, isLoading, isError, refetch } = useAdminUser(userId);
   const setRole = useSetUserRole();
   const suspend = useSuspendUser();
   const unsuspend = useUnsuspendUser();
   const del = useDeleteUser();
   const startImpersonation = useImpersonationStore(s => s.start);
-
-  // Suspension reason: collected via Alert.prompt on iOS, falls back to a
-  // generic motif on Android. Custom modal will replace this in v2.
+  // Suspension reason: native Alert.prompt on iOS, feature-local modal on
+  // Android (Alert.prompt is a no-op there). `modal` is mounted below.
+  const { prompt: promptForReason, modal: reasonModal } = useReasonPrompt();
 
   const myRole = me?.appRole ?? 'USER';
   const isSuper = isAtLeast(myRole, 'SUPER_ADMIN');
@@ -91,7 +92,15 @@ export const AdminUserDetailScreen: React.FC<SettingsStackScreenProps<'AdminUser
   const handleSuspend = useCallback(
     (minutes: number | undefined) => {
       if (!user) return;
-      const fire = (motif: string): void => {
+      void promptForReason({
+        title: t('admin.userDetail.suspendTitle'),
+        message: t('admin.userDetail.suspendReason'),
+        confirmLabel: t('admin.userDetail.suspendBtn'),
+        cancelLabel: t('admin.userDetail.cancel'),
+        defaultReason: t('admin.userDetail.suspendDefaultReason', 'Moderation'),
+      }).then(motif => {
+        // null = the admin cancelled the dialog/modal — do nothing.
+        if (motif === null) return;
         suspend.mutate(
           { userId: user.id, reason: motif, durationMinutes: minutes },
           {
@@ -102,18 +111,9 @@ export const AdminUserDetailScreen: React.FC<SettingsStackScreenProps<'AdminUser
               ),
           },
         );
-      };
-      promptForReason(
-        {
-          title: t('admin.userDetail.suspendTitle'),
-          message: t('admin.userDetail.suspendReason'),
-          confirmLabel: t('admin.userDetail.suspendBtn'),
-          defaultReason: 'Moderation',
-        },
-        fire,
-      );
+      });
     },
-    [suspend, user, t],
+    [promptForReason, suspend, user, t],
   );
 
   const handleUnsuspend = useCallback(() => {
@@ -190,7 +190,14 @@ export const AdminUserDetailScreen: React.FC<SettingsStackScreenProps<'AdminUser
 
   if (isLoading) return <Loader fullscreen accessibilityLabel={t('common.loading', 'Loading…')} />;
   if (isError || !user) {
-    return <EmptyState title={t('admin.userDetail.notFound')} description="" />;
+    return (
+      <EmptyState
+        title={t('admin.userDetail.notFound')}
+        description=""
+        actionLabel={t('common.retry', 'Retry')}
+        onAction={() => void refetch()}
+      />
+    );
   }
 
   return (
@@ -240,7 +247,7 @@ export const AdminUserDetailScreen: React.FC<SettingsStackScreenProps<'AdminUser
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>{t('admin.userDetail.infoTitle')}</Text>
-          <Field label={t('admin.userDetail.email')} value={user.email ?? '—'} />
+          <Field label={t('admin.userDetail.email')} value={user.email ?? '—'} copyable />
           <Field label={t('admin.userDetail.phone')} value={user.phoneNumber ?? '—'} />
           <Field label={t('admin.userDetail.joined')} value={formatDate(user.createdAt)} />
           <Field label={t('admin.userDetail.lastSeen')} value={formatDateTime(user.lastSeenAt)} />
@@ -256,32 +263,38 @@ export const AdminUserDetailScreen: React.FC<SettingsStackScreenProps<'AdminUser
           </View>
         ) : (
           <>
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>{t('admin.userDetail.suspendSection')}</Text>
-              {isSuspended ? (
-                <Button
-                  label={t('admin.userDetail.unsuspendBtn')}
-                  variant="primaryContainer"
-                  fullWidth
-                  loading={unsuspend.isPending}
-                  onPress={handleUnsuspend}
-                />
-              ) : (
-                <View style={styles.presetGrid}>
-                  {getSuspendPresets(t).map(p => (
-                    <Pressable
-                      key={p.id}
-                      onPress={() => handleSuspend(p.minutes)}
-                      style={styles.presetBtn}
-                      accessibilityRole="button"
-                      accessibilityLabel={`Suspendre ${p.label}`}
-                    >
-                      <Text className="text-xs font-body-bold text-warning">{p.label}</Text>
-                    </Pressable>
-                  ))}
-                </View>
-              )}
-            </View>
+            {/* A soft-deleted account can't be suspended — hide the section. */}
+            {!user.deletedAt ? (
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>{t('admin.userDetail.suspendSection')}</Text>
+                {isSuspended ? (
+                  <Button
+                    label={t('admin.userDetail.unsuspendBtn')}
+                    variant="primaryContainer"
+                    fullWidth
+                    loading={unsuspend.isPending}
+                    onPress={handleUnsuspend}
+                  />
+                ) : (
+                  <View style={styles.presetGrid}>
+                    {getSuspendPresets(t).map(p => (
+                      <Pressable
+                        key={p.id}
+                        onPress={() => handleSuspend(p.minutes)}
+                        style={styles.presetBtn}
+                        accessibilityRole="button"
+                        accessibilityLabel={t('admin.userDetail.suspendA11y', {
+                          defaultValue: 'Suspend {{label}}',
+                          label: p.label,
+                        })}
+                      >
+                        <Text className="text-xs font-body-bold text-warning">{p.label}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                )}
+              </View>
+            ) : null}
 
             {isSuper ? (
               <View style={styles.section}>
@@ -296,7 +309,10 @@ export const AdminUserDetailScreen: React.FC<SettingsStackScreenProps<'AdminUser
                         disabled={selected}
                         style={[styles.presetBtn, selected ? styles.presetBtnSelected : null]}
                         accessibilityRole="button"
-                        accessibilityLabel={`Définir le rôle ${r}`}
+                        accessibilityLabel={t('admin.userDetail.setRoleA11y', {
+                          defaultValue: 'Set role {{role}}',
+                          role: r,
+                        })}
                         accessibilityState={{ selected, disabled: selected }}
                       >
                         <Text
@@ -346,18 +362,41 @@ export const AdminUserDetailScreen: React.FC<SettingsStackScreenProps<'AdminUser
           </>
         )}
       </ScrollView>
+      {reasonModal}
     </View>
   );
 };
 
-const Field: React.FC<{ label: string; value: string }> = ({ label, value }) => (
-  <View className="flex-row justify-between py-xs">
-    <Text className="text-xs text-ink-muted">{label}</Text>
-    <Text className="text-xs text-white" numberOfLines={1}>
-      {value}
-    </Text>
-  </View>
-);
+const Field: React.FC<{ label: string; value: string; copyable?: boolean }> = ({
+  label,
+  value,
+  copyable = false,
+}) => {
+  const { t } = useTranslation();
+  const canCopy = copyable && value !== '—';
+  const handleCopy = (): void => {
+    if (!canCopy) return;
+    Clipboard.setString(value);
+    Alert.alert(t('admin.userDetail.copied', 'Copied'), value);
+  };
+  return (
+    <View className="flex-row justify-between py-xs">
+      <Text className="text-xs text-ink-muted">{label}</Text>
+      <Text
+        className="text-xs text-white flex-1 text-right"
+        numberOfLines={canCopy ? 2 : 1}
+        onLongPress={canCopy ? handleCopy : undefined}
+        accessibilityRole={canCopy ? 'button' : undefined}
+        accessibilityHint={
+          canCopy ? t('admin.userDetail.copyHint', 'Long-press to copy') : undefined
+        }
+        style={{ marginLeft: spacing.md }}
+      >
+        {value}
+      </Text>
+    </View>
+  );
+};
 
 const styles = StyleSheet.create({
   roleHero: {

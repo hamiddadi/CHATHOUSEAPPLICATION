@@ -8,8 +8,11 @@
  * every NavTile + the CSV export buttons render.
  */
 import React from 'react';
-import { fireEvent } from '@testing-library/react-native';
+import { Alert, Share } from 'react-native';
+import Clipboard from '@react-native-clipboard/clipboard';
+import { fireEvent, waitFor } from '@testing-library/react-native';
 import { adminKeys } from '../hooks/useAdmin';
+import { adminService } from '../services/adminService';
 import type { AdminStats, AppRole } from '../types/admin.types';
 import { makeNavigationSpy } from '../../../test-utils/navigationMock';
 import { renderScreen, mockAuthenticated, resetAuth } from '../../../test-utils/renderScreen';
@@ -117,15 +120,55 @@ describe('AdminHomeScreen', () => {
     expect(queryByLabelText('Active Rooms')).toBeTruthy();
   });
 
-  it('CSV "Export users" button is pressable without crashing (SUPER_ADMIN)', () => {
+  it('CSV "Export users" shares the export and does NOT auto-copy PII to the clipboard', async () => {
+    const FAKE_CSV = 'id,email,phone\n1,alice@example.com,+15550001\n';
+    const exportSpy = jest.spyOn(adminService, 'exportCsv').mockResolvedValue(FAKE_CSV);
+    const shareSpy = jest
+      .spyOn(Share, 'share')
+      .mockResolvedValue({ action: 'sharedAction' } as never);
+    const clipboardSpy = jest.spyOn(Clipboard, 'setString').mockReturnValue(undefined as never);
+
     const navigation = makeNavigationSpy();
-    const { getByLabelText, toJSON } = renderScreen(<AdminHomeScreen {...propsFor(navigation)} />, {
+    const { getByLabelText } = renderScreen(<AdminHomeScreen {...propsFor(navigation)} />, {
       navigation,
       seedQueryData: seedWith('SUPER_ADMIN'),
     });
-    // The handler is async (export → clipboard → share); the press itself must
-    // not throw synchronously. We don't await the network call.
+
     fireEvent.press(getByLabelText('Export users as CSV'));
-    expect(toJSON()).toBeTruthy();
+
+    // Default hand-off is the Share sheet carrying the full CSV.
+    await waitFor(() => expect(exportSpy).toHaveBeenCalledWith('users'));
+    await waitFor(() =>
+      expect(shareSpy).toHaveBeenCalledWith(expect.objectContaining({ message: FAKE_CSV })),
+    );
+    // PII must NOT be silently written to the system clipboard.
+    expect(clipboardSpy).not.toHaveBeenCalled();
+  });
+
+  it('the opt-in "Copy last export" confirms before writing PII to the clipboard', async () => {
+    const FAKE_CSV = 'id,email\n1,alice@example.com\n';
+    jest.spyOn(adminService, 'exportCsv').mockResolvedValue(FAKE_CSV);
+    jest.spyOn(Share, 'share').mockResolvedValue({ action: 'sharedAction' } as never);
+    const clipboardSpy = jest.spyOn(Clipboard, 'setString').mockReturnValue(undefined as never);
+    // Capture the confirmation Alert and fire its destructive "Copy" button.
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation((_t, _m, buttons) => {
+      const confirm = buttons?.find(b => b.style === 'destructive');
+      confirm?.onPress?.();
+    });
+
+    const navigation = makeNavigationSpy();
+    const { getByLabelText } = renderScreen(<AdminHomeScreen {...propsFor(navigation)} />, {
+      navigation,
+      seedQueryData: seedWith('SUPER_ADMIN'),
+    });
+
+    // Export first so there is a payload to copy.
+    fireEvent.press(getByLabelText('Export users as CSV'));
+    await waitFor(() => expect(clipboardSpy).not.toHaveBeenCalled());
+
+    // Opt-in copy → confirmation Alert → then (and only then) the clipboard write.
+    fireEvent.press(getByLabelText('Copy the last export to clipboard'));
+    expect(alertSpy).toHaveBeenCalled();
+    await waitFor(() => expect(clipboardSpy).toHaveBeenCalledWith(FAKE_CSV));
   });
 });

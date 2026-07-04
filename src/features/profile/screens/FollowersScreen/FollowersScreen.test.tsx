@@ -5,13 +5,16 @@
  * toggle, and a row's Follow button.
  */
 import React from 'react';
-import { fireEvent } from '@testing-library/react-native';
+import { fireEvent, waitFor } from '@testing-library/react-native';
 import { profileKeys } from '../../hooks/useProfile';
+import { profileService } from '../../services/profileService';
 import type { User } from '../../../../shared/types/domain';
 import { renderScreen, mockAuthenticated, resetAuth } from '../../../../test-utils/renderScreen';
 import { FollowersScreen } from './FollowersScreen';
 
 const TARGET_ID = 'user-target-1';
+// mockAuthenticated() seeds this id as the current viewer (see renderScreen).
+const ME = 'user-test-1';
 
 const makeUser = (id: string, overrides: Partial<User> = {}): User => ({
   id,
@@ -35,9 +38,17 @@ const makeUser = (id: string, overrides: Partial<User> = {}): User => ({
 const followers = [makeUser('follower-a'), makeUser('follower-b')];
 const following = [makeUser('following-x', { isFollowedByMe: true })];
 
+// useFollowers/useFollowing are now useInfiniteQuery — the cache holds
+// { pages: FollowPage[], pageParams } rather than a flat User[]. Wrap each
+// roster as a single page with no further cursor.
+const page = (items: User[]) => ({
+  pages: [{ items, nextCursor: null }],
+  pageParams: [undefined],
+});
+
 const seed = () => [
-  { key: [...profileKeys.followers(TARGET_ID)], data: followers },
-  { key: [...profileKeys.following(TARGET_ID)], data: following },
+  { key: [...profileKeys.followers(TARGET_ID)], data: page(followers) },
+  { key: [...profileKeys.following(TARGET_ID)], data: page(following) },
 ];
 
 const baseRoute = {
@@ -100,10 +111,61 @@ describe('FollowersScreen', () => {
     const { getByText } = renderScreen(<FollowersScreen />, {
       route: baseRoute,
       seedQueryData: [
-        { key: [...profileKeys.followers(TARGET_ID)], data: [] },
-        { key: [...profileKeys.following(TARGET_ID)], data: [] },
+        { key: [...profileKeys.followers(TARGET_ID)], data: page([]) },
+        { key: [...profileKeys.following(TARGET_ID)], data: page([]) },
       ],
     });
     expect(getByText('No followers yet')).toBeTruthy();
+  });
+
+  it('hides the Follow button on my own row (no self-follow)', () => {
+    // My own account appears in the followers list; its row must not offer a
+    // Follow toggle (a self-follow 400s server-side).
+    const withSelf = [makeUser(ME), makeUser('follower-b')];
+    const { queryAllByText, getByText } = renderScreen(<FollowersScreen />, {
+      route: baseRoute,
+      seedQueryData: [
+        { key: [...profileKeys.followers(TARGET_ID)], data: page(withSelf) },
+        { key: [...profileKeys.following(TARGET_ID)], data: page(following) },
+      ],
+    });
+    // Both rows render...
+    expect(getByText(`@u_${ME}`)).toBeTruthy();
+    expect(getByText('@u_follower-b')).toBeTruthy();
+    // ...but only the non-self row exposes a "Follow" button.
+    expect(queryAllByText('Follow')).toHaveLength(1);
+  });
+
+  it('loads the next page when the list end is reached (infinite scroll)', async () => {
+    // Seed a first page that reports there IS more (nextCursor set). Reaching
+    // the end must call the service with that cursor and append its rows.
+    const spy = jest
+      .spyOn(profileService, 'followers')
+      .mockResolvedValue({ items: [makeUser('follower-c')], nextCursor: null });
+
+    const { UNSAFE_getByType } = renderScreen(<FollowersScreen />, {
+      route: baseRoute,
+      seedQueryData: [
+        {
+          key: [...profileKeys.followers(TARGET_ID)],
+          data: { pages: [{ items: followers, nextCursor: 'cursor-1' }], pageParams: [undefined] },
+        },
+        { key: [...profileKeys.following(TARGET_ID)], data: page(following) },
+      ],
+    });
+
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { FlatList } = require('react-native');
+    UNSAFE_getByType(FlatList).props.onEndReached();
+
+    await waitFor(() => {
+      expect(spy).toHaveBeenCalledWith(TARGET_ID, 'cursor-1');
+    });
+    // FlatList windowing may not render the appended row in jsdom, so assert
+    // against the data prop directly (mirrors ExtActivityFeedScreen's test).
+    await waitFor(() => {
+      const data = UNSAFE_getByType(FlatList).props.data as User[];
+      expect(data.some(u => u.id === 'follower-c')).toBe(true);
+    });
   });
 });

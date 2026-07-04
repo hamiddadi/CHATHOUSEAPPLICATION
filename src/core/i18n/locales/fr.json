@@ -20,7 +20,12 @@
     "actionFailed": "L'action a échoué. Veuillez réessayer.",
     "permissionDenied": "Autorisation requise",
     "appName": "Chathouse",
-    "ok": "OK"
+    "ok": "OK",
+    "select_country": "Choisir un pays",
+    "search": "Rechercher",
+    "save": "Enregistrer",
+    "loadingMore": "Chargement…",
+    "delete": "Supprimer"
   },
   "errorBoundary": {
     "title": "Quelque chose s'est mal passé",
@@ -48,7 +53,17 @@
     "micA11y": "Enregistrer un message vocal",
     "typing": "écrit…",
     "cannotMessageTitle": "Message impossible",
-    "cannotMessageBody": "Vous devez vous suivre mutuellement pour échanger des messages."
+    "cannotMessageBody": "Vous devez vous suivre mutuellement pour échanger des messages.",
+    "loadErrorTitle": "Impossible de charger les messages",
+    "loadErrorHint": "Vérifiez votre connexion puis réessayez.",
+    "emptyTitle": "Aucun message pour le moment",
+    "emptyHint": "Envoyez un message pour démarrer la conversation.",
+    "comingSoon": "Cette fonctionnalité arrive bientôt.",
+    "callLabel": "Appel vocal",
+    "moreLabel": "Options de la conversation",
+    "attachLabel": "Pièce jointe",
+    "deleteTitle": "Supprimer le message",
+    "deleteBody": "Ce message sera supprimé définitivement."
   },
   "voice": {
     "preview": "🎤 Message vocal",
@@ -67,7 +82,9 @@
     "untitled": "Room sans titre",
     "emptyTitle": "Aucun replay pour l'instant",
     "emptyBody": "Les rooms enregistrées apparaîtront ici une fois terminées.",
-    "playA11y": "Lire le replay"
+    "playA11y": "Lire le replay",
+    "errorTitle": "Impossible de charger les replays",
+    "errorBody": "Vérifiez votre connexion et réessayez."
   },
   "tip": {
     "title": "Pourboire à {{name}}",
@@ -105,7 +122,12 @@
     "done": "Fait",
     "error": "Erreur",
     "failed": "Échec",
-    "close": "Fermer"
+    "close": "Fermer",
+    "handRaiseEveryone": "Lever de main : tout le monde",
+    "handRaiseFollowers": "Lever de main : abonnés",
+    "handRaiseNone": "Lever de main : désactivé",
+    "lockRoom": "Verrouiller la room",
+    "unlockRoom": "Déverrouiller la room"
   },
   "messages": {
     "title": "Messages",
@@ -149,7 +171,19 @@
     "empty": "Pas encore de conversations",
     "startHint": "Touche l'icône de rédaction pour démarrer une conversation.",
     "couldNotLoad": "Impossible de charger les messages",
-    "pullToRetry": "Tire vers le bas pour réessayer."
+    "pullToRetry": "Tire vers le bas pour réessayer.",
+    "leaveErrorTitle": "Impossible de quitter",
+    "removeMemberA11y": "Retirer {{name}}",
+    "removeSelected": "Retirer {{name}}",
+    "online": "En ligne",
+    "noMessagesYet": "Aucun message pour le moment",
+    "loadErrorHint": "Vérifiez votre connexion et réessayez.",
+    "timeNow": "à l'instant",
+    "timeMinutes": "{{count}} min",
+    "timeHours": "{{count}} h",
+    "timeDays": "{{count}} j",
+    "openChatA11y": "Ouvrir la conversation avec {{name}}",
+    "openGroupA11y": "Ouvrir le groupe {{name}}"
   },
   "settings": {
     "title": "Paramètres",
@@ -191,7 +225,13 @@
     "expandBioA11y": "Expand bio",
     "createHouseA11y": "Create a new house",
     "openGodmodeA11y": "Open Godmode",
-    "anonymousErrorReportingA11y": "Autoriser le crash reporting anonyme"
+    "anonymousErrorReportingA11y": "Autoriser le crash reporting anonyme",
+    "analyticsToggleFailed": "Impossible d'enregistrer ton choix. Réessaie.",
+    "signOutConfirmTitle": "Se déconnecter ?",
+    "signOutConfirmBody": "Tu pourras te reconnecter avec ton numéro de téléphone.",
+    "signOutHint": "Se déconnecter de cet appareil",
+    "extensions": "Extensions",
+    "extensionsHint": "Thème, police, recherche et plus"
   },
   "blockedUsers": {
     "title": "Comptes bloqués",
@@ -199,7 +239,9 @@
     "unblockFailed": "Impossible de débloquer. Réessayez.",
     "loadError": "Impossible de charger les comptes bloqués",
     "empty": "Aucun compte bloqué",
-    "emptyHint": "Les personnes que vous bloquez apparaissent ici. Vous pouvez les débloquer à tout moment."
+    "emptyHint": "Les personnes que vous bloquez apparaissent ici. Vous pouvez les débloquer à tout moment.",
+    "unblockConfirmTitle": "Débloquer {{handle}} ?",
+    "unblockConfirmBody": "Cette personne pourra de nouveau vous contacter."
   },
   "tipHistory": {
     "title": "Historique des pourboires",
@@ -239,7 +281,34 @@
     "upcoming": "À venir",
     "participants": "{{speakers}} orateurs · {{listeners}} auditeurs",
     "closeRoom": "Fermer",
+    "totalAttendees": "· {{count}} au total",
+    "controlsA11y": "Contrôles de la room",
+    "openChatA11y": "Ouvrir le chat",
+    "reportA11y": "Signaler la room",
+    "shareA11y": "Partager le lien de la room",
+    "profileA11y": "Profil de {{name}}",
+    "openSettings": "Ouvrir les réglages",
+    "editTitleA11y": "Modifier le titre : {{title}}",
+    "visibilityOpen": "Ouverte",
+    "visibilitySocial": "Social",
+    "visibilityClosed": "Privée",
+    "muteA11y": "Couper le micro",
+    "unmuteA11y": "Activer le micro",
+    "raiseHandA11y": "Lever la main",
+    "lowerHandA11y": "Baisser la main",
+    "showSelfA11y": "Redevenir visible",
+    "hideSelfA11y": "Passer invisible",
+    "visible": "Visible",
+    "invisible": "Invisible",
+    "speakInvite": {
+      "title": "Invitation à parler",
+      "body": "Un hôte vous invite sur scène.",
+      "accept": "Accepter",
+      "decline": "Refuser"
+    },
     "alert": {
+      "joinDeniedTitle": "Accès impossible",
+      "joinDeniedBody": "Vous n'avez pas accès à cette room.",
       "removedTitle": "Vous avez été retiré",
       "removedBody": "Un modérateur vous a expulsé de cette room. Vous ne pouvez pas y revenir avant 30 minutes.",
       "removedByBody": "{{name}} vous a retiré de cette room. Vous ne pouvez pas y revenir avant 30 minutes.",
@@ -276,7 +345,21 @@
     "resumeRoomA11y": "Reprendre la room {{title}}",
     "exploreA11y": "Découvrir",
     "eventsA11y": "Événements",
-    "notificationsA11y": "Notifications"
+    "notificationsA11y": "Notifications",
+    "filterAll": "Tout",
+    "filterFollowing": "Suivis",
+    "filterClubs": "Clubs",
+    "filterTech": "Tech",
+    "filterMusic": "Musique",
+    "filterBusiness": "Business",
+    "filterHealth": "Santé",
+    "filterA11y": "Filtre : {{label}}",
+    "unreadCount": "{{count}} non lus",
+    "activityA11y": "Activité",
+    "emptyTitle": "Aucune room en direct pour le moment",
+    "emptyBody": "Sois le premier — lance une room et fais parler la salle.",
+    "emptyCta": "Lancer une room",
+    "friendsInside": "👋 {{count}} ami·e·s"
   },
   "errorMessages": {
     "network": "Impossible de joindre le serveur. Vérifie ta connexion.",
@@ -286,7 +369,9 @@
     "notFound": "Ressource introuvable.",
     "validation": "Certains champs ont besoin d'attention.",
     "server": "Un problème est survenu de notre côté.",
-    "unknown": "Erreur inattendue."
+    "unknown": "Erreur inattendue.",
+    "rateLimited": "Trop de tentatives. Réessaie dans quelques instants.",
+    "conflict": "Cette opération entre en conflit avec des données existantes."
   },
   "auth": {
     "landing": {
@@ -314,7 +399,8 @@
         "loginA11y": "Se connecter",
         "devSkip": "Skip auth (dev)",
         "devSkipA11y": "Connexion en tant que devuser — développement uniquement"
-      }
+      },
+      "devLoginFailed": "Connexion dev échouée."
     },
     "phone": {
       "title": "Entre ton numéro",
@@ -322,7 +408,8 @@
       "submit": "Recevoir un code",
       "errors": {
         "required": "Ton numéro est requis.",
-        "invalid": "Numéro invalide. Format attendu : +33612345678."
+        "invalid": "Numéro invalide. Format attendu : +33612345678.",
+        "ageVerification": "Tu dois confirmer avoir au moins 16 ans pour continuer."
       },
       "ageVerification": "Je confirme avoir au moins 16 ans",
       "terms": "En saisissant votre numéro, vous acceptez nos ",
@@ -344,8 +431,11 @@
       "errors": {
         "required": "Le code est requis.",
         "invalid": "Code invalide. 6 chiffres attendus.",
-        "tooManyAttempts": "Trop de tentatives. Renvoie un nouveau code."
-      }
+        "tooManyAttempts": "Trop de tentatives. Renvoie un nouveau code.",
+        "resendFailed": "Impossible de renvoyer le code. Réessaie."
+      },
+      "inputA11yLabel": "Code de vérification, {{length}} chiffres",
+      "inputA11yHint": "Saisis le code reçu par SMS."
     },
     "name": {
       "title": "Comment t'appelles-tu ?",
@@ -364,8 +454,17 @@
         "required": "Un pseudo est requis.",
         "tooShort": "Au moins 3 caractères.",
         "tooLong": "Maximum 24 caractères.",
-        "format": "Seulement lettres, chiffres et _."
-      }
+        "format": "Seulement lettres, chiffres et _.",
+        "taken": "Ce pseudo est déjà pris."
+      },
+      "suggestionsRetry": "Suggestions indisponibles — touche pour réessayer",
+      "suggestionA11y": "Utiliser la suggestion @{{username}}"
+    },
+    "waitlist": {
+      "title": "Tu es sur la liste d'attente",
+      "subtitle": "On te préviendra dès qu'une place se libère. En attendant, invite un ami pour remonter dans la file.",
+      "invite": "Inviter un ami",
+      "shareMessage": "J'attends mon accès Chathouse — rejoins la liste d'attente pour me faire avancer : https://app.chathouse.com"
     }
   },
   "explore": {
@@ -381,7 +480,14 @@
     "searchEmpty": "Rien ne correspond à « {{q}} ».",
     "recentSearches": "Recherches récentes",
     "clearHistory": "Effacer",
-    "browseTopics": "Parcourir les sujets"
+    "browseTopics": "Parcourir les sujets",
+    "errorTitle": "Impossible de charger Explorer",
+    "errorBody": "Vérifiez votre connexion et réessayez.",
+    "searchErrorTitle": "Impossible de lancer la recherche",
+    "searchErrorBody": "Vérifiez votre connexion et réessayez.",
+    "filterChipA11y": "Filtre {{label}}",
+    "filteredRooms": "Rooms filtrées",
+    "topics": "Sujets"
   },
   "events": {
     "title": "Événements",
@@ -398,7 +504,14 @@
     "startsNow": "Commence maintenant",
     "attendeeCount_one": "{{count}} participant·e",
     "attendeeCount": "{{count}} participant·e·s",
-    "create": "Créer un événement"
+    "create": "Créer un événement",
+    "errorTitle": "Impossible de charger les évènements",
+    "errorBody": "Vérifiez votre connexion et réessayez.",
+    "unit": {
+      "minutes": "{{count}} min",
+      "hours": "{{count}} h",
+      "days": "{{count}} j"
+    }
   },
   "profile": {
     "myHouses": "Mes Houses",
@@ -460,8 +573,31 @@
       "loading": "Chargement du profil",
       "cancelA11y": "Annuler",
       "saveA11y": "Enregistrer le profil",
-      "changePhotoA11y": "Modifier la photo de profil"
-    }
+      "changePhotoA11y": "Modifier la photo de profil",
+      "error": "Erreur",
+      "usernameTaken": "Ce nom d'utilisateur est déjà pris.",
+      "photoPermission": "Autorise l'accès aux photos pour choisir une image.",
+      "openSettings": "Ouvrir les réglages",
+      "dmPrivacy": "Qui peut m'écrire ?",
+      "twitter": "Identifiant Twitter / X",
+      "instagram": "Identifiant Instagram"
+    },
+    "loading": "Chargement du profil",
+    "unavailable": "Profil indisponible",
+    "userMayNotExist": "Cet utilisateur n'existe peut-être pas.",
+    "shareProfileA11y": "Partager le profil",
+    "copyUsernameA11y": "Copier le nom d'utilisateur @{{handle}}",
+    "currentlyInRoom": "En direct dans une room — tape pour rejoindre",
+    "currentlyInRoomA11y": "Rejoindre la room en cours",
+    "upcomingEvents": "Events à venir",
+    "publicReplays": "Replays publics",
+    "replay": "Replay",
+    "whoViewed": "Qui a vu mon profil",
+    "whoViewedPremium": "🔒 Réservé aux membres Premium.",
+    "whoViewedError": "Impossible de charger les visites.",
+    "whoViewedEmpty": "Personne pour le moment.",
+    "followingState": "Abonné",
+    "loadingMore": "Chargement…"
   },
   "createRoom": {
     "title": "Nouvelle room",
@@ -485,7 +621,30 @@
     "startRoom": "Démarrer",
     "closeA11y": "Fermer sans démarrer",
     "errorTitle": "Création impossible",
-    "errorBody": "Impossible de créer la room. Réessaie."
+    "errorBody": "Impossible de créer la room. Réessaie.",
+    "visibility": {
+      "public": {
+        "label": "Ouverte",
+        "description": "N'importe qui sur Chathouse peut rejoindre"
+      },
+      "social": {
+        "label": "Social",
+        "description": "Seules les personnes que vous suivez peuvent rejoindre"
+      },
+      "closed": {
+        "label": "Privée",
+        "description": "Uniquement les personnes que vous invitez"
+      }
+    },
+    "preset30min": "+30 min",
+    "preset1h": "+1 h",
+    "preset3h": "+3 h",
+    "preset1d": "+1 j",
+    "schedulePresetA11y": "Planifier {{label}}",
+    "coHostsSearching": "Recherche…",
+    "coHostsSearchError": "Recherche impossible. Vérifiez votre connexion.",
+    "scheduleModeQuick": "Préréglages rapides",
+    "scheduleModeCustom": "Choisir date & heure"
   },
   "notifications": {
     "title": "Notifications",
@@ -498,7 +657,9 @@
       "rooms": "Rooms",
       "social": "Social",
       "clubs": "Clubs"
-    }
+    },
+    "errorTitle": "Impossible de charger les notifications",
+    "errorBody": "Vérifiez votre connexion et réessayez."
   },
   "onboarding": {
     "welcome": {
@@ -522,7 +683,8 @@
           "title": "Choisis ce qui te parle",
           "body": "Dis-nous ce que tu aimes ; on fera remonter les rooms qui te plaisent."
         }
-      }
+      },
+      "slideProgress": "Diapo {{current}} sur {{total}}"
     },
     "setupProfile": {
       "title": "Parle-nous de toi",
@@ -541,7 +703,8 @@
       "errors": {
         "displayNameTooLong": "Maximum 60 caractères.",
         "bioTooLong": "Maximum 150 caractères."
-      }
+      },
+      "openSettings": "Ouvrir les réglages"
     },
     "interests": {
       "title": "Choisis quelques centres d'intérêt",
@@ -557,7 +720,8 @@
         "music": "Musique",
         "business": "Business",
         "health": "Santé"
-      }
+      },
+      "maxReached": "Tu peux en choisir jusqu'à {{max}}."
     },
     "suggestedFollows": {
       "title": "Suggéré·es pour toi",
@@ -574,7 +738,11 @@
         "roomsStarted": "Sache dès qu'une personne que tu suis lance une room.",
         "messages": "Ne rate aucun message privé.",
         "follows": "Vois quand quelqu'un commence à te suivre."
-      }
+      },
+      "deniedTitle": "Notifications désactivées",
+      "deniedBody": "Pas de souci — tu peux les activer à tout moment depuis les réglages de ton profil.",
+      "blockedBody": "Les notifications sont bloquées pour Chathouse. Active-les dans les réglages de ton téléphone pour être notifié.",
+      "openSettings": "Ouvrir les réglages"
     }
   },
   "notificationSettings": {
@@ -602,7 +770,8 @@
     },
     "mutedUsers": {
       "heading": "Personnes en sourdine",
-      "subtitle": "Désactive pour ne plus mettre en sourdine les push de cette personne."
+      "subtitle": "Désactive pour ne plus mettre en sourdine les push de cette personne.",
+      "userFallback": "Personne masquée"
     }
   },
   "admin": {
@@ -633,7 +802,7 @@
         "auditLog": "Toutes les actions privilégiées"
       },
       "csvExports": "Exports CSV",
-      "csvHint": "Le contenu est copié dans le presse-papier puis ouvre la feuille de partage native.",
+      "csvHint": "Ouvre la feuille de partage native. La copie dans le presse-papier est optionnelle (contient des données personnelles).",
       "csvUsersLabel": "Users",
       "csvAuditLabel": "Audit log",
       "csvReportsLabel": "Reports",
@@ -642,7 +811,14 @@
       "csvA11yReports": "Exporter les signalements en CSV",
       "loading": "Chargement des statistiques d'administration",
       "errorStats": "Impossible de charger les stats.",
-      "exportError": "Échec de l'export"
+      "exportError": "Échec de l'export",
+      "copyWarnTitle": "Copier dans le presse-papier ?",
+      "copyWarnBody": "Ce CSV contient des données personnelles (e-mails, numéros de téléphone). Il restera lisible par d'autres applications jusqu'à ce que vous vidiez le presse-papier.",
+      "copyConfirm": "Copier",
+      "csvCopyLabel": "Copier le dernier export",
+      "csvClearLabel": "Vider le presse-papier",
+      "csvCopyA11y": "Copier le dernier export dans le presse-papier",
+      "csvClearA11y": "Vider le presse-papier"
     },
     "rooms": {
       "title": "Rooms Actives",
@@ -655,7 +831,8 @@
       "forceEndNotice": "Forcer la fin notifie tous les participants et ferme le canal audio.",
       "errorLoadingRooms": "Impossible de charger les rooms.",
       "failedEnd": "Échec de la fermeture de la room.",
-      "liveBadge": "LIVE"
+      "liveBadge": "LIVE",
+      "defaultReason": "Admin"
     },
     "reports": {
       "title": "Signalements",
@@ -707,7 +884,8 @@
         "godmode": "Accès god mode",
         "impersonationStarted": "Usurpation démarrée",
         "impersonationEnded": "Usurpation terminée"
-      }
+      },
+      "filterAll": "Toutes"
     },
     "users": {
       "title": "Gestion Utilisateurs",
@@ -724,7 +902,8 @@
         "mod": "Mod",
         "admin": "Admin",
         "super": "Super"
-      }
+      },
+      "openA11y": "Ouvrir {{name}}"
     },
     "userDetail": {
       "user": "Utilisateur",
@@ -763,13 +942,23 @@
       "deleteDesc": "⚠️ Action quasi-irréversible. Le compte sera marqué pour suppression et définitivement banni. Supprimer définitivement",
       "deleteBtn": "Supprimer le compte",
       "cancel": "Annuler",
-      "confirm": "Confirmer"
+      "confirm": "Confirmer",
+      "copied": "Copié",
+      "copyHint": "Appui long pour copier",
+      "suspendDefaultReason": "Modération",
+      "suspendA11y": "Suspendre {{label}}",
+      "setRoleA11y": "Définir le rôle {{role}}"
     }
   },
   "house": {
     "manageA11y": "Gérer la house",
     "requestToJoin": "Demander à rejoindre",
     "requestSent": "Demande envoyée",
+    "joinError": "Impossible de rejoindre cette house.",
+    "leaveError": "Impossible de quitter cette house.",
+    "kickError": "Impossible de retirer ce membre.",
+    "roleError": "Impossible de changer le rôle de ce membre.",
+    "acceptInviteError": "Impossible d'accepter l'invitation.",
     "requests": {
       "title": "Demandes en attente",
       "loading": "Chargement des demandes",
@@ -778,6 +967,45 @@
       "errorTitle": "Action impossible",
       "approveError": "Impossible d'approuver cette demande.",
       "declineError": "Impossible de refuser cette demande."
+    },
+    "loading": "Chargement de la house",
+    "unavailableTitle": "House indisponible",
+    "unavailableBody": "Cette house a peut-être été supprimée.",
+    "actionErrorTitle": "Action impossible",
+    "members": "membres",
+    "membersList": "Membres",
+    "roomsLive": "rooms en direct",
+    "liveRooms": "En direct",
+    "upcomingRooms": "Planifiées",
+    "pastRooms": "Rooms passées",
+    "rules": "Règles",
+    "roomOnlineCount": "{{count}} en ligne",
+    "roomScheduled": "Planifiée",
+    "openRoomA11y": "Ouvrir la room {{title}}",
+    "optionsTitle": "Options de la house",
+    "optionsA11y": "Options de la house",
+    "manageMemberA11y": "Gérer le rôle de {{name}}",
+    "share": "Partager la house",
+    "shareMessage": "Découvrez cette house sur Chathouse — {{url}}",
+    "inviteMembers": "Inviter des membres",
+    "inviteOnly": "Sur invitation uniquement",
+    "acceptInvite": "Accepter l'invitation",
+    "join": "Rejoindre",
+    "leave": "Quitter la house",
+    "leaveTitle": "Quitter la house",
+    "leaveBody": "Vous ne recevrez plus ses rooms et événements.",
+    "leaveConfirm": "Quitter",
+    "kick": "Retirer de la house",
+    "kickConfirmTitle": "Retirer {{name}} ?",
+    "kickConfirmBody": "Cette personne perdra l'accès à cette house et à ses rooms.",
+    "kickConfirm": "Retirer",
+    "currentRole": "Rôle actuel : {{role}}",
+    "promoteTo": "Promouvoir {{role}}",
+    "demoteToMember": "Rétrograder en membre",
+    "roles": {
+      "admin": "Admin",
+      "moderator": "Modérateur",
+      "member": "Membre"
     }
   },
   "houses": {
@@ -787,7 +1015,25 @@
       "descPlaceholder": "Description",
       "submit": "Créer",
       "privacySocial": "Social",
-      "privacySocialDesc": "Tout le monde peut demander à rejoindre ; les admins approuvent"
+      "privacySocialDesc": "Tout le monde peut demander à rejoindre ; les admins approuvent",
+      "closeA11y": "Fermer sans créer",
+      "errorTitle": "Erreur",
+      "errorBody": "Impossible de créer la house.",
+      "nameLabel": "Nom de la house",
+      "nameTooShort": "Le nom doit contenir au moins {{min}} caractères.",
+      "descLabel": "Description",
+      "rulesLabel": "Règles (facultatif)",
+      "rulesPlaceholder": "Les règles de la house…",
+      "privacyLabel": "Confidentialité",
+      "privacyOpen": "Ouverte",
+      "privacyOpenDesc": "Tout le monde peut rejoindre et lancer des rooms",
+      "privacyPrivate": "Privée",
+      "privacyPrivateDesc": "Sur invitation uniquement",
+      "submitBtn": "Créer la House",
+      "uploadIcon": "Icône de la house (facultatif)",
+      "uploadIconA11y": "Ajouter l'icône de la house",
+      "replaceIcon": "Appuyer pour remplacer",
+      "replaceIconA11y": "Remplacer l'icône de la house"
     },
     "manage": {
       "title": "Gérer la House",
@@ -804,12 +1050,34 @@
       "deleteConfirmBody": "Cette action supprime définitivement la house pour tous les membres.",
       "deleteConfirm": "Supprimer",
       "deleteError": "Impossible de supprimer cette house.",
-      "cancel": "Annuler"
+      "cancel": "Annuler",
+      "notAllowedTitle": "Réservé aux admins",
+      "notAllowedBody": "Seul le propriétaire ou un admin peut gérer cette house."
     },
     "invite": {
       "title": "Inviter un membre",
       "search": "Rechercher...",
-      "send": "Envoyer l'invitation"
+      "send": "Envoyer l'invitation",
+      "alreadyMember": "Membre",
+      "inviteBtn": "Inviter",
+      "invited": "Invité",
+      "searchPlaceholder": "Rechercher des utilisateurs",
+      "searchA11y": "Rechercher des personnes à inviter",
+      "searching": "Recherche en cours",
+      "closeA11y": "Fermer la fenêtre d'invitation",
+      "copyA11y": "Copier le lien d'invitation",
+      "copiedTitle": "Copié",
+      "copiedBody": "Le lien d'invitation est dans votre presse-papier.",
+      "copyError": "Impossible de copier le lien.",
+      "share": "Partager",
+      "ok": "OK",
+      "errorTitle": "Erreur",
+      "inviteError": "L'invitation n'a pas pu être envoyée.",
+      "linkLoading": "…",
+      "noResults": "Aucun résultat",
+      "noResultsBody": "Essaie un autre nom ou pseudo.",
+      "emptyStateTitle": "Inviter des membres",
+      "emptyStateBody": "Recherche une personne par nom ou pseudo, ou partage le lien ci-dessus."
     },
     "invitation": {
       "title": "Invitation",
@@ -826,14 +1094,48 @@
       "errorTitle": "Erreur",
       "errorBody": "Impossible d'accepter l'invitation.",
       "errorLoadTitle": "Invitation indisponible",
-      "errorLoadBody": "Cette house n'existe peut-être plus ou l'invitation a expiré."
-    }
+      "errorLoadBody": "Cette house n'existe peut-être plus ou l'invitation a expiré.",
+      "alreadyMemberTitle": "Déjà membre",
+      "alreadyMemberBody": "Vous faites déjà partie de cette house."
+    },
+    "title": "Houses",
+    "loading": "Chargement des houses",
+    "errorTitle": "Impossible de charger les houses",
+    "errorBody": "Vérifiez votre connexion.",
+    "tabs": {
+      "mine": "Mes houses",
+      "discover": "Découvrir"
+    },
+    "membersCount": "{{countStr}} membres",
+    "openHouseA11y": "Ouvrir la house {{name}}",
+    "createA11y": "Créer une nouvelle house",
+    "emptyMineTitle": "Aucune house pour l'instant",
+    "emptyMineBody": "Rejoignez une house ou créez votre propre communauté.",
+    "emptyDiscoverTitle": "Rien à découvrir",
+    "emptyDiscoverBody": "Soyez le premier — créez une house.",
+    "emptyCreateCta": "Créer une house"
   },
   "rooms": {
     "invite": {
       "title": "Inviter dans la Room",
       "search": "Rechercher des amis...",
-      "send": "Envoyer"
+      "send": "Envoyer",
+      "searching": "Recherche…",
+      "searchErrorTitle": "Recherche impossible",
+      "searchErrorBody": "Vérifiez votre connexion et réessayez.",
+      "successTitle": "Invitations envoyées",
+      "successBody": "{{count}} personne(s) notifiée(s).",
+      "errorTitle": "Erreur",
+      "errorBody": "Échec",
+      "emptyTitle": "Cherchez quelqu'un",
+      "emptyBody": "Tapez un nom ou pseudo pour inviter dans la room.",
+      "noResultsTitle": "Aucun résultat",
+      "closeA11y": "Fermer",
+      "searchPlaceholder": "Rechercher des utilisateurs",
+      "selectedCount": "{{count}} sélectionné(s) · max {{max}}",
+      "searchingA11y": "Recherche…",
+      "btnIdle": "Sélectionnez des invités",
+      "btnActive": "Envoyer ({{count}})"
     }
   },
   "extensions": {
@@ -848,6 +1150,21 @@
         "rooms": "Rooms",
         "social": "Social",
         "clubs": "Clubs"
+      },
+      "error": "Impossible de charger votre activité.",
+      "relative": {
+        "justNow": "à l'instant",
+        "minutes": "{{count}} min",
+        "hours": "{{count}} h",
+        "days": "{{count}} j"
+      },
+      "live": {
+        "someoneYouFollow": "Une personne que vous suivez",
+        "startedRoom": "a lancé « {{title}} »",
+        "joinRequestTitle": "Demande d'adhésion",
+        "joinRequestBody": "Nouvelle demande d'adhésion",
+        "waveTitle": "Salut reçu",
+        "waveBody": "Quelqu'un vous fait signe"
       }
     },
     "playground": {
@@ -905,7 +1222,8 @@
       "privateProfile": "Profil privé",
       "allowWaves": "Autoriser waves & pings",
       "showOnMap": "M'afficher sur la carte",
-      "saveError": "Impossible d'enregistrer. Veuillez réessayer."
+      "saveError": "Impossible d'enregistrer. Veuillez réessayer.",
+      "loadError": "Impossible de charger vos réglages."
     },
     "suggested": {
       "title": "Personnes que vous pourriez connaître",
@@ -917,7 +1235,8 @@
       "viewProfile": "Voir le profil de {{name}}",
       "sharedInterests": "{{count}} centre(s) d'intérêt commun(s)",
       "friendsOfFriends": "Suivi par des personnes que vous suivez",
-      "followersCount": "{{count}} abonnés"
+      "followersCount": "{{count}} abonnés",
+      "error": "Impossible de charger les suggestions."
     },
     "topics": {
       "title": "Explorer les sujets",
@@ -925,7 +1244,27 @@
       "searchA11y": "Rechercher des sujets",
       "selectTopicA11y": "Sélectionner le sujet {{label}}",
       "selectSubTopicA11y": "Sélectionner le sous-sujet {{label}}",
-      "empty": "Choisissez une catégorie à gauche."
+      "empty": "Choisissez une catégorie à gauche.",
+      "error": "Impossible de charger les sujets.",
+      "trending": "Tendances"
+    },
+    "theme": {
+      "dark": "Sombre"
+    },
+    "share": {
+      "title": "Partager ce salon",
+      "error": "Échec de la création des liens de partage.",
+      "more": "Plus…",
+      "shareViaA11y": "Partager via {{target}}"
+    },
+    "calendar": {
+      "addToCalendar": "Ajouter au calendrier"
+    },
+    "events": {
+      "reschedule": "Reprogrammer",
+      "cancelEvent": "Annuler l'évènement",
+      "cancelConfirm": "« {{title}} » sera annulé et les participants seront prévenus. Cette action est irréversible.",
+      "addToCalendar": "Ajouter au calendrier"
     }
   },
   "maps": {
@@ -1060,6 +1399,122 @@
         "title": "8. Loi applicable",
         "p1": "Les présentes conditions sont régies par le droit français. Tout litige relèvera de la compétence des tribunaux français, sauf disposition impérative contraire."
       }
+    },
+    "restore": {
+      "title": "Compte programmé pour suppression",
+      "body": "Votre compte est en cours de suppression. Souhaitez-vous le restaurer et conserver vos données ?",
+      "dismiss": "Plus tard",
+      "confirm": "Restaurer",
+      "successTitle": "Compte restauré",
+      "successBody": "Bon retour — votre compte est de nouveau actif.",
+      "errorTitle": "Restauration impossible",
+      "errorBody": "Une erreur est survenue. Veuillez réessayer."
+    }
+  },
+  "errors": {
+    "codes": {
+      "AUTH_001": "Identifiants invalides.",
+      "AUTH_002": "Ta session a expiré. Reconnecte-toi.",
+      "AUTH_003": "Authentification requise.",
+      "AUTH_004": "Ta session a été révoquée. Reconnecte-toi.",
+      "AUTH_005": "Cet e-mail est déjà enregistré.",
+      "AUTH_006": "Ce nom d'utilisateur est déjà pris.",
+      "AUTH_007": "Ton compte est suspendu.",
+      "AUTH_008": "Tu n'as pas les droits nécessaires.",
+      "ADMIN_001": "Impossible de rétrograder le seul super-admin.",
+      "ADMIN_002": "Impossible de modifier un admin de rang supérieur.",
+      "ADMIN_003": "Le godmode est désactivé.",
+      "LIVEKIT_001": "L'audio en direct n'est pas disponible sur ce serveur.",
+      "ROOM_001": "Room introuvable.",
+      "ROOM_002": "Cette room est pleine.",
+      "ROOM_003": "Action réservée aux hôtes.",
+      "ROOM_004": "Cette room est terminée.",
+      "ROOM_005": "Tu ne participes pas à cette room.",
+      "ROOM_006": "Le chat est désactivé dans cette room.",
+      "ROOM_007": "Room privée — invitation requise.",
+      "ROOM_008": "Tu as été banni de cette room.",
+      "ROOM_009": "Impossible de couper le micro de l'hôte.",
+      "ROOM_010": "Cette room est verrouillée.",
+      "PREMIUM_001": "Fonctionnalité réservée aux membres Premium.",
+      "USER_001": "Utilisateur introuvable.",
+      "USER_002": "Ce nom d'utilisateur est déjà pris.",
+      "USER_003": "Tu ne peux pas te suivre toi-même.",
+      "USER_004": "Tu ne peux pas te bloquer toi-même.",
+      "USER_005": "Wave déjà envoyée récemment. Réessaie plus tard.",
+      "USER_006": "Cet utilisateur n'accepte pas les waves.",
+      "CHAT_001": "Conversation introuvable.",
+      "CHAT_002": "Message introuvable.",
+      "CHAT_003": "Ce message n'est pas le tien.",
+      "CHAT_004": "Les messages privés sont réservés aux personnes qui se suivent mutuellement.",
+      "GROUP_001": "Groupe introuvable.",
+      "GROUP_002": "Tu n'es pas membre de ce groupe.",
+      "GROUP_003": "Un groupe nécessite au moins deux autres membres.",
+      "GROUP_004": "Seul le propriétaire du groupe peut faire ça.",
+      "GROUP_005": "Utilise « Quitter le groupe » pour te retirer.",
+      "GROUP_006": "Impossible de partager un groupe avec cette personne.",
+      "CLUB_001": "House introuvable.",
+      "CLUB_002": "Action réservée aux admins de la house.",
+      "CLUB_003": "House privée — impossible de la rejoindre directement.",
+      "CLUB_004": "Tu es déjà membre.",
+      "CLUB_005": "Le propriétaire ne peut pas quitter sa propre house.",
+      "CLUB_006": "Vous avez atteint la limite de 3 houses.",
+      "CLUB_007": "Une invitation valide est requise pour rejoindre cette house.",
+      "CLUB_008": "Ce lien d'invitation a expiré.",
+      "CLUB_009": "Ce lien d'invitation est invalide.",
+      "ACCOUNT_001": "La suppression du compte est déjà programmée.",
+      "RATE_LIMIT_001": "Trop de tentatives. Réessaie dans quelques instants.",
+      "NOT_FOUND_001": "Ressource introuvable.",
+      "SERVER_001": "Un problème est survenu de notre côté."
+    }
+  },
+  "titleEdit": {
+    "title": "Modifier le titre",
+    "placeholder": "Titre de la room",
+    "inputA11y": "Nouveau titre de la room",
+    "closeA11y": "Fermer",
+    "min": "min {{count}}",
+    "errorTitle": "Erreur",
+    "errorBody": "Échec de la mise à jour du titre."
+  },
+  "dateTimePicker": {
+    "dateLabel": "Date",
+    "timeLabel": "Heure",
+    "hours": "Heures",
+    "minutes": "Minutes",
+    "today": "Aujourd'hui",
+    "tomorrow": "Demain",
+    "dayA11y": "Date : {{date}}",
+    "hourA11y": "Heure {{hour}}",
+    "minuteA11y": "Minute {{minute}}"
+  },
+  "explorer": {
+    "maps": {
+      "attribution": "© OpenStreetMap contributors © CARTO",
+      "consentTitle": "Consentement de localisation",
+      "consentBody": "ChatHouse utilise votre position pour vous montrer les amis proches sur la carte. Vos données de localisation sont stockées de façon sécurisée sur nos serveurs et supprimées automatiquement après 30 jours d'inactivité. Vous pouvez désactiver ce partage à tout moment via le Mode Fantôme.",
+      "consentAccept": "J'ai compris",
+      "consentDecline": "Plus tard",
+      "ghostSee": "VISIBLE",
+      "ghostUnsee": "MASQUÉ",
+      "ghostVisibleA11y": "Vous êtes visible. Appuyez pour vous masquer.",
+      "ghostHiddenA11y": "Vous êtes masqué. Appuyez pour vous rendre visible.",
+      "searchPlaceholder": "Trouver un ami...",
+      "searchA11y": "Trouver un ami",
+      "recenterA11y": "Recentrer la carte sur ma position",
+      "recenterHint": "Recentre la carte sur votre position GPS actuelle",
+      "joinRoom": "Rejoindre la room",
+      "message": "Message",
+      "markerLive": ", en direct",
+      "miniCardInRoom": "🎙️ Dans « {{title}} »",
+      "miniCardOnline": "🟢 En ligne",
+      "miniCardLastSeen": "il y a {{count}} min",
+      "permissionTitle": "Autorisation de localisation requise",
+      "permissionBtn": "Autoriser l'accès",
+      "permissionRetryA11y": "Redemander l'accès à la localisation",
+      "locationDisabledTitle": "Activez les services de localisation",
+      "locationDisabledBody": "Activez le GPS dans les réglages de votre appareil pour voir vos amis sur la carte.",
+      "locatingA11y": "Localisation en cours",
+      "yourLocationA11y": "Votre position"
     }
   }
 }

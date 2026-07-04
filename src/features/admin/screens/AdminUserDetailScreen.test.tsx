@@ -4,14 +4,17 @@
  * target) and `adminKeys.whoami()` (the acting admin — SUPER_ADMIN so role +
  * impersonate + delete sections all surface, and rank > target so actions are
  * permitted). Buttons either open an Alert (role / unsuspend / impersonate /
- * delete) or go through `promptForReason` (suspend presets). We spy on
- * Alert.alert / Alert.prompt to assert the dialog opens without crashing.
+ * delete) or go through the reason prompt (suspend presets): native
+ * Alert.prompt on iOS, a feature-local modal on Android. We drive the Android
+ * modal path (which is where the previous silent no-op lived) end-to-end and
+ * assert the suspend mutation fires with the typed reason.
  */
 import React from 'react';
-import { Alert } from 'react-native';
-import { fireEvent } from '@testing-library/react-native';
+import { Alert, Platform } from 'react-native';
+import { fireEvent, waitFor } from '@testing-library/react-native';
 import { adminKeys } from '../hooks/useAdmin';
-import type { AdminUserDetail, AppRole } from '../types/admin.types';
+import { adminService } from '../services/adminService';
+import type { AdminUser, AdminUserDetail, AppRole } from '../types/admin.types';
 import { makeNavigationSpy } from '../../../test-utils/navigationMock';
 import { renderScreen, mockAuthenticated, resetAuth } from '../../../test-utils/renderScreen';
 import type { SettingsStackScreenProps } from '../../../core/navigation/types';
@@ -84,23 +87,103 @@ describe('AdminUserDetailScreen', () => {
     expect(getByText('target@example.com')).toBeTruthy();
   });
 
-  it('a suspend preset opens the prompt/confirm dialog without crashing', () => {
-    // promptForReason uses Alert.prompt (iOS) or Alert.alert; neither exists in
-    // the RN test mock, so spy on both to cover whichever path runs.
+  describe('suspend flow (Android modal path)', () => {
+    const ORIGINAL_OS = Platform.OS;
+    beforeEach(() => {
+      // Force the Android branch of useReasonPrompt so the feature-local modal
+      // renders (Alert.prompt is a no-op on Android — this is the regression).
+      Object.defineProperty(Platform, 'OS', { value: 'android', configurable: true });
+    });
+    afterEach(() => {
+      Object.defineProperty(Platform, 'OS', { value: ORIGINAL_OS, configurable: true });
+    });
+
+    it('tapping a suspend preset opens the reason modal; confirming calls suspend with the typed reason + duration', async () => {
+      const suspendSpy = jest
+        .spyOn(adminService, 'suspend')
+        .mockResolvedValue({ id: USER_ID } as AdminUser);
+      const navigation = makeNavigationSpy();
+      const { getByLabelText, getByText, queryByLabelText } = renderScreen(
+        <AdminUserDetailScreen {...propsFor(navigation)} />,
+        { navigation, seedQueryData: seedDetail(fakeDetail()) },
+      );
+
+      // The modal is not mounted until a preset is tapped.
+      expect(queryByLabelText('Reason for the suspension')).toBeNull();
+
+      // "1 hour" preset → 60 minutes.
+      fireEvent.press(getByLabelText('Suspend 1 hour'));
+
+      // Modal opens with its multiline reason field.
+      const field = getByLabelText('Reason for the suspension');
+      expect(field).toBeTruthy();
+      fireEvent.changeText(field, '  Repeated spam  ');
+
+      // Confirm → mutation fires with the trimmed reason and the preset duration.
+      fireEvent.press(getByText('Suspend'));
+      await waitFor(() => expect(suspendSpy).toHaveBeenCalledTimes(1));
+      expect(suspendSpy).toHaveBeenCalledWith(USER_ID, {
+        reason: 'Repeated spam',
+        durationMinutes: 60,
+      });
+    });
+
+    it('cancelling the reason modal does NOT call suspend', async () => {
+      const suspendSpy = jest
+        .spyOn(adminService, 'suspend')
+        .mockResolvedValue({ id: USER_ID } as AdminUser);
+      const navigation = makeNavigationSpy();
+      const { getByLabelText, getByText, queryByLabelText } = renderScreen(
+        <AdminUserDetailScreen {...propsFor(navigation)} />,
+        { navigation, seedQueryData: seedDetail(fakeDetail()) },
+      );
+
+      fireEvent.press(getByLabelText('Suspend Permanent'));
+      expect(getByLabelText('Reason for the suspension')).toBeTruthy();
+
+      fireEvent.press(getByText('Cancel'));
+
+      // Modal closed, and no mutation happened.
+      await waitFor(() => expect(queryByLabelText('Reason for the suspension')).toBeNull());
+      expect(suspendSpy).not.toHaveBeenCalled();
+    });
+
+    it('confirming with an empty reason falls back to the default motif', async () => {
+      const suspendSpy = jest
+        .spyOn(adminService, 'suspend')
+        .mockResolvedValue({ id: USER_ID } as AdminUser);
+      const navigation = makeNavigationSpy();
+      const { getByLabelText, getByText } = renderScreen(
+        <AdminUserDetailScreen {...propsFor(navigation)} />,
+        { navigation, seedQueryData: seedDetail(fakeDetail()) },
+      );
+
+      fireEvent.press(getByLabelText('Suspend 24 hours'));
+      // Leave the field empty and confirm.
+      fireEvent.press(getByText('Suspend'));
+      await waitFor(() => expect(suspendSpy).toHaveBeenCalledTimes(1));
+      expect(suspendSpy).toHaveBeenCalledWith(USER_ID, {
+        reason: 'Moderation',
+        durationMinutes: 60 * 24,
+      });
+    });
+  });
+
+  it('a suspend preset uses the native Alert.prompt on iOS (crash-free)', () => {
+    // On iOS the reason is collected by Alert.prompt (no modal). Spy so the
+    // press is inert but recorded — this asserts we do NOT open the modal there.
     const promptSpy = jest
       .spyOn(Alert, 'prompt' as never)
       .mockImplementation(() => undefined as never);
-    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
     const navigation = makeNavigationSpy();
-    const { getByLabelText } = renderScreen(<AdminUserDetailScreen {...propsFor(navigation)} />, {
-      navigation,
-      seedQueryData: seedDetail(fakeDetail()),
-    });
-    fireEvent.press(getByLabelText('Suspendre 1 hour'));
-    // One of the two prompt mechanisms must have fired (no `androidConfirm`
-    // here, so on a no-prompt platform it would call onSubmit directly — still
-    // crash-free). Assert at least one path triggered or the press was inert.
-    expect(promptSpy.mock.calls.length + alertSpy.mock.calls.length).toBeGreaterThanOrEqual(0);
+    const { getByLabelText, queryByLabelText } = renderScreen(
+      <AdminUserDetailScreen {...propsFor(navigation)} />,
+      { navigation, seedQueryData: seedDetail(fakeDetail()) },
+    );
+    fireEvent.press(getByLabelText('Suspend 1 hour'));
+    expect(promptSpy).toHaveBeenCalledTimes(1);
+    // No Android modal on iOS.
+    expect(queryByLabelText('Reason for the suspension')).toBeNull();
   });
 
   it('a role button opens the confirm Alert', () => {
@@ -111,7 +194,7 @@ describe('AdminUserDetailScreen', () => {
       seedQueryData: seedDetail(fakeDetail({ appRole: 'USER' })),
     });
     // Promote to MODERATOR (not the current role, so the button is enabled).
-    fireEvent.press(getByLabelText('Définir le rôle MODERATOR'));
+    fireEvent.press(getByLabelText('Set role MODERATOR'));
     expect(alertSpy).toHaveBeenCalled();
   });
 
@@ -159,5 +242,15 @@ describe('AdminUserDetailScreen', () => {
     expect(getByText("You don't have permission to act on this user.")).toBeTruthy();
     // Action sections are hidden in this case.
     expect(queryByText('Delete account')).toBeNull();
+  });
+
+  it('hides the Suspension section for a soft-deleted account', () => {
+    const navigation = makeNavigationSpy();
+    const { queryByText } = renderScreen(<AdminUserDetailScreen {...propsFor(navigation)} />, {
+      navigation,
+      seedQueryData: seedDetail(fakeDetail({ deletedAt: new Date(0).toISOString() })),
+    });
+    // A deleted account can't be suspended — the section title is gone.
+    expect(queryByText('Suspension')).toBeNull();
   });
 });

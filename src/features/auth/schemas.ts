@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { parsePhoneNumberFromString } from 'libphonenumber-js';
 
 /**
  * Zod schemas backing the auth forms. Kept feature-local so both the RHF
@@ -16,7 +17,15 @@ export const phoneFormSchema = z.object({
   phoneNumber: z
     .string()
     .transform(s => s.replace(/[\s\-()]/g, ''))
-    .pipe(z.string().min(1, 'auth.phone.errors.required').regex(E164, 'auth.phone.errors.invalid')),
+    .pipe(z.string().min(1, 'auth.phone.errors.required').regex(E164, 'auth.phone.errors.invalid'))
+    // The E.164 regex only checks the shape; libphonenumber validates the
+    // number against real country metadata (plausible lengths per prefix),
+    // rejecting E.164-shaped-but-impossible numbers before we burn an SMS.
+    .refine(v => parsePhoneNumberFromString(v)?.isValid() === true, 'auth.phone.errors.invalid')
+    // Normalize to the canonical E.164 form (e.g. "+330612345678" — a valid
+    // number written with its national prefix — becomes "+33612345678") so
+    // the wire value is always canonical.
+    .transform(v => parsePhoneNumberFromString(v)?.number ?? v),
   ageConfirmed: z.boolean().refine(v => v === true, {
     message: 'auth.phone.errors.ageVerification',
   }),

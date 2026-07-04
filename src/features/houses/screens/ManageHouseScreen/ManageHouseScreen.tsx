@@ -1,6 +1,7 @@
 import React, { memo, useCallback, useMemo, useState } from 'react';
 import {
   Alert,
+  Image,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -9,6 +10,7 @@ import {
   View,
 } from 'react-native';
 import MaterialIcons from '@react-native-vector-icons/material-icons';
+import { launchImageLibrary } from 'react-native-image-picker';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -21,6 +23,7 @@ import { EmptyState } from '../../../../shared/components/EmptyState';
 import { colors, spacing } from '../../../../shared/constants/theme';
 import type { RoomStackParamList } from '../../../../core/navigation/types';
 import { errorMessage } from '../../../../shared/utils/errorMessage';
+import { mediaService } from '../../../../shared/services/api/mediaService';
 import type { HousePrivacy } from '../../../../shared/types/domain';
 import { useAuthStore } from '../../../auth/store/authStore';
 import { useDeleteHouse, useHouse, useUpdateHouse } from '../../hooks/useHouses';
@@ -56,8 +59,11 @@ const getPrivacyOptions = (t: TFunction): PrivacyOption[] => [
   },
 ];
 
-const NAME_MAX = 30;
-const DESC_MAX = 200;
+// Aligned with the backend zod schema (clubs.schema.ts): name max 50,
+// description max 500.
+const NAME_MAX = 50;
+const DESC_MAX = 500;
+const ICON_UPLOAD_SIZE = 96;
 
 interface PrivacyRowProps {
   option: PrivacyOption;
@@ -126,6 +132,10 @@ export const ManageHouseScreen: React.FC = () => {
   const [description, setDescription] = useState('');
   const [rules, setRules] = useState('');
   const [privacy, setPrivacy] = useState<HousePrivacy>('open');
+  const [iconUri, setIconUri] = useState<string | null>(null);
+  const [iconBase64, setIconBase64] = useState<string | null>(null);
+  const [iconMime, setIconMime] = useState<string | undefined>(undefined);
+  const [uploading, setUploading] = useState(false);
   const [initialised, setInitialised] = useState(false);
 
   // Pre-fill the form from the loaded house exactly once, so subsequent
@@ -135,27 +145,75 @@ export const ManageHouseScreen: React.FC = () => {
     setDescription(house.description);
     setRules(house.rules ?? '');
     setPrivacy(house.privacy);
+    setIconUri(house.iconUrl);
     setInitialised(true);
   }
 
   // Delete is owner-only server-side (CLUB_005); only surface it to the owner.
   const isOwner = !!viewerId && house?.ownerId === viewerId;
+  // Backend update() rejects anyone who isn't an ADMIN member (CLUB_002); the
+  // owner is always materialised as an ADMIN member server-side, but keep the
+  // ownerId check as a belt-and-braces fallback. Guarding locally avoids a
+  // fully editable form that can only end in a generic server rejection.
+  const isAdminMember =
+    !!viewerId && (house?.members.some(m => m.id === viewerId && m.role === 'admin') ?? false);
+  const canManage = isOwner || isAdminMember;
 
   const handleClose = useCallback(() => navigation.goBack(), [navigation]);
 
-  const handleSave = useCallback(() => {
-    updateHouse.mutate(
-      { houseId, input: { name, description, rules: rules.trim() || null, privacy } },
-      {
-        onSuccess: () => navigation.goBack(),
-        onError: e =>
-          Alert.alert(
-            t('houses.manage.errorTitle', 'Error'),
-            errorMessage(e, t('houses.manage.saveError', "Couldn't save the changes.")),
-          ),
-      },
-    );
-  }, [updateHouse, houseId, name, description, rules, privacy, navigation, t]);
+  const handlePickIcon = useCallback(async () => {
+    const result = await launchImageLibrary({
+      mediaType: 'photo',
+      includeBase64: true,
+      quality: 0.8,
+      maxWidth: 1024,
+      maxHeight: 1024,
+      selectionLimit: 1,
+    });
+    if (result.didCancel) return;
+    const asset = result.assets?.[0];
+    if (asset?.uri) {
+      setIconUri(asset.uri);
+      setIconBase64(asset.base64 ?? null);
+      setIconMime(asset.type);
+    }
+  }, []);
+
+  const handleSave = useCallback(async () => {
+    try {
+      // A freshly-picked icon is a local file:// URI — upload it first and
+      // send the REMOTE https URL (same flow as CreateHouse). When the icon
+      // wasn't re-picked, iconUrl stays undefined and update() leaves it as-is.
+      let iconUrl: string | undefined;
+      if (iconBase64) {
+        setUploading(true);
+        iconUrl = await mediaService.uploadAvatar(iconBase64, iconMime);
+      }
+      await updateHouse.mutateAsync({
+        houseId,
+        input: { name, description, rules: rules.trim() || null, privacy, iconUrl },
+      });
+      navigation.goBack();
+    } catch (e) {
+      Alert.alert(
+        t('houses.manage.errorTitle', 'Error'),
+        errorMessage(e, t('houses.manage.saveError', "Couldn't save the changes.")),
+      );
+    } finally {
+      setUploading(false);
+    }
+  }, [
+    updateHouse,
+    houseId,
+    name,
+    description,
+    rules,
+    privacy,
+    iconBase64,
+    iconMime,
+    navigation,
+    t,
+  ]);
 
   const performDelete = useCallback(() => {
     deleteHouse.mutate(houseId, {
@@ -184,16 +242,37 @@ export const ManageHouseScreen: React.FC = () => {
   }, [performDelete, t]);
 
   const privacyOptions = useMemo(() => getPrivacyOptions(t), [t]);
-  const canSave = name.trim().length >= 2 && !updateHouse.isPending && !deleteHouse.isPending;
+  const canSave =
+    name.trim().length >= 2 && !updateHouse.isPending && !deleteHouse.isPending && !uploading;
 
   if (isLoading) {
     return <Loader fullscreen accessibilityLabel={t('houses.manage.loading', 'Loading house')} />;
   }
   if (isError || !house) {
+    // This screen is a modal: without an explicit way out, a load failure was
+    // a dead-end. Offer a Back action alongside the message.
     return (
       <EmptyState
         title={t('houses.manage.unavailableTitle', 'House unavailable')}
         description={t('houses.manage.unavailableBody', 'This house may have been deleted.')}
+        actionLabel={t('common.back', 'Back')}
+        onAction={handleClose}
+      />
+    );
+  }
+  if (!canManage) {
+    // Local mirror of the backend CLUB_002 gate (update is ADMIN/owner-only):
+    // without it a non-admin gets a fully editable form whose save can only
+    // end in a generic server rejection.
+    return (
+      <EmptyState
+        title={t('houses.manage.notAllowedTitle', 'Admins only')}
+        description={t(
+          'houses.manage.notAllowedBody',
+          'Only the owner or an admin can manage this house.',
+        )}
+        actionLabel={t('common.back', 'Back')}
+        onAction={handleClose}
       />
     );
   }
@@ -228,6 +307,35 @@ export const ManageHouseScreen: React.FC = () => {
         }}
         keyboardShouldPersistTaps="handled"
       >
+        <View className="items-center py-lg">
+          <Pressable
+            onPress={handlePickIcon}
+            accessibilityRole="button"
+            accessibilityLabel={
+              iconUri
+                ? t('houses.create.replaceIconA11y', 'Replace house icon')
+                : t('houses.create.uploadIconA11y', 'Upload house icon')
+            }
+            className="items-center justify-center bg-overlay-white-10 border-2 border-dashed border-overlay-white-30 rounded-xxl overflow-hidden"
+            style={{ width: ICON_UPLOAD_SIZE, height: ICON_UPLOAD_SIZE }}
+          >
+            {iconUri ? (
+              <Image
+                source={{ uri: iconUri }}
+                style={{ width: ICON_UPLOAD_SIZE, height: ICON_UPLOAD_SIZE }}
+                resizeMode="cover"
+              />
+            ) : (
+              <MaterialIcons name="add-a-photo" size={28} color={colors.text} />
+            )}
+          </Pressable>
+          <Text className="text-xs font-body text-ink-muted mt-sm">
+            {iconUri
+              ? t('houses.create.replaceIcon', 'Tap to replace')
+              : t('houses.create.uploadIcon', 'House icon (optional)')}
+          </Text>
+        </View>
+
         <Input
           label={t('houses.create.nameLabel', 'House name')}
           placeholder={t('houses.create.namePlaceholder', 'e.g. Indie Hackers')}
@@ -249,8 +357,8 @@ export const ManageHouseScreen: React.FC = () => {
         />
 
         <Input
-          label={t('houses.create.rulesLabel', 'Règles (optionnel)')}
-          placeholder={t('houses.create.rulesPlaceholder', 'Les règles de la maison…')}
+          label={t('houses.create.rulesLabel', 'Rules (optional)')}
+          placeholder={t('houses.create.rulesPlaceholder', 'The house rules…')}
           value={rules}
           onChangeText={setRules}
           multiline
@@ -275,7 +383,7 @@ export const ManageHouseScreen: React.FC = () => {
           size="lg"
           fullWidth
           disabled={!canSave}
-          loading={updateHouse.isPending}
+          loading={updateHouse.isPending || uploading}
           onPress={handleSave}
         />
 

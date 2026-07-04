@@ -1,14 +1,16 @@
 /**
  * AdminRoomsScreen render + button tests. No screen props. Data is a plain
  * AdminRoom[] (not paginated) at `adminKeys.rooms({ live: true })`. We seed a
- * live room so the "Close room" button is enabled, then assert pressing it goes
- * through `promptForReason` (Alert.prompt on iOS, Alert.alert via androidConfirm
- * otherwise) without crashing.
+ * live room so the "Close room" button is enabled, then drive the reason prompt:
+ * on Android the feature-local modal (the platform where Alert.prompt was a
+ * silent no-op) — confirming force-ends the room with the typed reason,
+ * cancelling force-ends nothing.
  */
 import React from 'react';
-import { Alert } from 'react-native';
-import { fireEvent } from '@testing-library/react-native';
+import { Alert, Platform } from 'react-native';
+import { fireEvent, waitFor } from '@testing-library/react-native';
 import { adminKeys } from '../hooks/useAdmin';
+import { adminService } from '../services/adminService';
 import type { AdminRoom } from '../types/admin.types';
 import { renderScreen, mockAuthenticated, resetAuth } from '../../../test-utils/renderScreen';
 import { AdminRoomsScreen } from './AdminRoomsScreen';
@@ -47,18 +49,66 @@ describe('AdminRoomsScreen', () => {
     expect(getByText('Late Night Debate')).toBeTruthy();
   });
 
-  it('the "Close room" button on a live room opens the prompt/confirm flow', () => {
+  describe('force-end flow (Android modal path)', () => {
+    const ORIGINAL_OS = Platform.OS;
+    beforeEach(() => {
+      Object.defineProperty(Platform, 'OS', { value: 'android', configurable: true });
+    });
+    afterEach(() => {
+      Object.defineProperty(Platform, 'OS', { value: ORIGINAL_OS, configurable: true });
+    });
+
+    it('"Close room" opens the reason modal; confirming force-ends the room with the typed reason', async () => {
+      const forceEndSpy = jest
+        .spyOn(adminService, 'forceEndRoom')
+        .mockResolvedValue({ ended: true });
+      const { getByLabelText, queryByLabelText } = renderScreen(<AdminRoomsScreen />, {
+        seedQueryData: seedRooms([fakeRoom()]),
+      });
+
+      // Modal not mounted until the row action is tapped.
+      expect(queryByLabelText('Are you sure you want to close this room?')).toBeNull();
+
+      fireEvent.press(getByLabelText('Close room Late Night Debate'));
+      const field = getByLabelText('Are you sure you want to close this room?');
+      fireEvent.changeText(field, 'ToS violation');
+
+      // The modal's confirm button carries the a11y label "Close room" (its
+      // confirmLabel) — distinct from the row action "Close room <title>".
+      fireEvent.press(getByLabelText('Close room'));
+      await waitFor(() => expect(forceEndSpy).toHaveBeenCalledTimes(1));
+      expect(forceEndSpy).toHaveBeenCalledWith('room-1', 'ToS violation');
+    });
+
+    it('cancelling the reason modal does NOT force-end the room', async () => {
+      const forceEndSpy = jest
+        .spyOn(adminService, 'forceEndRoom')
+        .mockResolvedValue({ ended: true });
+      const { getByLabelText, getByText, queryByLabelText } = renderScreen(<AdminRoomsScreen />, {
+        seedQueryData: seedRooms([fakeRoom()]),
+      });
+
+      fireEvent.press(getByLabelText('Close room Late Night Debate'));
+      expect(getByLabelText('Are you sure you want to close this room?')).toBeTruthy();
+      fireEvent.press(getByText('Cancel'));
+
+      await waitFor(() =>
+        expect(queryByLabelText('Are you sure you want to close this room?')).toBeNull(),
+      );
+      expect(forceEndSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  it('the "Close room" button uses the native Alert.prompt on iOS (no modal)', () => {
     const promptSpy = jest
       .spyOn(Alert, 'prompt' as never)
       .mockImplementation(() => undefined as never);
-    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
-    const { getByLabelText } = renderScreen(<AdminRoomsScreen />, {
+    const { getByLabelText, queryByLabelText } = renderScreen(<AdminRoomsScreen />, {
       seedQueryData: seedRooms([fakeRoom()]),
     });
     fireEvent.press(getByLabelText('Close room Late Night Debate'));
-    // This screen passes `androidConfirm`, so the no-prompt path shows an Alert.
-    // Either Alert.prompt (iOS) or Alert.alert (androidConfirm) must have fired.
-    expect(promptSpy.mock.calls.length + alertSpy.mock.calls.length).toBeGreaterThanOrEqual(1);
+    expect(promptSpy).toHaveBeenCalledTimes(1);
+    expect(queryByLabelText('Are you sure you want to close this room?')).toBeNull();
   });
 
   it('renders the empty state (crash-free) when there are no live rooms', () => {

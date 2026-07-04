@@ -4,6 +4,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { StatusBar } from 'react-native';
 import { useAuthStore } from '../../features/auth/store/authStore';
 import { useExtColorScheme } from '../../features/extensions';
+import { AccountRestorationGate } from '../../features/privacy';
 import { Loader } from '../../shared/components/Loader';
 import { AnimatedSplashScreen } from '../../shared/components/AnimatedSplashScreen';
 import { colors } from '../../shared/constants/theme';
@@ -39,20 +40,44 @@ export const RootNavigator: React.FC<RootNavigatorProps> = ({ onReady }) => {
   }
 
   const isAuthenticated = status === 'authenticated';
+  // Killing the app between OTP verification and picking a handle restarts
+  // as 'authenticated' with an empty username (authService maps a null
+  // backend username to ''). Route those users back to the Auth stack —
+  // opened directly on the Username step via `initialState` below — instead
+  // of Onboarding/Main, otherwise the handle step is skipped forever.
+  const needsUsername = isAuthenticated && user !== null && !user.username;
   // Treat missing `user` (hydrated from a stale token before refreshMe
   // resolved) as "onboarded" to avoid blocking returning users. New
   // users always have user populated via verifyOtp, so the gate fires
   // correctly for them.
   const needsOnboarding = isAuthenticated && user !== null && user.hasCompletedOnboarding === false;
 
-  const screen = !isAuthenticated ? 'Auth' : needsOnboarding ? 'Onboarding' : 'Main';
+  const screen =
+    !isAuthenticated || needsUsername ? 'Auth' : needsOnboarding ? 'Onboarding' : 'Main';
+
+  // `initialState` is only read when the container mounts — which is exactly
+  // the cold-start case above (while hydrating we render the splash, so the
+  // container mounts after auth state is known). setUsername() then flips
+  // `needsUsername` off and the stack swaps to Onboarding/Main as usual.
+  const initialState = needsUsername
+    ? { routes: [{ name: 'Auth' as const, state: { routes: [{ name: 'Username' as const }] } }] }
+    : undefined;
 
   return (
-    <NavigationContainer linking={linking} onReady={onReady} fallback={<Loader fullscreen />}>
+    <NavigationContainer
+      linking={linking}
+      initialState={initialState}
+      onReady={onReady}
+      fallback={<Loader fullscreen />}
+    >
       <StatusBar
         barStyle={colorScheme === 'dark' ? 'light-content' : 'dark-content'}
         backgroundColor={colors.background}
       />
+      {/* RGPD grace-period restoration prompt — offers "Restore my account" when
+          a soft-deleted user signs back in within the 30-day window. */}
+      <AccountRestorationGate />
+
       <RootStack.Navigator
         screenOptions={{
           headerShown: false,

@@ -290,21 +290,34 @@ export const paymentsService = {
     }
   },
 
-  /** Tip history for a user (sent + received), newest first. Confirmed tips only. */
+  /**
+   * Tip history for a user (sent + received), newest first. Confirmed tips only.
+   * Each row carries the public identity of the counterpart (recipient of a
+   * sent tip / sender of a received one) so clients can render a readable name
+   * instead of a raw user id.
+   */
   async listTips(userId: string) {
+    const publicIdentity = {
+      select: { id: true, username: true, displayName: true, avatarUrl: true },
+    } as const;
     const rows = await prisma.tip.findMany({
       where: { status: 'SUCCEEDED', OR: [{ fromUserId: userId }, { toUserId: userId }] },
       orderBy: { createdAt: 'desc' },
       take: 50,
+      include: { fromUser: publicIdentity, toUser: publicIdentity },
     });
-    return rows.map(t => ({
-      id: t.id,
-      direction: t.fromUserId === userId ? ('sent' as const) : ('received' as const),
-      fromUserId: t.fromUserId,
-      toUserId: t.toUserId,
-      amount: t.amount,
-      currency: t.currency,
-      createdAt: t.createdAt,
-    }));
+    return rows.map(t => {
+      const sent = t.fromUserId === userId;
+      return {
+        id: t.id,
+        direction: sent ? ('sent' as const) : ('received' as const),
+        fromUserId: t.fromUserId,
+        toUserId: t.toUserId,
+        amount: t.amount,
+        currency: t.currency,
+        createdAt: t.createdAt,
+        counterpart: sent ? t.toUser : t.fromUser,
+      };
+    });
   },
 };

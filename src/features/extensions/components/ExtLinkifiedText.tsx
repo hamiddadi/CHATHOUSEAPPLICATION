@@ -7,13 +7,44 @@ interface ExtLinkifiedTextProps extends TextProps {
   linkStyle?: TextStyle;
 }
 
+// Bare domains (no scheme, no `www.`) are only linkified when they end in one
+// of these common TLDs. This stops ordinary filenames like `rapport.pdf`,
+// `notes.txt`, or `photo.jpg` from being turned into (broken) links — `pdf`,
+// `txt`, `jpg` aren't real TLDs. Scheme'd / `www.` URLs bypass this list.
+const BARE_TLDS = [
+  'com',
+  'net',
+  'org',
+  'io',
+  'dev',
+  'app',
+  'fr',
+  'co',
+  'me',
+  'gg',
+  'gov',
+  'edu',
+  'info',
+  'tv',
+  'ai',
+  'xyz',
+];
+const BARE_TLD_ALTERNATION = BARE_TLDS.join('|');
+
 // Conservative URL matcher: http(s)://, www., and bare domain.tld/path forms.
 // We avoid markdown autolink ambiguities (greedy trailing punctuation).
 // Every branch uses only flat, length-bounded quantifiers (no quantifier nested
 // inside an optional/repeated group), so matching stays linear: a long string
-// without a link cannot trigger catastrophic backtracking.
-const URL_REGEX =
-  /\b((?:https?:\/\/|www\.)[^\s<>()[\]"']{1,2000}|[a-zA-Z0-9-]{1,255}\.[a-z]{2,24}\/?[^\s<>()[\]"']{0,2000})\b/gi;
+// without a link cannot trigger catastrophic backtracking. The bare-domain
+// branch requires a whitelisted TLD (see BARE_TLDS) so plain filenames aren't
+// mistaken for links.
+// The only interpolated part is BARE_TLD_ALTERNATION — a static join of the
+// hardcoded BARE_TLDS list (no user input) — so this is effectively a literal.
+// eslint-disable-next-line security/detect-non-literal-regexp
+const URL_REGEX = new RegExp(
+  `\\b((?:https?:\\/\\/|www\\.)[^\\s<>()[\\]"']{1,2000}|[a-zA-Z0-9-]{1,255}\\.(?:${BARE_TLD_ALTERNATION})\\b(?:\\/[^\\s<>()[\\]"']{0,2000})?)`,
+  'gi',
+);
 
 const ensureScheme = (raw: string): string => {
   if (/^https?:\/\//i.test(raw)) return raw;

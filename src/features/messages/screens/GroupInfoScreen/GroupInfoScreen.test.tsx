@@ -10,7 +10,7 @@ import { Alert } from 'react-native';
 import { fireEvent, waitFor } from '@testing-library/react-native';
 import { groupKeys } from '../../hooks/useGroups';
 import { renderScreen, mockAuthenticated, resetAuth } from '../../../../test-utils/renderScreen';
-import type { GroupConversation } from '../../services/groupService';
+import { groupService, type GroupConversation } from '../../services/groupService';
 import { GroupInfoScreen } from './GroupInfoScreen';
 
 const GROUP_ID = 'group-3';
@@ -69,20 +69,36 @@ describe('GroupInfoScreen', () => {
     expect(alertSpy).toHaveBeenCalledTimes(1);
   });
 
-  it('Leave group → confirming popToTops after the leave settles', async () => {
+  it('Leave group → confirming popToTops ONLY after the leave succeeds', async () => {
+    const leaveSpy = jest.spyOn(groupService, 'leave').mockResolvedValue({ left: true });
     // Drive the Alert by invoking the destructive button's onPress.
-    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation((_title, _msg, buttons) => {
+    jest.spyOn(Alert, 'alert').mockImplementation((_title, _msg, buttons) => {
       const confirm = buttons?.find(b => b.style === 'destructive');
       confirm?.onPress?.();
     });
     const { navigation, getByText } = renderInfo();
     fireEvent.press(await waitFor(() => getByText('Leave group')));
-    expect(alertSpy).toHaveBeenCalled();
-    // leave.mutate fires against the unmocked apiClient (rejects); onSettled runs
-    // either way → popToTop. Allow the rejected promise to settle.
+    // On success we navigate back to the conversation list.
     await waitFor(() => {
       expect(navigation.popToTop).toHaveBeenCalledTimes(1);
     });
+    leaveSpy.mockRestore();
+  });
+
+  it('Leave group → a FAILED leave alerts and does NOT navigate away', async () => {
+    jest.spyOn(groupService, 'leave').mockRejectedValue(new Error('boom'));
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation((_title, _msg, buttons) => {
+      // First call = the confirmation dialog; drive its destructive button.
+      const confirm = buttons?.find(b => b.style === 'destructive');
+      confirm?.onPress?.();
+    });
+    const { navigation, getByText } = renderInfo();
+    fireEvent.press(await waitFor(() => getByText('Leave group')));
+    // The error path fires a SECOND alert (the failure notice) and never pops.
+    await waitFor(() => {
+      expect(alertSpy.mock.calls.length).toBeGreaterThanOrEqual(2);
+    });
+    expect(navigation.popToTop).not.toHaveBeenCalled();
   });
 
   it('remove-member button (owner-only) opens a confirmation Alert', async () => {

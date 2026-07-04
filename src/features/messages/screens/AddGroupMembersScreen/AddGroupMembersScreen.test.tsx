@@ -47,12 +47,18 @@ const followUser = (id: string, username: string): User =>
     currentRoomId: null,
   }) as User;
 
+// useFollowing is now a useInfiniteQuery → seed the paged cache shape.
+const page = (following: User[]) => ({
+  pages: [{ items: following, nextCursor: null }],
+  pageParams: [undefined],
+});
+
 const renderAdd = (following: User[]) =>
   renderScreen(<AddGroupMembersScreen />, {
     route: { name: 'AddGroupMembers', params: { conversationId: GROUP_ID } },
     seedQueryData: [
       { key: [...groupKeys.detail(GROUP_ID)], data: group() },
-      { key: [...profileKeys.following(ME)], data: following },
+      { key: [...profileKeys.following(ME)], data: page(following) },
     ],
   });
 
@@ -95,6 +101,59 @@ describe('AddGroupMembersScreen', () => {
     });
     await waitFor(() => {
       expect(navigation.goBack).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('exposes an accessibility label on each candidate checkbox', () => {
+    const { getByLabelText } = renderAdd([followUser('peer-new', 'dave')]);
+    // The checkbox row is reachable by the candidate's name (aligned with
+    // NewMessageScreen), so a screen reader announces who it toggles.
+    const row = getByLabelText('dave');
+    expect(row.props.accessibilityRole).toBe('checkbox');
+  });
+
+  it('keeps a selection visible as a removable chip when the filter hides its row', () => {
+    const { getByLabelText, getByPlaceholderText } = renderAdd([
+      followUser('peer-new', 'dave'),
+      followUser('peer-eve', 'eve'),
+    ]);
+    fireEvent.press(getByLabelText('dave'));
+    // Filter to "eve" so dave's list row is hidden — the chip must persist.
+    fireEvent.changeText(getByPlaceholderText('Filter people you follow'), 'eve');
+    expect(getByLabelText('Remove dave')).toBeTruthy();
+  });
+
+  it('loads the next page of candidates when the list end is reached', async () => {
+    const { profileService } = require('../../../profile/services/profileService');
+    const spy = jest
+      .spyOn(profileService, 'following')
+      .mockResolvedValue({ items: [followUser('peer-zoe', 'zoe')], nextCursor: null });
+
+    const { UNSAFE_getByType } = renderScreen(<AddGroupMembersScreen />, {
+      route: { name: 'AddGroupMembers', params: { conversationId: GROUP_ID } },
+      seedQueryData: [
+        { key: [...groupKeys.detail(GROUP_ID)], data: group() },
+        {
+          key: [...profileKeys.following(ME)],
+          data: {
+            pages: [{ items: [followUser('peer-new', 'dave')], nextCursor: 'cursor-1' }],
+            pageParams: [undefined],
+          },
+        },
+      ],
+    });
+
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { FlatList } = require('react-native');
+    UNSAFE_getByType(FlatList).props.onEndReached();
+
+    await waitFor(() => {
+      expect(spy).toHaveBeenCalledWith(ME, 'cursor-1');
+    });
+    // Assert against the list data (FlatList windowing may skip the new row).
+    await waitFor(() => {
+      const data = UNSAFE_getByType(FlatList).props.data as User[];
+      expect(data.some(u => u.id === 'peer-zoe')).toBe(true);
     });
   });
 });

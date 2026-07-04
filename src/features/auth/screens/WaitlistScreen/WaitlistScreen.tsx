@@ -2,26 +2,34 @@ import React, { useCallback } from 'react';
 import { Share, Text, View } from 'react-native';
 import MaterialIcons from '@react-native-vector-icons/material-icons';
 import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { Button } from '../../../../shared/components/Button';
 import { colors, spacing } from '../../../../shared/constants/theme';
+import type { AuthStackParamList } from '../../../../core/navigation/types';
 
 const HOURGLASS_SIZE = 72;
 
 export const WaitlistScreen: React.FC = () => {
-  const navigation = useNavigation();
+  const navigation = useNavigation<NativeStackNavigationProp<AuthStackParamList>>();
   const insets = useSafeAreaInsets();
   const { t } = useTranslation();
 
-  const handleBack = useCallback(() => navigation.goBack(), [navigation]);
+  // This screen is only reachable via deep link today, so it can be the
+  // stack's first route: goBack() would then be a silent no-op — fall back
+  // to Landing instead of leaving the user stranded.
+  const handleBack = useCallback(() => {
+    if (navigation.canGoBack()) navigation.goBack();
+    else navigation.navigate('Landing');
+  }, [navigation]);
 
   const handleInvite = useCallback(async () => {
     try {
       await Share.share({
         message: t(
           'auth.waitlist.shareMessage',
-          "J'attends mon accès à Chathouse — rejoins la waitlist pour m'aider à passer devant : https://app.chathouse.com",
+          "I'm waiting for my Chathouse access — join the waitlist to help me move up: https://app.chathouse.com",
         ),
         url: 'https://app.chathouse.com',
       });

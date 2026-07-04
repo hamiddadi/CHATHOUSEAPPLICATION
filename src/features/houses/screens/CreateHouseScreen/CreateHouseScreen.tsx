@@ -55,8 +55,11 @@ const getPrivacyOptions = (t: TFunction): PrivacyOption[] => [
   },
 ];
 
-const NAME_MAX = 30;
-const DESC_MAX = 200;
+// Aligned with the backend zod schema (clubs.schema.ts): name max 50,
+// description max 500 — the FE was clamping harder than the API for no reason.
+const NAME_MAX = 50;
+const NAME_MIN = 2;
+const DESC_MAX = 500;
 const ICON_UPLOAD_SIZE = 96;
 
 interface PrivacyRowProps {
@@ -164,15 +167,26 @@ export const CreateHouseScreen: React.FC = () => {
       navigation.goBack();
     } catch (e) {
       Alert.alert(
-        t('houses.create.errorTitle', 'Erreur'),
-        errorMessage(e, t('houses.create.errorBody', 'Échec de la création')),
+        t('houses.create.errorTitle', 'Error'),
+        errorMessage(e, t('houses.create.errorBody', "Couldn't create the house.")),
       );
     } finally {
       setUploading(false);
     }
   }, [createHouse, description, rules, iconBase64, iconMime, name, navigation, privacy, t]);
 
-  const canCreate = name.trim().length >= 2 && !createHouse.isPending && !uploading;
+  // Inline validation feedback: a greyed-out button alone gives no clue WHY
+  // creation is blocked. Surface the min-length rule under the name field as
+  // soon as the user has typed something too short.
+  const nameError =
+    name.length > 0 && name.trim().length < NAME_MIN
+      ? // `min` (not `count`) on purpose: no i18next plural handling wanted.
+        t('houses.create.nameTooShort', 'The name must be at least {{min}} characters.', {
+          min: NAME_MIN,
+        })
+      : undefined;
+
+  const canCreate = name.trim().length >= NAME_MIN && !createHouse.isPending && !uploading;
 
   return (
     <KeyboardAvoidingView
@@ -239,6 +253,7 @@ export const CreateHouseScreen: React.FC = () => {
           value={name}
           onChangeText={setName}
           maxLength={NAME_MAX}
+          error={nameError}
           helperText={`${name.length} / ${NAME_MAX}`}
         />
 
@@ -254,8 +269,8 @@ export const CreateHouseScreen: React.FC = () => {
         />
 
         <Input
-          label={t('houses.create.rulesLabel', 'Règles (optionnel)')}
-          placeholder={t('houses.create.rulesPlaceholder', 'Les règles de la maison…')}
+          label={t('houses.create.rulesLabel', 'Rules (optional)')}
+          placeholder={t('houses.create.rulesPlaceholder', 'The house rules…')}
           value={rules}
           onChangeText={setRules}
           multiline

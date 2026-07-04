@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { getSocket } from '../../../shared/services/realtime/socketClient';
+import { getSocket, onReconnect } from '../../../shared/services/realtime/socketClient';
 import { useAuthStore } from '../../auth/store/authStore';
 import { messageKeys } from './useMessages';
 
@@ -16,6 +16,12 @@ export const useChatSocket = (): void => {
 
   useEffect(() => {
     if (!isAuthed) return;
+    // Resync after a socket gap: chat events emitted while disconnected are
+    // lost, so every re-connection invalidates the whole message domain
+    // (conversations, threads, unread badge) to refetch what was missed.
+    const offReconnect = onReconnect(() => {
+      void qc.invalidateQueries({ queryKey: messageKeys.all });
+    });
     // Race-safety: isAuthed can flip true→false (logout) while getSocket()
     // is still pending. Without `cancelled`, the async block resumes after
     // the cleanup already ran (unbind was undefined then), attaches the
@@ -56,6 +62,7 @@ export const useChatSocket = (): void => {
 
     return () => {
       cancelled = true;
+      offReconnect();
       unbind?.();
     };
   }, [isAuthed, qc]);

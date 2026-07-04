@@ -29,4 +29,14 @@ describe('TermsScreen', () => {
     expect(getByText('3. Prohibited Conduct')).toBeTruthy();
     expect(getByText('8. Governing Law')).toBeTruthy();
   });
+
+  it('renders the Eligibility rules paragraphs (s2.p2 / s2.p3) that were previously dropped', () => {
+    // Regression: TermsScreen used to render only s2.p1, silently omitting the
+    // two "important rules" paragraphs that exist in the locales.
+    const { getByText } = renderScreen(<TermsScreen />);
+    expect(
+      getByText('• Do not share illegal, explicit, or copyright-infringing content.'),
+    ).toBeTruthy();
+    expect(getByText('• Do not record rooms without the consent of all speakers.')).toBeTruthy();
+  });
 });

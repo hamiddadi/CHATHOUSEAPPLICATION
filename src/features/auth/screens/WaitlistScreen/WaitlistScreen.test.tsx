@@ -2,12 +2,13 @@ import React from 'react';
 import { Share } from 'react-native';
 import { fireEvent, waitFor } from '@testing-library/react-native';
 import { renderScreen, mockAuthenticated, resetAuth } from '../../../../test-utils/renderScreen';
+import { makeNavigationSpy } from '../../../../test-utils/navigationMock';
 import { WaitlistScreen } from './WaitlistScreen';
 
 /**
  * WaitlistScreen — no route params, no queries. Two CTAs: "Invite a friend"
- * opens the native Share sheet; "Back" → goBack. (These i18n keys are absent
- * from en.json, so t() falls back to the inline default English strings.)
+ * opens the native Share sheet; "Back" → goBack, falling back to
+ * navigate('Landing') when the screen is the stack's first route (deep link).
  */
 describe('WaitlistScreen', () => {
   beforeEach(() => {
@@ -42,5 +43,18 @@ describe('WaitlistScreen', () => {
     const { navigation, getByText } = renderScreen(<WaitlistScreen />);
     fireEvent.press(getByText('Back'));
     expect(navigation.goBack).toHaveBeenCalledTimes(1);
+  });
+
+  it('falls back to Landing when there is no history (deep-link entry)', () => {
+    // Deep link makes Waitlist the stack's first route: goBack() would be a
+    // silent no-op, so the screen must navigate('Landing') instead.
+    const navigation = makeNavigationSpy();
+    navigation.canGoBack.mockReturnValue(false);
+    const { getByText } = renderScreen(<WaitlistScreen />, { navigation });
+
+    fireEvent.press(getByText('Back'));
+
+    expect(navigation.goBack).not.toHaveBeenCalled();
+    expect(navigation.navigate).toHaveBeenCalledWith('Landing');
   });
 });

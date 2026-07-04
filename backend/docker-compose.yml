@@ -49,8 +49,12 @@ services:
       HOST: 0.0.0.0
       DATABASE_URL: postgresql://chathouse:${POSTGRES_PASSWORD:-chathouse}@postgres:5432/chathouse?schema=public
       REDIS_URL: redis://redis:6379
-      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?JWT_ACCESS_SECRET is required}
-      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET is required}
+      # Dev defaults so `docker compose up` works with ZERO setup (no .env file
+      # needed) for a Docker-only tester. Both are ≥32 chars (env.ts requires it).
+      # OVERRIDE with your own secrets in any real/public deployment — these are
+      # inert for local testing but must never ship to production.
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-dev_only_access_secret_change_me_0123456789abcdef}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-dev_only_refresh_secret_change_me_0123456789abcdef}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8081}
       # Dev/QA OTP bypass — these numbers skip the real SMS and log in with
       # OTP_TEST_CODE. Hard-gated to non-production in otp.service, so inert
@@ -62,10 +66,10 @@ services:
       # rooms; each transport uses one UDP port.
       MEDIASOUP_ENABLED: ${MEDIASOUP_ENABLED:-true}
       # IMPORTANT: MUST be the LAN/WAN IP reachable from devices, NOT 127.0.0.1
-      # when testing from a phone. Override per env (e.g. 192.168.1.42 in dev,
-      # the server's public IP in prod). 127.0.0.1 only works for same-host
-      # browsers — phones / different machines will fail ICE.
-      MEDIASOUP_ANNOUNCED_IP: ${MEDIASOUP_ANNOUNCED_IP:-127.0.0.1}
+      # when testing from a phone. Driven by the single LAN_IP knob (set it to
+      # your PC's Wi-Fi IP, e.g. LAN_IP=192.168.1.42). 127.0.0.1 (the default)
+      # only works for same-host browsers — phones / other machines fail ICE.
+      MEDIASOUP_ANNOUNCED_IP: ${LAN_IP:-127.0.0.1}
       MEDIASOUP_LISTEN_IP: 0.0.0.0
       # Each WebRTC transport consumes one UDP port. With 2 transports/user
       # (send + recv), 500 ports gives a server-wide ceiling of ~250 users.
@@ -86,14 +90,22 @@ services:
       # browser. LIVEKIT_URL is handed to clients, so it must be host-reachable
       # (127.0.0.1 for same-host; set the LAN IP to test from a phone, exactly
       # like MEDIASOUP_ANNOUNCED_IP above). Dev creds only — never use in prod.
-      # SECRET must be ≥ 32 chars (LiveKit server requirement).
-      LIVEKIT_URL: ${LIVEKIT_URL:-ws://127.0.0.1:7880}
+      # SECRET must be ≥ 32 chars (LiveKit server requirement). The URL is handed
+      # to the phone in the /livekit-token response, so it must be phone-reachable
+      # — driven by the same LAN_IP knob as MEDIASOUP_ANNOUNCED_IP above.
+      LIVEKIT_URL: ws://${LAN_IP:-127.0.0.1}:7880
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-devkey}
       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-devsecretdevsecretdevsecretdevsecret}
       LIVEKIT_TOKEN_TTL_SECONDS: ${LIVEKIT_TOKEN_TTL_SECONDS:-3600}
     ports:
       - '4000:4000'
       - '40000-40499:40000-40499/udp'
+    volumes:
+      # Persist uploaded avatars / voice notes on the host so they survive
+      # container recreation and rebuilds. Matches the app's
+      # UPLOADS_DIR = <repo>/backend/uploads (upload.service.ts). The dir is
+      # git-ignored (except .gitkeep) and served back via /uploads static route.
+      - ./uploads:/app/uploads
 
   # ─── LiveKit server (live audio) — dev single node ───
   # Self-hosted so the token issued by /livekit-token is actually connectable

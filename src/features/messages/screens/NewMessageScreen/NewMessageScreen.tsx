@@ -1,5 +1,6 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   FlatList,
   KeyboardAvoidingView,
@@ -22,7 +23,8 @@ import { colors, spacing } from '../../../../shared/constants/theme';
 import type { MessageStackParamList } from '../../../../core/navigation/types';
 import type { User } from '../../../../shared/types/domain';
 import { useAuthStore } from '../../../auth/store/authStore';
-import { useFollowing } from '../../../profile/hooks/useProfile';
+import { flattenFollowPages, useFollowing } from '../../../profile/hooks/useProfile';
+import { SelectedPeopleChips } from '../../components/SelectedPeopleChips';
 import { useCreateGroup } from '../../hooks/useGroups';
 
 type Nav = NativeStackNavigationProp<MessageStackParamList, 'NewMessage'>;
@@ -47,19 +49,21 @@ export const NewMessageScreen: React.FC = () => {
   const createGroup = useCreateGroup();
   const myId = useAuthStore(s => s.user?.id) ?? '';
 
-  // First page of who I follow (limit 50, server-side). Enough for a picker; a
-  // local filter narrows it as the user types — no per-keystroke network call.
-  const { data: following, isLoading } = useFollowing(myId);
+  // Who I follow, paged server-side (limit 50/page). The infinite query fetches
+  // the next page on scroll so a follow past the 50th isn't unreachable. A local
+  // filter narrows the loaded rows as the user types — no per-keystroke call.
+  const followingQuery = useFollowing(myId);
+  const { isLoading, hasNextPage, isFetchingNextPage, fetchNextPage } = followingQuery;
+  const following = useMemo(() => flattenFollowPages(followingQuery.data), [followingQuery.data]);
 
   const [query, setQuery] = useState('');
   // Selected peers, keyed by id so toggling is O(1) and order-stable enough.
   const [selected, setSelected] = useState<Map<string, User>>(new Map());
 
   const results = useMemo(() => {
-    const all = following ?? [];
     const q = query.trim().toLowerCase();
-    if (q.length === 0) return all;
-    return all.filter(
+    if (q.length === 0) return following;
+    return following.filter(
       u => u.displayName.toLowerCase().includes(q) || u.username.toLowerCase().includes(q),
     );
   }, [following, query]);
@@ -73,7 +77,12 @@ export const NewMessageScreen: React.FC = () => {
     });
   }, []);
 
+  const selectedPeople = useMemo(() => [...selected.values()], [selected]);
   const selectedCount = selected.size;
+
+  const handleEndReached = useCallback(() => {
+    if (hasNextPage && !isFetchingNextPage) void fetchNextPage();
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
   const handleStart = useCallback(() => {
     const ids = [...selected.keys()];
@@ -136,7 +145,20 @@ export const NewMessageScreen: React.FC = () => {
     [selected, toggle],
   );
 
-  const hasFollowing = (following?.length ?? 0) > 0;
+  const renderFooter = useCallback(
+    () =>
+      isFetchingNextPage ? (
+        <View className="py-lg items-center">
+          <ActivityIndicator
+            color={colors.primary}
+            accessibilityLabel={t('common.loadingMore', 'Loading more')}
+          />
+        </View>
+      ) : null,
+    [isFetchingNextPage, t],
+  );
+
+  const hasFollowing = following.length > 0;
 
   return (
     <KeyboardAvoidingView
@@ -175,6 +197,8 @@ export const NewMessageScreen: React.FC = () => {
         </View>
       )}
 
+      <SelectedPeopleChips people={selectedPeople} onRemove={toggle} />
+
       {isLoading ? (
         <Loader fullscreen accessibilityLabel={t('common.loading', 'Loading')} />
       ) : (
@@ -185,6 +209,9 @@ export const NewMessageScreen: React.FC = () => {
           keyboardShouldPersistTaps="handled"
           ItemSeparatorComponent={() => <View className="h-px bg-overlay-white-5 ml-[76px]" />}
           contentContainerStyle={{ paddingBottom: insets.bottom + spacing.giant }}
+          onEndReached={handleEndReached}
+          onEndReachedThreshold={0.4}
+          ListFooterComponent={renderFooter}
           ListEmptyComponent={
             !hasFollowing ? (
               <EmptyState

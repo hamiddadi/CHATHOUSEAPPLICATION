@@ -91,8 +91,8 @@ export const PhoneScreen: React.FC = () => {
         <Pressable
           onPress={handleBack}
           accessibilityRole="button"
-          accessibilityLabel={t('common.close', 'Close')}
-          hitSlop={8}
+          accessibilityLabel={t('common.back', 'Back')}
+          hitSlop={12}
         >
           <MaterialIcons name="arrow-back" size={24} color={colors.text} />
         </Pressable>
@@ -142,6 +142,11 @@ export const PhoneScreen: React.FC = () => {
                       Keyboard.dismiss();
                       setCountryPickerVisible(true);
                     }}
+                    accessibilityRole="button"
+                    accessibilityLabel={t('common.select_country', 'Select Country')}
+                    accessibilityValue={{
+                      text: `${selectedCountry.name} ${selectedCountry.callingCode}`,
+                    }}
                     className="flex-row items-center px-sm gap-xs"
                   >
                     <Text className="text-xl">{selectedCountry.flag}</Text>
@@ -181,6 +186,15 @@ export const PhoneScreen: React.FC = () => {
             </Pressable>
           )}
         />
+
+        {errors.ageConfirmed?.message && (
+          <Text className="text-xs text-danger mb-md" accessibilityLiveRegion="polite">
+            {t(
+              errors.ageConfirmed.message as string,
+              'You must confirm you are at least 16 years old to continue.',
+            )}
+          </Text>
+        )}
 
         <Button
           label={t('auth.phone.submit', 'Next')}

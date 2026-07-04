@@ -1,5 +1,6 @@
 import React, { memo } from 'react';
 import { Pressable, Text, View } from 'react-native';
+import { useTranslation } from 'react-i18next';
 
 const Stat: React.FC<{ label: string; value: string; onPress?: () => void }> = memo(
   ({ label, value, onPress }) => {
@@ -41,13 +42,24 @@ interface ProfileStatsProps {
 }
 
 const ProfileStats: React.FC<ProfileStatsProps> = memo(
-  ({ followingCount, followersCount, onPressFollowing, onPressFollowers }) => (
-    <View className="flex-row items-center mt-sm">
-      <Stat label="Following" value={formatCount(followingCount)} onPress={onPressFollowing} />
-      <View className="w-px h-[24px] bg-overlay-white-10" />
-      <Stat label="Followers" value={formatCount(followersCount)} onPress={onPressFollowers} />
-    </View>
-  ),
+  ({ followingCount, followersCount, onPressFollowing, onPressFollowers }) => {
+    const { t } = useTranslation();
+    return (
+      <View className="flex-row items-center mt-sm">
+        <Stat
+          label={t('profile.following', 'Following')}
+          value={formatCount(followingCount)}
+          onPress={onPressFollowing}
+        />
+        <View className="w-px h-[24px] bg-overlay-white-10" />
+        <Stat
+          label={t('profile.followers', 'Followers')}
+          value={formatCount(followersCount)}
+          onPress={onPressFollowers}
+        />
+      </View>
+    );
+  },
 );
 ProfileStats.displayName = 'ProfileStats';
 

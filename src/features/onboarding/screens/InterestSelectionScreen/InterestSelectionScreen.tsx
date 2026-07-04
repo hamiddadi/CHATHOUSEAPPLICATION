@@ -1,9 +1,11 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { AccessibilityInfo, Pressable, ScrollView, Text, View } from 'react-native';
+import MaterialIcons from '@react-native-vector-icons/material-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { useTranslation } from 'react-i18next';
 import { Button } from '../../../../shared/components/Button';
+import { impactLight } from '../../../../shared/utils/haptics';
 import { colors, radii, spacing } from '../../../../shared/constants/theme';
 import { useOnboardingStore } from '../../store/onboardingStore';
 import { INTEREST_CATEGORIES, type InterestCategory } from '../../schemas';
@@ -11,10 +13,14 @@ import type { OnboardingStackScreenProps } from '../../../../core/navigation/typ
 
 const MIN_INTERESTS = 3;
 const MAX_INTERESTS = 10;
+// The backend caps at MAX_INTERESTS, but the UI can never offer more chips
+// than there are categories — use the smaller of the two everywhere so the
+// "n / max" counter shows a cap the user can actually reach.
+const EFFECTIVE_MAX = Math.min(MAX_INTERESTS, INTEREST_CATEGORIES.length);
 
 /**
- * Step 2 of onboarding. User toggles interest chips (min 3, max 10) and
- * taps "Next" to persist the selection into the onboarding store, then
+ * Step 2 of onboarding. User toggles interest chips (min 3, max EFFECTIVE_MAX)
+ * and taps "Next" to persist the selection into the onboarding store, then
  * advances to the SuggestedFollows step — which owns the final
  * completeOnboarding() call. The interests survive in the store until then.
  */
@@ -24,19 +30,45 @@ export const InterestSelectionScreen: React.FC = () => {
   const navigation = useNavigation<OnboardingStackScreenProps<'InterestSelection'>['navigation']>();
   const setInterestsInStore = useOnboardingStore(s => s.setInterests);
 
-  const [selected, setSelected] = useState<Set<InterestCategory>>(new Set());
+  // Rehydrate from the onboarding store so a back-navigation (or a failed
+  // finish on a later step) doesn't wipe the user's earlier selection.
+  const [selected, setSelected] = useState<Set<InterestCategory>>(
+    () =>
+      new Set(
+        useOnboardingStore
+          .getState()
+          .interests.filter((i): i is InterestCategory =>
+            (INTEREST_CATEGORIES as readonly string[]).includes(i),
+          ),
+      ),
+  );
 
-  const toggle = useCallback((cat: InterestCategory) => {
-    setSelected(prev => {
-      const next = new Set(prev);
-      if (next.has(cat)) {
-        next.delete(cat);
-      } else if (next.size < MAX_INTERESTS) {
-        next.add(cat);
+  const maxReachedMessage = t('onboarding.interests.maxReached', {
+    max: EFFECTIVE_MAX,
+    defaultValue: `You can pick up to ${EFFECTIVE_MAX}.`,
+  });
+
+  const toggle = useCallback(
+    (cat: InterestCategory) => {
+      // Tapping a new chip while at the cap: give tactile + screen-reader
+      // feedback instead of silently ignoring the press.
+      if (!selected.has(cat) && selected.size >= EFFECTIVE_MAX) {
+        impactLight();
+        AccessibilityInfo.announceForAccessibility(maxReachedMessage);
+        return;
       }
-      return next;
-    });
-  }, []);
+      setSelected(prev => {
+        const next = new Set(prev);
+        if (next.has(cat)) {
+          next.delete(cat);
+        } else if (next.size < EFFECTIVE_MAX) {
+          next.add(cat);
+        }
+        return next;
+      });
+    },
+    [selected, maxReachedMessage],
+  );
 
   const interests = useMemo(() => [...selected], [selected]);
   const canSubmit = interests.length >= MIN_INTERESTS;
@@ -52,8 +84,23 @@ export const InterestSelectionScreen: React.FC = () => {
     navigation.navigate('NotificationsPermission');
   }, [interests, navigation, setInterestsInStore]);
 
+  const atMax = interests.length >= EFFECTIVE_MAX;
+
   return (
     <View className="flex-1 bg-background" style={{ paddingTop: insets.top + spacing.xl }}>
+      {/* Discreet back chevron — the previous SetupProfile step stays in the stack. */}
+      <View className="flex-row items-center px-xxl py-sm">
+        <Pressable
+          onPress={() => {
+            if (navigation.canGoBack()) navigation.goBack();
+          }}
+          accessibilityRole="button"
+          accessibilityLabel={t('common.back', 'Back')}
+          hitSlop={12}
+        >
+          <MaterialIcons name="arrow-back" size={24} color={colors.textMuted} />
+        </Pressable>
+      </View>
       <View
         className="flex-1 px-xxl gap-xxl"
         style={{ paddingBottom: insets.bottom + spacing.huge }}
@@ -66,7 +113,8 @@ export const InterestSelectionScreen: React.FC = () => {
           <Text className="text-sm text-ink-muted">
             {interests.length < MIN_INTERESTS
               ? t('onboarding.interests.minHint')
-              : `${interests.length} / ${MAX_INTERESTS}`}
+              : `${interests.length} / ${EFFECTIVE_MAX}`}
+            {atMax ? ` — ${maxReachedMessage}` : ''}
           </Text>
         </View>
 
@@ -79,6 +127,7 @@ export const InterestSelectionScreen: React.FC = () => {
                 onPress={() => toggle(cat)}
                 accessibilityRole="button"
                 accessibilityState={{ selected: isSelected }}
+                hitSlop={8}
                 style={[chipBase, isSelected ? chipSelected : chipUnselected]}
               >
                 <Text style={isSelected ? chipLabelSelected : chipLabelUnselected}>

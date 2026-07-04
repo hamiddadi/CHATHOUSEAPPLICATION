@@ -10,6 +10,35 @@ let connecting: Promise<Socket | null> | null = null;
 // token itself is dead (no valid session to recover).
 let refreshingAuth = false;
 
+// Subscribers notified after every socket RE-connection (never the first
+// successful connect of a socket instance): realtime events may have been
+// missed during the gap, so subscribers refetch/invalidate their caches.
+// Module-level so the registry survives disconnectSocket() teardowns.
+const reconnectHandlers = new Set<() => void>();
+
+/**
+ * Register a handler invoked after each socket re-connection — auto-reconnect
+ * or a manual `.connect()` after an auth refresh; anything but the socket's
+ * first successful connect. Returns the unsubscribe function.
+ */
+export const onReconnect = (handler: () => void): (() => void) => {
+  reconnectHandlers.add(handler);
+  return () => {
+    reconnectHandlers.delete(handler);
+  };
+};
+
+// Auth-rejection detector for `connect_error`. Prefers the structured
+// `err.data.code` when the server attaches one; falls back to sniffing the
+// message (the backend's socketAuth rejects with plain Errors whose message
+// IS the code: UNAUTHORIZED / TOKEN_REVOKED).
+const AUTH_ERROR_PATTERN = /auth|token_revoked/i;
+const isAuthConnectError = (err: Error & { data?: { code?: unknown } }): boolean => {
+  const code = err.data?.code;
+  if (typeof code === 'string' && AUTH_ERROR_PATTERN.test(code)) return true;
+  return AUTH_ERROR_PATTERN.test(String(err.message));
+};
+
 /**
  * On an auth-related `connect_error`, the (re)connection used a stale access
  * token. Trigger the REST interceptor's silent refresh by issuing one
@@ -36,7 +65,25 @@ const refreshAuthAndReconnect = async (s: Socket): Promise<void> => {
 const wireLifecycle = (s: Socket): void => {
   const store = useSocketStore.getState();
   store.set('connecting');
-  s.on('connect', () => useSocketStore.getState().set('connected'));
+  // Per-socket flag: distinguishes the first successful connect from later
+  // RE-connections so onReconnect() subscribers only fire when a gap may have
+  // dropped realtime events. A fresh socket after disconnectSocket() starts
+  // over (its first connect is not a "re"-connection).
+  let connectedBefore = false;
+  s.on('connect', () => {
+    useSocketStore.getState().set('connected');
+    if (connectedBefore) {
+      reconnectHandlers.forEach(handler => {
+        try {
+          handler();
+        } catch {
+          // A throwing subscriber must not break the connect pipeline or
+          // starve the other subscribers.
+        }
+      });
+    }
+    connectedBefore = true;
+  });
   s.on('disconnect', reason => {
     // reason === 'io client disconnect' → user-initiated, silent.
     if (reason === 'io client disconnect') {
@@ -48,7 +95,7 @@ const wireLifecycle = (s: Socket): void => {
   s.on('connect_error', err => {
     useSocketStore.getState().set('disconnected');
     // Auth handshake rejected → refresh the token and reconnect once.
-    if (String(err.message).toLowerCase().includes('auth')) {
+    if (isAuthConnectError(err)) {
       void refreshAuthAndReconnect(s);
     }
   });

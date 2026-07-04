@@ -1,11 +1,16 @@
-import { Alert } from 'react-native';
+import { Alert, Platform } from 'react-native';
 
 /**
- * Alert.prompt is iOS-only. This helper collects a free-text reason on iOS and,
- * on platforms without `Alert.prompt`, falls back to either a confirmation
- * dialog (when `androidConfirm` is provided) or an immediate call with
- * `defaultReason`. The collected text is trimmed and, if empty, replaced by
- * `defaultReason`. `onSubmit` only fires when the user confirms.
+ * Alert.prompt is iOS-only — on Android it is a silent no-op, so we must NOT
+ * route Android through it (the reason would never be collected and no callback
+ * would fire). This helper collects a free-text reason via `Alert.prompt` on
+ * iOS only, and on every other platform falls back to a confirmation dialog
+ * (when `androidConfirm` is provided) or, as a last resort, an immediate call
+ * with `defaultReason`. The collected text is trimmed and, if empty, replaced
+ * by `defaultReason`. `onSubmit` only fires when the user confirms.
+ *
+ * For a full free-text reason on Android, prefer `useReasonPrompt` (renders a
+ * real modal); this helper remains for confirm-only Android flows.
  */
 export interface PromptForReasonOptions {
   /** Title shown in the iOS prompt (and the Android confirmation, if any). */
@@ -45,8 +50,12 @@ export const promptForReason = (
 ): void => {
   const { title, message, confirmLabel, defaultReason, androidConfirm } = options;
   const cancelLabel = options.cancelLabel ?? 'Annuler';
+  // Alert.prompt only exists on iOS; on Android calling it does nothing (the
+  // onSubmit callback would never fire). Gate strictly on the platform so the
+  // Android fallbacks below always run.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const prompt = (Alert as any).prompt as AlertPrompt | undefined;
+  const alertPrompt = (Alert as any).prompt as AlertPrompt | undefined;
+  const prompt = Platform.OS === 'ios' ? alertPrompt : undefined;
 
   if (prompt) {
     prompt(

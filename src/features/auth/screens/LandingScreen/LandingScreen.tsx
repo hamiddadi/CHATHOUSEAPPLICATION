@@ -12,8 +12,10 @@ import Animated, {
 import { useTranslation } from 'react-i18next';
 import { GradientView } from '../../../../shared/components/GradientView';
 import { Avatar } from '../../../../shared/components/Avatar';
+import { toast } from '../../../../shared/components/Toast';
 import { useAnimatedPress } from '../../../../shared/hooks/useAnimatedPress';
 import { useOnMount } from '../../../../shared/hooks/useOnMount';
+import { errorMessage } from '../../../../shared/utils/errorMessage';
 import { AVATARS_10 } from '../../../../shared/constants/images';
 import { colors, spacing } from '../../../../shared/constants/theme';
 import type { LandingNavProp } from '../../../../core/navigation/types';
@@ -23,7 +25,22 @@ import { useAuthStore } from '../../store/authStore';
  * Constants (hoisted — avoids re-creation per render)
  * ========================================================== */
 
-const AVATAR_URLS: readonly string[] = AVATARS_10.slice(0, 7);
+// Names paired with the remote portraits so that offline (or on image error)
+// the Avatar component falls back to real initials on a deterministic tint
+// instead of an empty circle. Order matches AVATARS_10 (5 men, then women).
+const AVATAR_NAMES: readonly string[] = [
+  'Liam Carter',
+  'Noah Reed',
+  'Ethan Hayes',
+  'Marco Silva',
+  'Omar Haddad',
+  'Ava Bennett',
+  'Mia Laurent',
+];
+
+const AVATAR_PREVIEW: ReadonlyArray<{ uri: string; name: string }> = AVATARS_10.slice(0, 7).map(
+  (uri, i) => ({ uri, name: AVATAR_NAMES[i] ?? '' }),
+);
 
 const ENTRY_DURATION_MS = 600;
 const ENTRY_OFFSET_Y = 24;
@@ -121,13 +138,13 @@ const AvatarsPreview: React.FC<AvatarsPreviewProps> = memo(({ label, a11yLabel }
     accessibilityLabel={a11yLabel}
     className="flex-row items-center justify-center"
   >
-    {AVATAR_URLS.map((url, i) => (
+    {AVATAR_PREVIEW.map((preview, i) => (
       <View
-        key={url}
+        key={preview.uri}
         className="border-2 border-overlay-blue-50 rounded-xl"
         style={i > 0 ? styles.avatarStacked : undefined}
       >
-        <Avatar uri={url} size="md" shape="rounded" />
+        <Avatar uri={preview.uri} name={preview.name} size="md" shape="rounded" />
       </View>
     ))}
     <Text className="text-xs font-body-semibold text-overlay-white-80 ml-sm">{label}</Text>
@@ -249,8 +266,12 @@ export const LandingScreen: React.FC = () => {
   const devLogin = useAuthStore(s => s.devLogin);
   const authStatus = useAuthStore(s => s.status);
   const handleDevSkip = useCallback(() => {
-    void devLogin().catch(() => undefined);
-  }, [devLogin]);
+    void devLogin().catch((e: unknown) => {
+      // Dev-only control — surface the failure instead of dying silently.
+      if (__DEV__) console.warn('[LandingScreen] devLogin failed', e);
+      toast.error(errorMessage(e, t('auth.landing.devLoginFailed', 'Dev login failed.')));
+    });
+  }, [devLogin, t]);
 
   const ctaLabels = useMemo(
     () => ({
@@ -274,8 +295,8 @@ export const LandingScreen: React.FC = () => {
   const ctaY = useSharedValue(ENTRY_OFFSET_Y);
 
   useOnMount(() => {
-    if (__DEV__ && AVATAR_URLS.length === 0) {
-      console.warn('[LandingScreen] AVATAR_URLS is empty — avatars row will not render.');
+    if (__DEV__ && AVATAR_PREVIEW.length === 0) {
+      console.warn('[LandingScreen] AVATAR_PREVIEW is empty — avatars row will not render.');
     }
 
     const fadeIn = { duration: ENTRY_DURATION_MS };

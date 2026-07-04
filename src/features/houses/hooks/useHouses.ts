@@ -14,6 +14,7 @@ export const houseKeys = {
   detail: (id: string) => [...houseKeys.all, 'detail', id] as const,
   rooms: (id: string, filter: 'live' | 'upcoming' | 'past') =>
     [...houseKeys.all, 'rooms', id, filter] as const,
+  inviteLink: (id: string) => [...houseKeys.all, 'inviteLink', id] as const,
 };
 
 export const useHouses = (filter: 'mine' | 'discover' = 'mine') =>
@@ -89,6 +90,19 @@ export const useInviteToHouse = () =>
   useMutation({
     mutationFn: ({ houseId, userIds }: { houseId: string; userIds: readonly string[] }) =>
       houseService.invite(houseId, userIds),
+  });
+
+/**
+ * Fetch a shareable invite link (signed token + URL) for a house. Cached for a
+ * while so the copy/share affordance has a routable link without re-minting on
+ * every render; the token itself is valid for ~7 days server-side.
+ */
+export const useHouseInviteLink = (houseId: string) =>
+  useQuery<{ token: string; url: string }>({
+    queryKey: houseKeys.inviteLink(houseId),
+    queryFn: () => houseService.getInviteLink(houseId),
+    enabled: houseId.length > 0,
+    staleTime: 5 * 60 * 1000,
   });
 
 export const useAcceptInvitation = () => {

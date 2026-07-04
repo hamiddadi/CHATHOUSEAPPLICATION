@@ -69,4 +69,38 @@ describe('InterestSelectionScreen', () => {
     fireEvent.press(getByText('Finish'));
     expect(navigation.navigate).not.toHaveBeenCalled();
   });
+
+  it('rehydrates a previously-stored selection so Finish works without re-picking', () => {
+    // Simulate coming back to this screen after a prior pass stored 3 interests.
+    useOnboardingStore.getState().setInterests(['tech', 'design', 'crypto']);
+    const { getByText, navigation } = renderScreen(<InterestSelectionScreen />, {
+      route: { name: 'InterestSelection' },
+    });
+    // Counter reflects the rehydrated selection against the EFFECTIVE max (7
+    // categories, not the raw backend cap of 10).
+    expect(getByText('3 / 7')).toBeTruthy();
+    fireEvent.press(getByText('Finish'));
+    expect(navigation.navigate).toHaveBeenCalledWith('NotificationsPermission');
+    expect(useOnboardingStore.getState().interests).toEqual(['tech', 'design', 'crypto']);
+  });
+
+  it('shows the max hint once every reachable chip is selected (cap = category count)', () => {
+    const { getByText } = renderScreen(<InterestSelectionScreen />, {
+      route: { name: 'InterestSelection' },
+    });
+    for (const label of ['Tech', 'Design', 'Crypto', 'AI', 'Music', 'Business', 'Health']) {
+      fireEvent.press(getByText(label));
+    }
+    // Counter caps at 7 (the number of categories) and the hint is appended.
+    expect(getByText(/7 \/ 7/)).toBeTruthy();
+    expect(getByText(/You can pick up to 7\./)).toBeTruthy();
+  });
+
+  it('the back chevron pops back to the previous onboarding step', () => {
+    const { getByLabelText, navigation } = renderScreen(<InterestSelectionScreen />, {
+      route: { name: 'InterestSelection' },
+    });
+    fireEvent.press(getByLabelText('Back'));
+    expect(navigation.goBack).toHaveBeenCalledTimes(1);
+  });
 });

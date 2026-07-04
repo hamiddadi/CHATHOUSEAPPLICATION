@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { ActivityIndicator, Linking, Pressable, StyleSheet, Text } from 'react-native';
+import { useTranslation } from 'react-i18next';
 import { calendarApi } from '../api/calendarApi';
 import { colors } from '../../../shared/constants/theme';
 
@@ -13,7 +14,10 @@ interface Props {
  * the native Calendar app on tap. Works for Apple Calendar, Google
  * Calendar (Android), and any installed handler.
  */
-export const ExtCalendarExportButton: React.FC<Props> = ({ roomId, label = 'Add to Calendar' }) => {
+export const ExtCalendarExportButton: React.FC<Props> = ({ roomId, label }) => {
+  const { t } = useTranslation();
+  // Localize the default label; an explicit `label` prop still overrides it.
+  const resolvedLabel = label ?? t('extensions.calendar.addToCalendar', 'Add to Calendar');
   const [busy, setBusy] = useState(false);
 
   const handlePress = async (): Promise<void> => {
@@ -32,7 +36,7 @@ export const ExtCalendarExportButton: React.FC<Props> = ({ roomId, label = 'Add 
       onPress={() => void handlePress()}
       style={styles.btn}
       accessibilityRole="button"
-      accessibilityLabel={label}
+      accessibilityLabel={resolvedLabel}
       disabled={busy}
     >
       {busy ? (
@@ -40,7 +44,7 @@ export const ExtCalendarExportButton: React.FC<Props> = ({ roomId, label = 'Add 
       ) : (
         <>
           <Text style={styles.emoji}>📅</Text>
-          <Text style={styles.text}>{label}</Text>
+          <Text style={styles.text}>{resolvedLabel}</Text>
         </>
       )}
     </Pressable>

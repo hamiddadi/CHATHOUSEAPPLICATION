@@ -1,0 +1,38 @@
+# ChatHouse — one-command Dockerized APK builder. Requires ONLY Docker.
+#
+# Build an installable APK baked to reach your PC's backend, with no local JDK,
+# Android SDK, or Node.js:
+#
+#   Windows PowerShell:
+#     $env:BACKEND_HOST="192.168.1.42"
+#     docker compose -f docker-compose.apk.yml run --rm apk-builder
+#
+#   macOS / Linux:
+#     BACKEND_HOST=192.168.1.42 docker compose -f docker-compose.apk.yml run --rm apk-builder
+#
+# (Or just run scripts/build-apk.ps1 / scripts/build-apk.sh, which auto-detect
+#  your LAN IP.) The finished APK lands in ./artifacts/chathouse-<host>.apk
+services:
+  apk-builder:
+    build:
+      context: ./docker/android
+      dockerfile: Dockerfile
+    image: chathouse-apk-builder
+    environment:
+      # Your PC's LAN IP (what the phone connects to), or 127.0.0.1 for the
+      # adb-reverse-over-USB mode. Required — compose aborts with the message
+      # below if unset.
+      BACKEND_HOST: ${BACKEND_HOST:?Set BACKEND_HOST to your PC LAN IP (e.g. 192.168.1.42) or 127.0.0.1 for adb-reverse USB}
+      # arm64-v8a covers ~all modern phones. Add armeabi-v7a for old 32-bit ones.
+      APK_ABIS: ${APK_ABIS:-arm64-v8a}
+      # Optional; without it the in-app Map tab renders blank.
+      GOOGLE_MAPS_API_KEY: ${GOOGLE_MAPS_API_KEY:-}
+    volumes:
+      - .:/src:ro # repo source, read-only (host tree stays clean)
+      - ./artifacts:/output # finished APK lands here
+      - apk-node-modules:/build/node_modules # cached deps (fast re-builds)
+      - apk-gradle-cache:/opt/gradle-cache # cached Gradle + wrapper
+
+volumes:
+  apk-node-modules:
+  apk-gradle-cache:

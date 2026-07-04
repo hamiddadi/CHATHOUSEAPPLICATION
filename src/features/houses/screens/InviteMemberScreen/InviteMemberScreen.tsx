@@ -17,15 +17,19 @@ import type { RoomStackParamList } from '../../../../core/navigation/types';
 import type { User } from '../../../../shared/types/domain';
 import { useDebouncedValue } from '../../../../shared/hooks/useDebouncedValue';
 import { useSearchUsers } from '../../../profile/hooks/useProfile';
-import { useInviteToHouse } from '../../hooks/useHouses';
+import { useHouseInviteLink, useInviteToHouse } from '../../hooks/useHouses';
 
 type Nav = NativeStackNavigationProp<RoomStackParamList, 'InviteMember'>;
 type Route = RouteProp<RoomStackParamList, 'InviteMember'>;
 
-// Single source of truth for the invite link so the copied/shared URL and the
-// on-screen text can never drift apart.
-const INVITE_HOST = 'app.chathouse.com';
-const INVITE_BASE_URL = `https://${INVITE_HOST}/invite`;
+// The copied/shared URL comes from the server (it carries a signed token
+// aligned with the `house/:houseId/invite/:token` deep link route) so the
+// displayed and copied links can never drift apart.
+//
+// Per-user invite outcome: 'sent' (a fresh invitation was dispatched) vs
+// 'member' (backend reported sent:0 → the user is already a member, so we must
+// NOT claim a new invite was sent).
+type InviteState = 'sent' | 'member';
 
 // Match the debounce convention used by the other user-search screens
 // (InviteToRoomScreen / ExploreScreen) so each keystroke doesn't fire a request.
@@ -33,12 +37,12 @@ const SEARCH_DEBOUNCE_MS = 250;
 
 interface UserRowProps {
   user: User;
-  invited: boolean;
+  state: InviteState | undefined;
   onInvite: (id: string) => void;
   t: TFunction;
 }
 
-const UserRow: React.FC<UserRowProps> = memo(({ user, invited, onInvite, t }) => {
+const UserRow: React.FC<UserRowProps> = memo(({ user, state, onInvite, t }) => {
   const handle = useCallback(() => onInvite(user.id), [onInvite, user.id]);
   return (
     <View className="flex-row items-center gap-md p-md rounded-md bg-overlay-white-5">
@@ -47,9 +51,13 @@ const UserRow: React.FC<UserRowProps> = memo(({ user, invited, onInvite, t }) =>
         <Text className="text-md font-body-bold text-ink">{user.displayName}</Text>
         <Text className="text-xs font-body text-ink-muted">@{user.username}</Text>
       </View>
-      {invited ? (
+      {state !== undefined ? (
         <Button
-          label={t('houses.invite.invited', 'Invited')}
+          label={
+            state === 'member'
+              ? t('houses.invite.alreadyMember', 'Member')
+              : t('houses.invite.invited', 'Invited')
+          }
           variant="primaryContainer"
           size="sm"
           leftIcon={<MaterialIcons name="check" size={16} color={colors.onPrimaryContainer} />}
@@ -74,16 +82,22 @@ export const InviteMemberScreen: React.FC = () => {
   const route = useRoute<Route>();
   const insets = useSafeAreaInsets();
   const [query, setQuery] = useState('');
-  const [invited, setInvited] = useState<Record<string, boolean>>({});
+  const [invited, setInvited] = useState<Record<string, InviteState>>({});
   const debouncedQuery = useDebouncedValue(query.trim(), SEARCH_DEBOUNCE_MS);
 
   const { data: users, isLoading } = useSearchUsers(debouncedQuery);
   const inviteToHouse = useInviteToHouse();
+  // Signed, shareable invite link (carries a token routable via the
+  // `house/:houseId/invite/:token` deep link). Falls back to a placeholder
+  // link display while it loads.
+  const { data: inviteLink } = useHouseInviteLink(route.params.houseId);
 
   const handleClose = useCallback(() => navigation.goBack(), [navigation]);
 
-  const inviteUrl = `${INVITE_BASE_URL}/${route.params.houseId}`;
+  const inviteUrl = inviteLink?.url;
+  const displayLink = inviteUrl?.replace(/^https?:\/\//, '') ?? t('houses.invite.linkLoading', '…');
   const handleCopyLink = useCallback(async () => {
+    if (!inviteUrl) return;
     try {
       await Clipboard.setString(inviteUrl);
       Alert.alert(
@@ -117,8 +131,11 @@ export const InviteMemberScreen: React.FC = () => {
       inviteToHouse.mutate(
         { houseId: route.params.houseId, userIds: [id] },
         {
-          // Only mark as invited once the backend confirms — so a failed request
-          onSuccess: () => setInvited(prev => ({ ...prev, [id]: true })),
+          // Only reflect a real invitation once the backend confirms. sent === 0
+          // means the target was already a member (nothing was dispatched), so
+          // label the row "Member" rather than falsely claiming "Invited".
+          onSuccess: result =>
+            setInvited(prev => ({ ...prev, [id]: result.sent > 0 ? 'sent' : 'member' })),
           onError: () =>
             Alert.alert(
               t('houses.invite.errorTitle', 'Erreur'),
@@ -132,7 +149,7 @@ export const InviteMemberScreen: React.FC = () => {
 
   const renderItem = useCallback(
     ({ item }: { item: User }) => (
-      <UserRow user={item} invited={!!invited[item.id]} onInvite={handleInvite} t={t} />
+      <UserRow user={item} state={invited[item.id]} onInvite={handleInvite} t={t} />
     ),
     [handleInvite, invited, t],
   );
@@ -160,15 +177,21 @@ export const InviteMemberScreen: React.FC = () => {
         <View className="flex-row items-center gap-sm p-md rounded-md bg-overlay-white-5 border border-overlay-white-10">
           <MaterialIcons name="link" size={18} color={colors.textMuted} />
           <Text className="flex-1 text-xs font-body text-ink-muted" numberOfLines={1}>
-            {`${INVITE_HOST}/invite/${route.params.houseId}`}
+            {displayLink}
           </Text>
           <Pressable
             onPress={handleCopyLink}
+            disabled={!inviteUrl}
             accessibilityRole="button"
             accessibilityLabel={t('houses.invite.copyA11y', 'Copy invite link')}
-            hitSlop={6}
+            accessibilityState={{ disabled: !inviteUrl }}
+            hitSlop={12}
           >
-            <MaterialIcons name="content-copy" size={18} color={colors.primary} />
+            <MaterialIcons
+              name="content-copy"
+              size={18}
+              color={inviteUrl ? colors.primary : colors.textMuted}
+            />
           </Pressable>
         </View>
 
@@ -176,6 +199,7 @@ export const InviteMemberScreen: React.FC = () => {
           placeholder={t('houses.invite.searchPlaceholder', 'Search users')}
           value={query}
           onChangeText={setQuery}
+          accessibilityLabel={t('houses.invite.searchA11y', 'Search users to invite')}
           leftAdornment={<MaterialIcons name="search" size={18} color={colors.textMuted} />}
         />
       </View>
@@ -188,6 +212,7 @@ export const InviteMemberScreen: React.FC = () => {
           renderItem={renderItem}
           keyExtractor={keyExtractor}
           ItemSeparatorComponent={renderSeparator}
+          keyboardShouldPersistTaps="handled"
           contentContainerStyle={[
             styles.list,
             { paddingBottom: insets.bottom + spacing.giant, paddingTop: spacing.lg },

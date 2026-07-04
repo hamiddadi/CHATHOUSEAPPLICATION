@@ -1,11 +1,14 @@
 /**
- * AdminAuditLogScreen render tests. No screen props; read-only surface (the only
- * interactive control is AdminHeader's back arrow, exercised here). Data lives
- * at `adminKeys.auditLog({ limit: 100 })` as Paginated<AdminAuditLogEntry>.
+ * AdminAuditLogScreen render tests. No screen props. The log is now cursor-
+ * paginated + filterable by action: data lives at
+ * `adminKeys.auditLogInfinite({ limit: 100, action: undefined })` as react-query
+ * `InfiniteData` (pages of `Paginated<AdminAuditLogEntry>`). We exercise the
+ * back arrow, the action filter chips, and cursor pagination.
  */
 import React from 'react';
-import { fireEvent } from '@testing-library/react-native';
+import { fireEvent, waitFor } from '@testing-library/react-native';
 import { adminKeys } from '../hooks/useAdmin';
+import { adminService } from '../services/adminService';
 import type { AdminAuditLogEntry, Paginated } from '../types/admin.types';
 import { makeNavigationSpy } from '../../../test-utils/navigationMock';
 import { renderScreen, mockAuthenticated, resetAuth } from '../../../test-utils/renderScreen';
@@ -28,13 +31,24 @@ const fakeEntry = (overrides: Partial<AdminAuditLogEntry> = {}): AdminAuditLogEn
   ...overrides,
 });
 
-const seedLog = (entries: AdminAuditLogEntry[]) => {
+// The screen's default query params (no filter → action: undefined).
+const DEFAULT_PARAMS = { limit: 100, action: undefined };
+
+const seedLog = (
+  entries: AdminAuditLogEntry[],
+  params: Record<string, unknown> = DEFAULT_PARAMS,
+) => {
   const page: Paginated<AdminAuditLogEntry> = {
     data: entries,
     nextCursor: null,
     hasMore: false,
   };
-  return [{ key: [...adminKeys.auditLog({ limit: 100 })], data: page }];
+  return [
+    {
+      key: [...adminKeys.auditLogInfinite(params)],
+      data: { pages: [page], pageParams: [undefined] },
+    },
+  ];
 };
 
 describe('AdminAuditLogScreen', () => {
@@ -72,5 +86,65 @@ describe('AdminAuditLogScreen', () => {
     // AdminHeader renders a "Retour" (back) Pressable wired to useNavigation.
     fireEvent.press(getByLabelText('Retour'));
     expect(navigation.goBack).toHaveBeenCalledTimes(1);
+  });
+
+  it('tapping an action filter chip requeries with that action', async () => {
+    // Selecting "User suspended" must refetch scoped to USER_SUSPENDED.
+    const listSpy = jest
+      .spyOn(adminService, 'listAuditLog')
+      .mockResolvedValue({ data: [fakeEntry({ id: 'flt-1' })], nextCursor: null, hasMore: false });
+
+    const { getByLabelText } = renderScreen(<AdminAuditLogScreen />, {
+      seedQueryData: seedLog([fakeEntry()]),
+    });
+
+    // Chip label comes from the shared action i18n map.
+    fireEvent.press(getByLabelText('User suspended'));
+
+    await waitFor(() =>
+      expect(listSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'USER_SUSPENDED', limit: 100 }),
+      ),
+    );
+  });
+
+  it('fetches the next cursor page on end-reached, revealing page-2 entries', async () => {
+    const page1: Paginated<AdminAuditLogEntry> = {
+      data: [
+        fakeEntry({
+          id: 'a-1',
+          actor: { id: 'x', username: 'page1actor', displayName: null, avatarUrl: null },
+        }),
+      ],
+      nextCursor: 'CURSOR_2',
+      hasMore: true,
+    };
+    const listSpy = jest.spyOn(adminService, 'listAuditLog').mockResolvedValue({
+      data: [
+        fakeEntry({
+          id: 'a-2',
+          actor: { id: 'y', username: 'page2actor', displayName: null, avatarUrl: null },
+        }),
+      ],
+      nextCursor: null,
+      hasMore: false,
+    });
+
+    const { getByTestId, queryByText, getByText } = renderScreen(<AdminAuditLogScreen />, {
+      seedQueryData: [
+        {
+          key: [...adminKeys.auditLogInfinite(DEFAULT_PARAMS)],
+          data: { pages: [page1], pageParams: [undefined] },
+        },
+      ],
+    });
+
+    expect(queryByText('@page2actor')).toBeNull();
+    fireEvent(getByTestId('admin-audit-list'), 'onEndReached');
+
+    await waitFor(() =>
+      expect(listSpy).toHaveBeenCalledWith(expect.objectContaining({ cursor: 'CURSOR_2' })),
+    );
+    await waitFor(() => expect(getByText('@page2actor')).toBeTruthy());
   });
 });

@@ -14,8 +14,11 @@
  * speaking" / connection state keep flowing even while RoomScreen is unmounted.
  */
 import { create } from 'zustand';
+import type { Socket } from 'socket.io-client';
 import { getSocket } from '../../../shared/services/realtime/socketClient';
 import { errorMessage } from '../../../shared/utils/errorMessage';
+import { useAuthStore } from '../../auth/store/authStore';
+import { useCurrentRoomStore } from '../store/currentRoomStore';
 import { startRoomAudio, type RoomAudioHandle } from './roomAudioService';
 
 export type RoomAudioStatus =
@@ -54,8 +57,13 @@ let startInFlight: Promise<void> | null = null;
 
 const setScore = (key: string, speaking: boolean): void => {
   useRoomAudioStore.setState(s => {
+    const value = speaking ? 1 : 0;
+    // ActiveSpeakersChanged ticks re-report unchanged levels continuously;
+    // skip the state write (and the resulting full re-render of every
+    // scores subscriber) when nothing actually changed.
+    if (s.scores.get(key) === value) return {};
     const next = new Map(s.scores);
-    next.set(key, speaking ? 1 : 0);
+    next.set(key, value);
     return { scores: next };
   });
 };
@@ -67,6 +75,38 @@ const dropScore = (key: string): void => {
     next.delete(key);
     return { scores: next };
   });
+};
+
+// ─── Session-level room lifecycle ────────────────────────────────────
+// `room:ended` / `room:user_kicked` must be honoured even while RoomScreen is
+// UNMOUNTED (the user navigated away and only the mini-bar remains) — the
+// screen-level listeners die with the screen, so without this the LiveKit
+// audio and the mini-bar survived the host closing the room. Bound for the
+// lifetime of the audio session; torn down in stop().
+let roomLifecycleCleanup: (() => void) | null = null;
+
+const bindRoomLifecycle = (socket: Socket, roomId: string): void => {
+  roomLifecycleCleanup?.();
+  const endSession = (): void => {
+    useCurrentRoomStore.getState().clear(); // drop the mini-bar
+    void roomAudioSession.stop(); // stop LiveKit + foreground service
+  };
+  const endedHandler = (payload?: { roomId?: string }): void => {
+    if (payload?.roomId && payload.roomId !== roomId) return;
+    endSession();
+  };
+  const kickedHandler = (payload?: { userId?: string; roomId?: string }): void => {
+    if (!payload || payload.userId !== useAuthStore.getState().user?.id) return;
+    if (payload.roomId && payload.roomId !== roomId) return;
+    endSession();
+  };
+  socket.on('room:ended', endedHandler);
+  socket.on('room:user_kicked', kickedHandler);
+  roomLifecycleCleanup = () => {
+    socket.off('room:ended', endedHandler);
+    socket.off('room:user_kicked', kickedHandler);
+    roomLifecycleCleanup = null;
+  };
 };
 
 export const roomAudioSession = {
@@ -96,6 +136,12 @@ export const roomAudioSession = {
       try {
         const socket = await getSocket();
         if (!socket) throw new Error('socket not connected');
+        // Bind BEFORE the (slow) LiveKit connect, and even if it later throws
+        // (mic denied → the user stays in the room as a listener): the
+        // room-closed/kicked teardown must work in both cases. Guarded on
+        // boundRoomId so a stop()/switch that raced ahead doesn't get its
+        // fresh listeners clobbered by this stale start.
+        if (boundRoomId === roomId) bindRoomLifecycle(socket, roomId);
         const h = await startRoomAudio({
           socket,
           roomId,
@@ -137,6 +183,7 @@ export const roomAudioSession = {
   async stop(): Promise<void> {
     boundRoomId = null;
     startInFlight = null;
+    roomLifecycleCleanup?.();
     const h = handle;
     handle = null;
     useRoomAudioStore.setState({ roomId: null, status: 'idle', error: null, scores: new Map() });

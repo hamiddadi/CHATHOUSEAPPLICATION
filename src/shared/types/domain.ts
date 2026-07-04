@@ -150,6 +150,9 @@ export interface Message {
   durationMs: number | null;
   sentAt: string;
   isMine: boolean;
+  // Read receipt: true once the recipient opened the thread. Optional so
+  // legacy mocks/payloads without the flag stay valid (treated as unread).
+  isRead?: boolean;
 }
 
 export interface Conversation {

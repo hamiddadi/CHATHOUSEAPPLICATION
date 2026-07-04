@@ -84,7 +84,16 @@ export const SuggestedFollowsRoute: React.FC = () => {
   return (
     <View style={styles.container}>
       <View style={styles.body}>
-        <ExtSuggestedFollowsScreen onFollow={user => follow.mutate(user.id)} onTapUser={() => {}} />
+        {/* Pass mutateAsync (not mutate): the screen's optimistic "Following"
+            state rolls back via a `.catch` on the returned promise, which only
+            rejects with mutateAsync. `follow.mutate` is fire-and-forget (void)
+            and would swallow the failure, leaving a lying "Following" label. */}
+        <ExtSuggestedFollowsScreen
+          onFollow={async user => {
+            await follow.mutateAsync(user.id);
+          }}
+          onTapUser={() => {}}
+        />
       </View>
       <View style={[styles.footer, { paddingBottom: insets.bottom + spacing.lg }]}>
         <Button

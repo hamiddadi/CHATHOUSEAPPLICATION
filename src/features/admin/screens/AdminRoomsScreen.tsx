@@ -9,7 +9,7 @@ import { colors, palette, radii, spacing, withAlpha } from '../../../shared/cons
 import { errorMessage } from '../../../shared/utils/errorMessage';
 import { AdminHeader } from '../components/AdminHeader';
 import { useAdminRooms, useForceEndRoom } from '../hooks/useAdmin';
-import { promptForReason } from '../promptForReason';
+import { useReasonPrompt } from '../hooks/useReasonPrompt';
 import type { AdminRoom } from '../types/admin.types';
 
 const RoomRow: React.FC<{
@@ -71,9 +71,19 @@ export const AdminRoomsScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const { data: rooms, isLoading, isError, refetch, isRefetching } = useAdminRooms({ live: true });
   const forceEnd = useForceEndRoom();
+  // Reason collection: native prompt on iOS, feature-local modal on Android.
+  const { prompt: promptForReason, modal: reasonModal } = useReasonPrompt();
 
   const handleForceEnd = (roomId: string) => {
-    const fire = (reason: string) =>
+    void promptForReason({
+      title: t('admin.rooms.closeRoom'),
+      message: t('admin.rooms.confirmClose'),
+      confirmLabel: t('admin.rooms.closeRoom'),
+      cancelLabel: t('common.cancel', 'Cancel'),
+      defaultReason: t('admin.rooms.defaultReason', 'Admin'),
+    }).then(reason => {
+      // null = the admin cancelled — do not force-end the room.
+      if (reason === null) return;
       forceEnd.mutate(
         { roomId, reason },
         {
@@ -84,16 +94,7 @@ export const AdminRoomsScreen: React.FC = () => {
             ),
         },
       );
-    promptForReason(
-      {
-        title: t('admin.rooms.closeRoom'),
-        message: t('admin.rooms.confirmClose'),
-        confirmLabel: 'OK',
-        defaultReason: 'Admin',
-        androidConfirm: { message: t('admin.rooms.confirmClose'), confirmLabel: 'OK' },
-      },
-      fire,
-    );
+    });
   };
 
   return (
@@ -103,7 +104,7 @@ export const AdminRoomsScreen: React.FC = () => {
         <Text className="text-xs text-ink-muted">
           {t(
             'admin.rooms.forceEndNotice',
-            'Forcing termination notifies all participants and closes the LiveKit channel.',
+            'Forcing termination notifies all participants and closes the audio channel.',
           )}
         </Text>
       </View>
@@ -114,6 +115,8 @@ export const AdminRoomsScreen: React.FC = () => {
         <EmptyState
           title={t('common.error', 'Error')}
           description={t('admin.rooms.errorLoadingRooms', 'Unable to load rooms.')}
+          actionLabel={t('common.retry', 'Retry')}
+          onAction={() => void refetch()}
         />
       ) : (
         <FlatList
@@ -138,6 +141,7 @@ export const AdminRoomsScreen: React.FC = () => {
           showsVerticalScrollIndicator={false}
         />
       )}
+      {reasonModal}
     </View>
   );
 };

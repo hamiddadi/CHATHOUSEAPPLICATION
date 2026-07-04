@@ -115,20 +115,49 @@ export const houseService = {
     return res.data.data;
   },
 
-  async invite(houseId: string, userIds: readonly string[]): Promise<{ sent: number }> {
-    const res = await apiClient.post<Envelope<{ sent: number }>>(`/clubs/${houseId}/invite`, {
-      userIds,
-    });
+  async invite(
+    houseId: string,
+    userIds: readonly string[],
+  ): Promise<{ sent: number; token: string; url: string }> {
+    // The backend returns a signed, shareable invite token/URL alongside the
+    // count of direct invitations dispatched — even when `sent === 0` (e.g. all
+    // targets were already members), so the "copy link" affordance always has a
+    // routable link to hand out.
+    const res = await apiClient.post<Envelope<{ sent: number; token: string; url: string }>>(
+      `/clubs/${houseId}/invite`,
+      { userIds },
+    );
     return res.data.data;
+  },
+
+  /**
+   * Mint a shareable invite link (signed token) without inviting any specific
+   * user — the `/invite` endpoint accepts an empty target list and returns the
+   * token/URL. Used by the "copy invite link" affordance so the shared URL
+   * carries a real token aligned with the `house/:houseId/invite/:token` route.
+   */
+  async getInviteLink(houseId: string): Promise<{ token: string; url: string }> {
+    const res = await apiClient.post<Envelope<{ sent: number; token: string; url: string }>>(
+      `/clubs/${houseId}/invite`,
+      { userIds: [] },
+    );
+    return { token: res.data.data.token, url: res.data.data.url };
   },
 
   async acceptInvitation(
     houseId: string,
-    _inviteToken: string | undefined,
-  ): Promise<{ joined: true }> {
-    // The invite token is carried by the CLUB_INVITE notification payload;
-    // the backend only needs the club id to add the current user as a member.
-    const res = await apiClient.post<Envelope<{ joined: true }>>(`/clubs/${houseId}/accept`);
+    inviteToken: string | undefined,
+  ): Promise<{ joined: true; alreadyMember?: boolean }> {
+    // Send the signed invite token when we have one (from a shared invite link):
+    // the backend verifies its signature + expiry and can grant entry into a
+    // PRIVATE house without a per-user notification. When no token is present
+    // (accepted from an in-app CLUB_INVITE notification) the backend falls back
+    // to that notification. `alreadyMember` lets the UI show an idempotent
+    // "you're already a member" message rather than a fresh-join one.
+    const res = await apiClient.post<Envelope<{ joined: true; alreadyMember?: boolean }>>(
+      `/clubs/${houseId}/accept`,
+      inviteToken ? { inviteToken } : {},
+    );
     return res.data.data;
   },
 

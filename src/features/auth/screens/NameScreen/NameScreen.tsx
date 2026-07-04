@@ -16,6 +16,12 @@ type Route = RouteProp<AuthStackParamList, 'Name'>;
 
 const NAME_MAX = 50;
 
+// Strip Unicode control (Cc) and format (Cf) characters — bell/escape codes,
+// zero-width joiners, RTL-override tricks — that have no place in a name.
+// Visible characters (letters in any script, emoji…) pass through untouched.
+const CONTROL_CHARS = /[\p{Cc}\p{Cf}]/gu;
+const sanitizeName = (text: string): string => text.replace(CONTROL_CHARS, '');
+
 /**
  * Real-name step. Clubhouse collects the user's name BEFORE the @username, so
  * identity is anchored on a real name. We stash it in the onboarding store
@@ -55,8 +61,8 @@ export const NameScreen: React.FC = () => {
         <Pressable
           onPress={handleBack}
           accessibilityRole="button"
-          accessibilityLabel={t('common.close', 'Back')}
-          hitSlop={8}
+          accessibilityLabel={t('common.back', 'Back')}
+          hitSlop={12}
         >
           <MaterialIcons name="arrow-back" size={24} color={colors.text} />
         </Pressable>
@@ -80,7 +86,7 @@ export const NameScreen: React.FC = () => {
             label={t('auth.name.firstNameLabel', 'First name')}
             placeholder={t('auth.name.firstNamePlaceholder', 'Jane')}
             value={firstName}
-            onChangeText={setFirstName}
+            onChangeText={text => setFirstName(sanitizeName(text))}
             autoCapitalize="words"
             autoCorrect={false}
             autoFocus
@@ -91,7 +97,7 @@ export const NameScreen: React.FC = () => {
             label={t('auth.name.lastNameLabel', 'Last name')}
             placeholder={t('auth.name.lastNamePlaceholder', 'Doe')}
             value={lastName}
-            onChangeText={setLastName}
+            onChangeText={text => setLastName(sanitizeName(text))}
             autoCapitalize="words"
             autoCorrect={false}
             maxLength={NAME_MAX}

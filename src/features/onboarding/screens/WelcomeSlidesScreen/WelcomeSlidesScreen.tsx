@@ -1,12 +1,12 @@
 import React, { useCallback, useRef, useState } from 'react';
 import {
-  Dimensions,
   FlatList,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
   Pressable,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import MaterialIcons from '@react-native-vector-icons/material-icons';
@@ -33,16 +33,22 @@ const SLIDES: readonly SlideDef[] = [
   { key: 'topics', icon: 'tag' },
 ] as const;
 
-const { width: WINDOW_WIDTH } = Dimensions.get('window');
-
 export const WelcomeSlidesScreen: React.FC = () => {
   const navigation = useNavigation<Nav>();
   const insets = useSafeAreaInsets();
   const { t } = useTranslation();
+  // Live window width (not a module-level Dimensions snapshot) so paging
+  // offsets stay correct in split-screen / foldable / rotation scenarios.
+  const { width: windowWidth } = useWindowDimensions();
   const listRef = useRef<FlatList<SlideDef>>(null);
   const [index, setIndex] = useState(0);
+  // One-way latch: "Skip" / "Get started" can be tapped twice before the
+  // async markSeen resolves — without it, `replace` fires twice.
+  const finishingRef = useRef(false);
 
   const goLanding = useCallback(async () => {
+    if (finishingRef.current) return;
+    finishingRef.current = true;
     await welcomeStorage.markSeen();
     // `replace` so back-swipe doesn't take the user back into the slides
     // after they've finished them.
@@ -62,14 +68,17 @@ export const WelcomeSlidesScreen: React.FC = () => {
     listRef.current?.scrollToIndex({ index: next, animated: true });
   }, [goLanding, index]);
 
-  const onMomentumEnd = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const next = Math.round(e.nativeEvent.contentOffset.x / WINDOW_WIDTH);
-    setIndex(next);
-  }, []);
+  const onMomentumEnd = useCallback(
+    (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const next = Math.round(e.nativeEvent.contentOffset.x / windowWidth);
+      setIndex(next);
+    },
+    [windowWidth],
+  );
 
   const renderItem = useCallback(
     ({ item }: { item: SlideDef }) => (
-      <View style={{ width: WINDOW_WIDTH }} className="px-xxl items-center justify-center">
+      <View style={{ width: windowWidth }} className="px-xxl items-center justify-center">
         <View className="w-32 h-32 rounded-pill bg-primary-container items-center justify-center mb-xxxl">
           <MaterialIcons name={item.icon} size={56} color={colors.primary} />
         </View>
@@ -81,7 +90,7 @@ export const WelcomeSlidesScreen: React.FC = () => {
         </Text>
       </View>
     ),
-    [t],
+    [t, windowWidth],
   );
 
   const isLast = index === SLIDES.length - 1;
@@ -91,7 +100,7 @@ export const WelcomeSlidesScreen: React.FC = () => {
       {/* Skip button — hidden on the last slide since "Get started" closes the flow. */}
       <View className="flex-row justify-end px-xxl py-lg" style={styles.headerRow}>
         {!isLast && (
-          <Pressable onPress={goLanding} accessibilityRole="button" hitSlop={8}>
+          <Pressable onPress={goLanding} accessibilityRole="button" hitSlop={12}>
             <Text className="text-sm font-body-medium text-ink-muted">
               {t('onboarding.welcome.skip')}
             </Text>
@@ -109,14 +118,23 @@ export const WelcomeSlidesScreen: React.FC = () => {
         showsHorizontalScrollIndicator={false}
         onMomentumScrollEnd={onMomentumEnd}
         getItemLayout={(_d, i) => ({
-          length: WINDOW_WIDTH,
-          offset: WINDOW_WIDTH * i,
+          length: windowWidth,
+          offset: windowWidth * i,
           index: i,
         })}
       />
 
-      {/* Progress dots — cheap, no animation library needed. */}
-      <View className="flex-row justify-center gap-sm py-lg">
+      {/* Progress dots — cheap, no animation library needed. Exposed to screen
+          readers as a single "slide x of y" progress announcement. */}
+      <View
+        className="flex-row justify-center gap-sm py-lg"
+        accessible
+        accessibilityLabel={t('onboarding.welcome.slideProgress', {
+          current: index + 1,
+          total: SLIDES.length,
+          defaultValue: `Slide ${index + 1} of ${SLIDES.length}`,
+        })}
+      >
         {SLIDES.map((s, i) => (
           <View
             key={s.key}
