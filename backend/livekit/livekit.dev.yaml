@@ -8,7 +8,11 @@ rtc:
   tcp_port: 7881
   port_range_start: 41100
   port_range_end: 41199
-  use_external_ip: true
+  # Advertise the hotspot gateway IP for media ICE candidates so the phone (on
+  # 192.168.137.x) can reach the host's published UDP ports. use_external_ip
+  # (STUN) would pick the public / venue-Wi-Fi IP the phone can't reach.
+  use_external_ip: false
+  node_ip: 192.168.137.1
 logging:
   level: info
   json: true

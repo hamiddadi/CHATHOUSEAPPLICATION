@@ -112,7 +112,7 @@ services:
   # in dev. Key/secret MUST match the api's LIVEKIT_API_KEY / LIVEKIT_API_SECRET
   # above. Redis isn't needed for a single node (see livekit/livekit.yaml).
   livekit:
-    image: livekit/livekit-server:v1.8
+    image: livekit/livekit-server:latest
     container_name: chathouse-livekit
     restart: unless-stopped
     command: ['--config', '/etc/livekit.yaml']

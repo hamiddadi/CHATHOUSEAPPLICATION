@@ -275,7 +275,11 @@ export const startRoomAudio = async ({
       const volumeNorm = Math.min(1, speaker.audioLevel);
 
       if (isLocal) {
-        onLocalScore?.(volumeNorm);
+        // Use LiveKit's own voice-activity flag (isSpeaking) as the primary
+        // signal — the raw audioLevel peaks well below the score threshold for
+        // many mics/devices (≈0.4), so a level-only check would never light the
+        // speaking ring. Fall back to the normalized level when the flag is off.
+        onLocalScore?.(speaker.isSpeaking ? 1 : volumeNorm);
         continue;
       }
 

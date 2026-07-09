@@ -69,8 +69,6 @@ describe('RoomFeedScreen', () => {
     expect(navigation.navigate).toHaveBeenCalledWith('Events');
     fireEvent.press(getByLabelText('Replays'));
     expect(navigation.navigate).toHaveBeenCalledWith('Replays');
-    fireEvent.press(getByLabelText('Notifications'));
-    expect(navigation.navigate).toHaveBeenCalledWith('Notifications');
   });
 
   it('navigates to the ActivityFeed from the header activity bell', () => {

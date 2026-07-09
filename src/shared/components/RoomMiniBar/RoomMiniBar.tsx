@@ -38,10 +38,16 @@ export const RoomMiniBar: React.FC = memo(() => {
 
   const handleTap = useCallback(() => {
     if (room) {
+      // The mini-bar renders in MainNavigator as a SIBLING of the tab navigator,
+      // so its navigation context is the ROOT stack (which owns 'Main'), NOT the
+      // tab navigator. Navigating straight to 'RoomsTab' therefore threw
+      // "The action 'NAVIGATE' … was not handled by any navigator" and the room
+      // never re-opened. Route through 'Main' first — the same nested shape
+      // RoomScreen uses for its cross-tab jumps (see handleMessageUser).
       // eslint-disable-next-line @typescript-eslint/no-unsafe-call -- untyped composite navigator
-      (navigation as { navigate: (screen: string, params: object) => void }).navigate('RoomsTab', {
-        screen: 'Room',
-        params: { roomId: room.id },
+      (navigation as { navigate: (screen: string, params: object) => void }).navigate('Main', {
+        screen: 'RoomsTab',
+        params: { screen: 'Room', params: { roomId: room.id } },
       });
     }
   }, [navigation, room]);

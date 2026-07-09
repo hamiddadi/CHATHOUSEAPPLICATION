@@ -49,7 +49,7 @@ const RoomActionBar: React.FC<RoomActionBarProps> = memo(
               }
               accessibilityState={{ selected: isMuted }}
               hitSlop={ACTION_HIT_SLOP}
-              className="flex-row items-center gap-sm bg-danger rounded-pill py-sm px-xl"
+              className="flex-row items-center gap-sm bg-danger rounded-pill py-sm px-sm"
             >
               <MaterialIcons
                 name={isMuted ? 'mic-off' : 'mic'}
@@ -76,7 +76,7 @@ const RoomActionBar: React.FC<RoomActionBarProps> = memo(
             }
             accessibilityState={{ selected: isHandRaised }}
             hitSlop={ACTION_HIT_SLOP}
-            className="flex-row items-center gap-sm bg-primary/20 rounded-pill py-sm px-lg"
+            className="flex-row items-center gap-sm bg-primary/20 rounded-pill py-sm px-sm"
           >
             <MaterialIcons name="pan-tool" size={ACTION_BAR_ICON_SIZE} color={colors.primary} />
             <Text className="text-sm font-body-bold text-primary">
@@ -93,7 +93,7 @@ const RoomActionBar: React.FC<RoomActionBarProps> = memo(
             accessibilityRole="button"
             accessibilityLabel={t('room.invite')}
             hitSlop={ACTION_HIT_SLOP}
-            className="flex-row items-center gap-sm bg-overlay-white-5 rounded-pill py-sm px-lg"
+            className="flex-row items-center gap-sm bg-overlay-white-5 rounded-pill py-sm px-sm"
           >
             <MaterialIcons name="person-add" size={ACTION_BAR_ICON_SIZE} color={colors.primary} />
             <Text className="text-sm font-body-bold text-primary">{t('room.invite')}</Text>
@@ -108,10 +108,14 @@ const RoomActionBar: React.FC<RoomActionBarProps> = memo(
             accessibilityRole="button"
             accessibilityLabel={t('room.leaveQuietly')}
             hitSlop={ACTION_HIT_SLOP}
-            className="flex-row items-center gap-sm border border-overlay-white-20 rounded-pill py-sm px-xl"
+            className="flex-row items-center gap-sm border border-overlay-white-20 rounded-pill py-sm px-sm"
           >
             <MaterialIcons name="logout" size={ACTION_BAR_ICON_SIZE} color={colors.danger} />
-            <Text className="text-sm font-body-bold text-white">{t('room.leaveQuietly')}</Text>
+            {/* Visible label is the SHORT "Quitter"/"Leave" so the 3- and 4-button
+                bar fits on one row without clipping the edge buttons; the full
+                "Quitter discrètement" / "Leave quietly" stays as the a11y label
+                above so intent is preserved for screen readers. */}
+            <Text className="text-sm font-body-bold text-white">{t('room.leave')}</Text>
           </Pressable>
         </Animated.View>
       </View>
@@ -124,7 +128,7 @@ const styles = StyleSheet.create({
   actionPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.sm,
+    gap: spacing.xs,
     backgroundColor: 'rgba(12,17,46,0.9)',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(255,255,255,0.1)',
