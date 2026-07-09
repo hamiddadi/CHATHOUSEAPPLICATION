@@ -7,7 +7,7 @@ const SECONDARY_AVATAR = 52;
 const OTHER_AVATAR = 40;
 
 export const HandRaisedCell: React.FC<{ listener: UserSummary }> = memo(({ listener }) => (
-  <View style={styles.gridCell}>
+  <View style={styles.secondaryCell}>
     <View style={styles.handRaisedCell}>
       <Avatar
         uri={listener.avatarUrl ?? undefined}
@@ -23,7 +23,7 @@ export const HandRaisedCell: React.FC<{ listener: UserSummary }> = memo(({ liste
 HandRaisedCell.displayName = 'HandRaisedCell';
 
 export const FollowedCell: React.FC<{ listener: UserSummary }> = memo(({ listener }) => (
-  <View style={styles.gridCell}>
+  <View style={styles.secondaryCell}>
     <Avatar
       uri={listener.avatarUrl ?? undefined}
       name={listener.displayName}
@@ -34,7 +34,7 @@ export const FollowedCell: React.FC<{ listener: UserSummary }> = memo(({ listene
 FollowedCell.displayName = 'FollowedCell';
 
 export const OtherCell: React.FC<{ listener: UserSummary }> = memo(({ listener }) => (
-  <View style={[styles.gridCell, styles.otherCell]}>
+  <View style={styles.otherCell}>
     <Avatar
       uri={listener.avatarUrl ?? undefined}
       name={listener.displayName}
@@ -45,11 +45,11 @@ export const OtherCell: React.FC<{ listener: UserSummary }> = memo(({ listener }
 OtherCell.displayName = 'OtherCell';
 
 const styles = StyleSheet.create({
-  gridCell: {
-    width: '20%',
+  secondaryCell: {
     alignItems: 'center',
   },
   otherCell: {
+    alignItems: 'center',
     opacity: 0.6,
   },
   handRaisedCell: {

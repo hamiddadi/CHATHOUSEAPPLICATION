@@ -18,32 +18,18 @@ interface RoomActionBarProps {
   viewerCanSpeak: boolean;
   isMuted: boolean;
   isHandRaised: boolean;
-  /** #32: ghost mode — only offered to listeners (non-speakers). */
-  isHidden?: boolean;
   onToggleMute: () => void;
   onToggleHand: () => void;
-  onToggleHidden?: () => void;
   /** Invite is available to every participant — opens the InviteToRoom screen. */
   onInvite: () => void;
   onLeave: () => void;
 }
 
 const RoomActionBar: React.FC<RoomActionBarProps> = memo(
-  ({
-    viewerCanSpeak,
-    isMuted,
-    isHandRaised,
-    isHidden = false,
-    onToggleMute,
-    onToggleHand,
-    onToggleHidden,
-    onInvite,
-    onLeave,
-  }) => {
+  ({ viewerCanSpeak, isMuted, isHandRaised, onToggleMute, onToggleHand, onInvite, onLeave }) => {
     const { t } = useTranslation();
     const muteBtn = useAnimatedPress({ scaleTo: 0.96 });
     const raiseBtn = useAnimatedPress({ scaleTo: 0.96 });
-    const hideBtn = useAnimatedPress({ scaleTo: 0.96 });
     const inviteBtn = useAnimatedPress({ scaleTo: 0.96 });
     const leaveBtn = useAnimatedPress({ scaleTo: 0.96 });
 
@@ -98,36 +84,6 @@ const RoomActionBar: React.FC<RoomActionBarProps> = memo(
             </Text>
           </Pressable>
         </Animated.View>
-
-        {!viewerCanSpeak && onToggleHidden ? (
-          <Animated.View style={hideBtn.animatedStyle}>
-            <Pressable
-              onPress={onToggleHidden}
-              onPressIn={hideBtn.onPressIn}
-              onPressOut={hideBtn.onPressOut}
-              accessibilityRole="button"
-              accessibilityLabel={
-                isHidden
-                  ? t('room.showSelfA11y', 'Become visible again')
-                  : t('room.hideSelfA11y', 'Go invisible')
-              }
-              accessibilityState={{ selected: isHidden }}
-              hitSlop={ACTION_HIT_SLOP}
-              className="flex-row items-center gap-sm bg-overlay-white-5 rounded-pill py-sm px-lg"
-            >
-              <MaterialIcons
-                name={isHidden ? 'visibility-off' : 'visibility'}
-                size={ACTION_BAR_ICON_SIZE}
-                color={isHidden ? colors.danger : colors.primary}
-              />
-              <Text
-                className={`text-sm font-body-bold ${isHidden ? 'text-danger' : 'text-primary'}`}
-              >
-                {isHidden ? t('room.invisible', 'Invisible') : t('room.visible', 'Visible')}
-              </Text>
-            </Pressable>
-          </Animated.View>
-        ) : null}
 
         <Animated.View style={inviteBtn.animatedStyle}>
           <Pressable

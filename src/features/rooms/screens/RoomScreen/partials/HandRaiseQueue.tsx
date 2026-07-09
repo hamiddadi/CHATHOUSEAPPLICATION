@@ -28,6 +28,7 @@ const HandRaiseQueue: React.FC<HandRaiseQueueProps> = memo(
               accessibilityLabel={
                 viewerCanModerate ? `Inviter ${l.displayName} à parler` : l.displayName
               }
+              style={styles.handRaisedCellWrap}
             >
               <HandRaisedCell listener={l} />
             </Pressable>
@@ -44,6 +45,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     rowGap: spacing.lg,
+  },
+  handRaisedCellWrap: {
+    width: '20%',
+    alignItems: 'center',
   },
 });
 

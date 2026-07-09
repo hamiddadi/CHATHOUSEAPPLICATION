@@ -20,7 +20,6 @@ import {
   useRaiseHand,
   useReportRoom,
   useRoom,
-  useSetHidden,
   useSetMute,
 } from '../../hooks/useRooms';
 import type { RoomListener } from '../../services/roomService';
@@ -89,13 +88,6 @@ export const RoomScreen: React.FC = () => {
   // showed "muted". The screen only READS it; writes go through the store.
   const isMuted = useCurrentRoomStore(s => s.isMuted);
   const [isHandRaised, setIsHandRaised] = useState(false);
-  const [isHidden, setIsHidden] = useState(false);
-  // Captured once at mount: was the viewer ALREADY in this room (mini-bar
-  // return)? Only then can "absent from the participant lists" be read as
-  // "ghost mode on" — on a fresh entry we're simply not joined yet.
-  const wasInRoomAtMountRef = useRef(
-    useCurrentRoomStore.getState().room?.id === route.params.roomId,
-  );
   // The viewer is the actor of the room end (pressed "End Room"): ignore the
   // `room:ended` broadcast echo, which would otherwise pop the screen a second
   // time and show the "Room ended" alert to the very host who closed it.
@@ -106,7 +98,6 @@ export const RoomScreen: React.FC = () => {
   const raiseHand = useRaiseHand();
   const lowerHand = useLowerHand();
   const setMute = useSetMute();
-  const setHidden = useSetHidden();
   const endRoom = useEndRoom();
   const reportRoom = useReportRoom();
   const viewerId = useAuthStore(s => s.user?.id ?? null);
@@ -220,19 +211,6 @@ export const RoomScreen: React.FC = () => {
     handHydratedRef.current = true;
     if (handRaises.some(h => h.id === viewerId)) setIsHandRaised(true);
   }, [handRaises, viewerId]);
-
-  // Hydrate ghost mode on a mini-bar RETURN: we were already joined (the store
-  // still held this room at mount), so being absent from BOTH participant
-  // lists means the server-side hidden flag is on. Never inferred on a fresh
-  // entry, where absence just means the join isn't reflected yet.
-  const hiddenHydratedRef = useRef(false);
-  useEffect(() => {
-    if (hiddenHydratedRef.current || !wasInRoomAtMountRef.current || !room || !viewerId) return;
-    hiddenHydratedRef.current = true;
-    const visible =
-      room.speakers.some(s => s.id === viewerId) || room.listeners.some(l => l.id === viewerId);
-    if (!visible) setIsHidden(true);
-  }, [room, viewerId]);
 
   // Capture mic + start producing once we're in the room. The LiveKit
   // engine auto-activates if `@livekit/react-native` is installed; in Expo
@@ -513,16 +491,6 @@ export const RoomScreen: React.FC = () => {
     },
     [handleParticipantPress],
   );
-
-  // #32: toggle ghost mode (optimistic; roll back on failure).
-  const handleToggleHidden = useCallback(() => {
-    const next = !isHidden;
-    setIsHidden(next);
-    setHidden.mutate(
-      { roomId: route.params.roomId, hidden: next },
-      { onError: () => setIsHidden(!next) },
-    );
-  }, [isHidden, route.params.roomId, setHidden]);
 
   // #39: open a 1:1 DM thread with a participant. The DM service keys
   // conversations by the peer's userId, so we open ChatDetail directly. Cross-
@@ -930,10 +898,8 @@ export const RoomScreen: React.FC = () => {
           viewerCanSpeak={viewerCanSpeak}
           isMuted={isMuted}
           isHandRaised={isHandRaised}
-          isHidden={isHidden}
           onToggleMute={handleToggleMute}
           onToggleHand={handleToggleHand}
-          onToggleHidden={handleToggleHidden}
           onInvite={() => navigation.navigate('InviteToRoom', { roomId: room.id })}
           onLeave={handleLeave}
         />
@@ -1007,8 +973,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   othersCell: {
-    flex: 1,
-    maxWidth: `${100 / OTHERS_GRID_COLUMNS}%`,
+    width: `${100 / OTHERS_GRID_COLUMNS}%`,
     alignItems: 'center',
   },
   overflowChipWrapper: {

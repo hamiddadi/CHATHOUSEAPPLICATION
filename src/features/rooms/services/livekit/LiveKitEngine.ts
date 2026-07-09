@@ -100,7 +100,13 @@ export const mapLiveKitConnectionState = (state: string): LiveKitSemanticState =
   switch (state) {
     case 'connected':
       return 'connected';
+    // livekit-client's ConnectionState has 5 values — 'connecting' and
+    // 'signalReconnecting' are transient, not failures. Folding them into
+    // 'reconnecting' avoids spurious rejoin storms if the real
+    // connectionStateChanged event is ever wired through here.
+    case 'connecting':
     case 'reconnecting':
+    case 'signalReconnecting':
       return 'reconnecting';
     case 'disconnected':
     default:
@@ -108,9 +114,31 @@ export const mapLiveKitConnectionState = (state: string): LiveKitSemanticState =
   }
 };
 
+/**
+ * Compose the LiveKit SDK surface from the TWO packages it actually lives in.
+ *
+ * `@livekit/react-native` does NOT re-export the core SDK classes `Room`,
+ * `RoomEvent`, or `ConnectionState` — those live in `livekit-client` (which
+ * @livekit/react-native pulls in as a peer dep and uses internally). Requiring
+ * only @livekit/react-native left `s.Room` undefined, so `new s.Room()` threw
+ * "Cannot read property 'prototype' of undefined" on every room entry. We
+ * therefore source:
+ *   - Room / RoomEvent / ConnectionState        ← livekit-client
+ *   - registerGlobals / AudioSession /
+ *     AndroidAudioTypePresets (native helpers)   ← @livekit/react-native
+ */
 const loadSdk = (): LiveKitSdk | null => {
   try {
-    return require('@livekit/react-native') as LiveKitSdk;
+    const rn = require('@livekit/react-native');
+    const client = require('livekit-client');
+    return {
+      Room: client.Room,
+      RoomEvent: client.RoomEvent,
+      ConnectionState: client.ConnectionState,
+      registerGlobals: rn.registerGlobals,
+      AudioSession: rn.AudioSession,
+      AndroidAudioTypePresets: rn.AndroidAudioTypePresets,
+    } as LiveKitSdk;
   } catch {
     return null;
   }
@@ -122,17 +150,24 @@ let globalsRegistered = false;
 const ensureSdk = (): LiveKitSdk => {
   if (sdk) return sdk;
   const loaded = loadSdk();
-  if (!loaded) throw new Error(LIVEKIT_UNAVAILABLE_SENTINEL);
-  sdk = loaded;
-  // Register globals once — required by @livekit/react-native for WebRTC
+  // Guard the whole SDK surface, not just module presence: if livekit-client
+  // failed to compose (Room missing) treat it as unavailable (→ 'unsupported'
+  // banner) rather than crashing later inside `new s.Room()`.
+  if (!loaded || typeof loaded.Room !== 'function') {
+    throw new Error(LIVEKIT_UNAVAILABLE_SENTINEL);
+  }
+  // Register globals BEFORE the first Room is constructed — livekit-client's
+  // RN detection reads navigator.product + global.LiveKitReactNativeGlobal,
+  // both set by @livekit/react-native's registerGlobals().
   if (!globalsRegistered) {
     try {
-      sdk.registerGlobals();
+      loaded.registerGlobals();
     } catch {
       /* noop — may already be registered */
     }
     globalsRegistered = true;
   }
+  sdk = loaded;
   return loaded;
 };
 

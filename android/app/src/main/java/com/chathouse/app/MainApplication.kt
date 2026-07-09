@@ -13,6 +13,8 @@ import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint
 import com.facebook.react.defaults.DefaultReactHost.getDefaultReactHost
 import com.facebook.react.defaults.DefaultReactNativeHost
 import com.chathouse.audio.RoomForegroundPackage
+import com.livekit.reactnative.LiveKitReactNative
+import com.livekit.reactnative.audio.AudioType
 
 class MainApplication : Application(), ReactApplication {
 
@@ -37,6 +39,12 @@ class MainApplication : Application(), ReactApplication {
 
   override fun onCreate() {
     super.onCreate()
+    // Initialize LiveKit's native Audio Device Module BEFORE any RN init
+    // (loadReactNative below). Without this, @livekit/react-native's
+    // configureAudio throws "Audio device module is not initialized! Did you
+    // remember to call LiveKitReactNative.setup in your Application.onCreate?"
+    // and audio never starts. CommunicationAudioType = we both publish + play.
+    LiveKitReactNative.setup(this, AudioType.CommunicationAudioType())
     DefaultNewArchitectureEntryPoint.releaseLevel = try {
       ReleaseLevel.valueOf(BuildConfig.REACT_NATIVE_RELEASE_LEVEL.uppercase())
     } catch (e: IllegalArgumentException) {
