@@ -133,13 +133,15 @@ Run through this **before** pushing a `v*.*.*` tag:
 
 - [ ] **CI is green** on the commit being tagged (lint, typecheck, tests,
       gitleaks).
-- [ ] **DB schema applied** — if the release changes `prisma/schema.prisma`,
-      apply it to production:
-      `npx prisma db push` (this project uses **db push**, NOT
-      `migrate deploy` — avoid P3005). Verify it's idempotent / non-destructive.
+- [ ] **DB migrations apply on boot** — the api image runs `prisma migrate deploy`
+      at startup, so a fresh OR existing prod DB is migrated automatically from
+      `prisma/migrations/` (the chain is complete as of the 2026-07 catch-up
+      migration `20260711120000_sync_schema_drift`, which is idempotent). If the
+      release ADDS a migration, confirm it applied cleanly in the deploy logs. Do
+      NOT `db push` to prod — it bypasses migration history.
 - [ ] **Database backup taken** — trigger / confirm a fresh pg dump
       (`docker/backup` stack: `docker compose -f docker-compose.yml -f
-    docker/backup/docker-compose.backup.yml ...`). Confirm the dump file
+docker/backup/docker-compose.backup.yml ...`). Confirm the dump file
       exists and is non-empty.
 - [ ] **Staging is healthy** on the same image lineage — smoke tests green on
       staging.
@@ -182,22 +184,29 @@ The API reads its config from the host's `.env` consumed by `docker-compose`.
 Keep these on the host (or your secrets manager), not in the repo. Required /
 notable:
 
-| Var                           | Required | Notes                                                        |
-| ----------------------------- | :------: | ------------------------------------------------------------ |
-| `DATABASE_URL`                |   yes    | Postgres DSN. In-compose default: `postgres:5432/chathouse`. |
-| `REDIS_URL`                   |   yes    | e.g. `redis://redis:6379`.                                   |
-| `JWT_ACCESS_SECRET`           |   yes    | zod-validated; boot fails if missing.                        |
-| `JWT_REFRESH_SECRET`          |   yes    | zod-validated; boot fails if missing.                        |
-| `CORS_ORIGINS`                |   rec    | Comma-separated allowed origins.                             |
-| `NODE_ENV`                    |   rec    | `production` on prod.                                        |
-| `MEDIASOUP_ANNOUNCED_IP`      |  yes\*   | MUST be the host's public IP, not 127.0.0.1, for live audio. |
-| `MEDIASOUP_RTC_MIN/MAX_PORT`  |   rec    | UDP port range; must be published by the host firewall.      |
-| `ICE_SERVERS_JSON`            |   rec    | STUN/TURN config sent to clients.                            |
-| `ACCOUNT_DELETION_GRACE_DAYS` |   opt    | GDPR hard-delete grace (default 30).                         |
-| `AUDIT_LOG_RETENTION_DAYS`    |   opt    | Audit log retention (default 90).                            |
-| `SENTRY_DSN`                  |   opt    | Enables error reporting (@sentry/node v8).                   |
+| Var                           | Required | Notes                                                                                     |
+| ----------------------------- | :------: | ----------------------------------------------------------------------------------------- |
+| `DATABASE_URL`                |   yes    | Postgres DSN. In-compose default: `postgres:5432/chathouse`.                              |
+| `REDIS_URL`                   |   yes    | e.g. `redis://redis:6379`.                                                                |
+| `JWT_ACCESS_SECRET`           |   yes    | zod-validated; boot fails if missing.                                                     |
+| `JWT_REFRESH_SECRET`          |   yes    | zod-validated; boot fails if missing.                                                     |
+| `CORS_ORIGINS`                |   rec    | Comma-separated allowed origins.                                                          |
+| `NODE_ENV`                    |   rec    | `production` on prod.                                                                     |
+| `LIVEKIT_URL`                 |   yes    | Public `wss://` LiveKit endpoint (Cloud or self-hosted). Live audio 503s without it.      |
+| `LIVEKIT_API_KEY`             |   yes    | LiveKit API key. Boot-guarded against the dev default in prod.                            |
+| `LIVEKIT_API_SECRET`          |   yes    | LiveKit API secret. Boot-guarded against the dev default in prod.                         |
+| `TWILIO_ACCOUNT_SID`          |   yes    | Twilio SMS — phone+OTP is the ONLY login path; prod compose fail-closes without it.       |
+| `TWILIO_AUTH_TOKEN`           |   yes    | Twilio auth token.                                                                        |
+| `TWILIO_FROM_NUMBER`          |   yes    | E.164 SMS sender number.                                                                  |
+| `FIREBASE_SERVICE_ACCOUNT`    |   opt    | FCM service-account JSON (single line) for push send; needs `PUSH_DISPATCH_ENABLED=true`. |
+| `MEDIASOUP_*`                 |   n/a    | Legacy SFU — audio is LiveKit; prod compose sets `MEDIASOUP_ENABLED=false`. Ignore.       |
+| `ICE_SERVERS_JSON`            |   opt    | STUN/TURN for self-hosted LiveKit clients behind symmetric NAT.                           |
+| `ACCOUNT_DELETION_GRACE_DAYS` |   opt    | GDPR hard-delete grace (default 30).                                                      |
+| `AUDIT_LOG_RETENTION_DAYS`    |   opt    | Audit log retention (default 90).                                                         |
+| `SENTRY_DSN`                  |   opt    | Enables error reporting (@sentry/node v8).                                                |
 
-`*` required for live audio to work across the network.
+LiveKit Cloud is the lowest-ops choice — it provides global TURN and needs only
+the three `LIVEKIT_*` values above (no self-host UDP ports / TURN sidecar).
 
 ### 6.3 GitHub Environments
 
@@ -211,13 +220,13 @@ YAML files automatically — configure them in _Settings → Environments_.
 
 ## 7. Troubleshooting
 
-| Symptom                           | Likely cause / fix                                                           |
-| --------------------------------- | ---------------------------------------------------------------------------- |
-| Deploy job auto-rolled back       | `/health` never returned 200+db+redis true. Check `docker compose logs api`. |
-| `/health` shows `database:false`  | DB unreachable / `DATABASE_URL` wrong / schema not pushed.                   |
-| `/health` shows `redis:false`     | Redis down / `REDIS_URL` wrong.                                              |
-| Boot crash, no `/health` at all   | Missing required env (JWT secrets). Check container logs.                    |
-| Live audio fails for remote users | `MEDIASOUP_ANNOUNCED_IP` is 127.0.0.1 or UDP ports not published.            |
-| GHCR push 403                     | `packages: write` permission / package visibility / token scope.             |
-| Prod job stuck "Waiting"          | Required-reviewer approval pending in the Environment gate.                  |
-| `prisma migrate deploy` P3005     | Use `prisma db push` — this project does not use migration history.          |
+| Symptom                           | Likely cause / fix                                                                                                                                                                                                |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Deploy job auto-rolled back       | `/health` never returned 200+db+redis true. Check `docker compose logs api`.                                                                                                                                      |
+| `/health` shows `database:false`  | DB unreachable / `DATABASE_URL` wrong / schema not pushed.                                                                                                                                                        |
+| `/health` shows `redis:false`     | Redis down / `REDIS_URL` wrong.                                                                                                                                                                                   |
+| Boot crash, no `/health` at all   | Missing required env (JWT secrets). Check container logs.                                                                                                                                                         |
+| Live audio fails for remote users | `MEDIASOUP_ANNOUNCED_IP` is 127.0.0.1 or UDP ports not published.                                                                                                                                                 |
+| GHCR push 403                     | `packages: write` permission / package visibility / token scope.                                                                                                                                                  |
+| Prod job stuck "Waiting"          | Required-reviewer approval pending in the Environment gate.                                                                                                                                                       |
+| `prisma migrate deploy` P3005     | A pre-existing DB has tables but no `_prisma_migrations` baseline. Baseline it: `prisma migrate resolve --applied 00000000000000_init` (repeat for later migrations), then re-deploy. Do NOT switch to `db push`. |
