@@ -18,7 +18,8 @@ import { useChatSocket } from '../../hooks/useChatSocket';
 import { useGroups } from '../../hooks/useGroups';
 import { useGroupSocket } from '../../hooks/useGroupSocket';
 import type { GroupConversation } from '../../services/groupService';
-import { OnlineUsersList } from '../../components/OnlineUsersList';
+import { OnlineUsersList, type OnlineUser } from '../../components/OnlineUsersList';
+import { usePresenceAvailable } from '../../../extensions/hooks/usePresenceAvailable';
 
 type Nav = NativeStackNavigationProp<MessageStackParamList, 'MessagesList'>;
 
@@ -183,6 +184,19 @@ export const MessagesScreen: React.FC = () => {
   const myId = useAuthStore(s => s.user?.id ?? null);
   const { data: conversations, isLoading, isError, refetch, isRefetching } = useConversations();
   const { data: groups, refetch: refetchGroups, isRefetching: isRefetchingGroups } = useGroups();
+  // "Online now" strip: people I follow who are currently online / recently-seen
+  // and free to chat (GET /api/ext/presence/available). Each carries a real peer
+  // id, so tapping opens a valid DM (OnlineUsersList uses the id as the conv id).
+  const { data: availablePeers } = usePresenceAvailable();
+  const onlineUsers = useMemo<OnlineUser[]>(
+    () =>
+      (availablePeers ?? []).map(p => ({
+        id: p.id,
+        name: p.displayName ?? p.username ?? '',
+        avatar: p.avatarUrl ?? '',
+      })),
+    [availablePeers],
+  );
 
   // Pull-to-refresh (and the error retry) must resync BOTH sources rendered on
   // this screen: the 1:1 conversations and the group threads in the header.
@@ -221,7 +235,7 @@ export const MessagesScreen: React.FC = () => {
   // own backend tables, so they're rendered above the 1:1 conversation list).
   const ListHeader = (
     <View>
-      <OnlineUsersList />
+      <OnlineUsersList users={onlineUsers} />
       {groups && groups.length > 0 ? (
         <View className="pt-sm">
           <Text className="px-xxl pb-xs text-xs font-body-bold uppercase tracking-widest text-ink-muted">

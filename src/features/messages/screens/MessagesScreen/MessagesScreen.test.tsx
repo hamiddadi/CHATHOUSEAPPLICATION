@@ -8,6 +8,7 @@ import React from 'react';
 import { fireEvent, waitFor } from '@testing-library/react-native';
 import { messageKeys } from '../../hooks/useMessages';
 import { groupKeys } from '../../hooks/useGroups';
+import { presenceAvailableKey } from '../../../extensions/hooks/usePresenceAvailable';
 import { renderScreen, mockAuthenticated, resetAuth } from '../../../../test-utils/renderScreen';
 import type { Conversation } from '../../../../shared/types/domain';
 import type { GroupConversation } from '../../services/groupService';
@@ -109,5 +110,31 @@ describe('MessagesScreen', () => {
     const row = await waitFor(() => getByLabelText('Open group Design Crew'));
     fireEvent.press(row);
     expect(navigation.navigate).toHaveBeenCalledWith('GroupChat', { conversationId: 'group-1' });
+  });
+
+  it('renders the "online now" strip and opens a DM with the real peer id', async () => {
+    const { navigation, getByLabelText } = renderScreen(<MessagesScreen />, {
+      route: { name: 'MessagesList' },
+      seedQueryData: [
+        { key: [...messageKeys.conversations()], data: [] },
+        { key: [...groupKeys.list()], data: [] },
+        {
+          key: [...presenceAvailableKey(20)],
+          data: [
+            {
+              id: 'peer-9',
+              username: 'nina',
+              displayName: 'Nina',
+              avatarUrl: null,
+              lastSeenAt: null,
+              isOnline: true,
+            },
+          ],
+        },
+      ],
+    });
+    const online = await waitFor(() => getByLabelText('Open chat with Nina'));
+    fireEvent.press(online);
+    expect(navigation.navigate).toHaveBeenCalledWith('ChatDetail', { conversationId: 'peer-9' });
   });
 });
