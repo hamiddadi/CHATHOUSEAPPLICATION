@@ -92,6 +92,18 @@ services:
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?LIVEKIT_API_KEY is required}
       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?LIVEKIT_API_SECRET is required}
       LIVEKIT_TOKEN_TTL_SECONDS: ${LIVEKIT_TOKEN_TTL_SECONDS:-3600}
+      # ─── SMS / OTP (Twilio) — REQUIRED ───
+      # Phone + OTP is the ONLY login path. With no Twilio creds the SMS sender
+      # silently stubs and every real sign-in fails, so fail loudly at boot
+      # (consistent with the other required secrets above). Number must be E.164.
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:?TWILIO_ACCOUNT_SID is required (phone+OTP is the only login path)}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:?TWILIO_AUTH_TOKEN is required (phone+OTP is the only login path)}
+      TWILIO_FROM_NUMBER: ${TWILIO_FROM_NUMBER:?TWILIO_FROM_NUMBER is required (E.164 sender, e.g. +15551234567)}
+      # ─── Push notifications (Firebase Cloud Messaging) — OPTIONAL ───
+      # Full service-account JSON as a single-line string; flip PUSH_DISPATCH_ENABLED
+      # on to actually send. Unset/false = the stack still boots, push is skipped.
+      FIREBASE_SERVICE_ACCOUNT: ${FIREBASE_SERVICE_ACCOUNT:-}
+      PUSH_DISPATCH_ENABLED: ${PUSH_DISPATCH_ENABLED:-false}
       # mediasoup is the abandoned legacy SFU — keep it OFF in production.
       MEDIASOUP_ENABLED: 'false'
       # Observability (optional but recommended).

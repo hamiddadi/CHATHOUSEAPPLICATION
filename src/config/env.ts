@@ -42,8 +42,8 @@ if (!parsed.success) {
   // `no-console: warn` lint rule) and throw so the app doesn't boot with
   // garbage values silently.
   // eslint-disable-next-line no-console
-  console.error('[env] Invalid Expo config extra:', parsed.error.flatten());
-  throw new Error('Invalid Expo config — see logs.');
+  console.error('[env] Invalid environment (@env / react-native-dotenv):', parsed.error.flatten());
+  throw new Error('Invalid environment configuration — see logs.');
 }
 
 // Fail-fast guard: a production bundle must NEVER ship pointing at a local /
@@ -58,7 +58,8 @@ if (parsed.data.ENV === 'production') {
   if (offendingLocal) {
     throw new Error(
       `[env] Production build points at a local/dev endpoint (${offendingLocal}). ` +
-        'Set API_BASE_URL / WS_BASE_URL / LIVEKIT_URL as EAS secrets to the public production hosts.',
+        'Set API_BASE_URL / WS_BASE_URL / LIVEKIT_URL in .env.production (build with ' +
+        'ENVFILE=.env.production) to the public production hosts.',
     );
   }
   const cleartext =

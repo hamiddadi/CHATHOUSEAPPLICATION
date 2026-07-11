@@ -731,7 +731,9 @@ export const RoomScreen: React.FC = () => {
                           )
                         : audio.status === 'error'
                           ? `❌ ${audio.error ?? t('room.audioError', 'Audio error')}`
-                          : t('room.audioBanner')}
+                          : audio.status === 'reconnecting'
+                            ? t('room.audioReconnecting', '🔄 Reconnecting audio…')
+                            : t('room.audioBanner')}
                 </Text>
                 {micDenied ? (
                   <Pressable

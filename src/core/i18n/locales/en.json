@@ -276,6 +276,7 @@
     "mayHaveEnded": "This room may have ended.",
     "audioBanner": "Audio coming soon — chat, hand-raise & reactions are live.",
     "audioConnecting": "🔊 Connecting audio…",
+    "audioReconnecting": "🔄 Reconnecting audio…",
     "audioUnsupported": "⚠️ Audio requires an EAS dev-client (@livekit/react-native is unavailable in Expo Go).",
     "audioError": "Audio error",
     "upcoming": "Upcoming",

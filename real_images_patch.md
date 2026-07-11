@@ -8,12 +8,12 @@ screen, or layout code — only URL string literals inside mock data files.
 
 Files touched: only mock data files (no components, no screens, no logic).
 
-| File | URLs to replace |
-|---|---|
-| `src/shared/mocks/users.mock.ts` | 16 `i.pravatar.cc/150?img=N` → `randomuser.me/api/portraits/...` |
-| `src/shared/mocks/houses.mock.ts` | 8 `i.pravatar.cc/150?img=N` → seeded `picsum.photos` |
-| `src/shared/mocks/followersOnMap.mock.ts` | transitive — consumes `MOCK_USER_SUMMARIES`, no change |
-| `src/shared/mocks/rooms.mock.ts` | transitive — same |
+| File                                      | URLs to replace                                                  |
+| ----------------------------------------- | ---------------------------------------------------------------- |
+| `src/shared/mocks/users.mock.ts`          | 16 `i.pravatar.cc/150?img=N` → `randomuser.me/api/portraits/...` |
+| `src/shared/mocks/houses.mock.ts`         | 8 `i.pravatar.cc/150?img=N` → seeded `picsum.photos`             |
+| `src/shared/mocks/followersOnMap.mock.ts` | transitive — consumes `MOCK_USER_SUMMARIES`, no change           |
+| `src/shared/mocks/rooms.mock.ts`          | transitive — same                                                |
 
 ## 2. Minimal diff — `src/shared/mocks/users.mock.ts`
 

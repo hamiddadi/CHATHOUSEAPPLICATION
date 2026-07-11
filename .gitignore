@@ -35,6 +35,10 @@ ios/
 .env
 .env.local
 .env.*.local
+# Real per-environment front-end files (contain public hosts + Maps key).
+# The committed templates are .env.example / .env.production.example.
+.env.production
+.env.staging
 
 # IDE
 .idea/

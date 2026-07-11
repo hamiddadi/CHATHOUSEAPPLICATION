@@ -138,9 +138,19 @@ jobs:
           cache-dependency-path: backend/package-lock.json
       - run: npm ci
       - run: npx prisma generate
-      - name: Push schema to CI Postgres
-        run: npx prisma db push --accept-data-loss
+      # Apply the real migration chain (init -> add_profile_view -> sync_schema_drift)
+      # exactly as production does (backend/Dockerfile runs `migrate deploy`), so CI
+      # catches migration/schema drift instead of masking it with `db push`.
+      - name: Apply migrations to CI Postgres
+        run: npx prisma migrate deploy
       - run: npm test -- --forceExit --testTimeout=60000
+      # The full suite raises AUTH_RATE_LIMIT_MAX to 1000 (a shared in-memory
+      # bucket) so the login rate-limiter assertion self-skips. Run it once in
+      # isolation with a low cap so the 429 RATE_LIMIT_001 path is covered in CI.
+      - name: Rate-limiter assertion (isolated low cap)
+        env:
+          AUTH_RATE_LIMIT_MAX: '10'
+        run: npx jest auth.coverage --runInBand --forceExit -t 'rate limiter'
 
   # ─────────────────────────── Security ────────────────────────────────────────
   secrets-scan:
