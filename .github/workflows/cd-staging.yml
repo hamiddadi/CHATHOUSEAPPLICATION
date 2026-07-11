@@ -31,9 +31,36 @@ env:
   IMAGE_NAME: ${{ github.repository }}/api
 
 jobs:
+  # ───────────────────────── Quality gate (blocks the deploy) ─────────────────
+  # Fast, service-free gate so a red codebase never auto-ships to staging. Mirrors
+  # the deterministic checks (lint + prettier + typecheck, both packages); the full
+  # backend test suite (which needs Postgres/Redis) runs in parallel in ci.yml.
+  # All commands were verified green locally before this gate was added.
+  verify:
+    name: Quality gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - name: Frontend — lint + prettier + typecheck
+        run: |
+          npm ci
+          npm run quality
+      - name: Backend — prisma generate + lint + typecheck
+        working-directory: backend
+        run: |
+          npm ci
+          npx prisma generate
+          npx eslint "src/**/*.ts" --max-warnings 0
+          npx tsc --noEmit -p tsconfig.json
+
   # ───────────────────────── Build & push image to GHCR ──────────────────────
   build-and-push:
     name: Build & push image
+    needs: verify
     runs-on: ubuntu-latest
     permissions:
       contents: read
