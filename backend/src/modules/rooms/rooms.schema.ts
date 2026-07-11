@@ -14,7 +14,9 @@ export const createRoomSchema = z
     isPrivate: z.boolean().default(false),
     roomType: z.enum(['OPEN', 'SOCIAL', 'CLOSED']).default('OPEN'),
     chatEnabled: z.boolean().default(true),
-    // TODO(phase-N): Dead flag. No server-side media recording pipeline exists yet.
+    // Opts the room into the LiveKit Egress -> S3 Replay pipeline
+    // (recordings.service). No-op unless egress is configured server-side
+    // (EGRESS_ENABLED + RECORDING_S3_*), so it is safe to leave exposed.
     recordingEnabled: z.boolean().default(false),
     maxSpeakers: z.number().int().min(1).max(50).default(10),
     clubId: z.string().min(1).optional(),

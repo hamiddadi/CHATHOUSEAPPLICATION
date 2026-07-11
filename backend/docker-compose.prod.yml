@@ -142,7 +142,10 @@ services:
   # Production-grade self-hosting also needs a TURN server for clients behind
   # symmetric NAT — see https://docs.livekit.io/home/self-hosting/.
   livekit:
-    image: livekit/livekit-server:v1.8
+    # Pinned to v1.12.0: the client (livekit-client 2.19 via @livekit/react-native)
+    # cannot negotiate against v1.8 ("v1 RTC path not found" / signalling timeout).
+    # v1.12.0 is the version the dev stack runs and is verified against this client.
+    image: livekit/livekit-server:v1.12.0
     container_name: chathouse-livekit
     profiles: ['selfhost']
     restart: unless-stopped

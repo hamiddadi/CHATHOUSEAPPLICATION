@@ -187,9 +187,10 @@ export const roomsService = {
         isPrivate: input.isPrivate,
         roomType: input.roomType ?? 'OPEN',
         chatEnabled: input.chatEnabled,
-        // TODO(phase-N): recordingEnabled is a schema placeholder — no
-        // server-side recording pipeline (S3/GCS + transcoding) exists yet.
-        // Do NOT expose in client UI until the pipeline is implemented.
+        // recordingEnabled opts the room into the LiveKit Egress -> S3 Replay
+        // pipeline (started below via recordingsService). It is a no-op unless
+        // egress is configured server-side (EGRESS_ENABLED + RECORDING_S3_*), so
+        // it is safe to leave exposed — recordings simply never start when off.
         recordingEnabled: input.recordingEnabled ?? false,
         maxSpeakers: input.maxSpeakers,
         hostId,
