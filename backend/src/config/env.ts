@@ -233,3 +233,26 @@ if (!parsed.success) {
 
 export const env = parsed.data;
 export type Env = typeof env;
+
+// Defense in depth: refuse to boot in production if a secret still holds a
+// well-known DEV default (e.g. copied from docker-compose.yml). docker-compose.prod.yml
+// already REQUIRES these vars, but a copy-paste of a dev value would otherwise
+// pass silently. Fails safe — only trips in production, only on an exact match.
+if (env.NODE_ENV === 'production') {
+  const DEV_DEFAULTS = [
+    ['JWT_ACCESS_SECRET', 'dev_only_access_secret_change_me_0123456789abcdef'],
+    ['JWT_REFRESH_SECRET', 'dev_only_refresh_secret_change_me_0123456789abcdef'],
+    ['LIVEKIT_API_KEY', 'devkey'],
+    ['LIVEKIT_API_SECRET', 'devsecretdevsecretdevsecretdevsecret'],
+  ] as const;
+  const offenders = DEV_DEFAULTS.filter(([key, devValue]) => env[key] === devValue).map(
+    ([key]) => key,
+  );
+  if (offenders.length > 0) {
+    // eslint-disable-next-line no-console
+    console.error(
+      `❌ Refusing to start in production: these secrets still hold their DEV default — ${offenders.join(', ')}. Set real values (see backend/.env.prod.example).`,
+    );
+    process.exit(1);
+  }
+}
