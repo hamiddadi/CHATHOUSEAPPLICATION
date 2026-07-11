@@ -1,0 +1,10 @@
+{
+  "//": "Android builds run via ./gradlew / the react-native CLI, so the Java/Gradle IDE tooling is intentionally NOT used here — it only produces phantom 'unable to resolve class' / 'project cannot be built' diagnostics on the library build.gradle files under node_modules (they resolve fine at real build time). If any of these are installed, disable them for this Workspace. See the rationale in settings.json.",
+  "recommendations": [],
+  "unwantedRecommendations": [
+    "vscjava.vscode-gradle",
+    "redhat.java",
+    "vscjava.vscode-java-pack",
+    "vscjava.vscode-gradle-language-server"
+  ]
+}
