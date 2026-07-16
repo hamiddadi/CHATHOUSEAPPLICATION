@@ -101,6 +101,22 @@ jest.mock('@react-native-firebase/messaging', () =>
 );
 jest.mock('@notifee/react-native', () => require('./__mocks__/@notifee/react-native'));
 
+// Unit/render tests must never reach a developer backend. Keep the real Axios
+// instance (so service tests can spy on get/post normally), but replace its
+// transport with a deterministic immediate rejection. Individual tests that
+// need a successful request already mock the relevant service/client method.
+const axios = require('axios').default;
+axios.defaults.adapter = async (config: { method?: string; url?: string }) => {
+  const method = (config.method ?? 'get').toUpperCase();
+  throw new Error(`[test] Unmocked network request blocked: ${method} ${config.url ?? ''}`);
+};
+
+// Defensive teardown for tests that explicitly enable realtime with a mocked
+// socket. It is a no-op for the normal global test configuration above.
+afterEach(() => {
+  require('./src/shared/services/realtime/socketClient').disconnectSocket();
+});
+
 // ── react-native-safe-area-context — official jest mock (provides default
 // insets/frame + a simplified provider). Screens read insets via
 // useSafeAreaInsets(), so this must be in place before any render.

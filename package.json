@@ -3,9 +3,14 @@
   "version": "0.1.0",
   "main": "index.ts",
   "private": true,
+  "engines": {
+    "node": ">=22.20.0 <23"
+  },
   "scripts": {
     "start": "react-native start",
     "android": "react-native run-android",
+    "ios": "react-native run-ios",
+    "ios:pods": "bundle exec pod install --project-directory=ios",
     "lint": "eslint \"src/**/*.{ts,tsx}\"",
     "lint:fix": "eslint \"src/**/*.{ts,tsx}\" --fix",
     "format": "prettier --write \"src/**/*.{ts,tsx,json}\" \"*.{json,md}\"",
@@ -14,7 +19,7 @@
     "typecheck": "tsc --noEmit",
     "test": "jest",
     "test:watch": "jest --watch",
-    "test:ci": "jest --ci --coverage --passWithNoTests",
+    "test:ci": "jest --ci --coverage --runInBand --forceExit --passWithNoTests",
     "quality": "npm run lint -- --max-warnings 0 && npm run format:check && npm run typecheck",
     "prepare": "husky",
     "postinstall": "patch-package",
@@ -111,6 +116,6 @@
     "stylelint": "^16.12.0",
     "stylelint-config-standard": "^36.0.1",
     "tailwindcss": "^3.4.17",
-    "typescript": "*"
+    "typescript": "5.9.3"
   }
 }

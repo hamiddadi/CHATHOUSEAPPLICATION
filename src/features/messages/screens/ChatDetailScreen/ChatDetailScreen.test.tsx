@@ -102,13 +102,22 @@ describe('ChatDetailScreen', () => {
     });
   });
 
-  it('typing then pressing send does not crash and clears nothing unexpectedly', async () => {
+  it('typing then pressing send waits for the message mutation', async () => {
+    const sent: Message = {
+      ...messages()[0]!,
+      id: 'm-sent',
+      authorId: 'user-test-1',
+      text: 'Hello world',
+      isMine: true,
+    };
+    const sendSpy = jest.spyOn(messageService, 'send').mockResolvedValue(sent);
     const { getByLabelText, getByPlaceholderText } = renderChat();
     fireEvent.changeText(getByPlaceholderText('Type a message…'), 'Hello world');
     const send = await waitFor(() => getByLabelText('Send message'));
-    // The send mutation fires against the (unmocked) apiClient and will reject;
-    // handleSend awaits + reports via toast. We assert the press itself is safe.
-    expect(() => fireEvent.press(send)).not.toThrow();
+    fireEvent.press(send);
+    await waitFor(() => {
+      expect(sendSpy).toHaveBeenCalledWith(PEER_ID, 'Hello world');
+    });
   });
 
   it('attach button surfaces a "coming soon" Alert (no crash)', () => {

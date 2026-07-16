@@ -7,7 +7,7 @@
  */
 import React from 'react';
 import { Alert } from 'react-native';
-import { fireEvent } from '@testing-library/react-native';
+import { fireEvent, waitFor } from '@testing-library/react-native';
 import { houseKeys } from '../../hooks/useHouses';
 import { houseService } from '../../services/houseService';
 import type { House, HouseMember } from '../../../../shared/types/domain';
@@ -80,15 +80,22 @@ describe('ManageHouseScreen', () => {
     expect(navigation.goBack).toHaveBeenCalledTimes(1);
   });
 
-  it('"Save changes" fires the update mutation without crashing', () => {
+  it('"Save changes" waits for the update mutation and navigates back', async () => {
     const house = fakeHouse();
-    const { getByText, toJSON } = renderScreen(<ManageHouseScreen />, {
+    const updateSpy = jest.spyOn(houseService, 'update').mockResolvedValue(house);
+    const { getByText, navigation } = renderScreen(<ManageHouseScreen />, {
       route: { name: 'ManageHouse', params: { houseId: house.id } },
       seedQueryData: seed(house),
     });
     // Name pre-filled (>= 2 chars) → Save enabled.
     fireEvent.press(getByText('Save changes'));
-    expect(toJSON()).toBeTruthy();
+    await waitFor(() => {
+      expect(updateSpy).toHaveBeenCalledWith(
+        house.id,
+        expect.objectContaining({ name: house.name, privacy: house.privacy }),
+      );
+      expect(navigation.goBack).toHaveBeenCalledTimes(1);
+    });
   });
 
   it('selecting a privacy option toggles its selected state', () => {

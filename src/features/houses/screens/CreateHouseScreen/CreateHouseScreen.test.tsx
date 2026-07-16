@@ -12,7 +12,24 @@ import { Alert } from 'react-native';
 import { fireEvent, waitFor } from '@testing-library/react-native';
 import { renderScreen, mockAuthenticated, resetAuth } from '../../../../test-utils/renderScreen';
 import { houseService } from '../../services/houseService';
+import type { House } from '../../../../shared/types/domain';
 import { CreateHouseScreen } from './CreateHouseScreen';
+
+const createdHouse = (): House => ({
+  id: 'house-created',
+  name: 'My House',
+  description: '',
+  category: 'tech',
+  categoryEmoji: '💻',
+  iconUrl: null,
+  privacy: 'open',
+  ownerId: 'user-test-1',
+  membersCount: 1,
+  liveRoomsCount: 0,
+  isJoinedByMe: true,
+  members: [],
+  createdAt: new Date(0).toISOString(),
+});
 
 describe('CreateHouseScreen', () => {
   beforeEach(() => {
@@ -59,8 +76,9 @@ describe('CreateHouseScreen', () => {
     expect(privateRow.props.accessibilityState.selected).toBe(true);
   });
 
-  it('Create CTA fires (after a valid name) without crashing', () => {
-    const { getAllByText, getByPlaceholderText, toJSON } = renderScreen(<CreateHouseScreen />, {
+  it('Create CTA waits for the mutation and navigates back', async () => {
+    const createSpy = jest.spyOn(houseService, 'create').mockResolvedValue(createdHouse());
+    const { getAllByText, getByPlaceholderText, navigation } = renderScreen(<CreateHouseScreen />, {
       route: { name: 'CreateHouse' },
     });
     // i18n en.json: houses.create.namePlaceholder === 'House Name'.
@@ -68,7 +86,10 @@ describe('CreateHouseScreen', () => {
     // 'Create House' renders twice (header + CTA); the button is the last one.
     const matches = getAllByText('Create House');
     fireEvent.press(matches[matches.length - 1]);
-    expect(toJSON()).toBeTruthy();
+    await waitFor(() => {
+      expect(createSpy).toHaveBeenCalledWith(expect.objectContaining({ name: 'My House' }));
+      expect(navigation.goBack).toHaveBeenCalledTimes(1);
+    });
   });
 
   it('shows an inline error under the name field while it is too short', () => {

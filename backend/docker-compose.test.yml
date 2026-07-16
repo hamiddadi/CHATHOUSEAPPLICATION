@@ -1,0 +1,33 @@
+name: chathouse-test
+
+services:
+  postgres-test:
+    image: postgres:16-alpine
+    restart: 'no'
+    environment:
+      POSTGRES_USER: chathouse
+      POSTGRES_PASSWORD: chathouse
+      POSTGRES_DB: chathouse_test
+    ports:
+      - '127.0.0.1:5434:5432'
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U chathouse -d chathouse_test']
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  redis-test:
+    image: redis:7-alpine
+    restart: 'no'
+    command: ['redis-server', '--save', '', '--appendonly', 'no']
+    ports:
+      - '127.0.0.1:6380:6379'
+    tmpfs:
+      - /data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 2s
+      timeout: 3s
+      retries: 20

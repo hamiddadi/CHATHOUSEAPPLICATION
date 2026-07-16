@@ -5,7 +5,7 @@
   "description": "Chathouse — audio social network backend (Express 5, Socket.IO, mediasoup, Prisma)",
   "main": "dist/app.js",
   "engines": {
-    "node": ">=20 <21"
+    "node": ">=22.20.0 <23"
   },
   "scripts": {
     "dev": "tsx watch src/app.ts",
@@ -17,6 +17,10 @@
     "test:debug": "jest --runInBand --detectOpenHandles",
     "test:watch": "jest --watch",
     "test:seeded": "tsx scripts/seed.ts && jest --config jest.seed.config.js --runInBand --forceExit",
+    "test:infra:up": "docker compose -f docker-compose.test.yml up -d --wait",
+    "test:infra:down": "docker compose -f docker-compose.test.yml down -v",
+    "test:db:prepare": "node scripts/run-prisma-test.cjs migrate deploy",
+    "test:local": "npm run test:infra:up && npm run test:db:prepare && npm test",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",

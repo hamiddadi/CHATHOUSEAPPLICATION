@@ -4,10 +4,10 @@
 > Conformity target : Clubhouse parity, excluding Clips + Replays + audio recording.
 > Constraint respected throughout : **no modification of legacy code**.
 >
-> ⚠️ **Partly superseded by the de-Expo migration.** Build/deploy rows that
-> mention "EAS dev-client build", `app.json`, or iOS `UIBackgroundModes` no longer
-> apply — the app is now bare React Native built with Gradle. Background audio +
-> cert pinning ship through the committed `android/` project. See
+> ⚠️ **Historical status document.** Build/deploy rows mentioning Expo Go,
+> EAS, `app.json`, or an Expo dev client are superseded. The app now has
+> committed bare React Native Android and iOS projects. See
+> [`docs/setup.md`](./setup.md) and
 > [`docs/RELEASE-SIGNING.md`](./RELEASE-SIGNING.md).
 
 ## ✅ Deliverables

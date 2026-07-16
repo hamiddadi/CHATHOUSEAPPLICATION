@@ -11,10 +11,10 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  NODE_VERSION: '22'
+  NODE_VERSION: '22.23.1'
 
 jobs:
-  # ─────────────────────────── Frontend (Expo / RN) ───────────────────────────
+  # Frontend (React Native)
   frontend-lint:
     name: Frontend — Lint + Prettier
     runs-on: ubuntu-latest
@@ -58,7 +58,76 @@ jobs:
           path: coverage/
           retention-days: 7
 
-  # ─────────────────────────── Backend (Express / Prisma) ─────────────────────
+  # Native builds
+  android-build:
+    name: Android — Debug build + lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+      - run: npm ci
+      - name: Configure Firebase for native compile
+        shell: bash
+        env:
+          FIREBASE_ANDROID_CONFIG_BASE64: ${{ secrets.FIREBASE_ANDROID_CONFIG_BASE64 }}
+        run: |
+          if [[ -n "$FIREBASE_ANDROID_CONFIG_BASE64" ]]; then
+            printf '%s' "$FIREBASE_ANDROID_CONFIG_BASE64" | base64 --decode > android/app/google-services.json
+          else
+            cp android/app/google-services.json.example android/app/google-services.json
+          fi
+      - run: chmod +x android/gradlew
+      - name: Assemble and lint one CI architecture
+        working-directory: android
+        run: ./gradlew :app:assembleDebug :app:lintDebug -PreactNativeArchitectures=x86_64 --no-daemon
+
+  ios-build:
+    name: iOS — Simulator build
+    runs-on: macos-latest
+    env:
+      SENTRY_DISABLE_AUTO_UPLOAD: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+      - run: npm ci
+      - run: bundle install
+      - name: Configure Firebase for native compile
+        shell: bash
+        env:
+          FIREBASE_IOS_CONFIG_BASE64: ${{ secrets.FIREBASE_IOS_CONFIG_BASE64 }}
+        run: |
+          if [[ -n "$FIREBASE_IOS_CONFIG_BASE64" ]]; then
+            printf '%s' "$FIREBASE_IOS_CONFIG_BASE64" | base64 --decode > ios/ChatHouse/GoogleService-Info.plist
+          else
+            cp ios/ChatHouse/GoogleService-Info.plist.example ios/ChatHouse/GoogleService-Info.plist
+          fi
+      - name: Install CocoaPods
+        run: bundle exec pod install --project-directory=ios --repo-update
+      - name: Build for iOS Simulator
+        run: >-
+          xcodebuild
+          -workspace ios/ChatHouse.xcworkspace
+          -scheme ChatHouse
+          -configuration Debug
+          -destination 'generic/platform=iOS Simulator'
+          CODE_SIGNING_ALLOWED=NO
+          build
+
+  # Backend (Express / Prisma)
   backend-lint:
     name: Backend — Lint
     runs-on: ubuntu-latest
@@ -104,7 +173,7 @@ jobs:
         env:
           POSTGRES_USER: chathouse
           POSTGRES_PASSWORD: chathouse
-          POSTGRES_DB: chathouse
+          POSTGRES_DB: chathouse_test
         ports:
           - 5433:5432
         options: >-
@@ -122,7 +191,7 @@ jobs:
           --health-timeout=3s
           --health-retries=10
     env:
-      DATABASE_URL: postgresql://chathouse:chathouse@localhost:5433/chathouse?schema=public
+      DATABASE_URL: postgresql://chathouse:chathouse@localhost:5433/chathouse_test?schema=public
       REDIS_URL: redis://localhost:6379
       # Deterministic secrets — 32 chars of junk so env.ts zod passes.
       # Not reused anywhere real; workflow runs in an isolated VM.

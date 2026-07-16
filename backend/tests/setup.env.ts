@@ -1,11 +1,23 @@
-// Populate env before any source module loads. Integration tests hit the
-// running docker-compose stack (port 5433 on host because Postgres.exe owns
-// 5432 on Windows); unit tests never touch these URLs.
+// Populate env before any source module loads. Integration tests use the
+// disposable docker-compose.test.yml stack; unit tests never touch these URLs.
 process.env.NODE_ENV = 'test';
-process.env.DATABASE_URL =
+const testDatabaseUrl =
   process.env.DATABASE_URL ??
-  'postgresql://chathouse:chathouse@localhost:5433/chathouse?schema=public';
-process.env.REDIS_URL = process.env.REDIS_URL ?? 'redis://localhost:6379';
+  'postgresql://chathouse:chathouse@localhost:5434/chathouse_test?schema=public';
+process.env.DATABASE_URL = testDatabaseUrl;
+process.env.REDIS_URL = process.env.REDIS_URL ?? 'redis://localhost:6380';
+
+// A test suite truncates and rewrites tables. Refuse to start unless the DB
+// name is explicitly test-scoped, preventing an accidental wipe of the normal
+// development database when DATABASE_URL leaks in from backend/.env or a shell.
+const databaseName =
+  decodeURIComponent(new URL(testDatabaseUrl).pathname).replace(/^\/+/, '').split('/')[0] ?? '';
+if (!/(^|[_-])test($|[_-])/i.test(databaseName)) {
+  throw new Error(
+    `[tests] Refusing unsafe DATABASE_URL: database "${databaseName}" is not test-scoped. ` +
+      'Use a database name containing "test" (the default is chathouse_test).',
+  );
+}
 process.env.JWT_ACCESS_SECRET =
   process.env.JWT_ACCESS_SECRET ?? 'test-access-secret-that-is-at-least-32-characters-long';
 process.env.JWT_REFRESH_SECRET =

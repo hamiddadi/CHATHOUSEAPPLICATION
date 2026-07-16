@@ -7,6 +7,7 @@ import React from 'react';
 import { fireEvent, waitFor } from '@testing-library/react-native';
 import { launchImageLibrary } from 'react-native-image-picker';
 import { profileKeys } from '../../hooks/useProfile';
+import { profileService } from '../../services/profileService';
 import type { User } from '../../../../shared/types/domain';
 import { renderScreen, mockAuthenticated, resetAuth } from '../../../../test-utils/renderScreen';
 import { EditProfileScreen } from './EditProfileScreen';
@@ -78,20 +79,32 @@ describe('EditProfileScreen', () => {
     await waitFor(() => expect(launchImageLibrary).toHaveBeenCalledTimes(1));
   });
 
-  it('header Save (enabled for a valid handle) fires without throwing', () => {
-    const { getByLabelText } = renderScreen(<EditProfileScreen />, {
+  it('header Save waits for the profile update', async () => {
+    const updated = makeMe({ displayName: 'Valid Name', username: 'validuser' });
+    const updateSpy = jest.spyOn(profileService, 'update').mockResolvedValue(updated);
+    const { getByLabelText, navigation } = renderScreen(<EditProfileScreen />, {
       route: { name: 'EditProfile' },
-      seedQueryData: seedMe(makeMe({ displayName: 'Valid Name', username: 'validuser' })),
+      seedQueryData: seedMe(updated),
     });
     // canSave requires displayName>=2 && a schema-valid username → enabled here.
-    expect(() => fireEvent.press(getByLabelText('Save profile'))).not.toThrow();
+    fireEvent.press(getByLabelText('Save profile'));
+    await waitFor(() => {
+      expect(updateSpy).toHaveBeenCalled();
+      expect(navigation.goBack).toHaveBeenCalledTimes(1);
+    });
   });
 
-  it('footer "Save changes" CTA fires without throwing', () => {
-    const { getByText } = renderScreen(<EditProfileScreen />, {
+  it('footer "Save changes" CTA waits for the profile update', async () => {
+    const updated = makeMe({ displayName: 'Valid Name', username: 'validuser' });
+    const updateSpy = jest.spyOn(profileService, 'update').mockResolvedValue(updated);
+    const { getByText, navigation } = renderScreen(<EditProfileScreen />, {
       route: { name: 'EditProfile' },
-      seedQueryData: seedMe(makeMe({ displayName: 'Valid Name', username: 'validuser' })),
+      seedQueryData: seedMe(updated),
     });
-    expect(() => fireEvent.press(getByText('Save changes'))).not.toThrow();
+    fireEvent.press(getByText('Save changes'));
+    await waitFor(() => {
+      expect(updateSpy).toHaveBeenCalled();
+      expect(navigation.goBack).toHaveBeenCalledTimes(1);
+    });
   });
 });

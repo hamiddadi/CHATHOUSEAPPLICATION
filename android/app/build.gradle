@@ -6,6 +6,29 @@ apply plugin: "com.facebook.react"
 apply plugin: "com.google.gms.google-services"
 
 def projectRoot = rootDir.getAbsoluteFile().getParentFile().getAbsolutePath()
+def configuredVersionCode = System.getenv('VERSION_CODE') ?: project.findProperty('VERSION_CODE')
+def configuredVersionName = System.getenv('VERSION_NAME') ?: project.findProperty('VERSION_NAME')
+def appVersionCode = configuredVersionCode ? configuredVersionCode.toString().toInteger() : 1
+def appVersionName = configuredVersionName ? configuredVersionName.toString() : '1.0.0'
+
+def releaseSigningProperties = [
+    'CHATHOUSE_UPLOAD_STORE_FILE',
+    'CHATHOUSE_UPLOAD_STORE_PASSWORD',
+    'CHATHOUSE_UPLOAD_KEY_ALIAS',
+    'CHATHOUSE_UPLOAD_KEY_PASSWORD'
+]
+def releaseBuildRequested = gradle.startParameter.taskNames.any {
+    it.toLowerCase().contains('release')
+}
+if (releaseBuildRequested) {
+    def missingSigningProperties = releaseSigningProperties.findAll { !project.hasProperty(it) }
+    if (!missingSigningProperties.isEmpty()) {
+        throw new RuntimeException(
+            "Release signing is required. Missing ${missingSigningProperties.join(', ')} " +
+            '(see docs/RELEASE-SIGNING.md).'
+        )
+    }
+}
 
 /**
  * This is the configuration block to customize your React Native Android app.
@@ -95,8 +118,8 @@ android {
         applicationId 'com.chathouse.app'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0.0"
+        versionCode appVersionCode
+        versionName appVersionName
 
         // Google Maps Android API key. Injected at build time (NOT committed) so
         // the live key never lands in git history. Provide it via the
@@ -107,7 +130,6 @@ android {
             GOOGLE_MAPS_API_KEY: (System.getenv("GOOGLE_MAPS_API_KEY") ?: project.findProperty("GOOGLE_MAPS_API_KEY") ?: "")
         ]
 
-        buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }
     signingConfigs {
         debug {
@@ -156,20 +178,26 @@ android {
             signingConfig signingConfigs.debug
         }
         release {
-            // Use the real release keystore when the CHATHOUSE_UPLOAD_* properties
-            // are provided; otherwise fall back to debug signing so a local
-            // `assembleRelease` still produces an installable (NON-shippable) APK.
-            signingConfig project.hasProperty('CHATHOUSE_UPLOAD_STORE_FILE') ? signingConfigs.release : signingConfigs.debug
+            // Never sign a release with the shared debug key. The configuration
+            // guard above fails release tasks with a clear list of missing
+            // CHATHOUSE_UPLOAD_* values.
+            signingConfig signingConfigs.release
             def enableShrinkResources = findProperty('android.enableShrinkResourcesInReleaseBuilds') ?: 'false'
             shrinkResources enableShrinkResources.toBoolean()
             minifyEnabled enableMinifyInReleaseBuilds
-            proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
+            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
             def enablePngCrunchInRelease = findProperty('android.enablePngCrunchInReleaseBuilds') ?: 'true'
             crunchPngs enablePngCrunchInRelease.toBoolean()
         }
     }
     androidResources {
         ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:!CVS:!thumbs.db:!picasa.ini:!*~'
+    }
+    lint {
+        abortOnError true
+        // Third-party modules are linted by their own projects. Restrict this
+        // gate to ChatHouse sources so CI remains focused and reasonably fast.
+        checkDependencies false
     }
 }
 
@@ -201,7 +229,7 @@ dependencies {
     // res/values/styles.xml (MainActivity launch theme). Previously pulled in
     // transitively by expo-splash-screen; added explicitly after that package was
     // removed in the de-Expo migration, or AAPT resource linking fails.
-    implementation("androidx.core:core-splashscreen:1.0.1")
+    implementation("androidx.core:core-splashscreen:1.2.0")
 
     // de-Expo: the optional animated-gif / animated-webp Fresco add-ons were
     // wired through the Expo version catalog (`expoLibs.versions.fresco`), which

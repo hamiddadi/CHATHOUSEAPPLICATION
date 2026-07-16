@@ -6,6 +6,6 @@
   host on the dev machine's LAN or hotspot (e.g. 192.168.137.1), not just
   localhost. Release builds keep the strict main config.
 -->
-<network-security-config>
-  <base-config cleartextTrafficPermitted="true" />
+<network-security-config xmlns:tools="http://schemas.android.com/tools">
+  <base-config cleartextTrafficPermitted="true" tools:ignore="InsecureBaseConfiguration" />
 </network-security-config>

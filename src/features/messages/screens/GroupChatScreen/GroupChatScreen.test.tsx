@@ -67,6 +67,7 @@ describe('GroupChatScreen', () => {
   });
   afterEach(() => {
     resetAuth();
+    jest.restoreAllMocks();
   });
 
   it('mounts and renders the group title + a message', async () => {
@@ -84,13 +85,22 @@ describe('GroupChatScreen', () => {
     expect(navigation.navigate).toHaveBeenCalledWith('GroupInfo', { conversationId: GROUP_ID });
   });
 
-  it('typing then pressing send does not crash', async () => {
+  it('typing then pressing send waits for the group message mutation', async () => {
+    const sent: GroupMessage = {
+      ...messages()[0]!,
+      id: 'gm-sent',
+      senderId: 'user-test-1',
+      content: 'Hi team',
+      sender: { id: 'user-test-1', username: 'tester', displayName: 'Test User', avatarUrl: null },
+    };
+    const sendSpy = jest.spyOn(groupService, 'send').mockResolvedValue(sent);
     const { getByPlaceholderText, getByLabelText } = renderGroup();
     fireEvent.changeText(getByPlaceholderText('Message'), 'Hi team');
     const send = await waitFor(() => getByLabelText('Send'));
-    // send.mutate fires against the unmocked apiClient (rejects); onError restores
-    // the draft + toasts. The press itself must be crash-free.
-    expect(() => fireEvent.press(send)).not.toThrow();
+    fireEvent.press(send);
+    await waitFor(() => {
+      expect(sendSpy).toHaveBeenCalledWith(GROUP_ID, 'Hi team');
+    });
   });
 
   it('shows the mic button when the draft is empty', async () => {

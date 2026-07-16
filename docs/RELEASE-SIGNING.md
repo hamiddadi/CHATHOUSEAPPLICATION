@@ -1,28 +1,11 @@
-# Release signing & store credentials
+# Release signing and credentials
 
-> **Updated for the de-Expo migration.** This is now a **bare React Native**
-> project: `android/` is **committed and hand-maintained** (no `expo prebuild`,
-> no EAS Build, no EAS-managed credentials). Signing is done locally / in CI with
-> a standard Gradle keystore. iOS is not built from this repo (Android-only).
+ChatHouse has committed bare React Native projects for Android and iOS. Never
+commit private signing material, Firebase service accounts or store API keys.
 
-## TL;DR
+## Android
 
-- **Never commit a keystore or its passwords.** `.gitignore` excludes `*.jks`,
-  `*.keystore`, `*.p8`, `*.p12`, `*.key` (the shared `android/app/debug.keystore`
-  is the one intentional exception).
-- The release build reads the keystore + passwords from **Gradle properties**
-  (`CHATHOUSE_UPLOAD_*`). When they're absent, the `release` build type falls
-  back to **debug** signing so a local `assembleRelease` still produces an
-  installable — but **NON-shippable** — APK.
-- Ship an **`.aab`** (`:app:bundleRelease`) to Google Play; it splits per-ABI
-  automatically.
-
-## 1. Generate the upload keystore (one time)
-
-Use the JDK `keytool` (bundled with Android Studio at
-`…/Android Studio/jbr/bin/keytool`). Keep the resulting `.jks` and its passwords
-in a password manager / secret store — **if you lose them you can no longer
-update the app on Google Play.**
+### Create and store the upload key
 
 ```bash
 keytool -genkeypair -v \
@@ -30,17 +13,13 @@ keytool -genkeypair -v \
   -alias chathouse \
   -keyalg RSA -keysize 2048 -validity 10000 \
   -storetype JKS
-# answer the prompts (name/org/…); set a strong store + key password
 ```
 
-Place `chathouse-upload.jks` in `android/app/` (it is gitignored there).
+Keep the keystore in a password manager/secure backup. A local copy may be
+placed in `android/app/`; `*.jks` is ignored.
 
-## 2. Provide the signing credentials (never committed)
-
-Put these where Gradle can read them but git can't — typically
-`~/.gradle/gradle.properties` (outside the repo) for local builds, or
-`ORG_GRADLE_PROJECT_CHATHOUSE_UPLOAD_*` environment variables / encrypted CI
-secrets in CI:
+Supply all four values in `~/.gradle/gradle.properties`, `-P` options, or CI
+`ORG_GRADLE_PROJECT_*` secrets:
 
 ```properties
 CHATHOUSE_UPLOAD_STORE_FILE=chathouse-upload.jks
@@ -49,121 +28,63 @@ CHATHOUSE_UPLOAD_KEY_ALIAS=chathouse
 CHATHOUSE_UPLOAD_KEY_PASSWORD=********
 ```
 
-`android/app/build.gradle` wires these into `signingConfigs.release` and switches
-the `release` build type onto it only when `CHATHOUSE_UPLOAD_STORE_FILE` is set.
+Release tasks fail immediately if any value is absent. They never fall back to
+the shared debug key.
 
-## 3. Bump the version
+### Version and build
 
-Manual now (EAS used to auto-increment). In `android/app/build.gradle`
-`defaultConfig`:
-
-- `versionCode` — integer, **must increase** on every Play upload.
-- `versionName` — user-facing string (e.g. `1.0.1`).
-
-> **Footgun:** each `versionCode` is consumed **forever across all tracks** —
-> once internal-testing/closed-testing has seen a value, you can never reuse it
-> (even for a re-upload of a failed build). It currently sits at `1`, so the
-> first production submission already needs a bump; start production above
-> whatever internal testing has consumed.
-
-## 4. Build a signed release
+`VERSION_CODE` and `VERSION_NAME` may be passed as environment variables or
+Gradle properties. Defaults are for local development only.
 
 ```bash
 cd android
-
-# App Bundle for the Play Store (recommended — per-ABI split delivery):
-./gradlew :app:bundleRelease
-#   → android/app/build/outputs/bundle/release/app-release.aab
-
-# Or a universal APK (sideload / non-Play distribution):
-./gradlew :app:assembleRelease
-#   → android/app/build/outputs/apk/release/app-release.apk
+VERSION_CODE=42 VERSION_NAME=1.4.0 ./gradlew :app:bundleRelease
 ```
 
-All four ABIs (`armeabi-v7a, arm64-v8a, x86, x86_64`) are built by default
-(`android/gradle.properties` → `reactNativeArchitectures`). On a constrained
-machine, override for faster local builds:
-`./gradlew :app:assembleRelease -PreactNativeArchitectures=arm64-v8a`. A full
-4-ABI `bundleRelease` compiles every native target ×4 and is best run in CI / on
-a machine with ample RAM.
+Release builds use Hermes, R8 code optimization and resource shrinking. Smoke
+test the signed artifact on a physical device before uploading.
 
-**R8 / minification is OFF by default** for release
-(`android.enableMinifyInReleaseBuilds` is unset). The app ships unminified — fine
-for React Native (Hermes already optimises the JS). If you later enable it to
-shrink the AAB, set `android.enableMinifyInReleaseBuilds=true`, then do a real
-`bundleRelease` + on-device smoke test and expand `android/app/proguard-rules.pro`
-as needed.
+### Google/Firebase certificate restrictions
 
-> **CI guard:** if the `CHATHOUSE_UPLOAD_*` properties are missing, a release
-> build does **not** fail — it falls back to **debug** signing and produces a
-> debug-signed artifact. Play rejects debug-signed uploads (so it can't ship
-> insecurely), but to avoid a wasted CI cycle, assert the env var is present
-> before `bundleRelease` in CI, e.g. `test -n "$ORG_GRADLE_PROJECT_CHATHOUSE_UPLOAD_STORE_FILE"`.
+Register all relevant SHA-1/SHA-256 fingerprints for package
+`com.chathouse.app`:
 
-## 5. Restrict the Google Maps API key (package + SHA-1)
+- local debug key;
+- upload key;
+- Google Play App Signing key (the certificate users actually receive).
 
-`react-native-maps` needs the `com.google.android.geo.API_KEY` (injected at build
-time via the `GOOGLE_MAPS_API_KEY` Gradle property / env var — never committed).
-Lock the key down in **Google Cloud Console → APIs & Services → Credentials →
-your key → Application restrictions → Android apps**:
+Get local fingerprints with `./gradlew :app:signingReport`. Restrict the Maps
+API key to the package plus production signing certificate, and register the
+same apps/certificates in Firebase.
 
-- Package name: `com.chathouse.app`
-- SHA-1 certificate fingerprint: add **both** the debug and the release
-  fingerprints. Get them with:
+## iOS
 
-```bash
-cd android && ./gradlew :app:signingReport
-#   → prints SHA1 / SHA-256 for each variant's keystore
-```
+1. Open `ios/ChatHouse.xcworkspace` in Xcode.
+2. Select the `ChatHouse` target and your Apple Developer Team.
+3. Keep bundle ID `com.chathouse.app` and enable Push Notifications,
+   Background Modes (audio/remote notifications), and Associated Domains.
+4. Verify the App ID provisioning profile contains those entitlements.
+5. Set `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` to unique values.
+6. Choose a generic iOS device and use Product > Archive.
 
-For reference, the committed **debug** keystore's fingerprint (add this so debug
-builds can use Maps/Firebase too):
+Automatic signing is enabled in the project; CI Simulator builds disable code
+signing. For automated App Store delivery, use an App Store Connect API key
+stored as CI secrets (`.p8`, issuer ID and key ID). Never commit the key.
 
-```
-SHA1: 5E:8F:16:06:2E:A3:CD:2C:4A:0D:54:78:76:BA:A6:F3:8C:AB:F6:25
-```
+Firebase Cloud Messaging on iOS also requires an APNs authentication key or
+certificate configured in the Firebase console. Push delivery must be tested
+on a physical device.
 
-The **release** SHA-1 differs and only appears in `signingReport` once the
-`CHATHOUSE_UPLOAD_*` properties point at your real upload keystore.
-Add the same SHA-1s to **Firebase console → Project settings → your Android app**
-so FCM / any Firebase Android API keeps working for signed builds.
+## Shared release configuration
 
-> ### ⚠️ Play App Signing — the load-bearing detail
->
-> When you upload an `.aab`, the app is enrolled in **Play App Signing** by
-> default: Google **re-signs** the installed app with its own _app-signing key_,
-> which is **different** from your upload keystore. So the certificate on a
-> Play-installed device is **not** the one `signingReport` prints.
->
-> If you register only the upload-key SHA-1 on Firebase/Maps, **FCM push and
-> Google Maps will silently fail for every Play-Store user** while working fine
-> in your local release build — a production-only break that's painful to debug.
->
-> **After the first upload**, go to **Play Console → (your app) → Test and
-> release → App integrity → App signing** and copy **both** certificates' SHA-1:
->
-> - **App signing key certificate** (Google's — used on real devices)
-> - **Upload key certificate** (yours)
->
-> Register **both** (plus debug) on the Maps API key restriction **and** on the
-> Firebase Android app. The release SHA from `signingReport` = the upload key
-> only, and is **not sufficient** once Play App Signing is active.
+Before any store build:
 
-## 6. Firebase / FCM
+- use a production `.env` with `ENV=production`, HTTPS API and WSS realtime/
+  LiveKit endpoints;
+- provide the real Android/iOS Firebase files;
+- set Sentry organization, project and auth token if source-map upload is
+  required;
+- retain signing keys and recovery access in at least two secure locations.
 
-`android/app/google-services.json` (gitignored — carries the project API key) must
-be present at build time. The release/upload SHA-1 from step 5 must be registered
-on the Firebase Android app. Backend push only **sends** when
-`FIREBASE_SERVICE_ACCOUNT` (service-account JSON) and `PUSH_DISPATCH_ENABLED=true`
-are set on the server — see `backend/.env.example`.
-
-## 7. Store submission
-
-Upload `app-release.aab` to the **Google Play Console** (Internal testing →
-Production), or automate with [gradle-play-publisher] / fastlane using a Play
-Console **service-account JSON** key (kept out of git). Store-listing
-requirements (privacy policy URL, support URL, age rating, Data safety form) are
-filled in the Play Console; the hosted legal documents to link are in
-[`docs/legal/`](./legal): `PRIVACY-POLICY.md` and `EULA.md`.
-
-[gradle-play-publisher]: https://github.com/Triple-T/gradle-play-publisher
+The runtime environment validator rejects localhost and cleartext endpoints in
+production bundles.

@@ -1,115 +1,122 @@
-# Setup Guide
+# Native setup guide
 
-## Prerequisites
+ChatHouse is a bare React Native application. Expo Go, Expo prebuild and EAS are
+not part of the build pipeline.
 
-- **Node.js 20.x** (`>=20 <21` per backend `package.json` engines)
-- **pnpm** or **npm** (the repo uses npm with `--no-save` for ad-hoc tools)
-- **Docker Desktop** (for Postgres + Redis via compose)
-- **Expo Go** on iPhone/Android — must be the **SDK 55** build
+## 1. Toolchains
 
-## 1. Install dependencies
+- Node.js `>=22.20.0 <23`
+- npm (the committed lockfiles are authoritative)
+- Docker Desktop
+- Android Studio, JDK 17 and Android SDK 36
+- For iOS: macOS, Xcode, Ruby/Bundler and CocoaPods
+
+## 2. Dependencies and environment
 
 ```bash
-# Frontend
-cd <repo>
-npm install
-
-# Backend
-cd backend
-npm install
+npm ci
+cd backend && npm ci
 ```
 
-## 2. Configure env vars
+Create the untracked environment files:
 
 ```bash
-cp .env.example .env            # frontend
+cp .env.example .env
 cp backend/.env.example backend/.env
 ```
 
-Minimum required keys in `.env` (frontend):
+Typical device-development values are:
 
-```bash
-API_BASE_URL=http://<LAN-IP>:4000/api
-WS_BASE_URL=ws://<LAN-IP>:4000
+```dotenv
+API_BASE_URL=http://192.168.1.42:4000/api
+WS_BASE_URL=ws://192.168.1.42:4000
+LIVEKIT_URL=ws://192.168.1.42:7880
 REALTIME_ENABLED=true
-AGORA_APP_ID=<from Agora dashboard, optional>
+ENV=development
 ```
 
-Minimum required in `backend/.env`:
+Use the computer's actual LAN address. Android Emulator may use `10.0.2.2`;
+iOS Simulator may use `localhost`. Production is guarded and accepts only
+HTTPS/WSS non-local endpoints.
+
+## 3. Firebase
+
+Download the two app configurations for bundle/package
+`com.chathouse.app` and place them at:
+
+- `android/app/google-services.json`
+- `ios/ChatHouse/GoogleService-Info.plist`
+
+The repository contains `.example` placeholders for CI compilation. They are
+not functional Firebase credentials.
+
+For CI, provide the real files as base64 secrets named
+`FIREBASE_ANDROID_CONFIG_BASE64` and `FIREBASE_IOS_CONFIG_BASE64`.
+
+## 4. Backend development stack
 
 ```bash
-DATABASE_URL=postgresql://chathouse:chathouse@localhost:5433/chathouse?schema=public
-REDIS_URL=redis://localhost:6379
-JWT_SECRET=<32+ random chars>
-PORT=4000
-HOST=0.0.0.0
+npm run backend:up
+cd backend
+npm run prisma:deploy
+npm run dev
 ```
 
-Optional env (feature-flagged extensions):
+The normal development stack uses PostgreSQL on port 5433 and Redis on 6379.
+The API listens on 4000.
+
+## 5. Android
 
 ```bash
-# Vague 7 — Stripe Connect
-STRIPE_SECRET_KEY=sk_test_xxx
-STRIPE_CONNECT_CLIENT_ID=ca_xxx
-STRIPE_RETURN_URL=https://app.chathouse.com/payments/return
-STRIPE_REFRESH_URL=https://app.chathouse.com/payments/refresh
-
-# Vague 7 — Live captions
-ASR_PROVIDER=whisper
-ASR_API_KEY=sk-xxx
-
-# Vague 7 — Twitter import
-TWITTER_CLIENT_ID=xxx
-TWITTER_CLIENT_SECRET=xxx
-TWITTER_REDIRECT_URI=chathouse://oauth/twitter
-
-# Vague 1 — Contacts hashing salt
-CONTACTS_HASH_SALT=<random 32+ chars>
+npm start
+npm run android
 ```
 
-## 3. Boot the database
+Set `GOOGLE_MAPS_API_KEY` in the environment or user Gradle properties. For a
+faster local native build, use one ABI:
+
+```bash
+cd android
+./gradlew :app:assembleDebug -PreactNativeArchitectures=arm64-v8a
+```
+
+## 6. iOS
+
+On macOS:
+
+```bash
+bundle install
+npm run ios:pods
+npm start
+npm run ios
+```
+
+Open `ios/ChatHouse.xcworkspace` (not the `.xcodeproj`) when using Xcode. Select
+your Apple Development Team before running on a physical device. Push
+notifications and microphone publishing require a real device.
+
+## 7. Universal links
+
+Both platforms accept `chathouse://` and HTTPS links on
+`https://app.chathouse.com`. Native declarations alone are insufficient; host:
+
+- `https://app.chathouse.com/.well-known/assetlinks.json` with the Android
+  package and production signing SHA-256 fingerprint.
+- `https://app.chathouse.com/.well-known/apple-app-site-association` with the
+  Apple Team ID and `com.chathouse.app`.
+
+Serve both over HTTPS without redirects and with `application/json` content.
+
+## 8. Integration tests
+
+Never run backend tests against the development database. Use:
 
 ```bash
 cd backend
-docker compose up -d            # spins up postgres on :5433, redis on :6379
-npx prisma migrate dev          # apply migrations on first boot
-npm run seed                    # optional dev data
+npm run test:local
+npm run test:infra:down
 ```
 
-## 4. Start the backend
-
-Two flavors :
-
-```bash
-# Legacy stack (no extensions)
-npm run dev
-
-# Extended stack (all 7 vagues mounted under /api/ext/*)
-npx tsx src/extensions/server.ts
-```
-
-Both listen on `http://0.0.0.0:4000`.
-
-## 5. Start the mobile app
-
-```bash
-cd <repo>
-
-# LAN mode (phone on same Wi-Fi)
-REACT_NATIVE_PACKAGER_HOSTNAME=<LAN-IP> npx expo start --go --host lan
-
-# Tunnel mode (works through public internet — requires ngrok account)
-npx expo start --go --tunnel
-```
-
-Scan the QR with Expo Go.
-
-## Troubleshooting
-
-| Symptom                            | Likely cause                          | Fix                                       |
-| ---------------------------------- | ------------------------------------- | ----------------------------------------- |
-| `Failed to download remote update` | Phone can't reach Metro               | Same Wi-Fi + firewall TCP/8081 + TCP/4000 |
-| "Client isolation" on guest Wi-Fi  | Router blocks peer-to-peer            | Use mobile hotspot OR tunnel mode         |
-| `Cannot find module @sindresorhus` | Metro watcher race during npm install | Restart `expo start` with `CI=1`          |
-| Backend port already in use        | Old Docker container                  | `docker stop chathouse-api`               |
-| Mediasoup fails to init            | Not built for current Node            | Set `MEDIASOUP_ENABLED=false`             |
+This uses the disposable `chathouse_test` database on port 5434 and test Redis
+on 6380. The test setup and migration wrapper both reject non-test database
+names.

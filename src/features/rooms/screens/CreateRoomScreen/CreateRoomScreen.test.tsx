@@ -15,7 +15,31 @@
 import React from 'react';
 import { fireEvent, waitFor } from '@testing-library/react-native';
 import { renderScreen, mockAuthenticated, resetAuth } from '../../../../test-utils/renderScreen';
+import { roomService } from '../../services/roomService';
+import type { Room } from '../../../../shared/types/domain';
 import { CreateRoomScreen } from './CreateRoomScreen';
+
+const createdRoom = (): Room => ({
+  id: 'room-created',
+  title: 'A valid room title',
+  description: null,
+  category: 'tech',
+  categoryEmoji: '💻',
+  visibility: 'public',
+  houseId: null,
+  houseName: null,
+  hostId: 'user-test-1',
+  speakers: [],
+  listeners: [],
+  speakersCount: 0,
+  listenersCount: 0,
+  isLive: true,
+  isRecording: false,
+  chatEnabled: true,
+  chatVisibility: 'ALL',
+  startedAt: new Date(0).toISOString(),
+  scheduledFor: null,
+});
 
 describe('CreateRoomScreen', () => {
   beforeEach(() => {
@@ -63,18 +87,20 @@ describe('CreateRoomScreen', () => {
     expect(navigation.goBack).not.toHaveBeenCalled();
   });
 
-  it('attempts to create the room after a valid title is entered (no crash on API failure)', async () => {
-    const { getByText, getByPlaceholderText } = mount();
+  it('creates a live room and navigates to it after a valid title is entered', async () => {
+    const createSpy = jest.spyOn(roomService, 'create').mockResolvedValue(createdRoom());
+    const { getByText, getByPlaceholderText, navigation } = mount();
     // createRoom.topicPlaceholder → "What do you want to talk about?".
     fireEvent.changeText(
       getByPlaceholderText('What do you want to talk about?'),
       'A valid room title',
     );
     fireEvent.press(getByText('Start Room'));
-    // The mutation fires against an absent API → rejects → handled by the catch
-    // (Alert). We only assert the press didn't throw and the screen survives.
     await waitFor(() => {
-      expect(getByText('Start a Room')).toBeTruthy();
+      expect(createSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ title: 'A valid room title' }),
+      );
+      expect(navigation.replace).toHaveBeenCalledWith('Room', { roomId: 'room-created' });
     });
   });
 });

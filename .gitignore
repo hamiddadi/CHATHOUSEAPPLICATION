@@ -15,11 +15,16 @@ dist/
 web-build/
 expo-env.d.ts
 
-# Native
-ios/
-# android/ is now a committed, hand-maintained bare React Native project (de-Expo
-# migration). Build artifacts under it stay ignored via android/.gitignore and the
-# generic `build/` rule below. Only source + gradle wrapper + debug.keystore commit.
+# Native build artifacts (the Android and iOS source projects are committed).
+ios/Pods/
+ios/build/
+ios/DerivedData/
+ios/*.xcworkspace/xcuserdata/
+ios/*.xcodeproj/xcuserdata/
+ios/.xcode.env.local
+ios/ChatHouse/GoogleService-Info.plist
+# Android build artifacts stay ignored via android/.gitignore and the generic
+# `build/` rule below. Only source + Gradle wrapper + debug.keystore commit.
 *.jks
 *.keystore
 # debug.keystore is intentionally committed (shared debug signing); the rule

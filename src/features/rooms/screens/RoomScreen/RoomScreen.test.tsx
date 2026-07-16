@@ -17,7 +17,7 @@
  */
 import React from 'react';
 import { Alert } from 'react-native';
-import { act, fireEvent } from '@testing-library/react-native';
+import { act, fireEvent, waitFor } from '@testing-library/react-native';
 import { roomKeys } from '../../hooks/useRooms';
 import { roomService } from '../../services/roomService';
 import { useCurrentRoomStore } from '../../store/currentRoomStore';
@@ -119,17 +119,17 @@ describe('RoomScreen', () => {
       expect(navigation.navigate).toHaveBeenCalledWith('InviteToRoom', { roomId: ROOM_ID });
     });
 
-    it('leaves the room via the action-bar leave button (clears the mini-bar store)', () => {
-      const { getByLabelText } = mountRoom(fakeRoom());
+    it('leaves the room via the action-bar leave button and waits for completion', async () => {
+      const leaveSpy = jest.spyOn(roomService, 'leave').mockResolvedValue({ left: true });
+      const { navigation, getByLabelText } = mountRoom(fakeRoom());
       // Mount mirrored the room into the global "current room" store (mini-bar).
       expect(useCurrentRoomStore.getState().room).not.toBeNull();
-      // handleLeave clears the mini-bar synchronously, THEN awaits the leave
-      // mutation (which hits the absent API and is caught) before goBack. The
-      // synchronous clear is the deterministic, assert-able effect here; goBack
-      // fires only after the network promise settles, which jest's fake API
-      // never resolves quickly enough to await reliably.
       fireEvent.press(getByLabelText('Leave quietly'));
       expect(useCurrentRoomStore.getState().room).toBeNull();
+      await waitFor(() => {
+        expect(leaveSpy).toHaveBeenCalledWith(ROOM_ID);
+        expect(navigation.goBack).toHaveBeenCalledTimes(1);
+      });
     });
 
     it('toggles raise-hand without crashing (no mic for a listener)', () => {

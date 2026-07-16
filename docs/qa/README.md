@@ -1,5 +1,10 @@
 # Plan & cas de tests QA — ChatHouse (50 écrans, Android + iOS)
 
+> **Migration note (2026-07):** this QA corpus predates the bare React Native
+> migration. Any reference to Expo Go, EAS or an Expo dev client means the
+> corresponding native Android/iOS debug or staging build. The canonical build
+> setup is [`docs/setup.md`](../setup.md); Expo tooling is no longer used.
+
 > Application **temps réel** type Clubhouse : audio live **LiveKit**, messagerie & présence **WebSocket** (`socket.io-client`), **push notifications**, i18n **FR/EN**, rôles **guest / standard / moderator / admin / super_admin**, plateformes **Android + iOS** (OS récents et anciens), réseaux **3G/4G/5G/Wi-Fi** avec pertes/latence/reconnexion.
 
 Cet ensemble couvre **tous les boutons et interactions** des 50 écrans réels de l'application. Chaque cas est **ancré dans le code** (vrais `accessibilityLabel` / clés i18n / handlers / événements WebSocket), donc directement exécutable par une équipe QA **manuelle** et par l'**automatisation** (Detox / Maestro / RTL).
