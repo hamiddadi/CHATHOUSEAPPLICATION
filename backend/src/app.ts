@@ -1,13 +1,9 @@
 import http from 'node:http';
-import express, {
-  json as expressJson,
-  urlencoded as expressUrlencoded,
-  static as expressStatic,
-} from 'express';
+import express, { json as expressJson, urlencoded as expressUrlencoded } from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
 import compression from 'compression';
-import morgan from 'morgan';
+import morgan, { token as registerMorganToken } from 'morgan';
 import { env } from './config/env';
 import { logger } from './config/logger';
 import { connectRedis, disconnectRedis } from './config/redis';
@@ -16,6 +12,7 @@ import { globalLimiter } from './middlewares/rateLimit.middleware';
 import { errorMiddleware, notFoundHandler } from './middlewares/error.middleware';
 import { healthRouter } from './routes/health';
 import { docsRouter } from './routes/docs';
+import { legalRouter } from './routes/legal';
 import { authRouter } from './modules/auth/auth.router';
 import { usersRouter } from './modules/users/users.router';
 import { followRouter } from './modules/follow/follow.router';
@@ -30,12 +27,16 @@ import { exploreRouter } from './modules/explore/explore.router';
 import { pushRouter } from './modules/push/push.router';
 import { adminRouter } from './modules/admin/admin.router';
 import { uploadRouter } from './modules/upload/upload.router';
+import { mediaRouter } from './modules/media/media.router';
 import { recordingsRouter } from './modules/recordings/recordings.router';
 import { livekitWebhookRouter } from './modules/recordings/recordings.webhook';
 import { stripeWebhookRouter } from './extensions/modules/payments/payments.webhook';
-import { UPLOADS_DIR } from './modules/upload/upload.service';
-import { createSocketServer } from './socket/socket.server';
-import { mountExtensions } from './extensions/mount';
+import { createSocketServer, drainRoomDisconnectCleanups } from './socket/socket.server';
+import {
+  mountExtensions,
+  shutdownExtensionWorkers,
+  startExtensionWorkers,
+} from './extensions/mount';
 import { setRealtimeAliasServer } from './extensions/realtime/aliases';
 import { initMediasoup, shutdownMediasoup } from './webrtc/mediasoup.manager';
 import { startReminderWorker, shutdownReminders } from './queues/eventReminders';
@@ -44,9 +45,21 @@ import { registerGdprPurgeWorker, shutdownGdprPurge } from './workers/gdpr-purge
 import { ensureSearchIndexes } from './config/searchIndexes';
 import { initSentry } from './monitoring/sentry';
 import { httpMetricsMiddleware, metricsHandler } from './monitoring/metrics';
+import { drainBackgroundTasks } from './utils/backgroundTasks';
 
-// Grace period before a hung server.close() is hard-killed during shutdown.
+// Grace period before a hung Socket.IO/HTTP shutdown is hard-killed.
 const SHUTDOWN_GRACE_MS = 10_000;
+
+// Access logs must never retain search terms, reset tokens or any other query
+// parameter. Route paths remain useful for operations while the query string is
+// discarded before it reaches the logger.
+registerMorganToken('safe-url', request => {
+  const req = request as http.IncomingMessage & { originalUrl?: string };
+  return (req.originalUrl ?? req.url ?? '').split('?', 1)[0] ?? '';
+});
+
+const ACCESS_LOG_FORMAT =
+  ':remote-addr [:date[iso]] ":method :safe-url HTTP/:http-version" :status :res[content-length] :response-time ms';
 
 export const createApp = (): express.Express => {
   const app = express();
@@ -64,9 +77,6 @@ export const createApp = (): express.Express => {
   app.use('/webhooks', stripeWebhookRouter);
 
   // Body parsers — cap at 1 MB; avatar uploads go through /upload (phase 2)
-  app.use(expressJson({ limit: '1mb' }));
-  app.use(expressUrlencoded({ extended: true, limit: '1mb' }));
-
   // Security headers. contentSecurityPolicy is disabled for the API itself
   // (no HTML served); re-enable if you ever mount a web UI on the same host.
   app.use(
@@ -85,8 +95,13 @@ export const createApp = (): express.Express => {
   );
 
   app.use(compression());
+
+  // Keep signed media capability tokens out of access logs. The route has a
+  // dedicated public-read limiter and streams only private stored objects.
+  app.use('/media', mediaRouter);
+
   app.use(
-    morgan(env.NODE_ENV === 'production' ? 'combined' : 'dev', {
+    morgan(ACCESS_LOG_FORMAT, {
       stream: { write: (line: string) => logger.info(line.trim()) },
     }),
   );
@@ -117,14 +132,16 @@ export const createApp = (): express.Express => {
 
   // Health is unauthenticated and unratelimited (Kubernetes/ECS probes).
   app.use(healthRouter);
+  // Public, static store-compliance resources. They contain no scripts, forms
+  // or user data and remain reachable even when the API documentation is off.
+  app.use(legalRouter);
 
-  // Serve locally-stored uploads (avatars). Public + unratelimited so the
-  // mobile app's <Image> can fetch them without a bearer token, and mounted
-  // BEFORE the /api globalLimiter so image loads don't burn the API budget.
-  // express.static creates no directory itself; upload.service.ts mkdirs it
-  // on first write. The crossOriginResourcePolicy: 'cross-origin' helmet
-  // setting above lets RN/web clients on other origins load these.
-  app.use('/uploads', expressStatic(UPLOADS_DIR));
+  // Authenticate and rate-limit before parsing base64 payloads. This route
+  // owns a 12 MB parser and therefore has to precede the global 1 MB parser.
+  app.use('/api/upload', uploadRouter);
+
+  app.use(expressJson({ limit: '1mb' }));
+  app.use(expressUrlencoded({ extended: true, limit: '1mb' }));
 
   // OpenAPI/Swagger UI — unauthenticated, so keep it out of production to
   // avoid handing an attacker a free map of the API surface. Browse the
@@ -156,17 +173,16 @@ export const createApp = (): express.Express => {
   // inside the router. Always mounted so the `/api/admin/me` probe stays
   // available; the writable endpoints reject non-admins.
   app.use('/api/admin', adminRouter);
-  // Avatar upload (local-disk, no multer). Mounts its own 8 MB JSON parser
-  // internally since the global 1 MB cap is too small for base64 images.
-  app.use('/api/upload', uploadRouter);
-
+  if (env.EXTENSIONS_ENABLED) {
+    mountExtensions(app);
+  }
   app.use(notFoundHandler);
   app.use(errorMiddleware);
 
   return app;
 };
 
-const startServer = async (): Promise<void> => {
+export const startServer = async (): Promise<void> => {
   // Initialise error tracking FIRST — as early as possible so the HTTP
   // instrumentation can patch the layer before any service connects. No-op
   // when SENTRY_DSN is unset (the normal local/dev/CI state).
@@ -187,12 +203,8 @@ const startServer = async (): Promise<void> => {
   // the grace window and purges expired tokens/OTPs/audit logs.
   await registerGdprPurgeWorker();
   const app = createApp();
-  // Mount the `/api/ext/*` extension contract on the SAME entry point that
-  // production uses (`dist/app.js`), gated by env. Previously these routers
-  // were only mounted by the alternate `extensions/server.ts`, so the whole
-  // extension surface 404'd under the default `npm start`.
   if (env.EXTENSIONS_ENABLED) {
-    mountExtensions(app);
+    startExtensionWorkers();
   }
   const server = http.createServer(app);
   const io = await createSocketServer(server);
@@ -208,32 +220,38 @@ const startServer = async (): Promise<void> => {
     );
   });
 
-  // Reference `io` so linters don't flag it; kept around for future
-  // cross-module broadcasts (notifications fan-out, etc.).
-  void io;
-
+  let shuttingDown = false;
   const shutdown = async (signal: string): Promise<void> => {
+    if (shuttingDown) return;
+    shuttingDown = true;
     logger.info(`${signal} received — graceful shutdown`);
-    server.close(async () => {
-      try {
-        await shutdownMediasoup();
-        await shutdownReminders();
-        await shutdownLocationPurge();
-        await shutdownGdprPurge();
-        await disconnectDatabase();
-        await disconnectRedis();
-        logger.info('server stopped cleanly');
-        process.exit(0);
-      } catch (err) {
-        logger.error('shutdown error', { err });
-        process.exit(1);
-      }
-    });
-    // Hard-kill after the grace period if close() hangs
-    setTimeout(() => {
+    // Arm the deadline before awaiting network teardown so a stuck close is
+    // still bounded.
+    const forceTimer = setTimeout(() => {
       logger.error(`forced shutdown after ${SHUTDOWN_GRACE_MS / 1000}s`);
       process.exit(1);
     }, SHUTDOWN_GRACE_MS).unref();
+
+    try {
+      await io.close();
+      await drainRoomDisconnectCleanups();
+      await shutdownMediasoup();
+      await shutdownReminders();
+      await shutdownLocationPurge();
+      await shutdownGdprPurge();
+      if (env.EXTENSIONS_ENABLED) {
+        await shutdownExtensionWorkers();
+      }
+      await drainBackgroundTasks();
+      await disconnectDatabase();
+      await disconnectRedis();
+      clearTimeout(forceTimer);
+      logger.info('server stopped cleanly');
+      process.exit(0);
+    } catch (err) {
+      logger.error('shutdown error', { err });
+      process.exit(1);
+    }
   };
 
   process.on('SIGTERM', () => {

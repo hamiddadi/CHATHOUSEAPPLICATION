@@ -74,3 +74,23 @@ export const authLimiter = makeLimiter('rl:auth:', {
 export const sendLimiter = makeLimiter('rl:send:', {
   max: env.AUTH_RATE_LIMIT_MAX,
 });
+
+/**
+ * Media uploads are authenticated before their large JSON body is parsed.
+ * A per-user ceiling protects memory, object-storage cost and abuse while
+ * still allowing normal avatar retries and batches of voice notes.
+ */
+export const uploadLimiter = makeLimiter('rl:upload:', {
+  max: 30,
+  keyGenerator: req => req.userId ?? 'unauthenticated',
+});
+
+/**
+ * Contact discovery accepts a large address-book batch. A very small
+ * per-account request ceiling permits normal initial sync/retries while
+ * making phone-space enumeration materially more expensive.
+ */
+export const contactMatchLimiter = makeLimiter('rl:contacts:', {
+  max: 5,
+  keyGenerator: req => req.userId ?? 'unauthenticated',
+});

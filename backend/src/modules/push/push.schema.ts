@@ -1,12 +1,12 @@
 import { z } from 'zod';
 
 export const registerPushSchema = z.object({
-  token: z.string().min(1).max(256),
-  platform: z.enum(['ios', 'android', 'expo', 'web']),
+  token: z.string().trim().min(32).max(4096),
+  platform: z.enum(['ios', 'android']),
 });
 
 export const unregisterPushSchema = z.object({
-  token: z.string().min(1).max(256),
+  token: z.string().trim().min(32).max(4096),
 });
 
 export type RegisterPushInput = z.infer<typeof registerPushSchema>;

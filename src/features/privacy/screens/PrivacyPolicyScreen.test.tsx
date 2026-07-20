@@ -24,7 +24,7 @@ describe('PrivacyPolicyScreen', () => {
     const { getByText, toJSON } = renderScreen(<PrivacyPolicyScreen />);
     expect(toJSON()).toBeTruthy();
     expect(getByText('Privacy Policy')).toBeTruthy();
-    expect(getByText('Last updated: April 25, 2026')).toBeTruthy();
+    expect(getByText('Last updated: July 18, 2026')).toBeTruthy();
   });
 
   it('renders the numbered section headers', () => {
@@ -44,5 +44,11 @@ describe('PrivacyPolicyScreen', () => {
     const { getByText } = renderScreen(<PrivacyPolicyScreen />);
     fireEvent.press(getByText('privacy@chathouse.app'));
     expect(openSpy).toHaveBeenCalledWith('mailto:privacy@chathouse.app');
+  });
+
+  it('returns through the explicit legal-document back control', () => {
+    const { navigation, getByTestId } = renderScreen(<PrivacyPolicyScreen />);
+    fireEvent.press(getByTestId('privacy-policy-screen-back'));
+    expect(navigation.goBack).toHaveBeenCalledTimes(1);
   });
 });

@@ -53,6 +53,7 @@ export const socketAuth = async (socket: Socket, next: (err?: Error) => void): P
     const cacheKey = `user:susp:${claims.sub}`;
     const cached = await redis.get(cacheKey);
     if (cached === '1') return next(new Error('ACCOUNT_SUSPENDED'));
+    if (cached === 'd') return next(new Error('ACCOUNT_DELETED'));
     // Clean cached verdict is `0:<tokenVersion>`; a bare legacy '0' or any
     // unexpected value is treated as a miss and re-read, so it fails safe.
     const cachedTv =
@@ -66,9 +67,13 @@ export const socketAuth = async (socket: Socket, next: (err?: Error) => void): P
     } else {
       const user = await prisma.user.findUnique({
         where: { id: claims.sub },
-        select: { suspendedUntil: true, tokenVersion: true },
+        select: { suspendedUntil: true, deletedAt: true, tokenVersion: true },
       });
       if (!user) return next(new Error('UNAUTHORIZED'));
+      if (user.deletedAt) {
+        await redis.setEx(cacheKey, SUSPENSION_CACHE_TTL_SECONDS, 'd');
+        return next(new Error('ACCOUNT_DELETED'));
+      }
       if (claims.tv !== undefined && claims.tv !== user.tokenVersion) {
         return next(new Error('TOKEN_REVOKED'));
       }

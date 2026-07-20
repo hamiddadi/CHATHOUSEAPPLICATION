@@ -1,5 +1,7 @@
+import { MediaKind } from '@prisma/client';
 import { redis } from '../../../config/redis';
 import { prisma } from '../../../config/database';
+import { mediaService } from '../../../modules/media/media.service';
 import { ExtAppError, extError } from '../../utils/ExtAppError';
 
 /**
@@ -20,15 +22,30 @@ const TTL_S = 90 * 24 * 3600;
 const metaKey = (clubId: string) => `ext:clubmeta:${clubId}`;
 const featuredKey = (clubId: string) => `ext:clubmeta:featured:${clubId}`;
 
+const UPSERT_FEATURED_SCRIPT = `
+redis.call('LREM', KEYS[1], 0, ARGV[1])
+redis.call('LPUSH', KEYS[1], ARGV[1])
+redis.call('LTRIM', KEYS[1], 0, tonumber(ARGV[2]) - 1)
+redis.call('EXPIRE', KEYS[1], tonumber(ARGV[3]))
+return 1
+`;
+
 const requireClubAdmin = async (clubId: string, userId: string): Promise<void> => {
-  const club = await prisma.club.findUnique({
-    where: { id: clubId },
+  const club = await prisma.club.findFirst({
+    where: {
+      id: clubId,
+      owner: {
+        deletedAt: null,
+        blocksCreated: { none: { blockedId: userId } },
+        blocksReceived: { none: { blockerId: userId } },
+      },
+    },
     select: { ownerId: true },
   });
   if (!club) throw extError('CLUB_REQ_NOT_FOUND', 'Club not found');
   if (club.ownerId === userId) return;
-  const m = await prisma.clubMember.findUnique({
-    where: { clubId_userId: { clubId, userId } },
+  const m = await prisma.clubMember.findFirst({
+    where: { clubId, userId, user: { deletedAt: null } },
     select: { role: true },
   });
   if (m?.role !== 'ADMIN' && m?.role !== 'MODERATOR') {
@@ -57,8 +74,15 @@ export interface ClubMeta {
  * any authenticated user could enumerate private-club featured members.
  */
 const requireClubReadAccess = async (clubId: string, callerId: string): Promise<void> => {
-  const club = await prisma.club.findUnique({
-    where: { id: clubId },
+  const club = await prisma.club.findFirst({
+    where: {
+      id: clubId,
+      owner: {
+        deletedAt: null,
+        blocksCreated: { none: { blockedId: callerId } },
+        blocksReceived: { none: { blockerId: callerId } },
+      },
+    },
     select: { ownerId: true, privacy: true },
   });
   if (!club) throw extError('CLUB_REQ_NOT_FOUND', 'Club not found');
@@ -79,10 +103,10 @@ export const clubMetaService = {
    */
   async getForCaller(callerId: string, clubId: string): Promise<ClubMeta> {
     await requireClubReadAccess(clubId, callerId);
-    return this.get(clubId);
+    return this.get(clubId, callerId);
   },
 
-  async get(clubId: string): Promise<ClubMeta> {
+  async get(clubId: string, viewerId?: string): Promise<ClubMeta> {
     const [coverHash, featuredIds] = await Promise.all([
       redis.hGet(metaKey(clubId), 'coverUrl'),
       redis.lRange(featuredKey(clubId), 0, FEATURED_CAP - 1),
@@ -90,7 +114,16 @@ export const clubMetaService = {
     let featuredMembers: ClubMeta['featuredMembers'] = [];
     if (featuredIds.length > 0) {
       const users = await prisma.user.findMany({
-        where: { id: { in: featuredIds } },
+        where: {
+          id: { in: featuredIds },
+          deletedAt: null,
+          ...(viewerId
+            ? {
+                blocksCreated: { none: { blockedId: viewerId } },
+                blocksReceived: { none: { blockerId: viewerId } },
+              }
+            : {}),
+        },
         select: { id: true, username: true, displayName: true, avatarUrl: true },
       });
       const map = new Map(users.map(u => [u.id, u]));
@@ -103,40 +136,40 @@ export const clubMetaService = {
 
   async setCover(clubId: string, callerId: string, url: string): Promise<ClubMeta> {
     await requireClubAdmin(clubId, callerId);
-    if (!/^https?:\/\//i.test(url)) {
-      throw extError('PAY_INVALID', 'coverUrl must be http/https');
-    }
+    await mediaService.assertOwnedMediaUrl(callerId, url, MediaKind.AVATAR);
     await Promise.all([
       redis.hSet(metaKey(clubId), 'coverUrl', url),
       redis.expire(metaKey(clubId), TTL_S),
     ]);
-    return this.get(clubId);
+    return this.get(clubId, callerId);
   },
 
   async addFeatured(clubId: string, callerId: string, userId: string): Promise<ClubMeta> {
     await requireClubAdmin(clubId, callerId);
-    const member = await prisma.clubMember.findUnique({
-      where: { clubId_userId: { clubId, userId } },
+    const member = await prisma.clubMember.findFirst({
+      where: {
+        clubId,
+        userId,
+        user: {
+          deletedAt: null,
+          blocksCreated: { none: { blockedId: callerId } },
+          blocksReceived: { none: { blockerId: callerId } },
+        },
+      },
       select: { id: true },
     });
     if (!member) throw extError('PAY_INVALID', 'User is not a member');
 
-    const current = await redis.lRange(featuredKey(clubId), 0, FEATURED_CAP);
-    if (current.includes(userId)) return this.get(clubId);
-    if (current.length >= FEATURED_CAP) {
-      // Pop the oldest (LIFO display order: most recently featured first)
-      await redis.rPop(featuredKey(clubId));
-    }
-    await Promise.all([
-      redis.lPush(featuredKey(clubId), userId),
-      redis.expire(featuredKey(clubId), TTL_S),
-    ]);
-    return this.get(clubId);
+    await redis.eval(UPSERT_FEATURED_SCRIPT, {
+      keys: [featuredKey(clubId)],
+      arguments: [userId, String(FEATURED_CAP), String(TTL_S)],
+    });
+    return this.get(clubId, callerId);
   },
 
   async removeFeatured(clubId: string, callerId: string, userId: string): Promise<ClubMeta> {
     await requireClubAdmin(clubId, callerId);
     await redis.lRem(featuredKey(clubId), 0, userId);
-    return this.get(clubId);
+    return this.get(clubId, callerId);
   },
 };

@@ -1,6 +1,7 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../../config/database';
 import { getBlockedIdSet } from '../social/blocks';
+import { discoverableRoomWhere } from '../rooms/rooms.access';
 import type { SearchInput } from './search.schema';
 
 const publicUser = {
@@ -26,6 +27,7 @@ const searchUsers = async (q: string, limit: number, viewerId: string) => {
       // A block is symmetric from the search POV: neither side sees the
       // other in results. Always exclude the viewer themselves too.
       id: { notIn: [viewerId, ...blocked] },
+      deletedAt: null,
       OR: [
         { username: { contains: q, mode: 'insensitive' } },
         { displayName: { contains: q, mode: 'insensitive' } },
@@ -56,7 +58,7 @@ const clubSelect = {
   categoryEmoji: true,
   iconUrl: true,
   privacy: true,
-  _count: { select: { members: true } },
+  _count: { select: { members: { where: { user: { deletedAt: null } } } } },
 } as const satisfies Prisma.ClubSelect;
 
 const searchClubs = async (q: string, limit: number) => {
@@ -93,13 +95,15 @@ const roomSelect = {
   isLive: true,
   scheduledFor: true,
   host: { select: { id: true, username: true, displayName: true, avatarUrl: true } },
-  _count: { select: { participants: { where: { leftAt: null } } } },
+  _count: {
+    select: { participants: { where: { leftAt: null, user: { deletedAt: null } } } },
+  },
 } as const satisfies Prisma.RoomSelect;
 
-const searchRooms = async (q: string, limit: number) => {
+const searchRooms = async (q: string, limit: number, viewerId: string) => {
   const rooms = await prisma.room.findMany({
     where: {
-      isPrivate: false,
+      AND: [discoverableRoomWhere(viewerId)],
       endedAt: null,
       OR: [
         { title: { contains: q, mode: 'insensitive' } },
@@ -133,7 +137,7 @@ export const searchService = {
     const { q, type, limit } = input;
     if (type === 'users') return { users: await searchUsers(q, limit, viewerId) };
     if (type === 'clubs') return { clubs: await searchClubs(q, limit) };
-    if (type === 'rooms') return { rooms: await searchRooms(q, limit) };
+    if (type === 'rooms') return { rooms: await searchRooms(q, limit, viewerId) };
 
     // type === 'all' → run all three in parallel. Split the limit so no
     // single facet blows the payload budget.
@@ -141,7 +145,7 @@ export const searchService = {
     const [users, clubs, rooms] = await Promise.all([
       searchUsers(q, perFacet, viewerId),
       searchClubs(q, perFacet),
-      searchRooms(q, perFacet),
+      searchRooms(q, perFacet, viewerId),
     ]);
     return { users, clubs, rooms };
   },

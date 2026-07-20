@@ -213,7 +213,6 @@ export const CreateRoomScreen: React.FC = () => {
   );
   const [topics, setTopics] = useState<Set<string>>(new Set());
   const [coHosts, setCoHosts] = useState<SearchHit[]>([]);
-  const [recordingEnabled, setRecordingEnabled] = useState(false);
   // Optional: attach the room to one of the user's houses (clubId). Default
   // null = a standalone room. Houses are membership-gated server-side, so we
   // only ever offer the user's own ('mine') houses here.
@@ -326,7 +325,7 @@ export const CreateRoomScreen: React.FC = () => {
         topics: [...topics],
         coHostIds: coHosts.map(u => u.id),
         scheduledFor,
-        recordingEnabled,
+        recordingEnabled: false,
         houseId,
       });
       // A live room is joinable immediately: replace the create modal with the
@@ -357,12 +356,10 @@ export const CreateRoomScreen: React.FC = () => {
     scheduleMode,
     schedulePreset,
     customScheduledFor,
-    recordingEnabled,
     houseId,
     t,
   ]);
   const handleToggleSchedule = useCallback(() => setIsScheduled(prev => !prev), []);
-  const handleToggleRecording = useCallback(() => setRecordingEnabled(prev => !prev), []);
   const handleSelectPresetMode = useCallback(() => setScheduleMode('preset'), []);
   const handleSelectCustomMode = useCallback(() => setScheduleMode('custom'), []);
 
@@ -645,39 +642,6 @@ export const CreateRoomScreen: React.FC = () => {
             )}
           </View>
         )}
-
-        <Pressable
-          onPress={handleToggleRecording}
-          accessibilityRole="switch"
-          accessibilityLabel={t('createRoom.recordLabel')}
-          accessibilityState={{ checked: recordingEnabled }}
-          className="flex-row items-center gap-md p-lg rounded-md bg-overlay-white-5 border border-overlay-white-10"
-        >
-          <MaterialIcons
-            name="fiber-manual-record"
-            size={24}
-            color={recordingEnabled ? colors.primary : colors.text}
-          />
-          <View className="flex-1">
-            <Text className="text-md font-body-bold text-ink">{t('createRoom.recordLabel')}</Text>
-            <Text className="text-xs font-body text-ink-muted">{t('createRoom.recordHint')}</Text>
-          </View>
-          <View
-            className={
-              recordingEnabled
-                ? 'w-[44px] h-[26px] bg-primary rounded-pill'
-                : 'w-[44px] h-[26px] bg-surface-high rounded-pill'
-            }
-          >
-            <View
-              className={
-                recordingEnabled
-                  ? 'w-[22px] h-[22px] rounded-pill bg-white mt-xxs ml-[20px]'
-                  : 'w-[22px] h-[22px] rounded-pill bg-ink-muted mt-xxs ml-xxs'
-              }
-            />
-          </View>
-        </Pressable>
 
         <Button
           label={t('createRoom.startRoom')}

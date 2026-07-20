@@ -13,6 +13,7 @@ import { pushService, requestNotificationPermissionStatus } from './pushService'
 const messagingInstance = messaging();
 const requestPermissionMock = messagingInstance.requestPermission as jest.Mock;
 const getTokenMock = messagingInstance.getToken as jest.Mock;
+const deleteTokenMock = messagingInstance.deleteToken as jest.Mock;
 
 describe('pushService permission status', () => {
   beforeEach(() => {
@@ -101,5 +102,46 @@ describe('pushService permission status', () => {
     requestPermissionMock.mockResolvedValueOnce(messaging.AuthorizationStatus.AUTHORIZED);
     jest.spyOn(apiClient, 'post').mockRejectedValue(new Error('network down'));
     await expect(pushService.registerWithBackend()).resolves.toBe('granted');
+  });
+
+  it('rotates a token that is still bound to another account, then registers the replacement', async () => {
+    requestPermissionMock.mockResolvedValueOnce(messaging.AuthorizationStatus.AUTHORIZED);
+    getTokenMock
+      .mockResolvedValueOnce('old-fcm-token')
+      .mockResolvedValueOnce('replacement-fcm-token');
+    const postSpy = jest
+      .spyOn(apiClient, 'post')
+      .mockRejectedValueOnce({
+        kind: 'conflict',
+        status: 409,
+        code: 'PUSH_001',
+        message: 'already bound',
+      })
+      .mockResolvedValueOnce({ data: {} });
+
+    await expect(pushService.registerWithBackend()).resolves.toBe('granted');
+
+    expect(deleteTokenMock).toHaveBeenCalledTimes(1);
+    expect(postSpy).toHaveBeenNthCalledWith(1, '/push/register', {
+      token: 'old-fcm-token',
+      platform: 'ios',
+    });
+    expect(postSpy).toHaveBeenNthCalledWith(2, '/push/register', {
+      token: 'replacement-fcm-token',
+      platform: 'ios',
+    });
+  });
+
+  it('invalidates the local FCM token on sign-out even if backend unregister fails', async () => {
+    requestPermissionMock.mockResolvedValueOnce(messaging.AuthorizationStatus.AUTHORIZED);
+    await pushService.getOrRequestToken();
+    const postSpy = jest
+      .spyOn(apiClient, 'post')
+      .mockRejectedValueOnce(new Error('expired session'));
+
+    await expect(pushService.unregisterCurrentDevice()).resolves.toBeUndefined();
+
+    expect(postSpy).toHaveBeenCalledWith('/push/unregister', { token: 'test-fcm-token' });
+    expect(deleteTokenMock).toHaveBeenCalledTimes(1);
   });
 });

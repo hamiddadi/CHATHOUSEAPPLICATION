@@ -43,16 +43,18 @@ export const captionsService = {
     // room (IDOR fix).
     const room = await prisma.room.findUnique({
       where: { id: roomId },
-      select: { hostId: true },
+      select: { hostId: true, endedAt: true, isLive: true },
     });
-    if (!room) throw extError('CLUB_REQ_NOT_FOUND', 'Room not found');
+    if (!room || room.endedAt || !room.isLive) {
+      throw extError('CLUB_REQ_NOT_FOUND', 'Room not found');
+    }
     let allowed = room.hostId === callerId;
     if (!allowed) {
       const participant = await prisma.participant.findUnique({
         where: { userId_roomId: { userId: callerId, roomId } },
-        select: { role: true },
+        select: { role: true, leftAt: true },
       });
-      allowed = participant?.role === 'MODERATOR';
+      allowed = Boolean(participant && !participant.leftAt && participant.role === 'MODERATOR');
     }
     if (!allowed) throw new AppError('AUTH_008', 'Not allowed');
     await redis.set(flagKey(roomId), enabled ? '1' : '0');
@@ -65,6 +67,20 @@ export const captionsService = {
   async isEnabled(roomId: string): Promise<boolean> {
     const v = await redis.get(flagKey(roomId));
     return v === '1';
+  },
+
+  async isEnabledForCaller(callerId: string, roomId: string): Promise<boolean> {
+    const room = await prisma.room.findFirst({
+      where: {
+        id: roomId,
+        endedAt: null,
+        isLive: true,
+        participants: { some: { userId: callerId, leftAt: null } },
+      },
+      select: { id: true },
+    });
+    if (!room) throw extError('CLUB_REQ_NOT_FOUND', 'Room not found');
+    return this.isEnabled(roomId);
   },
 
   /**

@@ -6,16 +6,16 @@
 #
 # Toolchain pinned to what android/build.gradle + the Gradle wrapper expect:
 #   JDK 17 · Android SDK 36 · build-tools 36.0.0 · NDK 27.1.12297006 · CMake 3.22.1
-#   Node 20 (the RN Gradle plugin and sentry.gradle shell out to `node`)
+#   Node 22 (the RN Gradle plugin and sentry.gradle shell out to `node`)
 FROM eclipse-temurin:17-jdk-jammy
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Node 20 + build helpers. rsync copies the mounted source into a writable work
+# Node 22 + build helpers. rsync copies the mounted source into a writable work
 # dir; git is used by some npm postinstall tooling; python3 is a common gyp dep.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       curl unzip git rsync ca-certificates python3 && \
-    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+    curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
     apt-get install -y --no-install-recommends nodejs && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 

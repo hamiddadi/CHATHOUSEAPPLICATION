@@ -71,8 +71,12 @@ export const houseService = {
     return res.data.data;
   },
 
-  async get(id: string): Promise<House> {
-    const res = await apiClient.get<Envelope<House>>(`/clubs/${id}`);
+  async get(id: string, inviteToken?: string): Promise<House> {
+    // Invitation tokens are bearer capabilities. Keep them out of URLs so
+    // reverse-proxy, analytics and navigation logs do not retain them.
+    const res = await apiClient.get<Envelope<House>>(`/clubs/${id}`, {
+      ...(inviteToken ? { headers: { 'X-House-Invite': inviteToken } } : {}),
+    });
     return res.data.data;
   },
 

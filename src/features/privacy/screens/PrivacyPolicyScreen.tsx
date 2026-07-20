@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useCallback } from 'react';
+import { useNavigation } from '@react-navigation/native';
 import { useTranslation } from 'react-i18next';
 import {
   LegalDoc,
@@ -13,9 +14,17 @@ import {
  * user sees. Update this file alongside any data-handling change.
  */
 export const PrivacyPolicyScreen: React.FC = () => {
+  const navigation = useNavigation();
   const { t } = useTranslation();
+  const handleBack = useCallback(() => navigation.goBack(), [navigation]);
   return (
-    <LegalDoc title={t('privacy.policy.title')} lastUpdated={t('privacy.policy.lastUpdated')}>
+    <LegalDoc
+      testID="privacy-policy-screen"
+      title={t('privacy.policy.title')}
+      lastUpdated={t('privacy.policy.lastUpdated')}
+      onBack={handleBack}
+      backLabel={t('common.back', 'Back')}
+    >
       <Section title={t('privacy.policy.s1.title')}>
         <P>{t('privacy.policy.s1.p1')}</P>
         <P>{t('privacy.policy.s1.p2')}</P>

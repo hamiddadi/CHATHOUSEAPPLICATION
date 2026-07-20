@@ -2,6 +2,7 @@ import { Queue, Worker, type Job } from 'bullmq';
 import { logger } from '../../config/logger';
 import { prisma } from '../../config/database';
 import { notificationsService } from '../../modules/notifications/notifications.service';
+import { getBlockedIdSet } from '../../modules/social/blocks';
 import { bullConnection } from '../../queues/connection';
 
 /**
@@ -61,10 +62,15 @@ export const cancelReminder15 = async (roomId: string): Promise<void> => {
 };
 
 const processReminder15 = async (job: Job<Reminder15JobData>): Promise<void> => {
-  const room = await prisma.room.findUnique({
-    where: { id: job.data.roomId },
+  const room = await prisma.room.findFirst({
+    where: { id: job.data.roomId, host: { deletedAt: null } },
     // EVEN-05: honor the per-user `RoomRsvp.reminder` toggle.
-    include: { rsvps: { where: { reminder: true }, select: { userId: true } } },
+    include: {
+      rsvps: {
+        where: { reminder: true, user: { deletedAt: null } },
+        select: { userId: true },
+      },
+    },
   });
   if (!room) return;
   if (room.endedAt) return; // canceled or ended
@@ -73,11 +79,17 @@ const processReminder15 = async (job: Job<Reminder15JobData>): Promise<void> => 
   // (`eventReminders.ts`): opted-in RSVPs + the host + (for club rooms) every
   // active club member. The two reminders previously diverged — T-15 reached
   // RSVPs only — so subscribers who relied on the club fan-out missed it.
-  const recipientIds = new Set<string>(room.rsvps.map(r => r.userId));
+  const blocked = await getBlockedIdSet(room.hostId);
+  const recipientIds = new Set<string>(
+    room.rsvps.map(r => r.userId).filter(userId => !blocked.has(userId)),
+  );
   recipientIds.add(room.hostId);
   if (room.clubId) {
     const members = await prisma.clubMember.findMany({
-      where: { clubId: room.clubId },
+      where: {
+        clubId: room.clubId,
+        user: { deletedAt: null, id: { notIn: [...blocked] } },
+      },
       select: { userId: true },
     });
     for (const m of members) recipientIds.add(m.userId);
@@ -118,6 +130,7 @@ const scanForUpcoming = async (): Promise<void> => {
     where: {
       scheduledFor: { gte: windowStart, lte: windowEnd },
       endedAt: null,
+      host: { deletedAt: null },
     },
     select: { id: true, scheduledFor: true },
   });

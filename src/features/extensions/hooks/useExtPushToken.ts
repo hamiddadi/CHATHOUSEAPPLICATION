@@ -1,30 +1,20 @@
 import { useEffect, useRef, useState } from 'react';
 import messaging from '@react-native-firebase/messaging';
-import { Platform } from 'react-native';
-import { requestNotificationPermission } from '../../notifications/services/pushService';
-import { apiClient } from '../../../shared/services/api/apiClient';
+import {
+  pushService,
+  requestNotificationPermission,
+} from '../../notifications/services/pushService';
 
 /**
  * FCM push-token registration (Module 10 / NOTIF-016) — de-Expo: replaces the
  * `expo-notifications` token fetch with Firebase Cloud Messaging
  * (`@react-native-firebase/messaging`). POSTs the token to the real backend
- * route `/push/register` (the backend upserts on the token, so this is
- * idempotent + safe to co-exist with pushService.registerWithBackend, which
- * hits the same route on login). Re-registers only when the device token
- * changes. (Previously it POSTed to three non-existent routes — /push/tokens,
+ * route `/push/register` through the central push service, including safe
+ * account-switch rotation and token-refresh handling. Re-registering a token
+ * already owned by the same account is idempotent. (Previously it POSTed to
+ * three non-existent routes — /push/tokens,
  * /users/me/push-tokens, /ext/push/tokens — and always errored.)
  */
-
-const REGISTER_PATH = '/push/register';
-
-const postToken = async (token: string, platform: string): Promise<boolean> => {
-  try {
-    await apiClient.post(REGISTER_PATH, { token, platform });
-    return true;
-  } catch {
-    return false;
-  }
-};
 
 export const useExtPushToken = (enabled = true) => {
   const [token, setToken] = useState<string | null>(null);
@@ -36,6 +26,7 @@ export const useExtPushToken = (enabled = true) => {
   useEffect(() => {
     if (!enabled) return;
     let cancelled = false;
+    let unsubscribeRefresh: (() => void) | undefined;
 
     void (async () => {
       try {
@@ -51,11 +42,25 @@ export const useExtPushToken = (enabled = true) => {
         if (cancelled || !fetched) return;
         setToken(fetched);
 
+        unsubscribeRefresh = messaging().onTokenRefresh(refreshed => {
+          if (cancelled) return;
+          setToken(refreshed);
+          void pushService.registerTokenWithBackend(refreshed).then(registered => {
+            if (cancelled) return;
+            if (registered) {
+              lastSentRef.current = refreshed;
+              setStatus('registered');
+            } else {
+              setStatus('error');
+            }
+          });
+        });
+
         if (lastSentRef.current === fetched) {
           setStatus('registered');
           return;
         }
-        const ok = await postToken(fetched, Platform.OS);
+        const ok = await pushService.registerTokenWithBackend(fetched);
         if (!cancelled) {
           if (ok) {
             lastSentRef.current = fetched;
@@ -71,6 +76,7 @@ export const useExtPushToken = (enabled = true) => {
 
     return () => {
       cancelled = true;
+      unsubscribeRefresh?.();
     };
   }, [enabled]);
 

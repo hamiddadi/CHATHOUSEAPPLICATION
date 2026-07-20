@@ -4,7 +4,7 @@ import { redis } from '../../config/redis';
 import { logger } from '../../config/logger';
 import { AppError } from '../../middlewares/error.middleware';
 import { closeRoom as closeSfuRoom } from '../../webrtc/mediasoup.manager';
-import { emitHallwayRoomClosed } from '../../socket/realtime';
+import { disconnectUserSockets, emitHallwayRoomClosed } from '../../socket/realtime';
 import { signImpersonationToken } from '../../utils/jwt';
 import { cancelEventReminder } from '../../queues/eventReminders';
 import { recordingsService } from '../recordings/recordings.service';
@@ -241,14 +241,25 @@ export const adminService = {
         ? new Date(Date.now() + input.durationMinutes * 60_000)
         : PERMANENT_BAN_DATE;
 
-    const updated = await prisma.user.update({
-      where: { id: targetUserId },
-      data: {
-        suspendedUntil: expiresAt,
-        suspensionReason: input.reason,
-      },
-      select: publicAdminUser,
-    });
+    const [, updated] = await prisma.$transaction([
+      prisma.refreshToken.updateMany({
+        where: { userId: targetUserId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      }),
+      prisma.user.update({
+        where: { id: targetUserId },
+        data: {
+          suspendedUntil: expiresAt,
+          suspensionReason: input.reason,
+          isOnline: false,
+          isVisible: false,
+          latitude: null,
+          longitude: null,
+          tokenVersion: { increment: 1 },
+        },
+        select: publicAdminUser,
+      }),
+    ]);
 
     // Force the lockout to land within the cache TTL window. We mark the
     // cache "suspended" up to the same expiry so requireAuth doesn't even
@@ -258,6 +269,7 @@ export const adminService = {
       Math.max(30, Math.ceil((expiresAt.getTime() - Date.now()) / 1000)),
     );
     await redis.setEx(`user:susp:${targetUserId}`, ttlSec, '1');
+    disconnectUserSockets(targetUserId, 'account_suspended');
 
     await auditLogService.record({
       actorId,
@@ -332,15 +344,34 @@ export const adminService = {
     assertCanActOn(actor, target);
     if (target.deletedAt) return { deleted: true as const };
 
-    await prisma.user.update({
-      where: { id: targetUserId },
-      data: {
-        deletedAt: new Date(),
-        suspendedUntil: PERMANENT_BAN_DATE,
-        suspensionReason: 'Account scheduled for deletion (admin)',
-      },
-    });
+    const deletedAt = new Date();
+    await prisma.$transaction([
+      prisma.user.update({
+        where: { id: targetUserId },
+        data: {
+          deletedAt,
+          suspendedUntil: PERMANENT_BAN_DATE,
+          suspensionReason: 'Account scheduled for deletion (admin)',
+          isOnline: false,
+          isVisible: false,
+          latitude: null,
+          longitude: null,
+          currentRoomId: null,
+          tokenVersion: { increment: 1 },
+        },
+      }),
+      prisma.refreshToken.updateMany({
+        where: { userId: targetUserId, revokedAt: null },
+        data: { revokedAt: deletedAt },
+      }),
+      prisma.pushToken.deleteMany({ where: { userId: targetUserId } }),
+      prisma.participant.updateMany({
+        where: { userId: targetUserId, leftAt: null },
+        data: { leftAt: deletedAt },
+      }),
+    ]);
     await redis.setEx(`user:susp:${targetUserId}`, SUSPENSION_CACHE_TTL_SEC, '1');
+    disconnectUserSockets(targetUserId, 'account_deleted');
 
     await auditLogService.record({
       actorId,
@@ -486,9 +517,11 @@ export const adminService = {
     // force-ended scheduled room doesn't auto-open / fire a reminder later.
     // Best-effort: a Redis/BullMQ hiccup must NOT abort the teardown + audit
     // below for a force-end that already committed to Postgres.
-    await cancelEventReminder(roomId).catch(err =>
-      logger.warn('admin.forceEndRoom: cancel reminder failed', { err, roomId }),
-    );
+    if (room.scheduledFor) {
+      await cancelEventReminder(roomId).catch(err =>
+        logger.warn('admin.forceEndRoom: cancel reminder failed', { err, roomId }),
+      );
+    }
     await closeSfuRoom(roomId);
     // RECO-01: finalize any running Replay egress (gated/no-op when egress is
     // off). Without this the LiveKit egress keeps billing/uploading until a
@@ -496,7 +529,9 @@ export const adminService = {
     void recordingsService
       .stopForRoom(roomId)
       .catch(err => logger.warn('admin.forceEndRoom: recording stop failed', { err, roomId }));
-    emitHallwayRoomClosed(roomId);
+    if (!room.isPrivate && room.roomType === 'OPEN') {
+      emitHallwayRoomClosed(roomId);
+    }
     // ROOM-07: persist the cancellation for every recipient (active
     // participants + RSVPs, deduped). notificationsService.create also emits
     // the realtime nudge, so offline RSVPs see it on next open instead of

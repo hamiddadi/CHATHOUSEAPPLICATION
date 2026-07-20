@@ -212,6 +212,7 @@ export const OtpScreen: React.FC = () => {
         {/* 6-cell OTP input with shake animation */}
         <Animated.View style={shakeStyle}>
           <OtpInput
+            testID="auth-otp-input"
             value={code}
             onChange={handleCodeChange}
             error={error}

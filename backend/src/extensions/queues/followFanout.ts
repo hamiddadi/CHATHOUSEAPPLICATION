@@ -39,8 +39,8 @@ export const fanoutOne = async (roomId: string): Promise<number> => {
   if (claimed !== 'OK') return 0;
 
   try {
-    const room = await prisma.room.findUnique({
-      where: { id: roomId },
+    const room = await prisma.room.findFirst({
+      where: { id: roomId, host: { deletedAt: null } },
       include: {
         host: { select: { id: true, displayName: true, username: true } },
       },
@@ -54,13 +54,17 @@ export const fanoutOne = async (roomId: string): Promise<number> => {
     // to avoid runaway scans on viral hosts/clubs.
     const [followers, clubMembers, blocked] = await Promise.all([
       prisma.follow.findMany({
-        where: { followingId: room.hostId },
+        where: {
+          followingId: room.hostId,
+          status: 'ACCEPTED',
+          follower: { deletedAt: null },
+        },
         select: { followerId: true },
         take: 5000,
       }),
-      room.clubId
+      room.clubId && room.roomType === 'OPEN'
         ? prisma.clubMember.findMany({
-            where: { clubId: room.clubId },
+            where: { clubId: room.clubId, user: { deletedAt: null } },
             select: { userId: true },
             take: CLUB_MEMBER_CAP,
           })
@@ -159,6 +163,7 @@ const scanRecent = async (): Promise<void> => {
       // roomType CLOSED rooms are never fanned out (fanoutOne re-checks too);
       // exclude them here so we don't waste an idempotency claim on them.
       roomType: { not: 'CLOSED' },
+      host: { deletedAt: null },
       // Exclude scheduled-but-not-yet-live (those are handled by the
       // existing 5-min reminder + our 15-min sister worker).
       scheduledFor: null,

@@ -32,6 +32,21 @@ const register = async (app: Express) => {
   };
 };
 
+const eventually = async (assertion: () => Promise<void>, timeoutMs = 5_000): Promise<void> => {
+  const deadline = Date.now() + timeoutMs;
+  let lastError: unknown;
+  while (Date.now() < deadline) {
+    try {
+      await assertion();
+      return;
+    } catch (error) {
+      lastError = error;
+      await new Promise(resolve => setTimeout(resolve, 25));
+    }
+  }
+  throw lastError;
+};
+
 describe('Socket disconnect → room participation cleanup', () => {
   let app: Express;
   let server: http.Server;
@@ -114,5 +129,123 @@ describe('Socket disconnect → room participation cleanup', () => {
     expect(after?.leftAt).not.toBeNull();
 
     hostSock.disconnect();
+  }, 30_000);
+
+  it('keeps participation until the same user disconnects their last device', async () => {
+    const host = await register(app);
+    const listener = await register(app);
+    createdIds.push(host.id, listener.id);
+
+    const created = await request(app)
+      .post('/api/rooms')
+      .set('Authorization', `Bearer ${host.token}`)
+      .send({ title: 'Last device cleanup room' });
+    const roomId = created.body.data.id as string;
+
+    const [hostSock, phone, tablet] = await Promise.all([
+      connectWith(host.token),
+      connectWith(listener.token),
+      connectWith(listener.token),
+    ]);
+    await Promise.all([
+      joinRoom(hostSock, roomId),
+      joinRoom(phone, roomId),
+      joinRoom(tablet, roomId),
+    ]);
+
+    phone.disconnect();
+    await new Promise(resolve => setTimeout(resolve, 250));
+    expect(
+      await prisma.participant.count({ where: { roomId, userId: listener.id, leftAt: null } }),
+    ).toBe(1);
+
+    tablet.disconnect();
+    await eventually(async () => {
+      expect(
+        await prisma.participant.count({ where: { roomId, userId: listener.id, leftAt: null } }),
+      ).toBe(0);
+    });
+    hostSock.disconnect();
+  }, 30_000);
+
+  it('an authenticated REST leave evicts every device for that account from the room', async () => {
+    const host = await register(app);
+    const listener = await register(app);
+    createdIds.push(host.id, listener.id);
+
+    const created = await request(app)
+      .post('/api/rooms')
+      .set('Authorization', `Bearer ${host.token}`)
+      .send({ title: 'Account-scoped leave room' });
+    const roomId = created.body.data.id as string;
+
+    const [hostSock, phone, tablet] = await Promise.all([
+      connectWith(host.token),
+      connectWith(listener.token),
+      connectWith(listener.token),
+    ]);
+    await Promise.all([
+      joinRoom(hostSock, roomId),
+      joinRoom(phone, roomId),
+      joinRoom(tablet, roomId),
+    ]);
+
+    const left = new Promise<{ userId: string; roomId: string }>(resolve => {
+      hostSock.once('room:user-left', resolve);
+    });
+    const response = await request(app)
+      .post(`/api/rooms/${roomId}/leave`)
+      .set('Authorization', `Bearer ${listener.token}`);
+    expect(response.status).toBe(200);
+    expect(response.body.data.changed).toBe(true);
+    expect(await left).toEqual({ userId: listener.id, roomId });
+
+    await eventually(async () => {
+      const peers = await io.in(`room:${roomId}`).fetchSockets();
+      expect(peers.some(peer => peer.data.userId === listener.id)).toBe(false);
+      expect(
+        await prisma.participant.count({ where: { roomId, userId: listener.id, leftAt: null } }),
+      ).toBe(0);
+    });
+
+    phone.disconnect();
+    tablet.disconnect();
+    hostSock.disconnect();
+  }, 30_000);
+
+  it('simultaneous host/listener disconnects close the room without ghosts or deadlocks', async () => {
+    const host = await register(app);
+    const listener = await register(app);
+    createdIds.push(host.id, listener.id);
+
+    const created = await request(app)
+      .post('/api/rooms')
+      .set('Authorization', `Bearer ${host.token}`)
+      .send({ title: 'Concurrent disconnect cleanup room' });
+    const roomId = created.body.data.id as string;
+
+    const [hostSock, listenerSock] = await Promise.all([
+      connectWith(host.token),
+      connectWith(listener.token),
+    ]);
+    await Promise.all([joinRoom(hostSock, roomId), joinRoom(listenerSock, roomId)]);
+
+    hostSock.disconnect();
+    listenerSock.disconnect();
+
+    await eventually(async () => {
+      const [room, activeParticipants, usersStillInRoom] = await Promise.all([
+        prisma.room.findUniqueOrThrow({ where: { id: roomId } }),
+        prisma.participant.count({ where: { roomId, leftAt: null } }),
+        prisma.user.count({
+          where: { id: { in: [host.id, listener.id] }, currentRoomId: roomId },
+        }),
+      ]);
+      expect(room.endedAt).not.toBeNull();
+      expect(room.isLive).toBe(false);
+      expect(room.participantCount).toBe(0);
+      expect(activeParticipants).toBe(0);
+      expect(usersStillInRoom).toBe(0);
+    });
   }, 30_000);
 });

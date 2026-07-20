@@ -1,10 +1,6 @@
 import type { Server, Socket } from 'socket.io';
 import { roomsService } from '../../modules/rooms/rooms.service';
 import { logger } from '../../config/logger';
-import {
-  closeRoom as closeSfuRoom,
-  closeProducersForUserInRoom,
-} from '../../webrtc/mediasoup.manager';
 import { roomChannel } from '../channels';
 import { emitMapUserUpdate } from '../realtime';
 import { getUserId } from '../socket.middleware';
@@ -46,7 +42,7 @@ export const registerRoomHandlers = (io: Server, socket: Socket): void => {
       });
       // Bridge to the map: joiners enter as listeners (blue hearing badge);
       // setMute later flips them to speaking/muted if they take the stage.
-      emitMapUserUpdate({ userId: userId(), isInRoom: true, isListener: true });
+      await emitMapUserUpdate({ userId: userId(), isInRoom: true, isListener: true });
       socket.emit('room:participants', { participants: room.participants });
       ack?.(true);
     } catch (err) {
@@ -58,17 +54,7 @@ export const registerRoomHandlers = (io: Server, socket: Socket): void => {
   socket.on('room:leave', async (payload: LeavePayload, ack?: (ok: boolean) => void) => {
     try {
       await roomsService.leave(payload.roomId, userId());
-      // Close any RTC producer this user had in this room — the Producer's
-      // `close` handler fans out `rtc:producer-closed` so peers stop consuming.
-      closeProducersForUserInRoom(payload.roomId, userId());
       await socket.leave(roomChannel(payload.roomId));
-      io.to(roomChannel(payload.roomId)).emit('room:user-left', {
-        userId: userId(),
-        roomId: payload.roomId,
-      });
-      // Bridge to the map: leaving clears every room-audio flag, so the marker
-      // falls back to the plain online badge.
-      emitMapUserUpdate({ userId: userId(), isInRoom: false });
       ack?.(true);
     } catch (err) {
       logger.warn('room:leave failed', { err });
@@ -111,9 +97,6 @@ export const registerRoomHandlers = (io: Server, socket: Socket): void => {
   socket.on('room:end', async (payload: EndPayload, ack?: (ok: boolean) => void) => {
     try {
       await roomsService.end(payload.roomId, userId());
-      // Release the SFU router + all producers for this room. `closeSfuRoom`
-      // is idempotent so it's safe if RTC wasn't in use for this room.
-      await closeSfuRoom(payload.roomId);
       // ROOM-06 fix: do NOT emit `room:ended` here — `roomsService.end()`
       // already broadcasts it via `emitRoomEnded`. Emitting again duplicated
       // the event for every client in the room.

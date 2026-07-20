@@ -15,6 +15,10 @@ const { createApp } = require('../src/app') as typeof import('../src/app');
 const { prisma } = require('../src/config/database') as typeof import('../src/config/database');
 const { connectRedis, disconnectRedis, redis } =
   require('../src/config/redis') as typeof import('../src/config/redis');
+const { getRemindersQueue, shutdownReminders } =
+  require('../src/queues/eventReminders') as typeof import('../src/queues/eventReminders');
+const { shutdownReminder15 } =
+  require('../src/extensions/queues/reminder15') as typeof import('../src/extensions/queues/reminder15');
 /* eslint-enable @typescript-eslint/no-require-imports */
 
 const rand = () => Math.random().toString(36).slice(2, 10);
@@ -37,6 +41,9 @@ describe('Auth + Users integration', () => {
     for (const id of createdIds) {
       await prisma.user.delete({ where: { id } }).catch(() => undefined);
     }
+    await getRemindersQueue().drain(true);
+    await shutdownReminders();
+    await shutdownReminder15();
     await prisma.$disconnect();
     await disconnectRedis();
   });
@@ -129,6 +136,137 @@ describe('Auth + Users integration', () => {
 
     // Clean up the residual blacklist entry so we don't leak keys across runs
     await redis.del(`blacklist:${accessToken}`);
+  });
+
+  it('restores a self-deleted account when credentials are proven within 30 days', async () => {
+    const restoreUsername = `restore_${rand()}`;
+    const restoreEmail = `${restoreUsername}@test.local`;
+    const registered = await request(app)
+      .post('/api/auth/register')
+      .send({ username: restoreUsername, email: restoreEmail, password });
+    expect(registered.status).toBe(201);
+    const id = registered.body.data.user.id as string;
+    const oldAccessToken = registered.body.data.accessToken as string;
+    createdIds.push(id);
+
+    const deletion = await request(app)
+      .post('/api/users/me/request-deletion')
+      .set('Authorization', `Bearer ${oldAccessToken}`);
+    expect(deletion.status).toBe(200);
+    expect(deletion.body.data.permanentDeletionAt).toEqual(expect.any(String));
+
+    const disabled = await request(app)
+      .get('/api/users/me')
+      .set('Authorization', `Bearer ${oldAccessToken}`);
+    expect(disabled.status).toBe(401);
+
+    const restored = await request(app)
+      .post('/api/auth/login')
+      .send({ identifier: restoreEmail, password });
+    expect(restored.status).toBe(200);
+    expect(restored.body.data.user.id).toBe(id);
+
+    const row = await prisma.user.findUniqueOrThrow({
+      where: { id },
+      select: { deletedAt: true, isVisible: true, latitude: true, longitude: true },
+    });
+    expect(row).toEqual({
+      deletedAt: null,
+      isVisible: false,
+      latitude: null,
+      longitude: null,
+    });
+  });
+
+  it('cancels future hosted events permanently when a restorable account is deleted', async () => {
+    const restoreUsername = `restore_event_${rand()}`;
+    const restoreEmail = `${restoreUsername}@test.local`;
+    const registered = await request(app)
+      .post('/api/auth/register')
+      .send({ username: restoreUsername, email: restoreEmail, password });
+    const id = registered.body.data.user.id as string;
+    const token = registered.body.data.accessToken as string;
+    createdIds.push(id);
+
+    const created = await request(app)
+      .post('/api/rooms')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        title: `Deletion event ${rand()}`,
+        scheduledFor: new Date(Date.now() + 10 * 60 * 60 * 1000).toISOString(),
+      });
+    expect(created.status).toBe(201);
+    const roomId = created.body.data.id as string;
+    const queue = getRemindersQueue();
+    expect(await queue.getJob(`room-golive-${roomId}`)).toBeTruthy();
+
+    const deletion = await request(app)
+      .post('/api/users/me/request-deletion')
+      .set('Authorization', `Bearer ${token}`);
+    expect(deletion.status).toBe(200);
+
+    const canceled = await prisma.room.findUniqueOrThrow({ where: { id: roomId } });
+    expect(canceled).toMatchObject({
+      isLive: false,
+      participantCount: 0,
+    });
+    expect(canceled.endedAt).not.toBeNull();
+    expect(canceled.canceledAt).not.toBeNull();
+    expect(await queue.getJob(`room-reminder-${roomId}`)).toBeFalsy();
+    expect(await queue.getJob(`room-golive-${roomId}`)).toBeFalsy();
+
+    const restored = await request(app)
+      .post('/api/auth/login')
+      .send({ identifier: restoreEmail, password });
+    expect(restored.status).toBe(200);
+    expect((await prisma.room.findUniqueOrThrow({ where: { id: roomId } })).endedAt).not.toBeNull();
+  });
+
+  it('does not restore a self-deleted account after the 30-day grace period', async () => {
+    const expiredUsername = `expired_${rand()}`;
+    const expiredEmail = `${expiredUsername}@test.local`;
+    const registered = await request(app)
+      .post('/api/auth/register')
+      .send({ username: expiredUsername, email: expiredEmail, password });
+    const id = registered.body.data.user.id as string;
+    createdIds.push(id);
+
+    await prisma.user.update({
+      where: { id },
+      data: { deletedAt: new Date(Date.now() - 31 * 24 * 60 * 60 * 1000) },
+    });
+
+    const login = await request(app)
+      .post('/api/auth/login')
+      .send({ identifier: expiredEmail, password });
+    expect(login.status).toBe(401);
+    expect(login.body.error.code).toBe('AUTH_003');
+    expect((await prisma.user.findUniqueOrThrow({ where: { id } })).deletedAt).not.toBeNull();
+  });
+
+  it('never restores an admin-deleted or actively suspended account', async () => {
+    const bannedUsername = `banned_${rand()}`;
+    const bannedEmail = `${bannedUsername}@test.local`;
+    const registered = await request(app)
+      .post('/api/auth/register')
+      .send({ username: bannedUsername, email: bannedEmail, password });
+    const id = registered.body.data.user.id as string;
+    createdIds.push(id);
+
+    await prisma.user.update({
+      where: { id },
+      data: {
+        deletedAt: new Date(),
+        suspendedUntil: new Date('9999-12-31T23:59:59.000Z'),
+      },
+    });
+
+    const login = await request(app)
+      .post('/api/auth/login')
+      .send({ identifier: bannedEmail, password });
+    expect(login.status).toBe(403);
+    expect(login.body.error.code).toBe('AUTH_007');
+    expect((await prisma.user.findUniqueOrThrow({ where: { id } })).deletedAt).not.toBeNull();
   });
 
   it('PATCH /api/users/me/visibility toggles Ghost Mode', async () => {

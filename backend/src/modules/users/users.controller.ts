@@ -128,7 +128,8 @@ export const usersController = {
    * loading it through the React Query cache.
    */
   async exportData(req: Request, res: Response) {
-    const data = await usersService.exportData(requireUserId(req));
+    const origin = `${req.protocol}://${req.get('host')}`;
+    const data = await usersService.exportData(requireUserId(req), origin);
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
     res.setHeader(
       'Content-Disposition',

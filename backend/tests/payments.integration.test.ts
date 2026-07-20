@@ -1,7 +1,7 @@
 /**
  * Payments + premium integration tests.
  *
- * Mocks the external Stripe SDK (optional dynamic import) and Redis (in-memory),
+ * Mocks the external Stripe SDK (loaded dynamically) and Redis (in-memory),
  * but exercises the REAL Prisma layer (docker Postgres on :5433) so the Tip
  * ledger + Subscription/entitlement writes are asserted against the DB. Covers
  * the invariants the audit flagged as untested: tip gating (self/KYC/recipient),
@@ -36,7 +36,11 @@ jest.mock(
       },
       accounts: {
         create: async () => ({ id: 'acct_test' }),
-        retrieve: async () => ({ payouts_enabled: true, charges_enabled: true }),
+        retrieve: async (id: string) => ({
+          id,
+          payouts_enabled: !/disabled|incomplete/.test(id),
+          charges_enabled: !/disabled|incomplete/.test(id),
+        }),
       },
       accountLinks: { create: async () => ({ url: 'https://connect.stripe.com/setup/test' }) },
       paymentIntents: { create: async () => ({ id: 'pi_test', client_secret: 'secret' }) },
@@ -47,8 +51,7 @@ jest.mock(
         return instance;
       },
     };
-    // `virtual: true` — 'stripe' is an OPTIONAL dependency that isn't installed,
-    // so jest must mock it without resolving the real module.
+    // Keep the mock virtual so this suite never initializes the real SDK.
   },
   { virtual: true },
 );
@@ -144,7 +147,11 @@ describe('paymentsService.tip — gating', () => {
     const to = await seedUser();
     await redis.set(
       accountKey(to),
-      JSON.stringify({ stripeAccountId: 'acct_x', kycComplete: false, createdAt: '' }),
+      JSON.stringify({
+        stripeAccountId: 'acct_incompletea',
+        kycComplete: false,
+        createdAt: '',
+      }),
     );
     await expect(paymentsService.tip(from, to, 500, 'eur')).rejects.toMatchObject({
       code: 'PAY_KYC_INCOMPLETE',
@@ -160,6 +167,74 @@ describe('paymentsService.tip — gating', () => {
     );
     const res = await paymentsService.tip(from, to, 500, 'eur');
     expect(res.url).toContain('checkout.stripe.com');
+  });
+
+  it('fails closed when a formerly KYC-complete account is now restricted at Stripe', async () => {
+    const from = await seedUser();
+    const to = await seedUser();
+    await redis.set(
+      accountKey(to),
+      JSON.stringify({ stripeAccountId: 'acct_disabledb', kycComplete: true, createdAt: '' }),
+    );
+    await expect(paymentsService.tip(from, to, 500, 'eur')).rejects.toMatchObject({
+      code: 'PAY_KYC_INCOMPLETE',
+    });
+  });
+
+  it('never trusts a malformed payout-account cache entry', async () => {
+    const from = await seedUser();
+    const to = await seedUser();
+    await redis.set(accountKey(to), '{not-json');
+    await expect(paymentsService.tip(from, to, 500, 'eur')).rejects.toMatchObject({
+      code: 'PAY_RECIPIENT_NOT_CONFIGURED',
+    });
+  });
+});
+
+describe('paymentsService — durable Stripe Connect mapping', () => {
+  it('rebuilds the Redis KYC cache from PostgreSQL after cache eviction', async () => {
+    const userId = await seedUser();
+    await prisma.user.update({
+      where: { id: userId },
+      data: { stripeConnectAccountId: 'acct_durableRecovery' },
+    });
+    await redis.del(accountKey(userId));
+
+    await expect(paymentsService.getAccountStatus(userId)).resolves.toEqual({
+      connected: true,
+      kycComplete: true,
+      accountId: 'acct_durableRecovery',
+    });
+    expect(await redis.get(accountKey(userId))).toContain('acct_durableRecovery');
+  });
+
+  it('persists a newly-created Connect account before returning onboarding', async () => {
+    const userId = await seedUser();
+    const result = await paymentsService.onboardCreator(userId);
+    expect(result.accountId).toBe('acct_test');
+    await expect(
+      prisma.user.findUniqueOrThrow({
+        where: { id: userId },
+        select: { stripeConnectAccountId: true },
+      }),
+    ).resolves.toEqual({ stripeConnectAccountId: 'acct_test' });
+  });
+
+  it('persists account.updated state even when the Redis cache is absent', async () => {
+    const userId = await seedUser();
+    await paymentsService.syncAccount({
+      id: 'acct_webhookDurable',
+      payouts_enabled: true,
+      charges_enabled: true,
+      metadata: { chathouseUserId: userId },
+    });
+    await expect(
+      prisma.user.findUniqueOrThrow({
+        where: { id: userId },
+        select: { stripeConnectAccountId: true },
+      }),
+    ).resolves.toEqual({ stripeConnectAccountId: 'acct_webhookDurable' });
+    expect(await redis.get(accountKey(userId))).toContain('"kycComplete":true');
   });
 });
 

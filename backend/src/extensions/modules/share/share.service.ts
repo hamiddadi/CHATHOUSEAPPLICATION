@@ -1,5 +1,6 @@
 import { prisma } from '../../../config/database';
-import { extError } from '../../utils/ExtAppError';
+import { AppError } from '../../../middlewares/error.middleware';
+import { roomMetadataAccessWhere } from '../../../modules/rooms/rooms.access';
 
 /**
  * Pre-filled share URLs (Twitter / X, generic copy) for rooms & events.
@@ -22,12 +23,14 @@ interface ShareLinks {
 }
 
 export const shareService = {
-  async roomShare(roomId: string): Promise<ShareLinks> {
-    const room = await prisma.room.findUnique({
-      where: { id: roomId },
+  async roomShare(callerId: string, roomId: string): Promise<ShareLinks> {
+    const room = await prisma.room.findFirst({
+      where: {
+        AND: [{ id: roomId }, roomMetadataAccessWhere(callerId)],
+      },
       include: { host: { select: { displayName: true, username: true } } },
     });
-    if (!room) throw extError('CLUB_REQ_NOT_FOUND', 'Room not found');
+    if (!room) throw new AppError('ROOM_001');
 
     // Must match the deep-link route declared in the app (Room: 'room/:roomId').
     const url = `${ROOM_SHARE_BASE}/room/${room.id}`;

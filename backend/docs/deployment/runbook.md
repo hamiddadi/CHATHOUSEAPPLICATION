@@ -4,7 +4,7 @@ Operational guide for shipping the ChatHouse **backend API** (Express 5 /
 Prisma / mediasoup) to staging and production via GitHub Actions CD.
 
 The API container is built from `backend/Dockerfile` (multi-stage
-`node:20-slim`, runs `node dist/app.js` under `tini`, `EXPOSE 4000`) and runs
+`node:22.23.1-slim`, runs `node dist/app.js` under `tini`, `EXPOSE 4000`) and runs
 as the `api` service in the host's `docker-compose.yml` alongside `postgres`
 and `redis`.
 

@@ -82,7 +82,11 @@ export const useRoomSocket = (roomId: string | null, onJoinDenied?: () => void):
 
       cleanup = () => {
         unsubscribeReconnect();
-        socket.emit('room:leave', { roomId });
+        // Unmounting RoomScreen can mean "minimize to the mini-bar", not an
+        // account-level leave. Keep the socket in the room channel so the
+        // persistent audio session still receives ended/kicked events. The
+        // explicit Leave action calls the authenticated REST endpoint, whose
+        // server-side lifecycle evicts every device from this channel.
         socket.off('room:user-joined', refreshIfMatches);
         socket.off('room:user-left', refreshIfMatches);
         socket.off('room:role_changed', refreshIfMatches);

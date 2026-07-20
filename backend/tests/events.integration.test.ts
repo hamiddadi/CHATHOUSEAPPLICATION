@@ -11,8 +11,10 @@ const { createApp } = require('../src/app') as typeof import('../src/app');
 const { prisma } = require('../src/config/database') as typeof import('../src/config/database');
 const { connectRedis, disconnectRedis } =
   require('../src/config/redis') as typeof import('../src/config/redis');
-const { getRemindersQueue, shutdownReminders } =
+const { cancelEventReminder, getRemindersQueue, shutdownReminders, _internals } =
   require('../src/queues/eventReminders') as typeof import('../src/queues/eventReminders');
+const { shutdownReminder15 } =
+  require('../src/extensions/queues/reminder15') as typeof import('../src/extensions/queues/reminder15');
 /* eslint-enable @typescript-eslint/no-require-imports */
 
 const rand = () => Math.random().toString(36).slice(2, 10);
@@ -21,7 +23,11 @@ const registerUser = async (app: Express) => {
   const username = `e_${rand()}`;
   const res = await request(app)
     .post('/api/auth/register')
-    .send({ username, email: `${username}@test.local`, password: 'test-password-123' });
+    .send({
+      username,
+      email: `${username}@test.local`,
+      password: 'test-password-123',
+    });
   return {
     id: res.body.data.user.id as string,
     username,
@@ -42,6 +48,7 @@ describe('Events integration — scheduled rooms, RSVP, BullMQ reminder scheduli
 
   afterAll(async () => {
     for (const id of createdRoomIds) {
+      await cancelEventReminder(id);
       await prisma.room.delete({ where: { id } }).catch(() => undefined);
     }
     for (const id of createdClubIds) {
@@ -54,6 +61,7 @@ describe('Events integration — scheduled rooms, RSVP, BullMQ reminder scheduli
     const q = getRemindersQueue();
     await q.drain(true);
     await shutdownReminders();
+    await shutdownReminder15();
     await prisma.$disconnect();
     await disconnectRedis();
   });
@@ -256,5 +264,135 @@ describe('Events integration — scheduled rooms, RSVP, BullMQ reminder scheduli
       .get(`/api/clubs/${clubId}`)
       .set('Authorization', `Bearer ${owner.token}`);
     expect(detail.body.data.liveRoomsCount).toBe(1);
+  });
+
+  it('makes concurrent event cancellation idempotent without duplicate fan-out', async () => {
+    const host = await registerUser(app);
+    const guest = await registerUser(app);
+    createdUserIds.push(host.id, guest.id);
+
+    const created = await request(app)
+      .post('/api/rooms')
+      .set('Authorization', `Bearer ${host.token}`)
+      .send({
+        title: `Concurrent cancel ${rand()}`,
+        scheduledFor: new Date(Date.now() + 5 * 60 * 60 * 1000).toISOString(),
+      });
+    const roomId = created.body.data.id as string;
+    createdRoomIds.push(roomId);
+    await request(app)
+      .post(`/api/rooms/${roomId}/rsvp`)
+      .set('Authorization', `Bearer ${guest.token}`);
+
+    const responses = await Promise.all(
+      Array.from({ length: 2 }, () =>
+        request(app)
+          .post(`/api/ext/events/${roomId}/cancel`)
+          .set('Authorization', `Bearer ${host.token}`)
+          .send({ reason: 'duplicate device action' }),
+      ),
+    );
+
+    expect(responses.map(res => res.status)).toEqual([200, 200]);
+    expect(responses.reduce((sum, res) => sum + Number(res.body.notified ?? 0), 0)).toBe(2);
+    expect(
+      await prisma.notification.count({
+        where: { targetId: roomId, type: 'ROOM_CANCELED' },
+      }),
+    ).toBe(2);
+  });
+
+  it('allows only one of two conflicting concurrent reschedules to win', async () => {
+    const host = await registerUser(app);
+    createdUserIds.push(host.id);
+
+    const created = await request(app)
+      .post('/api/rooms')
+      .set('Authorization', `Bearer ${host.token}`)
+      .send({
+        title: `Concurrent reschedule ${rand()}`,
+        scheduledFor: new Date(Date.now() + 5 * 60 * 60 * 1000).toISOString(),
+      });
+    const roomId = created.body.data.id as string;
+    createdRoomIds.push(roomId);
+    const times = [
+      new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString(),
+      new Date(Date.now() + 7 * 60 * 60 * 1000).toISOString(),
+    ];
+
+    const responses = await Promise.all(
+      times.map(scheduledFor =>
+        request(app)
+          .patch(`/api/ext/events/${roomId}/reschedule`)
+          .set('Authorization', `Bearer ${host.token}`)
+          .send({ scheduledFor }),
+      ),
+    );
+
+    expect(responses.map(res => res.status).sort()).toEqual([200, 409]);
+    const room = await prisma.room.findUniqueOrThrow({
+      where: { id: roomId },
+      select: { scheduledFor: true },
+    });
+    expect(times).toContain(room.scheduledFor?.toISOString());
+  });
+
+  it('fails closed when a soft-deleted host reaches scheduled go-live', async () => {
+    const host = await registerUser(app);
+    createdUserIds.push(host.id);
+    const created = await request(app)
+      .post('/api/rooms')
+      .set('Authorization', `Bearer ${host.token}`)
+      .send({
+        title: `Deleted host event ${rand()}`,
+        scheduledFor: new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString(),
+      });
+    const roomId = created.body.data.id as string;
+    createdRoomIds.push(roomId);
+    await prisma.user.update({
+      where: { id: host.id },
+      data: { deletedAt: new Date() },
+    });
+
+    await _internals.openScheduledRoom(roomId);
+
+    const room = await prisma.room.findUniqueOrThrow({ where: { id: roomId } });
+    expect(room.isLive).toBe(false);
+    expect(room.endedAt).not.toBeNull();
+    expect(room.canceledAt).not.toBeNull();
+    expect(
+      await prisma.participant.count({
+        where: { roomId, userId: host.id, leftAt: null },
+      }),
+    ).toBe(0);
+  });
+
+  it('opens a scheduled event atomically with host presence and currentRoom', async () => {
+    const host = await registerUser(app);
+    createdUserIds.push(host.id);
+    const created = await request(app)
+      .post('/api/rooms')
+      .set('Authorization', `Bearer ${host.token}`)
+      .send({
+        title: `Atomic go-live ${rand()}`,
+        scheduledFor: new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString(),
+      });
+    const roomId = created.body.data.id as string;
+    createdRoomIds.push(roomId);
+
+    await _internals.openScheduledRoom(roomId);
+
+    const [room, user, hostParticipant] = await Promise.all([
+      prisma.room.findUniqueOrThrow({ where: { id: roomId } }),
+      prisma.user.findUniqueOrThrow({ where: { id: host.id } }),
+      prisma.participant.findUnique({
+        where: { userId_roomId: { userId: host.id, roomId } },
+      }),
+    ]);
+    expect(room.isLive).toBe(true);
+    expect(room.participantCount).toBe(1);
+    expect(room.totalAttendees).toBe(1);
+    expect(user.currentRoomId).toBe(roomId);
+    expect(hostParticipant).toMatchObject({ role: 'HOST', leftAt: null });
   });
 });

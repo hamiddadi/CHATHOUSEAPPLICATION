@@ -1,8 +1,13 @@
-import type { MessageKind } from '@prisma/client';
+import { MediaKind, type MessageKind, type Prisma } from '@prisma/client';
 import { prisma } from '../../config/database';
+import { logger } from '../../config/logger';
 import { AppError } from '../../middlewares/error.middleware';
 import { notificationsService } from '../notifications/notifications.service';
+import { mediaService } from '../media/media.service';
+import { lockUserRows } from '../social/relationship-lock';
 import { emitGroupMessage } from '../../socket/realtime';
+import { runIdempotentCreate } from '../../utils/idempotency';
+import { scheduleBackgroundTask } from '../../utils/backgroundTasks';
 import type {
   AddGroupMembersInput,
   CreateGroupInput,
@@ -73,14 +78,39 @@ const assertNoBlockBetween = async (userId: string, others: string[]): Promise<v
  * (in either direction — `@@unique([blockerId, blockedId])` is directional, so
  * both A→B and B→A land here). Throws GROUP_006 on the first offending pair.
  */
-const assertNoBlockWithin = async (members: string[]): Promise<void> => {
+const assertNoBlockWithinTransaction = async (
+  tx: Prisma.TransactionClient,
+  members: string[],
+): Promise<void> => {
   const ids = uniq(members);
   if (ids.length < 2) return;
-  const blocked = await prisma.block.findFirst({
+  const blocked = await tx.block.findFirst({
     where: { blockerId: { in: ids }, blockedId: { in: ids } },
     select: { id: true },
   });
   if (blocked) throw new AppError('GROUP_006');
+};
+
+/**
+ * Group creation/member admission is a sensitive social action. The caller
+ * may only add users they actively follow; PENDING private-account requests
+ * are deliberately not sufficient.
+ */
+const assertAcceptedFollows = async (
+  tx: Prisma.TransactionClient,
+  actorId: string,
+  targetIds: string[],
+): Promise<void> => {
+  const targets = uniq(targetIds).filter(id => id !== actorId);
+  if (targets.length === 0) return;
+  const accepted = await tx.follow.count({
+    where: {
+      followerId: actorId,
+      followingId: { in: targets },
+      status: 'ACCEPTED',
+    },
+  });
+  if (accepted !== targets.length) throw new AppError('GROUP_007');
 };
 
 // A GroupMessage row joined with its sender, as returned by the Prisma queries
@@ -121,42 +151,56 @@ export const groupsService = {
   async requireMembership(userId: string, conversationId: string) {
     const conv = await prisma.conversation.findUnique({
       where: { id: conversationId },
-      include: { members: { include: { user: { select: publicUser } } } },
+      include: {
+        members: {
+          where: { user: { deletedAt: null } },
+          include: { user: { select: publicUser } },
+        },
+      },
     });
     if (!conv) throw new AppError('GROUP_001');
     if (!conv.members.some(m => m.userId === userId)) throw new AppError('GROUP_002');
     return conv;
   },
 
-  async create(userId: string, input: CreateGroupInput) {
+  async create(userId: string, input: CreateGroupInput, idempotencyKey?: string) {
     // The creator is always a member; dedupe and drop any self-reference from
     // the requested members so a group is creator + ≥2 distinct others.
     const others = uniq(input.memberIds).filter(id => id !== userId);
     if (others.length < 2) throw new AppError('GROUP_003');
 
-    const found = await prisma.user.findMany({
-      where: { id: { in: others }, deletedAt: null },
-      select: { id: true },
-    });
-    if (found.length !== others.length) throw new AppError('USER_001');
-
-    // A blocked user must not be able to open a group with their blocker — and
-    // that holds for EVERY pair in the group, not just creator↔member: a third
-    // party must not be able to force two users who blocked each other into the
-    // same group. Check the full membership pairwise.
     const allMemberIds = [userId, ...others];
-    await assertNoBlockWithin(allMemberIds);
 
-    const conv = await prisma.conversation.create({
-      data: {
-        title: input.title,
-        ownerId: userId,
-        members: { create: allMemberIds.map(id => ({ userId: id })) },
+    const creation = await runIdempotentCreate({
+      userId,
+      scope: 'groups.create',
+      key: idempotencyKey,
+      payload: input,
+      create: async tx => {
+        // Serialize group admission with follow/block mutations, then re-check
+        // every authorization fact inside the same transaction as insertion.
+        const lockedIds = await lockUserRows(tx, allMemberIds);
+        if (lockedIds.length !== allMemberIds.length) throw new AppError('USER_001');
+        const activeUsers = await tx.user.count({
+          where: { id: { in: allMemberIds }, deletedAt: null },
+        });
+        if (activeUsers !== allMemberIds.length) throw new AppError('USER_001');
+        await assertNoBlockWithinTransaction(tx, allMemberIds);
+        await assertAcceptedFollows(tx, userId, others);
+
+        const conv = await tx.conversation.create({
+          data: {
+            title: input.title,
+            ownerId: userId,
+            members: { create: allMemberIds.map(id => ({ userId: id })) },
+          },
+          select: { id: true },
+        });
+        return conv.id;
       },
-      include: { members: { include: { user: { select: publicUser } } } },
     });
 
-    return this.serialize(conv, null, 0);
+    return this.detail(userId, creation.resourceId);
   },
 
   /** All group conversations the user belongs to, newest activity first. */
@@ -166,8 +210,12 @@ export const groupsService = {
       include: {
         conversation: {
           include: {
-            members: { include: { user: { select: publicUser } } },
+            members: {
+              where: { user: { deletedAt: null } },
+              include: { user: { select: publicUser } },
+            },
             messages: {
+              where: { sender: { deletedAt: null } },
               orderBy: { createdAt: 'desc' },
               take: 1,
               include: { sender: { select: publicUser } },
@@ -184,6 +232,7 @@ export const groupsService = {
           where: {
             conversationId: conv.id,
             senderId: { not: userId },
+            sender: { deletedAt: null },
             ...(m.lastReadAt ? { createdAt: { gt: m.lastReadAt } } : {}),
           },
         });
@@ -199,7 +248,7 @@ export const groupsService = {
     const conv = await this.requireMembership(userId, conversationId);
     const membership = conv.members.find(m => m.userId === userId);
     const last = await prisma.groupMessage.findFirst({
-      where: { conversationId },
+      where: { conversationId, sender: { deletedAt: null } },
       orderBy: { createdAt: 'desc' },
       include: { sender: { select: publicUser } },
     });
@@ -207,6 +256,7 @@ export const groupsService = {
       where: {
         conversationId,
         senderId: { not: userId },
+        sender: { deletedAt: null },
         ...(membership?.lastReadAt ? { createdAt: { gt: membership.lastReadAt } } : {}),
       },
     });
@@ -218,6 +268,7 @@ export const groupsService = {
     const messages = await prisma.groupMessage.findMany({
       where: {
         conversationId,
+        sender: { deletedAt: null },
         ...(input.before ? { createdAt: { lt: new Date(input.before) } } : {}),
       },
       orderBy: { createdAt: 'desc' },
@@ -227,24 +278,43 @@ export const groupsService = {
     return messages.reverse().map(toMessagePayload);
   },
 
-  async send(userId: string, conversationId: string, input: SendGroupMessageInput) {
+  async send(
+    userId: string,
+    conversationId: string,
+    input: SendGroupMessageInput,
+    idempotencyKey?: string,
+  ) {
     const conv = await this.requireMembership(userId, conversationId);
     const memberIds = conv.members.map(m => m.userId);
 
     // A blocked user must not reach their blocker via a shared group message.
     await assertNoBlockBetween(userId, memberIds);
 
-    const msg = await prisma.groupMessage.create({
-      data: { conversationId, senderId: userId, content: input.content },
+    const creation = await runIdempotentCreate({
+      userId,
+      scope: `groups.message:${conversationId}`,
+      key: idempotencyKey,
+      payload: { kind: 'TEXT', ...input },
+      create: async tx => {
+        const created = await tx.groupMessage.create({
+          data: { conversationId, senderId: userId, content: input.content },
+          select: { id: true },
+        });
+        await tx.conversation.update({
+          where: { id: conversationId },
+          data: { updatedAt: new Date() },
+        });
+        return created.id;
+      },
+    });
+    const msg = await prisma.groupMessage.findUnique({
+      where: { id: creation.resourceId },
       include: { sender: { select: publicUser } },
     });
-    // Bump the conversation so it floats to the top of everyone's list.
-    await prisma.conversation.update({
-      where: { id: conversationId },
-      data: { updatedAt: new Date() },
-    });
+    if (!msg) throw new AppError('GROUP_001');
 
     const payload = toMessagePayload(msg);
+    if (creation.replayed) return payload;
 
     // Realtime fan-out to every member (sender included, so their other
     // devices stay in sync).
@@ -253,16 +323,27 @@ export const groupsService = {
     // Offline fallback: a NEW_MESSAGE notification for every OTHER member.
     const handle = msg.sender.displayName ?? msg.sender.username ?? 'Someone';
     const title = conv.title ?? handle;
-    for (const memberId of memberIds) {
-      if (memberId === userId) continue;
-      void notificationsService.create({
-        userId: memberId,
-        type: 'NEW_MESSAGE',
-        title,
-        body: `${handle}: ${input.content.slice(0, 140)}`,
-        data: { conversationId, senderId: userId, conversation: 'group' },
-      });
-    }
+    await Promise.all(
+      memberIds
+        .filter(memberId => memberId !== userId)
+        .map(memberId =>
+          scheduleBackgroundTask(
+            notificationsService.create({
+              userId: memberId,
+              type: 'NEW_MESSAGE',
+              title,
+              body: `${handle}: ${input.content.slice(0, 140)}`,
+              data: { conversationId, senderId: userId, conversation: 'group' },
+            }),
+            err =>
+              logger.warn('group message notification failed', {
+                err,
+                conversationId,
+                memberId,
+              }),
+          ),
+        ),
+    );
 
     return payload;
   },
@@ -273,43 +354,75 @@ export const groupsService = {
    * stored URL, fan it out in realtime, and notify the other members. Mirrors
    * {@link send} but with a 🎤 notification body instead of a text preview.
    */
-  async sendVoice(userId: string, conversationId: string, input: SendGroupVoiceInput) {
+  async sendVoice(
+    userId: string,
+    conversationId: string,
+    input: SendGroupVoiceInput,
+    idempotencyKey?: string,
+  ) {
     const conv = await this.requireMembership(userId, conversationId);
     const memberIds = conv.members.map(m => m.userId);
 
     // A blocked user must not reach their blocker via a shared group voice note.
     await assertNoBlockBetween(userId, memberIds);
+    await mediaService.assertOwnedMediaUrl(userId, input.audioUrl, MediaKind.VOICE);
 
-    const msg = await prisma.groupMessage.create({
-      data: {
-        conversationId,
-        senderId: userId,
-        kind: 'VOICE',
-        audioUrl: input.audioUrl,
-        audioDurationMs: input.durationMs,
+    const creation = await runIdempotentCreate({
+      userId,
+      scope: `groups.message:${conversationId}`,
+      key: idempotencyKey,
+      payload: { kind: 'VOICE', ...input },
+      create: async tx => {
+        const created = await tx.groupMessage.create({
+          data: {
+            conversationId,
+            senderId: userId,
+            kind: 'VOICE',
+            audioUrl: input.audioUrl,
+            audioDurationMs: input.durationMs,
+          },
+          select: { id: true },
+        });
+        await tx.conversation.update({
+          where: { id: conversationId },
+          data: { updatedAt: new Date() },
+        });
+        return created.id;
       },
+    });
+    const msg = await prisma.groupMessage.findUnique({
+      where: { id: creation.resourceId },
       include: { sender: { select: publicUser } },
     });
-    await prisma.conversation.update({
-      where: { id: conversationId },
-      data: { updatedAt: new Date() },
-    });
+    if (!msg) throw new AppError('GROUP_001');
 
     const payload = toMessagePayload(msg);
+    if (creation.replayed) return payload;
     emitGroupMessage(memberIds, payload);
 
     const handle = msg.sender.displayName ?? msg.sender.username ?? 'Someone';
     const title = conv.title ?? handle;
-    for (const memberId of memberIds) {
-      if (memberId === userId) continue;
-      void notificationsService.create({
-        userId: memberId,
-        type: 'NEW_MESSAGE',
-        title,
-        body: `${handle}: 🎤 Voice message`,
-        data: { conversationId, senderId: userId, conversation: 'group' },
-      });
-    }
+    await Promise.all(
+      memberIds
+        .filter(memberId => memberId !== userId)
+        .map(memberId =>
+          scheduleBackgroundTask(
+            notificationsService.create({
+              userId: memberId,
+              type: 'NEW_MESSAGE',
+              title,
+              body: `${handle}: 🎤 Voice message`,
+              data: { conversationId, senderId: userId, conversation: 'group' },
+            }),
+            err =>
+              logger.warn('group voice notification failed', {
+                err,
+                conversationId,
+                memberId,
+              }),
+          ),
+        ),
+    );
 
     return payload;
   },
@@ -323,75 +436,130 @@ export const groupsService = {
     return { read: true as const };
   },
 
-  async addMembers(userId: string, conversationId: string, input: AddGroupMembersInput) {
-    const conv = await this.requireMembership(userId, conversationId);
-    const existingIds = new Set(conv.members.map(m => m.userId));
-    const toAdd = uniq(input.userIds).filter(id => !existingIds.has(id));
-    if (toAdd.length > 0) {
-      const found = await prisma.user.findMany({
-        where: { id: { in: toAdd }, deletedAt: null },
-        select: { id: true },
-      });
-      const validIds = found.map(u => u.id);
-      if (validIds.length > 0) {
-        // A blocked user must not be forced into a group with their blocker.
-        // Check the FULL resulting membership pairwise: not just each new member
-        // against the existing ones, but also the new members against EACH OTHER
-        // — adding a batch [A, B] where A blocked B was inserting both.
-        await assertNoBlockWithin([...existingIds, ...validIds]);
-        await prisma.conversationMember.createMany({
-          data: validIds.map(id => ({ conversationId, userId: id })),
+  async addMembers(
+    userId: string,
+    conversationId: string,
+    input: AddGroupMembersInput,
+    idempotencyKey?: string,
+  ) {
+    const mutation = await runIdempotentCreate({
+      userId,
+      scope: `groups.add-members:${conversationId}`,
+      key: idempotencyKey,
+      payload: input,
+      create: async tx => {
+        const lockedConversation = await tx.$queryRaw<{ id: string }[]>`
+          SELECT id FROM "Conversation" WHERE id = ${conversationId} FOR UPDATE`;
+        if (lockedConversation.length === 0) throw new AppError('GROUP_001');
+
+        const conv = await tx.conversation.findUnique({
+          where: { id: conversationId },
+          select: { members: { select: { userId: true } } },
+        });
+        if (!conv) throw new AppError('GROUP_001');
+        if (!conv.members.some(member => member.userId === userId)) {
+          throw new AppError('GROUP_002');
+        }
+
+        const existingIds = new Set(conv.members.map(member => member.userId));
+        const toAdd = uniq(input.userIds).filter(id => !existingIds.has(id));
+        if (toAdd.length === 0) return conversationId;
+
+        const resultingIds = [...existingIds, ...toAdd];
+        const lockedUsers = await lockUserRows(tx, resultingIds);
+        if (lockedUsers.length !== resultingIds.length) throw new AppError('USER_001');
+        const activeTargets = await tx.user.count({
+          where: { id: { in: toAdd }, deletedAt: null },
+        });
+        if (activeTargets !== toAdd.length) throw new AppError('USER_001');
+
+        await assertNoBlockWithinTransaction(tx, resultingIds);
+        await assertAcceptedFollows(tx, userId, toAdd);
+        await tx.conversationMember.createMany({
+          data: toAdd.map(id => ({ conversationId, userId: id })),
           skipDuplicates: true,
         });
-      }
-    }
-    return this.detail(userId, conversationId);
+        return conversationId;
+      },
+    });
+    return this.detail(userId, mutation.resourceId);
   },
 
   async rename(userId: string, conversationId: string, input: RenameGroupInput) {
     // Any member can rename the thread (Clubhouse-style group chats). An empty
     // title (normalised to null by the schema) reverts to the auto name.
-    await this.requireMembership(userId, conversationId);
-    await prisma.conversation.update({
-      where: { id: conversationId },
-      data: { title: input.title },
+    await prisma.$transaction(async tx => {
+      const locked = await tx.$queryRaw<{ id: string }[]>`
+        SELECT id FROM "Conversation" WHERE id = ${conversationId} FOR UPDATE`;
+      if (locked.length === 0) throw new AppError('GROUP_001');
+      const membership = await tx.conversationMember.findUnique({
+        where: { conversationId_userId: { conversationId, userId } },
+        select: { id: true },
+      });
+      if (!membership) throw new AppError('GROUP_002');
+      await tx.conversation.update({
+        where: { id: conversationId },
+        data: { title: input.title },
+      });
     });
     return this.detail(userId, conversationId);
   },
 
   async removeMember(userId: string, conversationId: string, targetId: string) {
-    const conv = await this.requireMembership(userId, conversationId);
-    // Only the owner can remove others; removing yourself goes through leave()
-    // so the empty-group cleanup runs.
-    if (conv.ownerId !== userId) throw new AppError('GROUP_004');
-    if (targetId === userId) throw new AppError('GROUP_005');
-    await prisma.conversationMember.deleteMany({
-      where: { conversationId, userId: targetId },
+    await prisma.$transaction(async tx => {
+      const locked = await tx.$queryRaw<{ id: string }[]>`
+        SELECT id FROM "Conversation" WHERE id = ${conversationId} FOR UPDATE`;
+      if (locked.length === 0) throw new AppError('GROUP_001');
+      const conv = await tx.conversation.findUnique({
+        where: { id: conversationId },
+        select: {
+          ownerId: true,
+          members: { where: { userId }, select: { id: true }, take: 1 },
+        },
+      });
+      if (!conv) throw new AppError('GROUP_001');
+      if (conv.members.length === 0) throw new AppError('GROUP_002');
+      if (conv.ownerId !== userId) throw new AppError('GROUP_004');
+      if (targetId === userId) throw new AppError('GROUP_005');
+      await tx.conversationMember.deleteMany({
+        where: { conversationId, userId: targetId },
+      });
     });
     return this.detail(userId, conversationId);
   },
 
   async leave(userId: string, conversationId: string) {
-    const conv = await this.requireMembership(userId, conversationId);
-    await prisma.conversationMember.deleteMany({ where: { conversationId, userId } });
-    // Garbage-collect an empty conversation (cascade removes its messages).
-    const remaining = await prisma.conversationMember.findMany({
-      where: { conversationId },
-      orderBy: [{ joinedAt: 'asc' }, { id: 'asc' }],
-      select: { userId: true },
-    });
-    const oldest = remaining[0];
-    if (!oldest) {
-      await prisma.conversation.delete({ where: { id: conversationId } });
-    } else if (conv.ownerId === userId) {
-      // The owner left but members remain: hand ownership to the oldest
-      // remaining member so no conversation is left with an orphaned ownerId
-      // (which would strand owner-only actions like removeMember).
-      await prisma.conversation.update({
+    await prisma.$transaction(async tx => {
+      await tx.$queryRaw<{ id: string }[]>`
+        SELECT id FROM "Conversation" WHERE id = ${conversationId} FOR UPDATE`;
+      const conv = await tx.conversation.findUnique({
         where: { id: conversationId },
-        data: { ownerId: oldest.userId },
+        select: {
+          ownerId: true,
+          members: { where: { userId }, select: { id: true }, take: 1 },
+        },
       });
-    }
+      // Replayed leave after a successful response loss is a successful no-op.
+      if (!conv || conv.members.length === 0) return;
+
+      await tx.conversationMember.deleteMany({
+        where: { conversationId, userId },
+      });
+      const oldest = await tx.conversationMember.findFirst({
+        where: { conversationId, user: { deletedAt: null } },
+        orderBy: [{ joinedAt: 'asc' }, { id: 'asc' }],
+        select: { userId: true },
+      });
+      if (!oldest) {
+        await tx.conversation.delete({ where: { id: conversationId } });
+      } else if (conv.ownerId === userId) {
+        // Transfer ownership in the same commit as the owner membership delete.
+        await tx.conversation.update({
+          where: { id: conversationId },
+          data: { ownerId: oldest.userId },
+        });
+      }
+    });
     return { left: true as const };
   },
 

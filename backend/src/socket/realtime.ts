@@ -1,4 +1,8 @@
 import type { Server } from 'socket.io';
+import { prisma } from '../config/database';
+import { logger } from '../config/logger';
+import { getBlockedIdSet } from '../modules/social/blocks';
+import { scheduleBackgroundTask } from '../utils/backgroundTasks';
 import { HALLWAY_ROOM } from './handlers/hallway.handler';
 import { MAPS_CHANNEL, roomChannel, userChannel } from './channels';
 
@@ -14,6 +18,22 @@ let ioRef: Server | null = null;
 
 export const setRealtimeServer = (io: Server): void => {
   ioRef = io;
+};
+
+export type AuthRevocationReason =
+  | 'logout'
+  | 'password_reset'
+  | 'account_deleted'
+  | 'account_suspended';
+
+/**
+ * Revoke every live Socket.IO connection for a user. Targeting the personal
+ * channel works through the Redis adapter, including across app instances.
+ */
+export const disconnectUserSockets = (userId: string, reason: AuthRevocationReason): void => {
+  const channel = userChannel(userId);
+  ioRef?.to(channel).emit('auth:revoked', { reason });
+  ioRef?.in(channel).disconnectSockets(true);
 };
 
 interface RoomCreatedPayload {
@@ -158,7 +178,23 @@ export const forceLeaveRoom = (
   // Personal channel is independent of the room channel, so this lands
   // regardless of the eviction below.
   ioRef?.to(userChannel(userId)).emit('room:you_were_kicked', { roomId, kickedBy, kickedByName });
+  forceUserSocketsLeaveRoom(roomId, userId);
+};
+
+/**
+ * Remove every device for one account from a room channel without disconnecting
+ * its account socket. Used after any account-level leave (REST, socket, kick).
+ */
+export const forceUserSocketsLeaveRoom = (roomId: string, userId: string): void => {
   ioRef?.in(userChannel(userId)).socketsLeave(roomChannel(roomId));
+};
+
+/**
+ * Empty a closed room's Socket.IO channel after broadcasting `room:ended`.
+ * This is authoritative cleanup for clients that ignore the lifecycle event.
+ */
+export const forceAllSocketsLeaveRoom = (roomId: string): void => {
+  ioRef?.in(roomChannel(roomId)).socketsLeave(roomChannel(roomId));
 };
 
 export const emitRoomMuteChanged = (
@@ -181,14 +217,72 @@ export const emitUserFollowerCount = (userId: string, count: number): void => {
  * coordinates, which still stream via `maps:user-moved` — so the client merges
  * it as a surgical per-user patch. No-op before socket boot.
  */
-export const emitMapUserUpdate = (payload: {
+type MapEventName = 'maps:user-moved' | 'maps:user-offline' | 'map:user_update';
+
+const emitMapEventToEligibleViewers = async (
+  sourceUserId: string,
+  event: MapEventName,
+  payload: unknown,
+  requireVisibleSource: boolean,
+): Promise<void> => {
+  const io = ioRef;
+  if (!io) return;
+
+  const [source, blocked, viewers] = await Promise.all([
+    requireVisibleSource
+      ? prisma.user.findUnique({
+          where: { id: sourceUserId },
+          select: { isVisible: true, deletedAt: true },
+        })
+      : Promise.resolve(null),
+    getBlockedIdSet(sourceUserId),
+    io.in(MAPS_CHANNEL).fetchSockets(),
+  ]);
+  if (requireVisibleSource && (!source || source.deletedAt || !source.isVisible)) return;
+
+  for (const viewer of viewers) {
+    const viewerId = (viewer.data as { userId?: string }).userId;
+    if (!viewerId || viewerId === sourceUserId || blocked.has(viewerId)) continue;
+    io.to(viewer.id).emit(event, payload);
+  }
+};
+
+export interface MapUserMovedPayload {
+  userId: string;
+  username: string | null;
+  displayName: string | null;
+  avatarUrl: string | null;
+  latitude: number;
+  longitude: number;
+  lastSeenAt: string;
+  currentRoomId: string | null;
+  currentRoom: { id: string; title: string; isLive: boolean } | null;
+}
+
+export const emitMapUserMoved = async (payload: MapUserMovedPayload): Promise<void> => {
+  await emitMapEventToEligibleViewers(payload.userId, 'maps:user-moved', payload, true);
+};
+
+export const emitMapUserOffline = async (userId: string): Promise<void> => {
+  await emitMapEventToEligibleViewers(userId, 'maps:user-offline', { userId }, false);
+};
+
+export const hideMapUsersFromEachOther = (firstUserId: string, secondUserId: string): void => {
+  ioRef?.to(userChannel(firstUserId)).emit('maps:user-offline', { userId: secondUserId });
+  ioRef?.to(userChannel(secondUserId)).emit('maps:user-offline', { userId: firstUserId });
+};
+
+export const emitMapUserUpdate = async (payload: {
   userId: string;
   isSpeaking?: boolean;
   isMuted?: boolean;
   isListener?: boolean;
   isInRoom?: boolean;
-}): void => {
-  ioRef?.to(MAPS_CHANNEL).emit('map:user_update', payload);
+}): Promise<void> => {
+  await scheduleBackgroundTask(
+    emitMapEventToEligibleViewers(payload.userId, 'map:user_update', payload, true),
+    err => logger.warn('map:user_update broadcast failed', { err, userId: payload.userId }),
+  );
 };
 
 export const emitRoomMetaUpdated = (
@@ -199,6 +293,7 @@ export const emitRoomMetaUpdated = (
     chatVisibility?: 'ALL' | 'MODS_ONLY';
     isLocked?: boolean;
     isPrivate?: boolean;
+    roomType?: 'OPEN' | 'SOCIAL' | 'CLOSED';
   },
 ): void => {
   ioRef?.to(roomChannel(roomId)).emit('room:meta_updated', { roomId, ...patch });

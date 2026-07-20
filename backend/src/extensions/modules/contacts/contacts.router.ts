@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { requireAuth } from '../../../middlewares/auth.middleware';
+import { contactMatchLimiter } from '../../../middlewares/rateLimit.middleware';
 import { asyncHandler } from '../../../utils/asyncHandler';
 import { authedUserId } from '../../../utils/authedUserId';
 import { contactsService } from './contacts.service';
@@ -20,6 +21,7 @@ const matchSchema = z.object({
 
 contactsRouter.post(
   '/match',
+  contactMatchLimiter,
   asyncHandler(async (req, res) => {
     const { phoneNumbers } = matchSchema.parse(req.body);
     const userId = authedUserId(req);

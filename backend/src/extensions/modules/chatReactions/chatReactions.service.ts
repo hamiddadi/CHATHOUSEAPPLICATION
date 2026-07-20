@@ -20,20 +20,94 @@ import { extError } from '../../utils/ExtAppError';
 
 const TTL_S = 24 * 3600;
 const ALLOWED = new Set(['❤️', '👏', '🔥', '😂', '🙏', '🎉', '✨', '🤯']);
+const ALLOWED_LIST = [...ALLOWED];
 
 const kBy = (id: string, emoji: string) => `ext:chatreact:${id}:by:${emoji}`;
 const kUser = (id: string) => `ext:chatreact:${id}:user`;
 
 export type ReactionsByEmoji = Record<string, { count: number; byMe: boolean }>;
 
-// Refresh the TTL on every key that backs a message's reactions, including
-// each per-emoji SET (otherwise those SETs leak forever) — and call this in
-// BOTH the add and the remove branches so the lifetime stays coherent.
-const touchTTL = async (id: string): Promise<void> => {
-  await Promise.all([
-    redis.expire(kUser(id), TTL_S),
-    ...[...ALLOWED].map(e => redis.expire(kBy(id, e), TTL_S)),
-  ]);
+const requireMessageAccess = async (callerId: string, messageId: string): Promise<void> => {
+  const msg = await prisma.roomChatMessage.findFirst({
+    where: {
+      id: messageId,
+      isDeleted: false,
+      user: { deletedAt: null },
+      room: {
+        participants: {
+          some: { userId: callerId, leftAt: null },
+        },
+      },
+    },
+    select: {
+      room: {
+        select: {
+          chatVisibility: true,
+          participants: {
+            where: { userId: callerId, leftAt: null },
+            select: { role: true },
+            take: 1,
+          },
+        },
+      },
+    },
+  });
+  if (!msg) throw extError('CLUB_REQ_NOT_FOUND', 'Message not found');
+  const role = msg.room.participants[0]?.role;
+  if (msg.room.chatVisibility === 'MODS_ONLY' && role !== 'HOST' && role !== 'MODERATOR') {
+    // Match roomsService.listRoomMessages: listeners cannot infer reactions
+    // for chat history hidden from them.
+    throw extError('CLUB_REQ_NOT_FOUND', 'Message not found');
+  }
+};
+
+// One connection-local Lua operation keeps the reverse hash and all emoji
+// sets coherent under concurrent taps/swaps. The previous HGET + separate
+// writes could leave one user in multiple emoji sets.
+const TOGGLE_SCRIPT = `
+local caller = ARGV[1]
+local nextEmoji = ARGV[2]
+local ttl = tonumber(ARGV[3])
+local previous = redis.call('HGET', KEYS[1], caller)
+
+local function setIndex(label)
+  for i = 4, #ARGV do
+    if ARGV[i] == label then
+      return i - 2
+    end
+  end
+  return nil
+end
+
+if previous == nextEmoji then
+  redis.call('HDEL', KEYS[1], caller)
+  local oldIndex = setIndex(previous)
+  if oldIndex then redis.call('SREM', KEYS[oldIndex], caller) end
+else
+  if previous then
+    local oldIndex = setIndex(previous)
+    if oldIndex then redis.call('SREM', KEYS[oldIndex], caller) end
+  end
+  redis.call('HSET', KEYS[1], caller, nextEmoji)
+  local nextIndex = setIndex(nextEmoji)
+  if nextIndex then redis.call('SADD', KEYS[nextIndex], caller) end
+end
+
+for i = 1, #KEYS do
+  redis.call('EXPIRE', KEYS[i], ttl)
+end
+return 1
+`;
+
+const readReactions = async (callerId: string, messageId: string): Promise<ReactionsByEmoji> => {
+  const myEmoji = await redis.hGet(kUser(messageId), callerId);
+  const out: ReactionsByEmoji = {};
+  const counts = await Promise.all(ALLOWED_LIST.map(emoji => redis.sCard(kBy(messageId, emoji))));
+  ALLOWED_LIST.forEach((emoji, index) => {
+    const count = counts[index] ?? 0;
+    if (count > 0) out[emoji] = { count, byMe: myEmoji === emoji };
+  });
+  return out;
 };
 
 export const chatReactionsService = {
@@ -45,56 +119,16 @@ export const chatReactionsService = {
     if (!ALLOWED.has(emoji)) {
       throw extError('PAY_INVALID', `Emoji "${emoji}" not in allowed set`);
     }
-    // Make sure the message exists (so we don't store orphan reactions)
-    const msg = await prisma.roomChatMessage.findUnique({
-      where: { id: messageId },
-      select: { id: true, isDeleted: true },
+    await requireMessageAccess(callerId, messageId);
+    await redis.eval(TOGGLE_SCRIPT, {
+      keys: [kUser(messageId), ...ALLOWED_LIST.map(value => kBy(messageId, value))],
+      arguments: [callerId, emoji, String(TTL_S), ...ALLOWED_LIST],
     });
-    if (!msg || msg.isDeleted) {
-      throw extError('CLUB_REQ_NOT_FOUND', 'Message not found');
-    }
-
-    // Source of truth for counts is the per-emoji SET (sAdd/sRem are
-    // idempotent), NOT a hand-incremented HASH. With a separately
-    // maintained counter, two concurrent toggles of the same emoji could
-    // each read prevEmoji===emoji and decrement twice (negative count) or
-    // both read "absent" and increment twice (double count). Deriving the
-    // count from the SET via sCard() in list() removes that divergence.
-    const prevEmoji = await redis.hGet(kUser(messageId), callerId);
-    if (prevEmoji === emoji) {
-      // Same emoji → remove
-      await Promise.all([
-        redis.hDel(kUser(messageId), callerId),
-        redis.sRem(kBy(messageId, emoji), callerId),
-      ]);
-      await touchTTL(messageId);
-    } else {
-      // Different / new
-      if (prevEmoji) {
-        await redis.sRem(kBy(messageId, prevEmoji), callerId);
-      }
-      await Promise.all([
-        redis.hSet(kUser(messageId), callerId, emoji),
-        redis.sAdd(kBy(messageId, emoji), callerId),
-      ]);
-      await touchTTL(messageId);
-    }
-
-    return this.list(callerId, messageId);
+    return readReactions(callerId, messageId);
   },
 
   async list(callerId: string, messageId: string): Promise<ReactionsByEmoji> {
-    const myEmoji = await redis.hGet(kUser(messageId), callerId);
-    const out: ReactionsByEmoji = {};
-    // Count = cardinality of each idempotent SET — cannot go negative or
-    // double-count under concurrency.
-    const counts = await Promise.all([...ALLOWED].map(emoji => redis.sCard(kBy(messageId, emoji))));
-    let i = 0;
-    for (const emoji of ALLOWED) {
-      const count = counts[i++] ?? 0;
-      if (count <= 0) continue;
-      out[emoji] = { count, byMe: myEmoji === emoji };
-    }
-    return out;
+    await requireMessageAccess(callerId, messageId);
+    return readReactions(callerId, messageId);
   },
 };

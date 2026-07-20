@@ -128,6 +128,7 @@ export const PhoneScreen: React.FC = () => {
 
             return (
               <Input
+                testID="auth-phone-input"
                 placeholder={t('auth.phone.placeholder', 'Phone number')}
                 value={displayValue}
                 onChangeText={handleTextChange}
@@ -168,6 +169,7 @@ export const PhoneScreen: React.FC = () => {
           name="ageConfirmed"
           render={({ field: { onChange, value } }) => (
             <Pressable
+              testID="auth-age-confirmation"
               onPress={() => onChange(!value)}
               className="flex-row items-center gap-sm mb-md"
               accessibilityRole="checkbox"
@@ -197,6 +199,7 @@ export const PhoneScreen: React.FC = () => {
         )}
 
         <Button
+          testID="auth-phone-submit"
           label={t('auth.phone.submit', 'Next')}
           variant="primary"
           size="lg"
@@ -209,6 +212,7 @@ export const PhoneScreen: React.FC = () => {
         <Text className="text-center text-xs text-ink-muted leading-5 mt-md">
           {t('auth.phone.terms', 'By entering your number, you’re agreeing to our ')}
           <Text
+            testID="auth-terms-link"
             onPress={handleTerms}
             accessibilityRole="link"
             accessibilityLabel={t('auth.phone.termsLinkA11y', 'Terms of Service')}
@@ -218,6 +222,7 @@ export const PhoneScreen: React.FC = () => {
           </Text>
           {t('auth.phone.termsAnd', ' and ')}
           <Text
+            testID="auth-privacy-link"
             onPress={handlePrivacy}
             accessibilityRole="link"
             accessibilityLabel={t('auth.phone.privacyLinkA11y', 'Privacy Policy')}

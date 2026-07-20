@@ -36,11 +36,9 @@ type Route = RouteProp<MessageStackParamList, 'AddGroupMembers'>;
  * in the group. The old global user search let you pick anyone, which the
  * backend would then reject.
  *
- * NOTE: the *server* gate here is a Block check, NOT a follow-gate. Groups now
- * enforce the Block table symmetrically (groups.service `assertNoBlockBetween`
- * in create/addMembers/send), so a blocked user can't reach their blocker via a
- * group — GROUP_006 on the add. Scoping the picker to who you follow is a UX
- * convenience, not the security boundary.
+ * The server independently enforces both an ACCEPTED follow from the adder to
+ * every candidate and a symmetric Block check across the full membership.
+ * This picker mirrors that policy but is not the security boundary.
  */
 export const AddGroupMembersScreen: React.FC = () => {
   const navigation = useNavigation<Nav>();

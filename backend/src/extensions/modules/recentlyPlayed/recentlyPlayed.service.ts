@@ -1,5 +1,9 @@
 import { redis } from '../../../config/redis';
 import { prisma } from '../../../config/database';
+import {
+  assertRoomMetadataAccess,
+  roomMetadataAccessWhere,
+} from '../../../modules/rooms/rooms.access';
 
 /**
  * "Recently played" — track the last N rooms a user attended so the app
@@ -18,6 +22,7 @@ const key = (userId: string) => `ext:recent:${userId}`;
 
 export const recentlyPlayedService = {
   async touch(userId: string, roomId: string): Promise<void> {
+    await assertRoomMetadataAccess(roomId, userId);
     const now = Date.now();
     await Promise.all([
       redis.zAdd(key(userId), { score: now, value: roomId }),
@@ -33,14 +38,17 @@ export const recentlyPlayedService = {
   },
 
   /**
-   * Hydrated list — returns the room rows (filtered to public + not-ended
-   * + non-private). Skips deleted rooms. Preserves recency order.
+   * Hydrated list. Access is re-checked on every read so a stale/arbitrary
+   * Redis id cannot reveal private or SOCIAL room metadata.
    */
   async list(userId: string, limit = 20) {
     const ids = await this.listIds(userId, limit);
     if (ids.length === 0) return [];
     const rows = await prisma.room.findMany({
-      where: { id: { in: ids } },
+      where: {
+        id: { in: ids },
+        AND: [roomMetadataAccessWhere(userId)],
+      },
       select: {
         id: true,
         title: true,

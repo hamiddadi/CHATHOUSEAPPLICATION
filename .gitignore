@@ -68,6 +68,10 @@ build/
 # the files are environment-specific and must not be versioned. The directory
 # is mkdir'd on first write (backend/src/modules/upload/upload.service.ts).
 backend/uploads/
+# Private development/test fallback for the object-storage adapter. This path
+# is never exposed by Express and production is required to use S3-compatible
+# storage.
+backend/private-media/
 
 # Firebase (carries project API key) — provided locally / via CI secret, not
 # committed. Match any location so a stray copy can't slip in.

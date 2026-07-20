@@ -83,6 +83,22 @@ services:
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?JWT_ACCESS_SECRET is required}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET is required}
       CORS_ORIGINS: ${CORS_ORIGINS:?CORS_ORIGINS is required (e.g. https://app.chathouse.app)}
+      PUBLIC_URL: ${PUBLIC_URL:?PUBLIC_URL is required (e.g. https://api.chathouse.app)}
+      # Private object storage for avatars and voice notes. No public bucket or
+      # local filesystem fallback is accepted in production.
+      MEDIA_STORAGE_DRIVER: s3
+      MEDIA_URL_SIGNING_SECRET: ${MEDIA_URL_SIGNING_SECRET:?MEDIA_URL_SIGNING_SECRET is required}
+      MEDIA_EXPORT_URL_TTL_SECONDS: ${MEDIA_EXPORT_URL_TTL_SECONDS:-3600}
+      MEDIA_S3_BUCKET: ${MEDIA_S3_BUCKET:?MEDIA_S3_BUCKET is required}
+      MEDIA_S3_REGION: ${MEDIA_S3_REGION:?MEDIA_S3_REGION is required}
+      MEDIA_S3_ENDPOINT: ${MEDIA_S3_ENDPOINT:?MEDIA_S3_ENDPOINT is required}
+      MEDIA_S3_ACCESS_KEY: ${MEDIA_S3_ACCESS_KEY:?MEDIA_S3_ACCESS_KEY is required}
+      MEDIA_S3_SECRET_KEY: ${MEDIA_S3_SECRET_KEY:?MEDIA_S3_SECRET_KEY is required}
+      MEDIA_S3_FORCE_PATH_STYLE: ${MEDIA_S3_FORCE_PATH_STYLE:-false}
+      # Recording remains hidden and server-disabled until a per-participant
+      # consent workflow is implemented and reviewed.
+      ROOM_RECORDING_ENABLED: 'false'
+      EGRESS_ENABLED: 'false'
       # ─── LiveKit (live audio) — REQUIRED, or every room join returns 503 ───
       # Point at LiveKit Cloud (wss://<your-project>.livekit.cloud) OR the
       # self-hosted `livekit` service below (behind your TLS proxy as
@@ -104,6 +120,11 @@ services:
       # on to actually send. Unset/false = the stack still boots, push is skipped.
       FIREBASE_SERVICE_ACCOUNT: ${FIREBASE_SERVICE_ACCOUNT:-}
       PUSH_DISPATCH_ENABLED: ${PUSH_DISPATCH_ENABLED:-false}
+      # Stripe remains enabled while the public app release is frozen.
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:?STRIPE_SECRET_KEY is required}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:?STRIPE_WEBHOOK_SECRET is required}
+      STRIPE_RETURN_URL: ${STRIPE_RETURN_URL:?STRIPE_RETURN_URL is required}
+      STRIPE_REFRESH_URL: ${STRIPE_REFRESH_URL:?STRIPE_REFRESH_URL is required}
       # mediasoup is the abandoned legacy SFU — keep it OFF in production.
       MEDIASOUP_ENABLED: 'false'
       # Observability (optional but recommended).

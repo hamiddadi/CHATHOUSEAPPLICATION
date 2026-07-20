@@ -9,8 +9,10 @@ process.env.REDIS_URL = process.env.REDIS_URL ?? 'redis://localhost:6379';
 /* eslint-disable @typescript-eslint/no-require-imports */
 const { createApp } = require('../src/app') as typeof import('../src/app');
 const { prisma } = require('../src/config/database') as typeof import('../src/config/database');
-const { connectRedis, disconnectRedis } =
+const { redis, connectRedis, disconnectRedis } =
   require('../src/config/redis') as typeof import('../src/config/redis');
+const { notifPrefsExtService } =
+  require('../src/extensions/modules/notifPrefsExt/notifPrefsExt.service') as typeof import('../src/extensions/modules/notifPrefsExt/notifPrefsExt.service');
 /* eslint-enable @typescript-eslint/no-require-imports */
 
 const rand = () => Math.random().toString(36).slice(2, 10);
@@ -152,11 +154,11 @@ describe('Notifications + Push integration', () => {
     const u = await registerUser(app);
     createdUserIds.push(u.id);
 
-    const tok = `ExponentPushToken[${rand()}]`;
+    const tok = `fcm_${rand()}_${rand()}_${rand()}_${rand()}`;
     const reg = await request(app)
       .post('/api/push/register')
       .set('Authorization', `Bearer ${u.token}`)
-      .send({ token: tok, platform: 'expo' });
+      .send({ token: tok, platform: 'android' });
     expect(reg.status).toBe(200);
     expect(reg.body.data.registered).toBe(true);
 
@@ -167,7 +169,7 @@ describe('Notifications + Push integration', () => {
     await request(app)
       .post('/api/push/register')
       .set('Authorization', `Bearer ${u.token}`)
-      .send({ token: tok, platform: 'expo' });
+      .send({ token: tok, platform: 'android' });
     const afterReupsert = await prisma.pushToken.findMany({ where: { userId: u.id, token: tok } });
     expect(afterReupsert).toHaveLength(1);
 
@@ -180,6 +182,30 @@ describe('Notifications + Push integration', () => {
     expect(gone).toHaveLength(0);
   });
 
+  it("does not let another account hijack an existing device's push token", async () => {
+    const owner = await registerUser(app);
+    const attacker = await registerUser(app);
+    createdUserIds.push(owner.id, attacker.id);
+    const token = `fcm_${rand()}_${rand()}_${rand()}_${rand()}`;
+
+    const first = await request(app)
+      .post('/api/push/register')
+      .set('Authorization', `Bearer ${owner.token}`)
+      .send({ token, platform: 'ios' });
+    expect(first.status).toBe(200);
+
+    const claim = await request(app)
+      .post('/api/push/register')
+      .set('Authorization', `Bearer ${attacker.token}`)
+      .send({ token, platform: 'android' });
+    expect(claim.status).toBe(409);
+    expect(claim.body.error.code).toBe('PUSH_001');
+
+    const row = await prisma.pushToken.findUnique({ where: { token } });
+    expect(row?.userId).toBe(owner.id);
+    expect(row?.platform).toBe('ios');
+  });
+
   it('push dispatch stub: creating a notification for a user with a registered token does not throw', async () => {
     const u = await registerUser(app);
     createdUserIds.push(u.id);
@@ -187,7 +213,10 @@ describe('Notifications + Push integration', () => {
     await request(app)
       .post('/api/push/register')
       .set('Authorization', `Bearer ${u.token}`)
-      .send({ token: `ExponentPushToken[${rand()}]`, platform: 'expo' });
+      .send({
+        token: `fcm_${rand()}_${rand()}_${rand()}_${rand()}`,
+        platform: 'android',
+      });
 
     // Triggering a follow fires the notification → push dispatcher.
     const other = await registerUser(app);
@@ -222,5 +251,19 @@ describe('Notifications + Push integration', () => {
       .get('/api/notifications')
       .set('Authorization', `Bearer ${a.token}`);
     expect(after.body.data.some((n: { id: string }) => n.id === id)).toBe(false);
+  });
+
+  it('atomically grants only one frequency slot under concurrent push fan-out', async () => {
+    const user = await registerUser(app);
+    createdUserIds.push(user.id);
+    const kind = `concurrent_${rand()}`;
+
+    await notifPrefsExtService.setFrequency(user.id, 'normal');
+    const decisions = await Promise.all(
+      Array.from({ length: 25 }, () => notifPrefsExtService.canDeliver(user.id, kind)),
+    );
+
+    expect(decisions.filter(Boolean)).toHaveLength(1);
+    await redis.del(`ext:notif:lastdel:${kind}:${user.id}`);
   });
 });

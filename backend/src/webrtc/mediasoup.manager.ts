@@ -22,12 +22,24 @@ export interface ProducerInfo {
   kind: 'audio' | 'video';
 }
 
+export interface TransportOwnership {
+  roomId: string;
+  userId: string;
+  socketId: string;
+}
+
+interface ConsumerRecord extends TransportOwnership {
+  consumer: any;
+  transportId: string;
+}
+
 let mediasoup: any | null = null;
 const workers: any[] = [];
 const routersByRoom = new Map<string, any>();
 const transportsById = new Map<string, any>();
-const transportRoomById = new Map<string, string>();
+const transportOwnershipById = new Map<string, TransportOwnership>();
 const producersById = new Map<string, any>();
+const consumersById = new Map<string, ConsumerRecord>();
 // Per-room: producerId → { userId, kind } — source of truth for late-joiner
 // discovery (`rtc:list-producers`) and for cleanup on room end.
 const producersByRoom = new Map<string, Map<string, { userId: string; kind: 'audio' | 'video' }>>();
@@ -114,11 +126,14 @@ export const closeRoom = async (roomId: string): Promise<void> => {
   routersByRoom.delete(roomId);
 
   // Purge transports belonging to this room.
-  for (const [tid, rid] of transportRoomById.entries()) {
-    if (rid === roomId) {
-      transportRoomById.delete(tid);
+  for (const [tid, ownership] of transportOwnershipById.entries()) {
+    if (ownership.roomId === roomId) {
+      transportOwnershipById.delete(tid);
       transportsById.delete(tid);
     }
+  }
+  for (const [consumerId, record] of consumersById.entries()) {
+    if (record.roomId === roomId) consumersById.delete(consumerId);
   }
 
   // Fire per-producer close hooks so the socket layer can broadcast.
@@ -143,19 +158,50 @@ export const getRtpCapabilities = async (roomId: string): Promise<unknown> => {
  * (the transport remembers its room, so the client can't cross-room).
  */
 export const getTransportRoomId = (transportId: string): string | undefined =>
-  transportRoomById.get(transportId);
+  transportOwnershipById.get(transportId)?.roomId;
 
-export const createWebRtcTransport = async (roomId: string) => {
+export const getTransportOwnership = (transportId: string): TransportOwnership | undefined => {
+  const ownership = transportOwnershipById.get(transportId);
+  return ownership ? { ...ownership } : undefined;
+};
+
+const requireOwnedTransport = (
+  transportId: string,
+  userId: string,
+  socketId: string,
+  expectedRoomId?: string,
+): { transport: any; ownership: TransportOwnership } => {
+  const transport = transportsById.get(transportId);
+  const ownership = transportOwnershipById.get(transportId);
+  if (!transport || !ownership) throw new Error('TRANSPORT_NOT_FOUND');
+  if (
+    ownership.userId !== userId ||
+    ownership.socketId !== socketId ||
+    (expectedRoomId !== undefined && ownership.roomId !== expectedRoomId)
+  ) {
+    throw new Error('TRANSPORT_FORBIDDEN');
+  }
+  return { transport, ownership };
+};
+
+export const createWebRtcTransport = async (roomId: string, userId: string, socketId: string) => {
   const router = await getOrCreateRouter(roomId);
   const transport = await router.createWebRtcTransport(webRtcTransportOptions);
   transportsById.set(transport.id, transport);
-  transportRoomById.set(transport.id, roomId);
+  transportOwnershipById.set(transport.id, { roomId, userId, socketId });
+  const cleanup = (): void => {
+    transportsById.delete(transport.id);
+    transportOwnershipById.delete(transport.id);
+    for (const [consumerId, record] of consumersById.entries()) {
+      if (record.transportId === transport.id) consumersById.delete(consumerId);
+    }
+  };
   transport.on('dtlsstatechange', (state: string) => {
     if (state === 'closed') {
-      transportsById.delete(transport.id);
-      transportRoomById.delete(transport.id);
+      cleanup();
     }
   });
+  transport.observer?.on('close', cleanup);
   return {
     id: transport.id as string,
     iceParameters: transport.iceParameters,
@@ -167,9 +213,10 @@ export const createWebRtcTransport = async (roomId: string) => {
 export const connectTransport = async (
   transportId: string,
   dtlsParameters: unknown,
+  userId: string,
+  socketId: string,
 ): Promise<void> => {
-  const transport = transportsById.get(transportId);
-  if (!transport) throw new Error('TRANSPORT_NOT_FOUND');
+  const { transport } = requireOwnedTransport(transportId, userId, socketId);
   await transport.connect({ dtlsParameters });
 };
 
@@ -178,11 +225,10 @@ export const produce = async (
   kind: 'audio' | 'video',
   rtpParameters: unknown,
   userId: string,
+  socketId: string,
 ): Promise<string> => {
-  const transport = transportsById.get(transportId);
-  if (!transport) throw new Error('TRANSPORT_NOT_FOUND');
-  const roomId = transportRoomById.get(transportId);
-  if (!roomId) throw new Error('TRANSPORT_NOT_FOUND');
+  const { transport, ownership } = requireOwnedTransport(transportId, userId, socketId);
+  const { roomId } = ownership;
 
   const producer = await transport.produce({
     kind,
@@ -201,11 +247,17 @@ export const produce = async (
   const info: ProducerInfo = { producerId: producer.id, roomId, userId, kind };
   onProducerAdded?.(info);
 
+  let cleaned = false;
   const cleanup = (): void => {
-    producersById.delete(producer.id);
+    if (cleaned) return;
+    cleaned = true;
     const rm = producersByRoom.get(roomId);
-    rm?.delete(producer.id);
+    const wasTracked = producersById.delete(producer.id);
+    const wasInRoom = rm?.delete(producer.id) ?? false;
     if (rm && rm.size === 0) producersByRoom.delete(roomId);
+    // closeRoom may already have removed + broadcast this producer before a
+    // delayed native close event arrives. Never fan out a duplicate close.
+    if (!wasTracked && !wasInRoom) return;
     onProducerClosed?.(info);
   };
   producer.on('transportclose', cleanup);
@@ -219,21 +271,36 @@ export const consume = async (
   consumerTransportId: string,
   producerId: string,
   rtpCapabilities: unknown,
+  userId: string,
+  socketId: string,
 ) => {
   const router = routersByRoom.get(roomId);
   if (!router) throw new Error('ROUTER_NOT_FOUND');
+  const { transport } = requireOwnedTransport(consumerTransportId, userId, socketId, roomId);
+  if (!producersByRoom.get(roomId)?.has(producerId)) {
+    throw new Error('PRODUCER_NOT_FOUND');
+  }
   if (!router.canConsume({ producerId, rtpCapabilities })) {
     throw new Error('CANNOT_CONSUME');
   }
-  const transport = transportsById.get(consumerTransportId);
-  if (!transport) throw new Error('TRANSPORT_NOT_FOUND');
   const consumer = await transport.consume({
     producerId,
     rtpCapabilities,
     paused: true,
   });
-  consumer.on('transportclose', () => undefined);
-  consumer.on('producerclose', () => undefined);
+  const cleanup = (): void => {
+    consumersById.delete(consumer.id);
+  };
+  consumersById.set(consumer.id, {
+    consumer,
+    roomId,
+    userId,
+    socketId,
+    transportId: consumerTransportId,
+  });
+  consumer.on('transportclose', cleanup);
+  consumer.on('producerclose', cleanup);
+  consumer.observer?.on('close', cleanup);
   return {
     id: consumer.id as string,
     producerId,
@@ -242,11 +309,71 @@ export const consume = async (
   };
 };
 
-export const resumeConsumer = async (consumerId: string): Promise<void> => {
-  // Consumers are short-lived and not tracked across calls; we rely on the
-  // client-side Consumer object for mutation. This function intentionally
-  // does nothing server-side — keep for API symmetry with the spec.
-  void consumerId;
+export const resumeConsumer = async (
+  consumerId: string,
+  userId: string,
+  socketId: string,
+): Promise<void> => {
+  // A mediasoup consumer is created paused. The server must resume the exact
+  // consumer owned by this socket after the client installs its local
+  // consumer; resuming only client-side leaves the server RTP path paused.
+  const record = consumersById.get(consumerId);
+  if (!record) throw new Error('CONSUMER_NOT_FOUND');
+  if (record.userId !== userId || record.socketId !== socketId) {
+    throw new Error('CONSUMER_FORBIDDEN');
+  }
+  await record.consumer.resume();
+};
+
+/**
+ * Close the SFU transports created by one concrete Socket.IO connection.
+ * Transports are device/socket scoped, unlike account-level room membership.
+ */
+export const closeTransportsForSocket = (socketId: string): number => {
+  let closed = 0;
+  for (const [transportId, ownership] of Array.from(transportOwnershipById.entries())) {
+    if (ownership.socketId !== socketId) continue;
+    const transport = transportsById.get(transportId);
+    transportsById.delete(transportId);
+    transportOwnershipById.delete(transportId);
+    try {
+      transport?.close();
+      closed += 1;
+    } catch (err) {
+      logger.warn('transport.close failed', { err, transportId, socketId });
+    }
+  }
+  for (const [consumerId, record] of consumersById.entries()) {
+    if (record.socketId === socketId) consumersById.delete(consumerId);
+  }
+  return closed;
+};
+
+/**
+ * Close every transport for one account inside one room. Room membership is
+ * account scoped, so an explicit REST/socket leave or a kick must evict all
+ * of that account's devices, not only the socket that initiated the action.
+ */
+export const closeTransportsForUserInRoom = (roomId: string, userId: string): number => {
+  let closed = 0;
+  for (const [transportId, ownership] of Array.from(transportOwnershipById.entries())) {
+    if (ownership.roomId !== roomId || ownership.userId !== userId) continue;
+    const transport = transportsById.get(transportId);
+    transportsById.delete(transportId);
+    transportOwnershipById.delete(transportId);
+    try {
+      transport?.close();
+      closed += 1;
+    } catch (err) {
+      logger.warn('transport.close failed', { err, transportId, roomId, userId });
+    }
+  }
+  for (const [consumerId, record] of consumersById.entries()) {
+    if (record.roomId === roomId && record.userId === userId) {
+      consumersById.delete(consumerId);
+    }
+  }
+  return closed;
 };
 
 /**
@@ -309,9 +436,10 @@ export const shutdownMediasoup = async (): Promise<void> => {
   }
   routersByRoom.clear();
   transportsById.clear();
-  transportRoomById.clear();
+  transportOwnershipById.clear();
   producersById.clear();
   producersByRoom.clear();
+  consumersById.clear();
   onProducerAdded = null;
   onProducerClosed = null;
   for (const w of workers) {

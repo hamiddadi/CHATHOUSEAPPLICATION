@@ -12,9 +12,11 @@
  *   @react-native-vector-icons/{material-icons,ionicons,fontawesome}
  *   react-native-svg, react-native-maps
  *   @livekit/react-native (+ -webrtc), react-native-audio-recorder-player
- *   react-native-keychain, react-native-image-picker, react-native-haptic-feedback
+ *   @dr.pogodin/react-native-fs, react-native-keychain, react-native-image-picker,
+ *   react-native-haptic-feedback
  *   @react-native-community/{geolocation,netinfo}, @react-native-clipboard/clipboard
- *   @sentry/react-native, @react-native-firebase/messaging, @notifee/react-native
+ *   react-native-share, @sentry/react-native, @react-native-firebase/messaging,
+ *   @notifee/react-native
  *
  * reanimated / safe-area-context / async-storage use a bundled-or-official mock;
  * '@env' is a virtual module; @react-navigation/native is partially mocked.
@@ -73,6 +75,7 @@ jest.mock('@livekit/react-native', () => require('./__mocks__/@livekit/react-nat
 jest.mock('@livekit/react-native-webrtc', () =>
   require('./__mocks__/@livekit/react-native-webrtc'),
 );
+jest.mock('@dr.pogodin/react-native-fs', () => require('./__mocks__/@dr.pogodin/react-native-fs'));
 // On-device speech recogniser — the real module builds a NativeEventEmitter at
 // import time (throws under jest); the stub keeps the caption publisher inert.
 jest.mock('@react-native-voice/voice', () => require('./__mocks__/@react-native-voice/voice'));
@@ -93,6 +96,7 @@ jest.mock('@react-native-community/netinfo', () =>
 jest.mock('@react-native-clipboard/clipboard', () =>
   require('./__mocks__/@react-native-clipboard/clipboard'),
 );
+jest.mock('react-native-share', () => require('./__mocks__/react-native-share'));
 jest.mock('@sentry/react-native', () => require('./__mocks__/@sentry/react-native'));
 // FCM + notifee — manual mocks already existed in __mocks__/ for these; register
 // them explicitly so the native Firebase/notifee bridges never load under jest.

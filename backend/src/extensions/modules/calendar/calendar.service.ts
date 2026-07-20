@@ -1,5 +1,6 @@
 import { prisma } from '../../../config/database';
 import { extError } from '../../utils/ExtAppError';
+import { roomMetadataAccessWhere } from '../../../modules/rooms/rooms.access';
 
 /**
  * Calendar export (.ics) for scheduled events.
@@ -31,29 +32,15 @@ const ROOM_URL_BASE = 'https://app.chathouse.com/r';
 
 export const calendarService = {
   async icsForRoom(callerId: string, roomId: string): Promise<string> {
-    const room = await prisma.room.findUnique({
-      where: { id: roomId },
+    const room = await prisma.room.findFirst({
+      where: {
+        AND: [{ id: roomId }, roomMetadataAccessWhere(callerId)],
+      },
       include: {
         host: { select: { displayName: true, username: true } },
       },
     });
     if (!room) throw extError('CLUB_REQ_NOT_FOUND', 'Event not found');
-
-    // Confidentiality gate: private/closed rooms only export to the host or
-    // a user who has RSVP'd. Mirrors followFanout's isPrivate/CLOSED guard so
-    // a .ics export cannot leak metadata (title, schedule, host) of rooms the
-    // caller has no access to (IDOR fix).
-    if (room.isPrivate || room.roomType === 'CLOSED') {
-      const isHost = room.hostId === callerId;
-      if (!isHost) {
-        const rsvp = await prisma.roomRsvp.findUnique({
-          where: { roomId_userId: { roomId, userId: callerId } },
-          select: { id: true },
-        });
-        // Surface as a 404 to avoid confirming the room's existence.
-        if (!rsvp) throw extError('CLUB_REQ_NOT_FOUND', 'Event not found');
-      }
-    }
 
     if (!room.scheduledFor) {
       throw extError('PAY_INVALID', 'Room is not a scheduled event');

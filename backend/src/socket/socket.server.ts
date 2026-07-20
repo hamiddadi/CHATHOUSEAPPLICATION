@@ -4,10 +4,14 @@ import { createAdapter } from '@socket.io/redis-adapter';
 import { env } from '../config/env';
 import { logger } from '../config/logger';
 import { redis } from '../config/redis';
-import { closeAllProducersForUser, onProducerEvents } from '../webrtc/mediasoup.manager';
+import {
+  closeAllProducersForUser,
+  closeTransportsForSocket,
+  onProducerEvents,
+} from '../webrtc/mediasoup.manager';
 import { registerCaptionsRealtime } from '../extensions/realtime/captions.realtime';
 import { roomsService } from '../modules/rooms/rooms.service';
-import { emitMapUserUpdate, setRealtimeServer } from './realtime';
+import { setRealtimeServer } from './realtime';
 import { socketAuth } from './socket.middleware';
 import { registerRoomHandlers } from './handlers/room.handler';
 import { registerChatHandlers } from './handlers/chat.handler';
@@ -16,6 +20,15 @@ import { registerRtcHandlers } from './handlers/rtc.handler';
 import { registerHallwayHandlers } from './handlers/hallway.handler';
 import { registerLatencyHandlers } from './handlers/latency.handler';
 import { registerPresenceHandlers } from './handlers/presence.handler';
+import { userChannel } from './channels';
+import {
+  drainSocketDisconnectCleanups as drainRoomDisconnectCleanups,
+  enqueueSocketDisconnectCleanup,
+  trackSocketDisconnectCleanup,
+} from './disconnect-cleanup';
+
+// Backward-compatible name used by integration teardown and app shutdown.
+export { drainSocketDisconnectCleanups as drainRoomDisconnectCleanups } from './disconnect-cleanup';
 
 /**
  * Boot the Socket.IO layer on top of the existing HTTP server. The Redis
@@ -44,6 +57,35 @@ export const createSocketServer = async (httpServer: HttpServer): Promise<Server
   sub.on('error', err => logger.error('socket sub error', { err }));
   await Promise.all([pub.connect(), sub.connect()]);
   io.adapter(createAdapter(pub, sub));
+
+  // The Redis adapter does not own the duplicated clients passed to it.
+  // Attach their lifecycle to the Socket.IO server so every caller of
+  // `io.close()` (production shutdown and tests alike) also waits for queued
+  // disconnect writes and releases both pub/sub sockets.
+  const closeSocketIo = io.close.bind(io);
+  let closePromise: Promise<void> | null = null;
+  io.close = (callback?: (err?: Error) => void): Promise<void> => {
+    if (!closePromise) {
+      closePromise = closeSocketIo().then(async () => {
+        await drainRoomDisconnectCleanups();
+        // Socket.IO's Redis adapter queues its unsubscribe commands in
+        // adapter.close() without awaiting their returned promises. `close()`
+        // drains that queue before releasing the sockets; `destroy()` would
+        // reject those in-flight unsubscribes as unhandled teardown errors.
+        await Promise.all([
+          pub.isOpen ? pub.close() : Promise.resolve(),
+          sub.isOpen ? sub.close() : Promise.resolve(),
+        ]);
+      });
+    }
+    if (callback) {
+      void closePromise.then(
+        () => callback(),
+        err => callback(err instanceof Error ? err : new Error(String(err))),
+      );
+    }
+    return closePromise;
+  };
 
   io.use(socketAuth);
 
@@ -75,6 +117,11 @@ export const createSocketServer = async (httpServer: HttpServer): Promise<Server
   io.on('connection', (socket: Socket) => {
     const userId = socket.data.userId as string;
     logger.info(`socket connected user=${userId} id=${socket.id}`);
+    let disconnectingRoomChannels: string[] = [];
+    // Account-level fan-out/revocation must not depend on any feature handler
+    // being registered. Joining twice is idempotent (chat.handler also joins
+    // this channel for backward compatibility).
+    void socket.join(userChannel(userId));
 
     registerRoomHandlers(io, socket);
     registerChatHandlers(io, socket);
@@ -82,44 +129,61 @@ export const createSocketServer = async (httpServer: HttpServer): Promise<Server
     registerRtcHandlers(socket);
     registerHallwayHandlers(io, socket);
     registerLatencyHandlers(socket);
-    registerPresenceHandlers(socket);
+    registerPresenceHandlers(io, socket);
     // Extensions: on-device live-captions relay (caption:publish → room:caption).
     registerCaptionsRealtime(io, socket);
 
-    // `disconnecting` fires while socket.rooms is still populated — the only
-    // place we can see which room channels this socket was in. Clean up the
-    // user's room participation so an ungraceful drop (app killed, network
-    // loss, logout) doesn't leave a ghost participant behind. Skipped when the
-    // SAME user still has another live socket in that room (multi-device), so a
-    // second device — or a brief reconnect — doesn't evict them.
     socket.on('disconnecting', () => {
-      const roomChannels = [...socket.rooms].filter(r => r.startsWith('room:'));
-      if (roomChannels.length === 0) return;
-      void (async () => {
-        for (const channel of roomChannels) {
-          const roomId = channel.slice('room:'.length);
-          try {
-            const peers = await io.in(channel).fetchSockets();
-            const userHasAnotherSocket = peers.some(
-              s => s.id !== socket.id && (s.data as { userId?: string }).userId === userId,
-            );
-            if (userHasAnotherSocket) continue;
-            await roomsService.leave(roomId, userId);
-            io.to(channel).emit('room:user-left', { userId, roomId });
-            emitMapUserUpdate({ userId, isInRoom: false });
-          } catch (err) {
-            logger.warn('socket disconnect room cleanup failed', { err, roomId, userId });
-          }
-        }
-      })();
+      // Capture while socket.rooms is populated, then process after this
+      // socket has actually left the adapter. Checking during `disconnecting`
+      // let two devices see each other and both skip cleanup.
+      disconnectingRoomChannels = [...socket.rooms].filter(r => r.startsWith('room:'));
     });
 
     socket.on('disconnect', reason => {
-      // A user can have multiple concurrent sockets (two tabs). If this is
-      // their last socket we can still eagerly close producers — mediasoup
-      // is tolerant: closing an already-consumed-by-nobody producer is cheap.
-      const closed = closeAllProducersForUser(userId);
-      if (closed > 0) logger.info(`closed ${closed} producer(s) for user=${userId} on disconnect`);
+      // RTP transports are scoped to one concrete socket/device. Releasing
+      // them here does not interrupt another device for the same account,
+      // which owns separate transports.
+      const closedTransports = closeTransportsForSocket(socket.id);
+      if (closedTransports > 0) {
+        logger.info(
+          `closed ${closedTransports} RTC transport(s) for socket=${socket.id} on disconnect`,
+        );
+      }
+
+      for (const channel of disconnectingRoomChannels) {
+        const roomId = channel.slice('room:'.length);
+        enqueueSocketDisconnectCleanup(`${roomId}:${userId}`, async () => {
+          try {
+            const peers = await io.in(channel).fetchSockets();
+            const userHasAnotherSocket = peers.some(
+              s => (s.data as { userId?: string }).userId === userId,
+            );
+            if (userHasAnotherSocket) return;
+            await roomsService.leave(roomId, userId);
+          } catch (err) {
+            logger.warn('socket disconnect room cleanup failed', { err, roomId, userId });
+          }
+        });
+      }
+
+      // Only the last device may close account-level producers. Previously one
+      // phone disconnecting also cut audio produced by a still-live tablet.
+      trackSocketDisconnectCleanup(
+        (async () => {
+          const remaining = await io.in(userChannel(userId)).fetchSockets();
+          const hasAnotherDevice = remaining.some(
+            peer => (peer.data as { userId?: string }).userId === userId,
+          );
+          if (hasAnotherDevice) return;
+          const closed = closeAllProducersForUser(userId);
+          if (closed > 0) {
+            logger.info(`closed ${closed} producer(s) for user=${userId} on last disconnect`);
+          }
+        })().catch(err =>
+          logger.warn('socket producer disconnect cleanup failed', { err, userId }),
+        ),
+      );
       logger.info(`socket disconnected user=${userId} id=${socket.id} reason=${reason}`);
     });
   });

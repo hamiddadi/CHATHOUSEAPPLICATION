@@ -1,9 +1,9 @@
 import * as Sentry from '@sentry/node';
 
 /**
- * Sentry error & performance monitoring (SDK v8).
+ * Sentry error monitoring (SDK v10).
  *
- * v8 notes:
+ * Current SDK notes:
  *  - The HTTP integration is `Sentry.httpIntegration()` — the v7-era
  *    `new Sentry.Integrations.Http()` was removed and will not compile.
  *  - `@sentry/tracing` is obsolete; tracing is merged into `@sentry/node`.
@@ -20,14 +20,37 @@ export function initSentry(): void {
     return;
   }
 
-  const isProd = process.env.NODE_ENV === 'production';
-
   Sentry.init({
     dsn,
     environment: process.env.NODE_ENV,
-    // Lower trace sampling in prod to control cost; full sampling elsewhere.
-    tracesSampleRate: isProd ? 0.1 : 1.0,
+    // Server error reporting is a narrowly-scoped reliability/security
+    // control. Performance tracing is disabled to avoid collecting behavioural
+    // request trails; mobile diagnostics have their own explicit opt-in gate.
+    tracesSampleRate: 0,
+    sendDefaultPii: false,
     integrations: [Sentry.httpIntegration()],
+    beforeSend(event) {
+      // Defense in depth: never send user identity, request bodies, cookies,
+      // authorization headers or query strings to Sentry.
+      event.user = undefined;
+      if (event.request) {
+        event.request.cookies = undefined;
+        event.request.data = undefined;
+        event.request.headers = undefined;
+        event.request.query_string = undefined;
+        if (event.request.url) {
+          event.request.url = event.request.url.split('?', 1)[0] ?? event.request.url;
+        }
+      }
+      for (const breadcrumb of event.breadcrumbs ?? []) {
+        if (!breadcrumb.data) continue;
+        delete breadcrumb.data['headers'];
+        delete breadcrumb.data['request_body'];
+        const url = breadcrumb.data['url'];
+        if (typeof url === 'string') breadcrumb.data['url'] = url.split('?', 1)[0] ?? url;
+      }
+      return event;
+    },
   });
 }
 

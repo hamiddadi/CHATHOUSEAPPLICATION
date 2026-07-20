@@ -2,6 +2,8 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { requireAuth, requireAdmin } from '../../../middlewares/auth.middleware';
 import { asyncHandler } from '../../../utils/asyncHandler';
+import { authedUserId } from '../../../utils/authedUserId';
+import { assertUserVisible } from '../../utils/assertUserVisible';
 import { badgesService } from './badges.service';
 
 export const badgesRouter: Router = Router();
@@ -18,6 +20,7 @@ badgesRouter.get(
   '/:userId',
   asyncHandler(async (req, res) => {
     const { userId } = userIdParamSchema.parse(req.params);
+    await assertUserVisible(authedUserId(req), userId);
     const items = await badgesService.list(userId);
     res.json({ items });
   }),
@@ -30,6 +33,7 @@ badgesRouter.post(
   asyncHandler(async (req, res) => {
     const { userId } = userIdParamSchema.parse(req.params);
     const { badge } = badgeSchema.parse(req.body);
+    await assertUserVisible(authedUserId(req), userId);
     await badgesService.grant(userId, badge);
     res.json({ granted: badge });
   }),
@@ -41,6 +45,7 @@ badgesRouter.post(
   asyncHandler(async (req, res) => {
     const { userId } = userIdParamSchema.parse(req.params);
     const { badge } = badgeSchema.parse(req.body);
+    await assertUserVisible(authedUserId(req), userId);
     await badgesService.revoke(userId, badge);
     res.json({ revoked: badge });
   }),

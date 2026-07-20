@@ -1,4 +1,5 @@
 import { apiClient } from '../../../shared/services/api/apiClient';
+import { createIdempotencyKey } from '../../../shared/utils/idempotency';
 import type {
   Room,
   RoomCategory,
@@ -26,8 +27,8 @@ export interface CreateRoomInput {
   coHostIds?: readonly string[];
   isPrivate?: boolean;
   chatEnabled?: boolean;
-  // Host opt-in: record the room for later Replay (audio-only). Only takes
-  // effect when the backend has egress configured (otherwise a harmless no-op).
+  // Future host opt-in for Replays. The initial public release keeps the
+  // backend kill-switch off, so a true value is rejected and the UI stays hidden.
   recordingEnabled?: boolean;
   maxSpeakers?: number;
 }
@@ -283,19 +284,23 @@ export const roomService = {
     const trimmed = input.title.trim();
     if (trimmed.length === 0) throw new Error('Title is required');
     const { isPrivate, roomType } = visibilityToBackend(input.visibility, input.isPrivate);
-    const res = await apiClient.post<Envelope<RawRoom>>('/rooms', {
-      title: trimmed,
-      description: input.description?.trim() || undefined,
-      isPrivate,
-      roomType,
-      chatEnabled: input.chatEnabled ?? true,
-      recordingEnabled: input.recordingEnabled ?? false,
-      maxSpeakers: input.maxSpeakers,
-      clubId: input.houseId ?? undefined,
-      scheduledFor: input.scheduledFor ?? undefined,
-      topics: input.topics ?? [],
-      coHostIds: input.coHostIds ?? [],
-    });
+    const res = await apiClient.post<Envelope<RawRoom>>(
+      '/rooms',
+      {
+        title: trimmed,
+        description: input.description?.trim() || undefined,
+        isPrivate,
+        roomType,
+        chatEnabled: input.chatEnabled ?? true,
+        recordingEnabled: input.recordingEnabled ?? false,
+        maxSpeakers: input.maxSpeakers,
+        clubId: input.houseId ?? undefined,
+        scheduledFor: input.scheduledFor ?? undefined,
+        topics: input.topics ?? [],
+        coHostIds: input.coHostIds ?? [],
+      },
+      { headers: { 'Idempotency-Key': createIdempotencyKey() } },
+    );
     return toRoom(res.data.data);
   },
 

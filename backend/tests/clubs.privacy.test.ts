@@ -52,7 +52,7 @@ describe('Clubs — PRIVATE member-roster privacy gate', () => {
     await disconnectRedis();
   });
 
-  it('PRIVATE house: a non-member sees membersCount but NOT the member list', async () => {
+  it('PRIVATE house: an uninvited non-member cannot enumerate it by id', async () => {
     const owner = await registerUser(app);
     const outsider = await registerUser(app);
     createdUserIds.push(owner.id, outsider.id);
@@ -64,13 +64,33 @@ describe('Clubs — PRIVATE member-roster privacy gate', () => {
     const asOutsider = await request(app)
       .get(`/api/clubs/${clubId}`)
       .set('Authorization', `Bearer ${outsider.token}`);
-    expect(asOutsider.status).toBe(200);
-    // Retro-compatible shape: the array is present but empty for non-members…
-    expect(Array.isArray(asOutsider.body.data.members)).toBe(true);
-    expect(asOutsider.body.data.members).toHaveLength(0);
-    // …while the aggregate count is still exposed for the header.
-    expect(asOutsider.body.data.membersCount).toBe(1);
-    expect(asOutsider.body.data.isJoinedByMe).toBe(false);
+    expect(asOutsider.status).toBe(404);
+    expect(asOutsider.body.error.code).toBe('CLUB_001');
+  });
+
+  it('PRIVATE house: a signed invite permits a preview without exposing the roster', async () => {
+    const owner = await registerUser(app);
+    const invitee = await registerUser(app);
+    createdUserIds.push(owner.id, invitee.id);
+
+    const create = await createClub(app, owner.token, 'PRIVATE', `Invite House ${rand()}`);
+    const clubId = create.body.data.id as string;
+    createdClubIds.push(clubId);
+
+    const invite = await request(app)
+      .post(`/api/clubs/${clubId}/invite`)
+      .set('Authorization', `Bearer ${owner.token}`)
+      .send({ userIds: [] });
+    const preview = await request(app)
+      .get(`/api/clubs/${clubId}`)
+      .set('Authorization', `Bearer ${invitee.token}`)
+      .set('X-House-Invite', invite.body.data.token as string);
+
+    expect(preview.status).toBe(200);
+    expect(preview.body.data.name).toContain('Invite House');
+    expect(preview.body.data.members).toEqual([]);
+    expect(preview.body.data.membersCount).toBe(1);
+    expect(preview.body.data.isJoinedByMe).toBe(false);
   });
 
   it('PRIVATE house: the owner (a member) still sees the full member list', async () => {

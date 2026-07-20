@@ -9,13 +9,9 @@ import { ImpersonationBanner } from '../features/admin/components/ImpersonationB
 import { SocketStatusBanner } from '../features/rooms/components/SocketStatusBanner';
 import { useAnalyticsConsentStore } from '../features/privacy';
 import { setupForegroundPush } from '../features/notifications/services/pushNotifications';
-import { initReporter, reportException } from './observability/reporter';
+import { reportException } from './observability/reporter';
 import { AppProviders } from './providers/AppProviders';
 import { RootNavigator } from './navigation/RootNavigator';
-
-// Boot-time Sentry init. No-op in dev + when @sentry/react-native isn't
-// installed or SENTRY_DSN isn't set.
-initReporter();
 
 // Boot-time NetInfo subscription. No-op if @react-native-community/netinfo
 // isn't installed; the OfflineBanner simply never shows.
@@ -23,9 +19,9 @@ startNetworkListener();
 
 // Hydrate the GDPR analytics-consent store. Default = disabled, so until
 // the user opts in (Settings → Confidentialité → toggle), the reporter is
-// silent. Resolves quickly since SecureStore reads are synchronous-ish.
-// Capture the rejection so a failed SecureStore read (consent hydration)
-// surfaces in the reporter instead of becoming an unhandled rejection.
+// silent. Resolves quickly from the local consent preference.
+// Capture a failed AsyncStorage read so it never becomes an unhandled
+// rejection. The reporter remains a consent-gated no-op in production here.
 void useAnalyticsConsentStore
   .getState()
   .hydrate()

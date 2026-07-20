@@ -1276,67 +1276,63 @@
     "export": {
       "title": "Export my data",
       "description1": "Under Article 20 of the GDPR (right to data portability), you can download a full copy of all your personal data in a structured JSON file.",
-      "description2": "The archive contains: your profile, your hosted rooms, your participations, your follow graph, your direct messages, your room messages, your RSVPs, your device list (platform and dates, without the secret token) and your notification preferences.",
-      "note": "Note: the audit log (moderation actions) and reports issued against your account are not included, in accordance with Article 23 of the GDPR (legitimate interest of moderation).",
+      "description2": "The archive includes your profile, rooms and participation, follow graph, direct/group/room messages, houses, notifications, reactions, reports you filed, Stripe payment history, private media and account-related history.",
+      "note": "Passwords, OTPs, session/push tokens, storage keys and confidential reports filed by other people are intentionally excluded.",
       "buttonPrepare": "Preparing…",
       "buttonExport": "Generate and share my export",
-      "success": "✓ Export generated ({{size}} KB) — share it via the share menu.",
-      "warning": "The clipboard is readable by other apps. Only copy the archive if necessary, then clear the clipboard.",
-      "buttonCopy": "Copy to clipboard",
-      "buttonClear": "Clear clipboard",
+      "success": "✓ JSON export shared ({{size}} KB). The temporary local file was removed.",
       "errorExportTitle": "Error",
-      "errorExportBody": "Export failed",
-      "errorCopyBody": "Copy failed"
+      "errorExportBody": "Export failed"
     },
     "delete": {
       "title": "Delete my account",
-      "description": "Deleting your account is permanent and irreversible. We will immediately delete your profile, messages, houses, and rooms.",
-      "grace": "A 30-day grace period is enforced on our backup servers before your data is completely purged.",
+      "description": "The request immediately disables your account, revokes sessions and hides your profile. Permanent purge occurs after 30 days.",
+      "grace": "During those 30 days, a successful sign-in automatically restores a self-deleted account. Without a sign-in, account data and private media are purged.",
       "confirmInputLabel": "To confirm, type: ",
-      "buttonDelete": "Delete my account permanently",
+      "buttonDelete": "Request account deletion",
       "buttonCancel": "Cancel",
-      "alertTitle": "Account deleted",
-      "alertBody": "Your account has been deleted. We're sorry to see you go.",
+      "alertTitle": "Deletion scheduled",
+      "alertBody": "Your account is disabled and will be purged after the 30-day period.",
       "errorTitle": "Error",
       "errorBody": "Deletion failed",
       "warningTitle": "⚠️ Near-irreversible action",
       "beforeDelete": "Before deleting",
       "stepExport": "• You can export your data from Settings → Privacy → Export my data.",
       "stepRooms": "• Rooms you hosted will be closed if they are active.",
-      "stepMessages": "• Direct messages you sent to other users will remain visible to the recipient (cannot be retracted after sending).",
+      "stepMessages": "• Your messages and private media will be removed during permanent purge.",
       "a11yInput": "Deletion confirmation input",
       "confirmPhrase": "DELETE"
     },
     "policy": {
       "title": "Privacy Policy",
-      "lastUpdated": "Last updated: April 25, 2026",
+      "lastUpdated": "Last updated: July 18, 2026",
       "s1": {
         "title": "1. What data we collect",
-        "p1": "• Account data: phone number, username, profile picture, bio, social links (optional).",
-        "p2": "• Content: hosted rooms, participations, direct messages, room messages, reactions, hand raises.",
+        "p1": "• Account data: phone, email when provided, username, name, 16+ confirmation, photo, biography, interests and optional social links.",
+        "p2": "• Content and activity: rooms and participation, direct/group/room messages, voice messages, houses, follows, reactions and reports.",
         "p3": "• Metadata: creation date, last login, followers list, interests, platform role.",
-        "p4": "• Geolocation (optional, after consent): used only for the map feature. Stored at the lowest compatible precision.",
-        "p5": "• Technical data: IP address, user agent, device tokens for push notifications."
+        "p4": "• Precise or approximate location, optional and off by default: users who enable visibility appear on the real-time map. Turning visibility off clears coordinates.",
+        "p5": "• Payments and technical data: Stripe history, IP address, security logs and device identifiers needed for push notifications."
       },
       "s2": {
         "title": "2. Why we collect them",
         "p1": "• Provide the service: create an account, join rooms, exchange messages.",
         "p2": "• Moderation: reports, suspensions and bans (legitimate interest — community safety).",
         "p3": "• Notifications: inform about invitations, starting rooms, received messages (you can disable them in settings).",
-        "p4": "• Anonymous statistics (optional): crash reports, telemetry. Disabled by default."
+        "p4": "• Optional Sentry mobile diagnostics: off by default, no default PII, and enabled only after revocable consent."
       },
       "s3": {
         "title": "3. Who we share them with",
         "p1": "• No sale. No third-party advertising.",
-        "p2": "• Technical subcontractors only, under GDPR compliant contract: hosting (server), sending authentication SMS, push notifications.",
+        "p2": "• Necessary processors: hosting and private object storage, Twilio (SMS), Firebase/APNs (push), LiveKit (live audio), Stripe (payments), and Sentry (consented diagnostics).",
         "p3": "• In case of legal obligation, judicial requisition or protection of a person in danger."
       },
       "s4": {
         "title": "4. How long",
         "p1": "• Profile and content: as long as your account is active.",
         "p2": "• Account deletion: 30 days grace period, then definitive purge.",
-        "p3": "• Technical logs: 90 days.",
-        "p4": "• Moderation log (reports, suspensions): kept for 1 year for compliance."
+        "p3": "• Database audit log: 90 days by default; expired authentication artefacts are removed on short schedules.",
+        "p4": "• Narrow financial, security or legal records may be isolated and retained only for periods required by law."
       },
       "s5": {
         "title": "5. Your rights (GDPR)",
@@ -1359,16 +1355,16 @@
     },
     "terms": {
       "title": "Terms of Service",
-      "lastUpdated": "Last updated: April 25, 2026",
+      "lastUpdated": "Last updated: July 18, 2026",
       "s1": {
         "title": "1. Acceptance",
         "p1": "By creating an account or using the Chathouse app, you agree to these terms. If you do not agree, do not use the service."
       },
       "s2": {
         "title": "2. Eligibility",
-        "p1": "You must be at least 16 years old to use Chathouse. Under this age, explicit consent from a legal guardian is required.",
+        "p1": "You must be at least 16 years old to create or use a Chathouse account. Registration by anyone under 16 is not permitted.",
         "p2": "• Do not share illegal, explicit, or copyright-infringing content.",
-        "p3": "• Do not record rooms without the consent of all speakers."
+        "p3": "• Built-in room recording is disabled. Do not make an external recording without the explicit consent of everyone concerned."
       },
       "s3": {
         "title": "3. Prohibited Conduct",
@@ -1436,6 +1432,8 @@
       "ROOM_008": "You are banned from this room.",
       "ROOM_009": "You can't mute the host.",
       "ROOM_010": "This room is locked.",
+      "ROOM_011": "Room recording is currently disabled.",
+      "ROOM_012": "Leave your current room before joining another.",
       "PREMIUM_001": "Premium required.",
       "USER_001": "User not found.",
       "USER_002": "This username is already taken.",
@@ -1463,6 +1461,13 @@
       "CLUB_008": "This invitation link has expired.",
       "CLUB_009": "This invitation link is invalid.",
       "ACCOUNT_001": "Account deletion is already scheduled.",
+      "AGE_001": "You must confirm that you are at least 16 years old.",
+      "MAPS_001": "Enable map visibility before sharing your location.",
+      "UPLOAD_001": "This media file is too large.",
+      "PUSH_001": "This device notification token belongs to another session.",
+      "IDEMPOTENCY_001": "This request key was already used for a different operation.",
+      "IDEMPOTENCY_002": "The request key is invalid.",
+      "VALIDATION_001": "Some submitted information is invalid.",
       "RATE_LIMIT_001": "Too many attempts. Please try again in a moment.",
       "NOT_FOUND_001": "Resource not found.",
       "SERVER_001": "Something went wrong on our end."
@@ -1492,7 +1497,7 @@
     "maps": {
       "attribution": "© OpenStreetMap contributors © CARTO",
       "consentTitle": "Location Consent",
-      "consentBody": "ChatHouse uses your location to show you friends nearby on the map. Your location data will be stored securely on our servers and automatically deleted after 30 days of inactivity. You can turn this off anytime using Ghost Mode.",
+      "consentBody": "ChatHouse uses your location to show users who choose to be visible on the map. If you enable visibility, those users can also see your live position. Turning sharing off clears your coordinates; inactive locations are also purged automatically.",
       "consentAccept": "I Understand",
       "consentDecline": "Not Now",
       "ghostSee": "SEE",

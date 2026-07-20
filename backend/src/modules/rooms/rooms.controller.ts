@@ -2,10 +2,6 @@ import type { Request, Response } from 'express';
 import { sendOk } from '../../utils/response';
 import { AppError } from '../../middlewares/error.middleware';
 import { prisma } from '../../config/database';
-import {
-  closeRoom as closeSfuRoom,
-  closeProducersForUserInRoom,
-} from '../../webrtc/mediasoup.manager';
 import { authedUserId as requireUserId } from '../../utils/authedUserId';
 import { livekitService, type LivekitParticipantRole } from './livekit.service';
 import {
@@ -43,13 +39,13 @@ const parseLimit = (raw: unknown, def = 20, max = 50): number => {
 export const roomsController = {
   async list(req: Request, res: Response) {
     const input = listRoomsSchema.parse(req.query);
-    const rows = await roomsService.list(input);
+    const rows = await roomsService.list(requireUserId(req), input);
     sendOk(res, rows);
   },
 
   async create(req: Request, res: Response) {
     const input = createRoomSchema.parse(req.body);
-    const room = await roomsService.create(requireUserId(req), input);
+    const room = await roomsService.create(requireUserId(req), input, req.get('Idempotency-Key'));
     sendOk(res, room, 201);
   },
 
@@ -59,7 +55,7 @@ export const roomsController = {
     // behind requireAuth, so req.userId is populated; it stays optional in
     // the service (undefined → flag false everywhere) for callers without
     // an authenticated viewer.
-    const room = await roomsService.get(paramId(req, 'id'), req.userId);
+    const room = await roomsService.get(paramId(req, 'id'), requireUserId(req));
     sendOk(res, room);
   },
 
@@ -76,13 +72,6 @@ export const roomsController = {
   async end(req: Request, res: Response) {
     const roomId = paramId(req, 'id');
     const result = await roomsService.end(roomId, requireUserId(req));
-    // Release SFU state too so a subsequent /rooms/:id/join on a reused id
-    // doesn't inherit the old router.
-    await closeSfuRoom(roomId);
-    // Destroy the LiveKit room server-side so every participant is
-    // force-disconnected from the audio bus (their tokens are still valid
-    // otherwise). Best-effort — no-op when LiveKit isn't configured.
-    void livekitService.deleteRoom(roomId);
     sendOk(res, result);
   },
 
@@ -123,7 +112,7 @@ export const roomsController = {
   },
 
   async userUpcoming(req: Request, res: Response) {
-    const rows = await roomsService.userHostedUpcoming(paramId(req, 'userId'));
+    const rows = await roomsService.userHostedUpcoming(paramId(req, 'userId'), requireUserId(req));
     sendOk(res, rows);
   },
 
@@ -207,16 +196,6 @@ export const roomsController = {
       banMinutes: input.banMinutes,
       reason: input.reason,
     });
-    // Tear down the kicked user's SFU producers so peers stop consuming their
-    // audio immediately — the socket `room:user_kicked` broadcast (emitted by
-    // roomsService.kick) already pops the client out of the room. The Producer
-    // `close` handler fans out `rtc:producer-closed` so consumers clean up.
-    // Idempotent: a no-op (returns 0) if RTC wasn't in use for this user.
-    closeProducersForUserInRoom(roomId, input.userId);
-    // Force-disconnect the kicked user from the LiveKit audio bus too —
-    // otherwise their still-valid token keeps them streaming until it expires.
-    // Best-effort — no-op when LiveKit isn't configured.
-    void livekitService.removeParticipant(roomId, input.userId);
     sendOk(res, result);
   },
 

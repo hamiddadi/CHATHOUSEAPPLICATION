@@ -121,8 +121,8 @@ export const SettingsScreen: React.FC = () => {
   const showAdminEntry = adminMe ? isAtLeast(adminMe.appRole, 'MODERATOR') : false;
   const handleOpenAdmin = useCallback(() => navigation.navigate('AdminHome'), [navigation]);
 
-  // Analytics opt-in lives in SecureStore so the user's choice persists
-  // across reinstalls. Must be hydrated once at app start (see App.tsx).
+  // The non-sensitive analytics opt-in lives in AsyncStorage and survives app
+  // restarts. It is hydrated once at app start (see App.tsx).
   const analyticsEnabled = useAnalyticsConsentStore(s => s.enabled);
   const setAnalyticsEnabled = useAnalyticsConsentStore(s => s.setEnabled);
   const handleToggleAnalytics = useCallback(async () => {

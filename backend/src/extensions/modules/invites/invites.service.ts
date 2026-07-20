@@ -107,12 +107,20 @@ export const invitesService = {
     if (inviterId === redeemerId) return { attributed: false, reason: 'self' };
 
     try {
+      const now = new Date();
       return await prisma.$transaction(async tx => {
         // Consume one invite from the inviter — only if they still have quota.
         // updateMany with a guarded WHERE makes this atomic (no read-modify-write
         // race). count 0 ⇒ inviter missing or out of invites.
         const consumed = await tx.user.updateMany({
-          where: { id: inviterId, invitesRemaining: { gt: 0 } },
+          where: {
+            id: inviterId,
+            deletedAt: null,
+            invitesRemaining: { gt: 0 },
+            OR: [{ suspendedUntil: null }, { suspendedUntil: { lte: now } }],
+            blocksCreated: { none: { blockedId: redeemerId } },
+            blocksReceived: { none: { blockerId: redeemerId } },
+          },
           data: { invitesRemaining: { decrement: 1 } },
         });
         if (consumed.count === 0) return { attributed: false, reason: 'quota' as const };
@@ -120,7 +128,13 @@ export const invitesService = {
         // Claim the redeemer's attribution slot, but only while it's still null
         // (idempotent: a second redemption finds it already set → count 0).
         const claimed = await tx.user.updateMany({
-          where: { id: redeemerId, invitedById: null },
+          where: {
+            id: redeemerId,
+            deletedAt: null,
+            invitedById: null,
+            blocksCreated: { none: { blockedId: inviterId } },
+            blocksReceived: { none: { blockerId: inviterId } },
+          },
           data: { invitedById: inviterId },
         });
         if (claimed.count === 0) {

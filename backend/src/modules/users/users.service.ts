@@ -1,7 +1,24 @@
-import type { Prisma } from '@prisma/client';
-import { prisma } from '../../config/database';
+import { MediaKind, type Prisma } from '@prisma/client';
+import { prisma, runWriteWithRetry } from '../../config/database';
+import { env } from '../../config/env';
+import { logger } from '../../config/logger';
 import { AppError } from '../../middlewares/error.middleware';
+import {
+  invalidateUserAuthCache,
+  markUserDeletedInAuthCache,
+} from '../../middlewares/auth.middleware';
+import { disconnectUserSockets, emitMapUserMoved, emitMapUserOffline } from '../../socket/realtime';
+import { cancelEventReminder } from '../../queues/eventReminders';
 import { getBlockedIdSet } from '../social/blocks';
+import { roomsService } from '../rooms/rooms.service';
+import { expiringMediaUrlFor } from '../media/media-url';
+import { mediaService } from '../media/media.service';
+import {
+  restoreStripeSubscription,
+  scheduleStripeCancellation,
+} from '../../extensions/modules/payments/stripe.gdpr';
+import { exportExtensionData } from '../../extensions/gdpr';
+import { scheduleBackgroundTask } from '../../utils/backgroundTasks';
 import type {
   CompleteOnboardingInput,
   InterestsInput,
@@ -51,10 +68,71 @@ const meSelect = {
 // Only surface users seen within this window on the live map.
 const ONLINE_WINDOW_MS = 30 * 60 * 1000;
 // Grace period between a deletion request and the permanent purge.
-const DELETION_GRACE_MS = 30 * 24 * 60 * 60 * 1000;
+const DELETION_GRACE_MS = env.ACCOUNT_DELETION_GRACE_DAYS * 24 * 60 * 60 * 1000;
 // Hard caps on how many pins a single map query materialises.
 const ONLINE_MAP_LIMIT = 200;
 const FOLLOWING_MAP_LIMIT = 500;
+
+type ExportMediaReference = { mediaId: string; downloadUrl: string } | { externalUrl: string };
+
+const mediaIdFromInternalUrl = (value: string): string | null => {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return null;
+  }
+
+  // In production, never reinterpret a URL hosted by another origin as one of
+  // our private-media capabilities. Local/test deployments may not have a
+  // stable PUBLIC_URL, so the canonical /media path remains the fallback.
+  if (env.PUBLIC_URL && parsed.origin !== new URL(env.PUBLIC_URL).origin) {
+    return null;
+  }
+
+  const parts = parsed.pathname.split('/').filter(Boolean);
+  const isStableCapability = parts.length === 3;
+  const isExpiringCapability = parts.length === 4 && /^\d{10}$/.test(parts[2] ?? '');
+  const mediaId = parts[1];
+  if (
+    parts[0] !== 'media' ||
+    (!isStableCapability && !isExpiringCapability) ||
+    !mediaId ||
+    !parts.at(-1)
+  ) {
+    return null;
+  }
+  try {
+    return decodeURIComponent(mediaId);
+  } catch {
+    return null;
+  }
+};
+
+const mediaReferenceForExport = (
+  value: string | null,
+  requestOrigin: string,
+): ExportMediaReference | null => {
+  if (!value) return null;
+  const mediaId = mediaIdFromInternalUrl(value);
+  if (!mediaId) return { externalUrl: value };
+  return {
+    mediaId,
+    downloadUrl: expiringMediaUrlFor(mediaId, requestOrigin),
+  };
+};
+
+export interface MapUserSnapshot {
+  id: string;
+  username: string | null;
+  displayName: string | null;
+  avatarUrl: string | null;
+  latitude: number;
+  longitude: number;
+  lastSeenAt: Date;
+  currentRoomId: string | null;
+  currentRoom: { id: string; title: string; isLive: boolean } | null;
+}
 
 // Canonical interest list: trimmed, lowercased, de-duplicated.
 const normaliseInterests = (xs: string[]): string[] => [
@@ -73,29 +151,76 @@ export const usersService = {
     // canonical (the profile UI re-adds '@' when displaying / building links).
     // An empty string clears the handle (column is nullable VarChar(50)).
     const data: Prisma.UserUpdateInput = { ...input };
+    if (input.avatarUrl !== undefined) {
+      await mediaService.assertOwnedMediaUrl(userId, input.avatarUrl, MediaKind.AVATAR);
+    }
     if (input.twitter !== undefined) data.twitter = input.twitter.replace(/^@+/, '');
     if (input.instagram !== undefined) data.instagram = input.instagram.replace(/^@+/, '');
     return prisma.user.update({ where: { id: userId }, data, select: meSelect });
   },
 
   async setVisibility(userId: string, input: VisibilityInput) {
-    return prisma.user.update({
+    const result = await prisma.user.update({
       where: { id: userId },
-      data: { isVisible: input.isVisible },
+      data: input.isVisible
+        ? { isVisible: true }
+        : {
+            isVisible: false,
+            latitude: null,
+            longitude: null,
+          },
       select: { id: true, isVisible: true },
     });
+    if (!result.isVisible) await emitMapUserOffline(userId);
+    return result;
   },
 
-  async setLocation(userId: string, input: LocationInput) {
-    return prisma.user.update({
-      where: { id: userId },
+  async setLocation(userId: string, input: LocationInput): Promise<MapUserSnapshot> {
+    const written = await prisma.user.updateMany({
+      where: { id: userId, isVisible: true, deletedAt: null },
       data: {
         latitude: input.latitude,
         longitude: input.longitude,
         lastSeenAt: new Date(),
       },
-      select: { id: true, latitude: true, longitude: true, lastSeenAt: true },
     });
+    if (written.count !== 1) throw new AppError('MAPS_001');
+
+    const result = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        username: true,
+        displayName: true,
+        avatarUrl: true,
+        latitude: true,
+        longitude: true,
+        lastSeenAt: true,
+        currentRoomId: true,
+        currentRoom: { select: { id: true, title: true, isLive: true } },
+      },
+    });
+    if (
+      !result ||
+      result.latitude === null ||
+      result.longitude === null ||
+      result.lastSeenAt === null
+    ) {
+      throw new AppError('MAPS_001');
+    }
+    const snapshot = result as MapUserSnapshot;
+    await emitMapUserMoved({
+      userId: snapshot.id,
+      username: snapshot.username,
+      displayName: snapshot.displayName,
+      avatarUrl: snapshot.avatarUrl,
+      latitude: snapshot.latitude,
+      longitude: snapshot.longitude,
+      lastSeenAt: snapshot.lastSeenAt.toISOString(),
+      currentRoomId: snapshot.currentRoomId,
+      currentRoom: snapshot.currentRoom,
+    });
+    return snapshot;
   },
 
   /**
@@ -105,19 +230,25 @@ export const usersService = {
    * (explore featured users, available-people strip, map) reflecting reality.
    */
   async touchPresence(userId: string, online: boolean) {
-    await prisma.user.update({
-      where: { id: userId },
-      data: { isOnline: online, lastSeenAt: new Date() },
-    });
-    return { online };
+    const updated = await runWriteWithRetry(() =>
+      prisma.user.updateMany({
+        // A disconnect callback can outlive a test/user purge. updateMany keeps
+        // that cleanup idempotent, and never brings a soft-deleted account back
+        // into discovery while its deletion grace period is running.
+        where: { id: userId, deletedAt: null },
+        data: { isOnline: online, lastSeenAt: new Date() },
+      }),
+    );
+    return { online: updated.count === 1 ? online : false };
   },
 
   async getById(id: string, viewerId?: string) {
     // A block is a symmetric break: a blocked user's profile must not be
     // readable by the other party. Also hide soft-deleted accounts.
+    let blockedIds = new Set<string>();
     if (viewerId && viewerId !== id) {
-      const blocked = await getBlockedIdSet(viewerId);
-      if (blocked.has(id)) throw new AppError('USER_001');
+      blockedIds = await getBlockedIdSet(viewerId);
+      if (blockedIds.has(id)) throw new AppError('USER_001');
     }
     const user = await prisma.user.findFirst({
       where: { id, deletedAt: null },
@@ -126,34 +257,51 @@ export const usersService = {
       // adding a join to every search-result row.
       select: {
         ...publicSelect,
-        invitedBy: { select: { id: true, username: true, displayName: true } },
+        invitedBy: {
+          select: {
+            id: true,
+            username: true,
+            displayName: true,
+            deletedAt: true,
+          },
+        },
       },
     });
     if (!user) throw new AppError('USER_001');
 
-    // #76: record the visit (fire-and-forget) so the viewed user can later see
-    // who looked at their profile. Best-effort — never blocks/fails the read.
+    // #76: record the visit so the viewed user can later see who looked at
+    // their profile. Non-blocking in production and drainable at shutdown.
     if (viewerId && viewerId !== id) {
-      void prisma.profileView
-        .upsert({
+      await scheduleBackgroundTask(
+        prisma.profileView.upsert({
           where: { viewerId_viewedUserId: { viewerId, viewedUserId: id } },
           create: { viewerId, viewedUserId: id },
           update: { viewedAt: new Date() },
-        })
-        .catch(() => undefined);
+        }),
+        err => logger.warn('profile view persistence failed', { err, viewerId, viewedUserId: id }),
+      );
     }
 
     // Per-viewer relationship flag so the client can render Follow/Following
     // without a second round-trip. Cheap indexed lookup on the unique pair.
     let isFollowedByMe = false;
     if (viewerId && viewerId !== id) {
-      const rel = await prisma.follow.findUnique({
-        where: { followerId_followingId: { followerId: viewerId, followingId: id } },
+      const rel = await prisma.follow.findFirst({
+        where: { followerId: viewerId, followingId: id, status: 'ACCEPTED' },
         select: { followerId: true },
       });
       isFollowedByMe = rel !== null;
     }
-    return { ...user, isFollowedByMe };
+    const { invitedBy, ...profile } = user;
+    const visibleInviter =
+      invitedBy && !invitedBy.deletedAt && !blockedIds.has(invitedBy.id)
+        ? {
+            id: invitedBy.id,
+            username: invitedBy.username,
+            displayName: invitedBy.displayName,
+          }
+        : null;
+    return { ...profile, invitedBy: visibleInviter, isFollowedByMe };
   },
 
   /**
@@ -166,8 +314,13 @@ export const usersService = {
       select: { isPremium: true },
     });
     if (!me?.isPremium) throw new AppError('PREMIUM_001');
+    const blocked = await getBlockedIdSet(userId);
     const rows = await prisma.profileView.findMany({
-      where: { viewedUserId: userId },
+      where: {
+        viewedUserId: userId,
+        ...(blocked.size > 0 ? { viewerId: { notIn: [...blocked] } } : {}),
+        viewer: { deletedAt: null },
+      },
       orderBy: { viewedAt: 'desc' },
       take: Math.min(limit, 100),
       include: {
@@ -266,7 +419,12 @@ export const usersService = {
     if (input.firstName !== undefined) data.firstName = input.firstName;
     if (input.lastName !== undefined) data.lastName = input.lastName;
     if (input.bio !== undefined) data.bio = input.bio;
-    if (input.avatarUrl !== undefined) data.avatarUrl = input.avatarUrl;
+    if (input.avatarUrl !== undefined) {
+      if (input.avatarUrl !== null) {
+        await mediaService.assertOwnedMediaUrl(userId, input.avatarUrl, MediaKind.AVATAR);
+      }
+      data.avatarUrl = input.avatarUrl;
+    }
     if (input.interests !== undefined) {
       data.interests = normaliseInterests(input.interests);
     }
@@ -304,6 +462,7 @@ export const usersService = {
         longitude: true,
         lastSeenAt: true,
         currentRoomId: true,
+        currentRoom: { select: { id: true, title: true, isLive: true } },
       },
       take: ONLINE_MAP_LIMIT,
     });
@@ -323,7 +482,7 @@ export const usersService = {
     const thirtyMinAgo = new Date(Date.now() - ONLINE_WINDOW_MS);
     const blocked = await getBlockedIdSet(viewerId);
     const follows = await prisma.follow.findMany({
-      where: { followerId: viewerId },
+      where: { followerId: viewerId, status: 'ACCEPTED' },
       select: { followingId: true },
     });
     const ids = follows.map(f => f.followingId).filter(id => !blocked.has(id));
@@ -356,14 +515,123 @@ export const usersService = {
 
   // ─── Account Deletion (30-day soft delete) ─────────────
   async requestDeletion(userId: string) {
-    const user = await prisma.user.findUnique({ where: { id: userId } });
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { deletedAt: true },
+    });
     if (!user) throw new AppError('USER_001');
     if (user.deletedAt) throw new AppError('ACCOUNT_001');
 
     const deletedAt = new Date();
-    await prisma.user.update({
-      where: { id: userId },
-      data: { deletedAt },
+    const [scheduled] = await prisma.$transaction([
+      prisma.user.updateMany({
+        where: { id: userId, deletedAt: null },
+        data: {
+          deletedAt,
+          isVisible: false,
+          isOnline: false,
+          latitude: null,
+          longitude: null,
+          currentRoomId: null,
+          tokenVersion: { increment: 1 },
+        },
+      }),
+      prisma.refreshToken.updateMany({
+        where: { userId, revokedAt: null },
+        data: { revokedAt: deletedAt },
+      }),
+      prisma.pushToken.deleteMany({ where: { userId } }),
+    ]);
+    if (scheduled.count !== 1) throw new AppError('ACCOUNT_001');
+
+    await markUserDeletedInAuthCache(userId);
+    disconnectUserSockets(userId, 'account_deleted');
+
+    // Marking the account deleted happens before room cleanup. This ordering
+    // closes the race with scheduled go-live: its Room -> User transaction
+    // either commits first (and the active participant is found below) or sees
+    // deletedAt and cancels the event itself.
+    const activeParticipations = await prisma.participant.findMany({
+      where: { userId, leftAt: null },
+      select: { roomId: true },
+    });
+    for (const participation of activeParticipations) {
+      try {
+        await roomsService.leave(participation.roomId, userId);
+      } catch (err) {
+        logger.error('account-deletion: failed to leave active room', {
+          err,
+          userId,
+          roomId: participation.roomId,
+        });
+      }
+    }
+
+    // Heal any legacy live room whose host participant/currentRoom pointer was
+    // missing. A deleted account must never leave a live room under its
+    // ownership.
+    const orphanHostedRooms = await prisma.room.findMany({
+      where: { hostId: userId, isLive: true, endedAt: null },
+      select: { id: true },
+    });
+    for (const room of orphanHostedRooms) {
+      try {
+        await roomsService.end(room.id, userId);
+      } catch (err) {
+        logger.error('account-deletion: failed to close hosted room', {
+          err,
+          userId,
+          roomId: room.id,
+        });
+      }
+    }
+
+    // Future events are canceled, not merely hidden. Otherwise a reminder job
+    // could expire during the grace period and leave an unstartable event that
+    // reappears after login restoration.
+    const futureEvents = await prisma.room.findMany({
+      where: {
+        hostId: userId,
+        isLive: false,
+        endedAt: null,
+        scheduledFor: { not: null },
+      },
+      select: { id: true },
+    });
+    if (futureEvents.length > 0) {
+      const eventIds = futureEvents.map(room => room.id);
+      await prisma.room.updateMany({
+        where: {
+          id: { in: eventIds },
+          hostId: userId,
+          isLive: false,
+          endedAt: null,
+        },
+        data: {
+          endedAt: deletedAt,
+          canceledAt: deletedAt,
+          participantCount: 0,
+        },
+      });
+      const queueResults = await Promise.allSettled(eventIds.map(cancelEventReminder));
+      queueResults.forEach((result, index) => {
+        if (result.status === 'rejected') {
+          logger.warn('account-deletion: failed to cancel event jobs', {
+            err: result.reason,
+            userId,
+            roomId: eventIds[index],
+          });
+        }
+      });
+    }
+
+    await scheduleStripeCancellation(userId).catch(err => {
+      // The account is already disabled. The daily GDPR worker retries this so
+      // a transient Stripe outage never undoes the deletion request.
+      logger.error('account-deletion: failed to schedule subscription cancellation', {
+        userId,
+        err: err instanceof Error ? err.message : String(err),
+      });
     });
     return {
       deletedAt: deletedAt.toISOString(),
@@ -397,6 +665,13 @@ export const usersService = {
       },
       data: { deletedAt: null },
     });
+    await invalidateUserAuthCache(userId);
+    await restoreStripeSubscription(userId).catch(err => {
+      logger.warn('account-restoration: failed to resume pending Stripe subscription', {
+        userId,
+        err: err instanceof Error ? err.message : String(err),
+      });
+    });
     return { cancelled: true };
   },
 
@@ -419,30 +694,46 @@ export const usersService = {
   },
 
   /**
-   * GDPR Article 20 — right to portability. Returns every piece of
-   * user-owned data we know about, in a structured JSON archive. We
-   * deliberately denormalize so the user can read it without joining
-   * tables: profile, hosted rooms, participations, follows, DMs sent,
-   * room chat sent, RSVPs, push tokens, notification preferences.
-   *
-   * NOT included on purpose: AuditLog actions targeting the user (those
-   * belong to the moderation trail), Reports filed against the user
-   * (legitimate-interest exception), other users' content.
+   * GDPR Articles 15/20 — access and portability. The export deliberately
+   * denormalizes every user-facing domain so it remains readable without
+   * knowledge of the database schema. Authentication secrets, raw push tokens
+   * and private object-storage keys are never exported.
    */
-  async exportData(userId: string) {
+  async exportData(userId: string, requestOrigin: string) {
     const [
       profile,
       hostedRooms,
       participations,
       followers,
       following,
-      sentMessages,
-      sentRoomMessages,
+      directMessages,
+      legacyRoomMessages,
+      roomChatMessages,
+      groupMemberships,
+      groupMessages,
       rsvps,
       pushTokens,
       notifPrefs,
+      notificationsReceived,
+      notificationsTriggered,
       handRaises,
+      reactions,
       blocksCreated,
+      reportsFiled,
+      ownedClubs,
+      clubMemberships,
+      tipsSent,
+      tipsReceived,
+      subscription,
+      profileViewsGiven,
+      profileViewsReceived,
+      roomBansIssued,
+      roomBansReceived,
+      invitedUsers,
+      auditEvents,
+      idempotentOperations,
+      mediaObjects,
+      extensionData,
     ] = await Promise.all([
       prisma.user.findUnique({
         where: { id: userId },
@@ -458,10 +749,24 @@ export const usersService = {
           twitter: true,
           instagram: true,
           avatarUrl: true,
+          avatarThumb: true,
           interests: true,
           isPrivateAccount: true,
           isVisible: true,
+          latitude: true,
+          longitude: true,
           allowWaves: true,
+          dmPrivacy: true,
+          currentRoomId: true,
+          hasCompletedOnboarding: true,
+          invitedById: true,
+          invitesRemaining: true,
+          isPremium: true,
+          premiumUntil: true,
+          stripeCustomerId: true,
+          stripeConnectAccountId: true,
+          deletedAt: true,
+          ageConfirmedAt: true,
           createdAt: true,
           updatedAt: true,
           lastSeenAt: true,
@@ -481,72 +786,412 @@ export const usersService = {
           roomType: true,
           createdAt: true,
           endedAt: true,
+          canceledAt: true,
           scheduledFor: true,
           participantCount: true,
+          totalAttendees: true,
+          chatEnabled: true,
+          chatVisibility: true,
+          recordingEnabled: true,
+          recordings: {
+            select: {
+              id: true,
+              status: true,
+              fileUrl: true,
+              durationMs: true,
+              startedAt: true,
+              endedAt: true,
+            },
+          },
         },
+        orderBy: { createdAt: 'asc' },
       }),
       prisma.participant.findMany({
         where: { userId },
-        select: { roomId: true, role: true, joinedAt: true, leftAt: true },
+        select: {
+          roomId: true,
+          role: true,
+          isMuted: true,
+          isHidden: true,
+          joinedAt: true,
+          leftAt: true,
+        },
+        orderBy: { joinedAt: 'asc' },
       }),
       prisma.follow.findMany({
         where: { followingId: userId },
-        select: { followerId: true, createdAt: true },
+        select: { followerId: true, status: true, createdAt: true },
+        orderBy: { createdAt: 'asc' },
       }),
       prisma.follow.findMany({
         where: { followerId: userId },
-        select: { followingId: true, createdAt: true },
+        select: { followingId: true, status: true, createdAt: true },
+        orderBy: { createdAt: 'asc' },
       }),
       prisma.message.findMany({
-        where: { senderId: userId },
-        select: { id: true, content: true, receiverId: true, roomId: true, createdAt: true },
-        orderBy: { createdAt: 'desc' },
-        take: 5000,
+        where: {
+          roomId: null,
+          OR: [{ senderId: userId }, { receiverId: userId }],
+        },
+        select: {
+          id: true,
+          kind: true,
+          content: true,
+          audioUrl: true,
+          audioDurationMs: true,
+          senderId: true,
+          receiverId: true,
+          isRead: true,
+          createdAt: true,
+        },
+        orderBy: { createdAt: 'asc' },
+      }),
+      prisma.message.findMany({
+        where: { senderId: userId, roomId: { not: null } },
+        select: {
+          id: true,
+          roomId: true,
+          kind: true,
+          content: true,
+          audioUrl: true,
+          audioDurationMs: true,
+          createdAt: true,
+        },
+        orderBy: { createdAt: 'asc' },
       }),
       prisma.roomChatMessage.findMany({
         where: { userId },
-        select: { id: true, content: true, roomId: true, createdAt: true },
-        orderBy: { createdAt: 'desc' },
-        take: 5000,
+        select: {
+          id: true,
+          content: true,
+          roomId: true,
+          replyToId: true,
+          isDeleted: true,
+          createdAt: true,
+        },
+        orderBy: { createdAt: 'asc' },
+      }),
+      prisma.conversationMember.findMany({
+        where: { userId },
+        select: {
+          conversationId: true,
+          joinedAt: true,
+          lastReadAt: true,
+          conversation: {
+            select: {
+              title: true,
+              ownerId: true,
+              createdAt: true,
+              updatedAt: true,
+            },
+          },
+        },
+        orderBy: { joinedAt: 'asc' },
+      }),
+      prisma.groupMessage.findMany({
+        where: {
+          OR: [{ senderId: userId }, { conversation: { members: { some: { userId } } } }],
+        },
+        select: {
+          id: true,
+          conversationId: true,
+          senderId: true,
+          kind: true,
+          content: true,
+          audioUrl: true,
+          audioDurationMs: true,
+          createdAt: true,
+        },
+        orderBy: { createdAt: 'asc' },
       }),
       prisma.roomRsvp.findMany({
         where: { userId },
         select: { roomId: true, reminder: true, createdAt: true },
+        orderBy: { createdAt: 'asc' },
       }),
       prisma.pushToken.findMany({
         where: { userId },
         select: { platform: true, createdAt: true, lastUsed: true },
       }),
       prisma.notificationPreference.findUnique({ where: { userId } }),
+      prisma.notification.findMany({
+        where: { userId },
+        select: {
+          id: true,
+          actorId: true,
+          type: true,
+          title: true,
+          body: true,
+          data: true,
+          targetId: true,
+          targetType: true,
+          isRead: true,
+          createdAt: true,
+        },
+        orderBy: { createdAt: 'asc' },
+      }),
+      prisma.notification.findMany({
+        where: { actorId: userId, userId: { not: userId } },
+        select: {
+          id: true,
+          userId: true,
+          type: true,
+          targetId: true,
+          targetType: true,
+          createdAt: true,
+        },
+        orderBy: { createdAt: 'asc' },
+      }),
       prisma.roomHandRaise.findMany({
         where: { userId },
         select: { roomId: true, raisedAt: true },
+        orderBy: { raisedAt: 'asc' },
+      }),
+      prisma.roomReaction.findMany({
+        where: { userId },
+        select: { roomId: true, emoji: true, createdAt: true },
+        orderBy: { createdAt: 'asc' },
       }),
       prisma.block.findMany({
         where: { blockerId: userId },
         select: { blockedId: true, createdAt: true },
+        orderBy: { createdAt: 'asc' },
       }),
+      prisma.report.findMany({
+        where: { reporterId: userId },
+        select: {
+          id: true,
+          targetKind: true,
+          reportedId: true,
+          reportedRoomId: true,
+          reason: true,
+          details: true,
+          resolvedAt: true,
+          createdAt: true,
+        },
+        orderBy: { createdAt: 'asc' },
+      }),
+      prisma.club.findMany({
+        where: { ownerId: userId },
+        select: {
+          id: true,
+          name: true,
+          slug: true,
+          description: true,
+          rules: true,
+          iconUrl: true,
+          privacy: true,
+          category: true,
+          memberCount: true,
+          isVerified: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+        orderBy: { createdAt: 'asc' },
+      }),
+      prisma.clubMember.findMany({
+        where: { userId },
+        select: {
+          clubId: true,
+          role: true,
+          joinedAt: true,
+          club: { select: { name: true, slug: true } },
+        },
+        orderBy: { joinedAt: 'asc' },
+      }),
+      prisma.tip.findMany({
+        where: { fromUserId: userId },
+        select: {
+          id: true,
+          toUserId: true,
+          paymentIntentId: true,
+          amount: true,
+          currency: true,
+          status: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+        orderBy: { createdAt: 'asc' },
+      }),
+      prisma.tip.findMany({
+        where: { toUserId: userId },
+        select: {
+          id: true,
+          fromUserId: true,
+          paymentIntentId: true,
+          amount: true,
+          currency: true,
+          status: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+        orderBy: { createdAt: 'asc' },
+      }),
+      prisma.subscription.findUnique({
+        where: { userId },
+        select: {
+          stripeSubscriptionId: true,
+          stripeCustomerId: true,
+          status: true,
+          currentPeriodEnd: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      }),
+      prisma.profileView.findMany({
+        where: { viewerId: userId },
+        select: { viewedUserId: true, viewedAt: true },
+        orderBy: { viewedAt: 'asc' },
+      }),
+      prisma.profileView.findMany({
+        where: { viewedUserId: userId },
+        select: { viewerId: true, viewedAt: true },
+        orderBy: { viewedAt: 'asc' },
+      }),
+      prisma.roomBan.findMany({
+        where: { bannedBy: userId },
+        select: {
+          roomId: true,
+          userId: true,
+          reason: true,
+          expiresAt: true,
+          createdAt: true,
+        },
+        orderBy: { createdAt: 'asc' },
+      }),
+      prisma.roomBan.findMany({
+        where: { userId },
+        select: {
+          roomId: true,
+          bannedBy: true,
+          reason: true,
+          expiresAt: true,
+          createdAt: true,
+        },
+        orderBy: { createdAt: 'asc' },
+      }),
+      prisma.user.findMany({
+        where: { invitedById: userId },
+        select: { id: true, username: true, createdAt: true },
+        orderBy: { createdAt: 'asc' },
+      }),
+      prisma.auditLog.findMany({
+        where: { OR: [{ actorId: userId }, { targetUserId: userId }] },
+        select: {
+          action: true,
+          targetUserId: true,
+          targetRoomId: true,
+          targetType: true,
+          targetId: true,
+          metadata: true,
+          createdAt: true,
+        },
+        orderBy: { createdAt: 'asc' },
+      }),
+      prisma.idempotencyKey.findMany({
+        where: { userId },
+        select: {
+          scope: true,
+          resourceId: true,
+          createdAt: true,
+          expiresAt: true,
+        },
+        orderBy: { createdAt: 'asc' },
+      }),
+      prisma.mediaObject.findMany({
+        where: { ownerId: userId },
+        select: {
+          id: true,
+          kind: true,
+          mimeType: true,
+          sizeBytes: true,
+          createdAt: true,
+        },
+        orderBy: { createdAt: 'asc' },
+      }),
+      exportExtensionData(userId),
     ]);
 
     if (!profile) throw new AppError('USER_001');
 
+    const { avatarUrl, avatarThumb, ...portableProfile } = profile;
+    const portableHostedRooms = hostedRooms.map(({ recordings, ...room }) => ({
+      ...room,
+      recordings: recordings.map(({ fileUrl, ...recording }) => ({
+        ...recording,
+        fileMedia: mediaReferenceForExport(fileUrl, requestOrigin),
+      })),
+    }));
+    const portableDirectMessages = directMessages.map(({ audioUrl, ...message }) => ({
+      ...message,
+      audioMedia: mediaReferenceForExport(audioUrl, requestOrigin),
+    }));
+    const portableLegacyRoomMessages = legacyRoomMessages.map(({ audioUrl, ...message }) => ({
+      ...message,
+      audioMedia: mediaReferenceForExport(audioUrl, requestOrigin),
+    }));
+    const portableGroupMessages = groupMessages.map(({ audioUrl, ...message }) => ({
+      ...message,
+      audioMedia: mediaReferenceForExport(audioUrl, requestOrigin),
+    }));
+    const portableOwnedClubs = ownedClubs.map(({ iconUrl, ...club }) => ({
+      ...club,
+      iconMedia: mediaReferenceForExport(iconUrl, requestOrigin),
+    }));
+
     return {
-      exportFormat: 'chathouse-user-export-v1',
+      exportFormat: 'chathouse-user-export-v4',
       generatedAt: new Date().toISOString(),
-      retentionNote:
-        "Vos données sont conservées pendant la durée d'utilisation du service. La suppression de compte purge l'ensemble après 30 jours.",
-      profile,
-      hostedRooms,
+      retention: {
+        accountDeletionGraceDays: env.ACCOUNT_DELETION_GRACE_DAYS,
+        auditLogRetentionDays: env.AUDIT_LOG_RETENTION_DAYS,
+        mediaDownloadUrlTtlSeconds: env.MEDIA_EXPORT_URL_TTL_SECONDS,
+        note: 'A deletion request disables the account immediately. Signing in during the grace period restores a self-deleted account; otherwise automated purge follows.',
+      },
+      profile: {
+        ...portableProfile,
+        avatarMedia: mediaReferenceForExport(avatarUrl, requestOrigin),
+        avatarThumbnailMedia: mediaReferenceForExport(avatarThumb, requestOrigin),
+      },
+      hostedRooms: portableHostedRooms,
       participations,
       followers,
       following,
-      sentDirectMessages: sentMessages.filter(m => !m.roomId),
-      sentRoomMessages,
+      directMessages: portableDirectMessages,
+      legacyRoomMessages: portableLegacyRoomMessages,
+      roomChatMessages,
+      groupMemberships,
+      groupMessages: portableGroupMessages,
       rsvps,
+      notificationsReceived,
+      notificationsTriggered,
       handRaises,
+      reactions,
       blocksCreated,
+      reportsFiled,
+      ownedClubs: portableOwnedClubs,
+      clubMemberships,
+      payments: { tipsSent, tipsReceived, subscription },
+      profileViews: { given: profileViewsGiven, received: profileViewsReceived },
+      roomBans: { issued: roomBansIssued, received: roomBansReceived },
+      invitedUsers,
+      auditEvents,
+      idempotentOperations,
+      privateMedia: mediaObjects.map(media => ({
+        ...media,
+        downloadUrl: expiringMediaUrlFor(media.id, requestOrigin),
+      })),
       pushTokens,
       notificationPreferences: notifPrefs,
+      extensionData,
+      intentionallyExcluded: [
+        'password hashes',
+        'access and refresh tokens',
+        'password-reset and OTP secrets',
+        'raw push-notification tokens',
+        'private object-storage keys',
+        'reports filed by other people',
+      ],
     };
   },
 };

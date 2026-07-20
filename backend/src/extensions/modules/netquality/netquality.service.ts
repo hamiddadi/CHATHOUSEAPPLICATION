@@ -95,6 +95,13 @@ export const netqualityService = {
   },
 
   async get(userId: string, roomId: string): Promise<NetQualityReport | null> {
+    const participant = await prisma.participant.findUnique({
+      where: { userId_roomId: { userId, roomId } },
+      select: { leftAt: true },
+    });
+    if (!participant || participant.leftAt) {
+      throw new AppError('AUTH_008');
+    }
     const raw = await redis.get(key(userId, roomId));
     if (!raw) return null;
     try {

@@ -21,7 +21,15 @@ topicsRouter.get(
   '/trending',
   asyncHandler(async (_req, res) => {
     const rooms = await prisma.room.findMany({
-      where: { isLive: true, isPrivate: false, endedAt: null },
+      // Global aggregate: include only genuinely OPEN rooms. Counting SOCIAL
+      // rooms here would expose their topics to users outside the follow graph.
+      where: {
+        isLive: true,
+        isPrivate: false,
+        roomType: 'OPEN',
+        endedAt: null,
+        host: { deletedAt: null },
+      },
       select: { topic: true, topics: true },
     });
     const counts = new Map<string, number>();

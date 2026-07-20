@@ -42,7 +42,23 @@ if (env.NODE_ENV === 'development') {
  * own handling.
  */
 const isTransientWriteConflict = (err: unknown): boolean => {
-  if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2034') return true;
+  if (err instanceof Prisma.PrismaClientKnownRequestError) {
+    if (err.code === 'P2034') return true;
+
+    const metaCode = typeof err.meta?.['code'] === 'string' ? err.meta['code'] : '';
+    const metaError = typeof err.meta?.['error'] === 'string' ? err.meta['error'] : '';
+    if (err.code === 'P2010' && /40P01|40001/i.test(metaCode)) return true;
+    // Interactive transactions can fail before they start when a short burst
+    // exhausts the Prisma pool, or expire while waiting on a row lock. The
+    // whole transaction has been rolled back in both cases, so callers using
+    // this helper can safely retry from the beginning.
+    if (
+      err.code === 'P2028' &&
+      /unable to start a transaction|transaction.*expired|transaction.*closed/i.test(metaError)
+    ) {
+      return true;
+    }
+  }
   const msg = err instanceof Error ? err.message : String(err);
   return /deadlock detected|40P01|40001|could not serialize|write conflict/i.test(msg);
 };

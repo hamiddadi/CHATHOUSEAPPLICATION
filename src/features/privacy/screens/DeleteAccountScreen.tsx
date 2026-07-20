@@ -92,7 +92,7 @@ export const DeleteAccountScreen: React.FC = () => {
         <Text style={styles.body}>
           {t(
             'privacy.delete.stepMessages',
-            '• Direct messages you sent to other users will remain visible to the recipient (cannot be retracted after sending).',
+            '• Your messages and private media will be removed during permanent purge.',
           )}
         </Text>
       </View>

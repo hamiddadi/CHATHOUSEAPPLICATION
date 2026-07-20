@@ -22,7 +22,7 @@ const paramId = (req: Request, key: string): string => {
 export const groupsController = {
   async create(req: Request, res: Response) {
     const input = createGroupSchema.parse(req.body);
-    const group = await groupsService.create(authedUserId(req), input);
+    const group = await groupsService.create(authedUserId(req), input, req.get('Idempotency-Key'));
     sendOk(res, group, 201);
   },
 
@@ -44,13 +44,23 @@ export const groupsController = {
 
   async send(req: Request, res: Response) {
     const input = sendGroupMessageSchema.parse(req.body);
-    const message = await groupsService.send(authedUserId(req), paramId(req, 'id'), input);
+    const message = await groupsService.send(
+      authedUserId(req),
+      paramId(req, 'id'),
+      input,
+      req.get('Idempotency-Key'),
+    );
     sendOk(res, message, 201);
   },
 
   async sendVoice(req: Request, res: Response) {
     const input = sendGroupVoiceSchema.parse(req.body);
-    const message = await groupsService.sendVoice(authedUserId(req), paramId(req, 'id'), input);
+    const message = await groupsService.sendVoice(
+      authedUserId(req),
+      paramId(req, 'id'),
+      input,
+      req.get('Idempotency-Key'),
+    );
     sendOk(res, message, 201);
   },
 
@@ -61,7 +71,12 @@ export const groupsController = {
 
   async addMembers(req: Request, res: Response) {
     const input = addGroupMembersSchema.parse(req.body);
-    const group = await groupsService.addMembers(authedUserId(req), paramId(req, 'id'), input);
+    const group = await groupsService.addMembers(
+      authedUserId(req),
+      paramId(req, 'id'),
+      input,
+      req.get('Idempotency-Key'),
+    );
     sendOk(res, group);
   },
 

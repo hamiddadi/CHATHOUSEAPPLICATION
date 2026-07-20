@@ -168,17 +168,21 @@ describe('Inside-a-room — hand raise + chat + reactions', () => {
     expect(list.status).toBe(200);
     expect(list.body.data.map((m: { content: string }) => m.content)).toContain('Hey everyone 👋');
 
-    // Disable chat on a fresh room via the schema default → create with chatEnabled=false.
+    // A host may only own one live room, so use a fresh host for the second
+    // room while retaining the same chat authorization assertion.
+    const noChatHost = await register(app);
+    createdUsers.push(noChatHost.id);
     const noChat = await request(app)
       .post('/api/rooms')
-      .set('Authorization', `Bearer ${host.token}`)
+      .set('Authorization', `Bearer ${noChatHost.token}`)
       .send({ title: 'No chat room', chatEnabled: false });
+    expect(noChat.status).toBe(201);
     const noChatId = noChat.body.data.id as string;
     createdRooms.push(noChatId);
     // host is auto-participant; sending should still be blocked.
     const blocked = await request(app)
       .post(`/api/rooms/${noChatId}/messages`)
-      .set('Authorization', `Bearer ${host.token}`)
+      .set('Authorization', `Bearer ${noChatHost.token}`)
       .send({ content: 'should fail' });
     expect(blocked.status).toBe(403);
     expect(blocked.body.error.code).toBe('ROOM_006');

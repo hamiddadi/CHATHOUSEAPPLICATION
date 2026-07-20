@@ -108,4 +108,36 @@ describe('Password reset flow', () => {
     expect(res.status).toBe(401);
     expect(res.body.error.code).toBe('AUTH_003');
   });
+
+  it('consumes a reset token exactly once under concurrent device retries', async () => {
+    const username = `pr_race_${rand()}`;
+    const email = `${username}@test.local`;
+    const oldPassword = 'old-password-123';
+    const newPassword = 'concurrent-new-password-456';
+
+    const reg = await request(app)
+      .post('/api/auth/register')
+      .send({ username, email, password: oldPassword });
+    expect(reg.status).toBe(201);
+    createdIds.push(reg.body.data.user.id as string);
+
+    const token = await captureToken(async () => {
+      const res = await request(app).post('/api/auth/forgot-password').send({ email });
+      expect(res.status).toBe(200);
+    });
+    expect(token).toHaveLength(64);
+
+    const attempts = await Promise.all(
+      Array.from({ length: 2 }, () =>
+        request(app).post('/api/auth/reset-password').send({ token, newPassword }),
+      ),
+    );
+    expect(attempts.map(res => res.status).sort((a, b) => a - b)).toEqual([200, 401]);
+    expect(attempts.filter(res => res.status === 401)[0]?.body.error.code).toBe('AUTH_003');
+
+    const login = await request(app)
+      .post('/api/auth/login')
+      .send({ identifier: email, password: newPassword });
+    expect(login.status).toBe(200);
+  });
 });

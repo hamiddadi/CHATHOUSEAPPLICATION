@@ -121,25 +121,29 @@ describe('Hallway feed — scoring + realtime broadcasts', () => {
 
   it('interests match boosts a room whose title contains the viewer interest', async () => {
     const viewer = await register(app);
-    const host = await register(app);
-    createdUsers.push(viewer.id, host.id);
+    const offTopicHost = await register(app);
+    const onTopicHost = await register(app);
+    createdUsers.push(viewer.id, offTopicHost.id, onTopicHost.id);
 
     // Seed viewer interests
-    await request(app)
+    const interests = await request(app)
       .patch('/api/users/me/interests')
       .set('Authorization', `Bearer ${viewer.token}`)
-      .send({ interests: ['crypto', 'music'] });
+      .send({ interests: ['crypto', 'music', 'technology'] });
+    expect(interests.status).toBe(200);
 
     const offTopic = await request(app)
       .post('/api/rooms')
-      .set('Authorization', `Bearer ${host.token}`)
+      .set('Authorization', `Bearer ${offTopicHost.token}`)
       .send({ title: 'Gardening chat' });
+    expect(offTopic.status).toBe(201);
     createdRooms.push(offTopic.body.data.id);
 
     const onTopic = await request(app)
       .post('/api/rooms')
-      .set('Authorization', `Bearer ${host.token}`)
+      .set('Authorization', `Bearer ${onTopicHost.token}`)
       .send({ title: 'Crypto market mood' });
+    expect(onTopic.status).toBe(201);
     createdRooms.push(onTopic.body.data.id);
 
     const feed = await request(app)

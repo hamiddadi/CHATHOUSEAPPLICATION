@@ -14,7 +14,8 @@ feature graphic, and the hosted URLs still have to be produced separately.
 - **Primary language:** English (add French — the app ships i18n FR — as a localization)
 - **Support URL:** https://chathouse.app/support _(must resolve before submission)_
 - **Marketing URL:** https://chathouse.app
-- **Privacy Policy URL:** https://chathouse.app/privacy _(host the finalized PRIVACY-POLICY.md)_
+- **Privacy Policy URL:** https://api.chathouse.app/privacy
+- **Account deletion URL:** https://api.chathouse.app/account-deletion
 
 ## Short / promotional text
 

@@ -6,6 +6,7 @@ import { AppError } from '../../middlewares/error.middleware';
 import { pushService } from '../push/push.service';
 import { emitNotification, emitNotificationCount } from '../../socket/realtime';
 import { notifPrefsExtService } from '../../extensions/modules/notifPrefsExt/notifPrefsExt.service';
+import { scheduleBackgroundTask } from '../../utils/backgroundTasks';
 
 /**
  * Maps a NotificationType to the matching boolean field on
@@ -236,41 +237,44 @@ export const notificationsService = {
     }
     emitNotificationCount(input.userId, count);
 
-    // Fire-and-forget push dispatch — gated on the user's per-type
-    // preference. The in-app row above is always created so the bell
-    // count stays accurate even when push is silenced.
-    void (async () => {
-      if (!(await isPushAllowed(input.userId, input.type, input.data))) return;
-      // Extension gate (notifPrefsExt): frequency-tier throttle + per-club /
-      // per-user mute. Only the push is suppressed; the in-app row + realtime
-      // emit above already happened. Fail-open: a thrown check (Redis down,
-      // etc.) must never swallow a push, so we default to allow on error. No
-      // ext prefs ⇒ canDeliver returns true (defaults), so this is a no-op.
-      let extAllows = true;
-      try {
-        extAllows = await notifPrefsExtService.canDeliver(input.userId, input.type, {
-          clubId: extractClubId(input.data),
-          actorId: input.actorId,
+    // Best-effort push dispatch — gated on the user's per-type preference.
+    // It stays non-blocking in production but is registered for graceful
+    // shutdown; tests await it so Prisma/Redis work cannot outlive fixtures.
+    await scheduleBackgroundTask(
+      (async () => {
+        if (!(await isPushAllowed(input.userId, input.type, input.data))) return;
+        // Extension gate (notifPrefsExt): frequency-tier throttle + per-club /
+        // per-user mute. Only the push is suppressed; the in-app row + realtime
+        // emit above already happened. Fail-open: a thrown check (Redis down,
+        // etc.) must never swallow a push, so we default to allow on error. No
+        // ext prefs ⇒ canDeliver returns true (defaults), so this is a no-op.
+        let extAllows = true;
+        try {
+          extAllows = await notifPrefsExtService.canDeliver(input.userId, input.type, {
+            clubId: extractClubId(input.data),
+            actorId: input.actorId,
+          });
+        } catch (err) {
+          logger.warn('notifPrefsExt canDeliver failed; pushing anyway', {
+            err,
+            userId: input.userId,
+          });
+        }
+        if (!extAllows) return;
+        await pushService.dispatchToUser(input.userId, {
+          title: input.title,
+          body: input.body,
+          data: {
+            notificationId: row.id,
+            type: input.type,
+            ...(input.data && typeof input.data === 'object' && !Array.isArray(input.data)
+              ? (input.data as Record<string, unknown>)
+              : {}),
+          },
         });
-      } catch (err) {
-        logger.warn('notifPrefsExt canDeliver failed; pushing anyway', {
-          err,
-          userId: input.userId,
-        });
-      }
-      if (!extAllows) return;
-      await pushService.dispatchToUser(input.userId, {
-        title: input.title,
-        body: input.body,
-        data: {
-          notificationId: row.id,
-          type: input.type,
-          ...(input.data && typeof input.data === 'object' && !Array.isArray(input.data)
-            ? (input.data as Record<string, unknown>)
-            : {}),
-        },
-      });
-    })().catch(err => logger.warn('notif push dispatch failed', { err, userId: input.userId }));
+      })(),
+      err => logger.warn('notif push dispatch failed', { err, userId: input.userId }),
+    );
     return row;
   },
 };

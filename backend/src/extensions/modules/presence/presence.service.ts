@@ -29,7 +29,7 @@ export const presenceService = {
 
     const [candidates, blockedIds, reciprocal] = await Promise.all([
       prisma.follow.findMany({
-        where: { followerId: userId },
+        where: { followerId: userId, status: 'ACCEPTED' },
         select: {
           following: {
             select: PUBLIC_USER,
@@ -41,7 +41,7 @@ export const presenceService = {
       // Users who follow the caller back → reciprocal connections allowed to
       // surface even when their account is private.
       prisma.follow.findMany({
-        where: { followingId: userId },
+        where: { followingId: userId, status: 'ACCEPTED' },
         select: { followerId: true },
       }),
     ]);

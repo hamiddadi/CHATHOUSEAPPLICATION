@@ -42,7 +42,7 @@ describe('DeleteAccountScreen', () => {
     const { getByText } = renderScreen(<DeleteAccountScreen />);
 
     // Button is disabled (Button passes onPress=undefined when disabled) → no Alert.
-    fireEvent.press(getByText('Delete my account permanently'));
+    fireEvent.press(getByText('Request account deletion'));
     expect(alertSpy).not.toHaveBeenCalled();
   });
 
@@ -51,7 +51,7 @@ describe('DeleteAccountScreen', () => {
     const { getByText, getByLabelText } = renderScreen(<DeleteAccountScreen />);
 
     fireEvent.changeText(getByLabelText('Deletion confirmation input'), 'delete');
-    fireEvent.press(getByText('Delete my account permanently'));
+    fireEvent.press(getByText('Request account deletion'));
 
     // Confirmation is case-insensitive ("delete" === "DELETE") → Alert shown.
     expect(alertSpy).toHaveBeenCalledTimes(1);
@@ -71,7 +71,7 @@ describe('DeleteAccountScreen', () => {
     const { getByText, getByLabelText } = renderScreen(<DeleteAccountScreen />);
 
     fireEvent.changeText(getByLabelText('Deletion confirmation input'), 'DELETE');
-    fireEvent.press(getByText('Delete my account permanently'));
+    fireEvent.press(getByText('Request account deletion'));
 
     // Pull the destructive button out of the Alert call and fire its onPress.
     const buttons = alertSpy.mock.calls[0]?.[2] as AlertButton[] | undefined;
@@ -96,7 +96,7 @@ describe('DeleteAccountScreen', () => {
     const { getByText, getByLabelText } = renderScreen(<DeleteAccountScreen />);
 
     fireEvent.changeText(getByLabelText('Deletion confirmation input'), 'DELETE');
-    fireEvent.press(getByText('Delete my account permanently'));
+    fireEvent.press(getByText('Request account deletion'));
     // First Alert = the confirm dialog.
     const confirmButtons = alertSpy.mock.calls[0]?.[2] as AlertButton[] | undefined;
     const destructive = confirmButtons?.find(b => b.style === 'destructive');
@@ -122,7 +122,7 @@ describe('DeleteAccountScreen', () => {
     const { getByText, getByLabelText } = renderScreen(<DeleteAccountScreen />);
 
     fireEvent.changeText(getByLabelText('Deletion confirmation input'), 'DELETE');
-    fireEvent.press(getByText('Delete my account permanently'));
+    fireEvent.press(getByText('Request account deletion'));
     const confirmButtons = alertSpy.mock.calls[0]?.[2] as AlertButton[] | undefined;
     const destructive = confirmButtons?.find(b => b.style === 'destructive');
     await destructive?.onPress?.();

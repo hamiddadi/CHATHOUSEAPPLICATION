@@ -28,6 +28,47 @@ const FREQ_THROTTLE_MS: Record<FrequencyTier, number> = {
   infrequent: 24 * 60 * 60 * 1000, // 1 push per day per kind
 };
 
+/**
+ * Check both mute sets and claim the frequency slot as one Redis operation.
+ * Redis serialises Lua execution, so two workers cannot both observe an empty
+ * slot and dispatch the same fan-out push concurrently.
+ *
+ * TIME comes from Redis rather than an application node, avoiding clock skew
+ * when the mono-server is scaled later. Legacy timestamp keys without a TTL
+ * are repaired by assigning the remaining quiet-window TTL.
+ */
+const CAN_DELIVER_SCRIPT = `
+local actorId = ARGV[1]
+local clubId = ARGV[2]
+local throttleMs = tonumber(ARGV[3])
+
+if actorId ~= '' and redis.call('SISMEMBER', KEYS[1], actorId) == 1 then
+  return 0
+end
+if clubId ~= '' and redis.call('SISMEMBER', KEYS[2], clubId) == 1 then
+  return 0
+end
+if throttleMs <= 0 then
+  return 1
+end
+
+local nowParts = redis.call('TIME')
+local nowMs = (tonumber(nowParts[1]) * 1000) + math.floor(tonumber(nowParts[2]) / 1000)
+local lastRaw = redis.call('GET', KEYS[3])
+local lastMs = tonumber(lastRaw)
+
+if lastMs and (nowMs - lastMs) < throttleMs then
+  local remainingMs = throttleMs - (nowMs - lastMs)
+  if redis.call('PTTL', KEYS[3]) < 0 then
+    redis.call('PEXPIRE', KEYS[3], remainingMs)
+  end
+  return 0
+end
+
+redis.call('SET', KEYS[3], tostring(nowMs), 'PX', throttleMs)
+return 1
+`;
+
 export const notifPrefsExtService = {
   async getFrequency(userId: string): Promise<FrequencyTier> {
     const v = await redis.get(freqKey(userId));
@@ -77,26 +118,12 @@ export const notifPrefsExtService = {
     opts: { clubId?: string | null; actorId?: string | null } = {},
   ): Promise<boolean> {
     const { clubId, actorId } = opts;
-
-    if (actorId) {
-      const userMuted = await redis.sIsMember(userMuteKey(userId), actorId);
-      if (userMuted) return false;
-    }
-    if (clubId) {
-      const clubMuted = await redis.sIsMember(clubMuteKey(userId), clubId);
-      if (clubMuted) return false;
-    }
-
     const tier = await this.getFrequency(userId);
     const throttle = FREQ_THROTTLE_MS[tier];
-    if (throttle === 0) return true;
-
-    const last = await redis.get(lastDeliveredKey(userId, kind));
-    if (last) {
-      const lastMs = Number(last);
-      if (Date.now() - lastMs < throttle) return false;
-    }
-    await redis.set(lastDeliveredKey(userId, kind), String(Date.now()));
-    return true;
+    const result = await redis.eval(CAN_DELIVER_SCRIPT, {
+      keys: [userMuteKey(userId), clubMuteKey(userId), lastDeliveredKey(userId, kind)],
+      arguments: [actorId ?? '', clubId ?? '', String(throttle)],
+    });
+    return Number(result) === 1;
   },
 };

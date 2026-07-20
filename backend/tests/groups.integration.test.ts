@@ -19,18 +19,33 @@ const register = async (app: Express) => {
   const u = `g_${rand()}`;
   const res = await request(app)
     .post('/api/auth/register')
-    .send({ username: u, email: `${u}@test.local`, password: 'test-password-123' });
-  return { id: res.body.data.user.id as string, token: res.body.data.accessToken as string };
+    .send({
+      username: u,
+      email: `${u}@test.local`,
+      password: 'test-password-123',
+    });
+  return {
+    id: res.body.data.user.id as string,
+    token: res.body.data.accessToken as string,
+  };
 };
 
 const block = (app: Express, token: string, targetId: string) =>
   request(app).post(`/api/users/${targetId}/block`).set('Authorization', `Bearer ${token}`);
 
-const createGroup = (app: Express, token: string, memberIds: string[], title?: string) =>
+const follow = (app: Express, token: string, targetId: string) =>
+  request(app).post(`/api/follow/${targetId}`).set('Authorization', `Bearer ${token}`);
+
+const createGroupRaw = (app: Express, token: string, memberIds: string[], title?: string) =>
   request(app)
     .post('/api/groups')
     .set('Authorization', `Bearer ${token}`)
     .send({ memberIds, ...(title !== undefined ? { title } : {}) });
+
+const createGroup = async (app: Express, token: string, memberIds: string[], title?: string) => {
+  await Promise.all(memberIds.map(targetId => follow(app, token, targetId)));
+  return createGroupRaw(app, token, memberIds, title);
+};
 
 describe('Groups — block gate, ownership transfer, rename-to-null', () => {
   let app: Express;
@@ -99,7 +114,7 @@ describe('Groups — block gate, ownership transfer, rename-to-null', () => {
     expect(groups.body.data).toHaveLength(0);
   });
 
-  it('create: unrelated users can still open a group (201)', async () => {
+  it('create: accepted follows can open a group (201)', async () => {
     const alice = await register(app);
     const bob = await register(app);
     const carol = await register(app);
@@ -109,6 +124,25 @@ describe('Groups — block gate, ownership transfer, rename-to-null', () => {
     expect(res.status).toBe(201);
     expect(res.body.data.members).toHaveLength(3);
     expect(res.body.data.title).toBe('Trip planning');
+  });
+
+  it('create: a PENDING private-account request is not enough (GROUP_007)', async () => {
+    const alice = await register(app);
+    const bob = await register(app);
+    const carol = await register(app);
+    createdIds.push(alice.id, bob.id, carol.id);
+    await prisma.user.update({
+      where: { id: bob.id },
+      data: { isPrivateAccount: true },
+    });
+
+    const pending = await follow(app, alice.token, bob.id);
+    expect(pending.body.data.requested).toBe(true);
+    expect((await follow(app, alice.token, carol.id)).status).toBe(200);
+
+    const res = await createGroupRaw(app, alice.token, [bob.id, carol.id]);
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe('GROUP_007');
   });
 
   // ── Fix 1: block gate on send ────────────────────────────────────────────
@@ -158,6 +192,7 @@ describe('Groups — block gate, ownership transfer, rename-to-null', () => {
     const group = await createGroup(app, alice.token, [bob.id, carol.id]);
     const gid = group.body.data.id as string;
 
+    expect((await follow(app, alice.token, dave.id)).status).toBe(200);
     // dave has blocked bob (an existing member). Adding dave must be refused.
     await block(app, dave.token, bob.id);
 
@@ -186,6 +221,7 @@ describe('Groups — block gate, ownership transfer, rename-to-null', () => {
     const group = await createGroup(app, alice.token, [bob.id, carol.id]);
     const gid = group.body.data.id as string;
 
+    await Promise.all([follow(app, alice.token, dave.id), follow(app, alice.token, eve.id)]);
     // D blocks E. They are BOTH new members in the same batch — the old check
     // only compared each new member against existing ones, so this pair passed
     // and both were inserted.
@@ -217,6 +253,7 @@ describe('Groups — block gate, ownership transfer, rename-to-null', () => {
     const group = await createGroup(app, alice.token, [bob.id, carol.id]);
     const gid = group.body.data.id as string;
 
+    expect((await follow(app, alice.token, dave.id)).status).toBe(200);
     const res = await request(app)
       .post(`/api/groups/${gid}/members`)
       .set('Authorization', `Bearer ${alice.token}`)

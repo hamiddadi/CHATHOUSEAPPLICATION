@@ -100,7 +100,12 @@ export const WelcomeSlidesScreen: React.FC = () => {
       {/* Skip button — hidden on the last slide since "Get started" closes the flow. */}
       <View className="flex-row justify-end px-xxl py-lg" style={styles.headerRow}>
         {!isLast && (
-          <Pressable onPress={goLanding} accessibilityRole="button" hitSlop={12}>
+          <Pressable
+            testID="welcome-skip"
+            onPress={goLanding}
+            accessibilityRole="button"
+            hitSlop={12}
+          >
             <Text className="text-sm font-body-medium text-ink-muted">
               {t('onboarding.welcome.skip')}
             </Text>
@@ -145,6 +150,7 @@ export const WelcomeSlidesScreen: React.FC = () => {
 
       <View className="px-xxl" style={{ paddingBottom: insets.bottom + spacing.xl }}>
         <Button
+          testID="welcome-next"
           label={isLast ? t('onboarding.welcome.start') : t('onboarding.welcome.next')}
           variant="primary"
           size="lg"

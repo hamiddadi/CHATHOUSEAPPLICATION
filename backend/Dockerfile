@@ -2,7 +2,7 @@
 # mediasoup compiles C++ from source, so we need python3 + make + g++ here.
 # The resulting `node_modules` (including the native mediasoup-worker binary)
 # is copied wholesale into the runtime image to avoid re-compiling there.
-FROM node:20-slim AS builder
+FROM node:22.23.1-slim AS builder
 
 WORKDIR /app
 
@@ -27,7 +27,7 @@ RUN npm run build
 RUN npm prune --omit=dev
 
 # ─── Prod stage ────────────────────────────────────────
-FROM node:20-slim AS runner
+FROM node:22.23.1-slim AS runner
 
 WORKDIR /app
 ENV NODE_ENV=production

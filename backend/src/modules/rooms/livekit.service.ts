@@ -28,6 +28,13 @@ const isLivekitConfigured = (): boolean =>
 // EgressClient/RoomServiceClient want the HTTP(S) host; LIVEKIT_URL is ws(s)://.
 const httpHost = (wsUrl: string): string => wsUrl.replace(/^ws/i, 'http');
 
+const errorMessage = (err: unknown): string => (err instanceof Error ? err.message : String(err));
+
+const isAlreadyAbsent = (err: unknown): boolean => {
+  const message = errorMessage(err).toLowerCase();
+  return message.includes('does not exist') || message.includes('not found');
+};
+
 // Lazily-built admin client for server-side room moderation (kick / close).
 // Reused across calls; null until LiveKit is configured.
 let roomServiceRef: RoomServiceClient | null = null;
@@ -125,10 +132,11 @@ export const livekitService = {
     try {
       await client.removeParticipant(roomId, userId);
     } catch (err) {
+      if (isAlreadyAbsent(err)) return;
       logger.warn('livekit removeParticipant failed', {
         roomId,
         userId,
-        err: err instanceof Error ? err.message : err,
+        err: errorMessage(err),
       });
     }
   },
@@ -144,9 +152,10 @@ export const livekitService = {
     try {
       await client.deleteRoom(roomId);
     } catch (err) {
+      if (isAlreadyAbsent(err)) return;
       logger.warn('livekit deleteRoom failed', {
         roomId,
-        err: err instanceof Error ? err.message : err,
+        err: errorMessage(err),
       });
     }
   },

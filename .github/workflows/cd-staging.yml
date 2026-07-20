@@ -6,7 +6,7 @@
 #          →  health-check (retry)  →  auto-rollback on failure  →  Slack notify.
 #
 # The image is built from CONTEXT ./backend with ./backend/Dockerfile (a
-# multi-stage node:20-slim build that compiles mediasoup natively and runs
+# multi-stage Node 22 build that compiles mediasoup natively and runs
 # `node dist/app.js` under tini, EXPOSE 4000).
 #
 # Required secrets (see backend/docs/deployment/runbook.md for the full list):
@@ -29,8 +29,14 @@ concurrency:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}/api
+  NODE_VERSION: '22.23.1'
 
 jobs:
+  full-ci:
+    name: Full CI gate
+    uses: ./.github/workflows/ci.yml
+    secrets: inherit
+
   # ───────────────────────── Quality gate (blocks the deploy) ─────────────────
   # Fast, service-free gate so a red codebase never auto-ships to staging. Mirrors
   # the deterministic checks (lint + prettier + typecheck, both packages); the full
@@ -43,7 +49,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
       - name: Frontend — lint + prettier + typecheck
         run: |
@@ -60,7 +66,7 @@ jobs:
   # ───────────────────────── Build & push image to GHCR ──────────────────────
   build-and-push:
     name: Build & push image
-    needs: verify
+    needs: [verify, full-ci]
     runs-on: ubuntu-latest
     permissions:
       contents: read

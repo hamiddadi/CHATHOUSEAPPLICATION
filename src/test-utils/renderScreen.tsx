@@ -42,7 +42,10 @@ const makeTestQueryClient = (): QueryClient =>
   new QueryClient({
     defaultOptions: {
       queries: { retry: false, gcTime: Infinity, staleTime: Infinity },
-      mutations: { retry: false },
+      // TanStack's default 5-minute mutation GC timer keeps Jest alive after
+      // render cleanup. Infinity avoids creating that timer in the per-test
+      // client; the client itself becomes collectible with the render tree.
+      mutations: { retry: false, gcTime: Infinity },
     },
   });
 

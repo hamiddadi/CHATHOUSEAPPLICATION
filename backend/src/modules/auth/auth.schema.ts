@@ -17,6 +17,7 @@ export const registerSchema = z.object({
     .transform(e => e.toLowerCase()),
   password: z.string().min(8).max(128),
   displayName: z.string().min(1).max(60).optional(),
+  ageConfirmed: z.boolean().optional(),
 });
 
 export const loginSchema = z.object({

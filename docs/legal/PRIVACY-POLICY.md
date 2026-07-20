@@ -1,6 +1,6 @@
 # Chathouse — Privacy Policy
 
-**Last updated: 2026-06-03**
+**Last updated: 2026-07-18**
 
 > This document is a launch-ready draft. Before publishing, have it reviewed by
 > counsel and fill the bracketed placeholders (`[…]`) with your registered legal
@@ -14,7 +14,7 @@ and group messages (including voice messages), and discover people and rooms.
 This policy explains what personal data we process, why, and the rights you have.
 
 **Data controller:** [Legal entity name], [registered address].
-**Contact / Data Protection:** contact@weasydoo.com.
+**Contact / Data Protection:** privacy@chathouse.app.
 
 ---
 
@@ -25,18 +25,20 @@ This policy explains what personal data we process, why, and the rights you have
 - **Account & identity:** phone number (used to sign you in via one-time code),
   and optionally email; username, display name, first/last name, bio, profile
   photo, and interests.
-- **Content you create:** audio you speak in rooms (and recordings of a room
-  **only** when recording is explicitly enabled for that room), text and voice
-  messages, room titles/topics, reactions, and reports you submit.
+- **Content you create:** live room audio transported for the conversation,
+  text and voice messages, room titles/topics, reactions, and reports you
+  submit. Built-in room recording and replays are currently disabled. Voice
+  messages you deliberately create are stored as private media.
 - **Payments:** when you send a tip or subscribe to premium, the payment itself
   is processed by **Stripe**. We do **not** receive or store your full card
   number; we store a payment/subscription reference and status.
 
 ### Information collected automatically
 
-- **Location** (only with your permission): approximate/precise location to show
-  you and friends on the map and to surface nearby rooms. You can disable this in
-  your OS settings or use in-app "ghost mode" to stop sharing.
+- **Location** (only with your permission): approximate/precise location used by
+  the real-time map. If you enable visibility, other opted-in visible users can
+  see your live position. Disabling sharing or using in-app "ghost mode" clears
+  your stored coordinates; stale locations are also purged automatically.
 - **Usage & device data:** rooms joined, follows, app interactions, device type,
   OS version, and app version.
 - **Diagnostics:** crash and error reports (via **Sentry**) — collected **only if
@@ -60,13 +62,16 @@ We do **not** sell your personal data.
 
 We share data only with service providers acting on our instructions:
 
-- **LiveKit** — real-time audio transport (and egress for opt-in recordings).
+- **LiveKit** — ephemeral real-time audio transport. Room recording/replay
+  egress is release-disabled.
 - **Stripe** — payment and subscription processing.
 - **Twilio** (or equivalent SMS provider) — sending one-time login codes.
-- **Sentry** — crash/error diagnostics (consent-gated).
+- **Sentry** — opt-in mobile crash/error diagnostics and restricted
+  server-side reliability diagnostics.
 - **Push providers** (Apple Push Notification service / Firebase Cloud Messaging)
   — delivering notifications.
-- **Hosting/infrastructure** — our cloud and database providers.
+- **Hosting/infrastructure** — our cloud, database, and private object-storage
+  providers.
 
 Other users see the profile, content, and presence you choose to share (e.g.
 your speaking in a room, your messages to them, your map presence when enabled).
@@ -83,8 +88,10 @@ We keep personal data only as long as necessary. Summary (full matrix in
 `backend/docs/rgpd/data-retention-policy.md`):
 
 - **Account data:** for the life of your account.
-- **Deleted accounts:** soft-deleted immediately and **permanently erased after a
-  30-day grace period** by an automated daily purge job.
+- **Deleted accounts:** disabled immediately and **permanently erased after a
+  30-day grace period** by an automated daily purge job. A successful login
+  during that period restores a self-deleted account; moderation bans cannot be
+  self-restored.
 - **Location:** purged on a rolling basis (≈30 days).
 - **Auth artifacts** (refresh tokens, one-time codes, password-reset tokens):
   deleted shortly after expiry/revocation.
@@ -102,7 +109,7 @@ You can:
 - **Object/restrict** processing and **withdraw consent** (e.g. revoke location
   or diagnostics) at any time.
 
-To exercise rights you cannot complete in-app, contact contact@weasydoo.com. You
+To exercise rights you cannot complete in-app, contact privacy@chathouse.app. You
 also have the right to lodge a complaint with your supervisory authority
 ([authority for your jurisdiction]).
 
@@ -120,8 +127,9 @@ of 16 and the minimum digital-consent age in your country) to use Chathouse.
 ## 9. Security
 
 We protect data with encryption in transit, hashed credentials (bcrypt), signed
-short-lived access tokens, role-based access control, signed payment/recording
-webhooks, and rate limiting. No system is perfectly secure, but we work to
+short-lived access tokens, role-based access control, private object storage,
+signed capability links and payment webhooks, and rate limiting. No system is
+perfectly secure, but we work to
 protect your information and will notify you and regulators of breaches as
 required by law.
 
@@ -132,4 +140,4 @@ Material changes will be communicated in-app.
 
 ## 11. Contact
 
-[Legal entity name], [address] — contact@weasydoo.com.
+[Legal entity name], [address] — privacy@chathouse.app.

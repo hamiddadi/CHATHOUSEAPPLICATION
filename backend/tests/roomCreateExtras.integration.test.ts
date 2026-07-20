@@ -11,6 +11,10 @@ const { createApp } = require('../src/app') as typeof import('../src/app');
 const { prisma } = require('../src/config/database') as typeof import('../src/config/database');
 const { connectRedis, disconnectRedis } =
   require('../src/config/redis') as typeof import('../src/config/redis');
+const { cancelEventReminder, shutdownReminders } =
+  require('../src/queues/eventReminders') as typeof import('../src/queues/eventReminders');
+const { shutdownReminder15 } =
+  require('../src/extensions/queues/reminder15') as typeof import('../src/extensions/queues/reminder15');
 /* eslint-enable @typescript-eslint/no-require-imports */
 
 const rand = () => Math.random().toString(36).slice(2, 10);
@@ -34,6 +38,11 @@ describe('CreateRoom — co-hosts + topics', () => {
   });
 
   afterAll(async () => {
+    for (const id of createdRooms) {
+      await cancelEventReminder(id).catch(() => undefined);
+    }
+    await shutdownReminders();
+    await shutdownReminder15();
     for (const id of createdRooms) {
       await prisma.room.delete({ where: { id } }).catch(() => undefined);
     }
@@ -179,24 +188,28 @@ describe('CreateRoom — co-hosts + topics', () => {
 
   it('feed scoring: structured topics match ranks a room above one with no match', async () => {
     const viewer = await register(app);
-    const host = await register(app);
-    createdUsers.push(viewer.id, host.id);
+    const offTopicHost = await register(app);
+    const onTopicHost = await register(app);
+    createdUsers.push(viewer.id, offTopicHost.id, onTopicHost.id);
 
-    await request(app)
+    const interests = await request(app)
       .patch('/api/users/me/interests')
       .set('Authorization', `Bearer ${viewer.token}`)
-      .send({ interests: ['music'] });
+      .send({ interests: ['music', 'travel', 'art'] });
+    expect(interests.status).toBe(200);
 
     const offTopic = await request(app)
       .post('/api/rooms')
-      .set('Authorization', `Bearer ${host.token}`)
+      .set('Authorization', `Bearer ${offTopicHost.token}`)
       .send({ title: 'Gardening', topics: ['plants'] });
+    expect(offTopic.status).toBe(201);
     createdRooms.push(offTopic.body.data.id);
 
     const onTopic = await request(app)
       .post('/api/rooms')
-      .set('Authorization', `Bearer ${host.token}`)
+      .set('Authorization', `Bearer ${onTopicHost.token}`)
       .send({ title: 'Nothing to see here', topics: ['music'] });
+    expect(onTopic.status).toBe(201);
     createdRooms.push(onTopic.body.data.id);
 
     const feed = await request(app)

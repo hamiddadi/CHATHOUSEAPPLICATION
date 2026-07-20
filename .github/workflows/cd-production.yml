@@ -33,9 +33,15 @@ env:
   IMAGE_NAME: ${{ github.repository }}/api
 
 jobs:
+  full-ci:
+    name: Full CI gate
+    uses: ./.github/workflows/ci.yml
+    secrets: inherit
+
   # ───────────────────────── Build & push image to GHCR ──────────────────────
   build-and-push:
     name: Build & push image
+    needs: full-ci
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -86,6 +92,9 @@ jobs:
   deploy-production:
     name: Deploy to production
     needs: build-and-push
+    # Public release freeze: undefined/false blocks deployment. Re-enabling
+    # requires the protected repository variable plus the full CI gate above.
+    if: ${{ vars.PUBLIC_RELEASE_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     # `environment: production` enforces the manual-approval / required-reviewers
     # protection rule configured in repo Settings → Environments → production.

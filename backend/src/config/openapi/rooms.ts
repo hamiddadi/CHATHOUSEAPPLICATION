@@ -12,6 +12,10 @@ export const registerRoomsPaths = (
   registry: OpenAPIRegistry,
   { ErrorBody, SuccessVoid }: OpenApiComponents,
 ): void => {
+  const idempotencyHeaders = z.object({
+    'Idempotency-Key': z.string().min(8).max(128).optional(),
+  });
+
   registry.registerPath({
     method: 'get',
     path: '/api/rooms',
@@ -38,7 +42,10 @@ export const registerRoomsPaths = (
     path: '/api/rooms',
     tags: ['Rooms'],
     security: [{ bearerAuth: [] }],
-    request: { body: { content: { 'application/json': { schema: createRoomSchema } } } },
+    request: {
+      headers: idempotencyHeaders,
+      body: { content: { 'application/json': { schema: createRoomSchema } } },
+    },
     responses: {
       201: {
         description: 'Room created.',
@@ -66,6 +73,52 @@ export const registerRoomsPaths = (
             schema: z.object({ success: z.literal(true), data: z.object({}).passthrough() }),
           },
         },
+      },
+    },
+  });
+
+  registry.registerPath({
+    method: 'post',
+    path: '/api/rooms/{id}/leave',
+    tags: ['Rooms'],
+    security: [{ bearerAuth: [] }],
+    request: { params: z.object({ id: z.string() }) },
+    responses: {
+      200: {
+        description: 'Leaves the room. Repeated calls are successful no-ops.',
+        content: {
+          'application/json': {
+            schema: z.object({
+              success: z.literal(true),
+              data: z.object({ left: z.literal(true) }),
+            }),
+          },
+        },
+      },
+    },
+  });
+
+  registry.registerPath({
+    method: 'post',
+    path: '/api/rooms/{id}/end',
+    tags: ['Rooms'],
+    security: [{ bearerAuth: [] }],
+    request: { params: z.object({ id: z.string() }) },
+    responses: {
+      200: {
+        description: 'Ends a live room and disconnects its media session.',
+        content: {
+          'application/json': {
+            schema: z.object({
+              success: z.literal(true),
+              data: z.object({ ended: z.literal(true) }),
+            }),
+          },
+        },
+      },
+      403: {
+        description: 'Caller is not the host',
+        content: { 'application/json': { schema: ErrorBody } },
       },
     },
   });

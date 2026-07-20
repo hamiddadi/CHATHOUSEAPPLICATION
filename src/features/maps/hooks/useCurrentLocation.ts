@@ -76,7 +76,7 @@ export const useCurrentLocation = (): UseCurrentLocationReturn => {
             i18n.t('explorer.maps.consentTitle', 'Location Consent'),
             i18n.t(
               'explorer.maps.consentBody',
-              'ChatHouse uses your location to show you friends nearby on the map. Your location data will be stored securely on our servers and automatically deleted after 30 days of inactivity. You can turn this off anytime using Ghost Mode.',
+              'ChatHouse uses your location to show users who choose to be visible on the map. If you enable visibility, those users can also see your live position. Turning sharing off clears your coordinates; inactive locations are also purged automatically.',
             ),
             [
               {

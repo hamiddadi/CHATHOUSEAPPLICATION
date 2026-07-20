@@ -39,13 +39,8 @@ const getOrCreateCustomer = async (userId: string): Promise<string> => {
   const stripe = await requireStripe();
   // PAYM-06: a deterministic idempotency key means a retried create (network
   // blip, double-tap, redelivery) returns the SAME customer instead of spawning
-  // an orphan. The StripeLike.customers.create signature omits the options arg;
-  // narrow-cast locally so we can pass it without touching the shared type.
-  const createCustomer = stripe.customers.create as (
-    params: unknown,
-    options?: { idempotencyKey?: string },
-  ) => Promise<{ id: string }>;
-  const customer = await createCustomer(
+  // an orphan.
+  const customer = await stripe.customers.create(
     {
       metadata: { chathouseUserId: userId },
       ...(user.email ? { email: user.email } : {}),
@@ -113,26 +108,34 @@ export const premiumService = {
     const { returnUrl, refreshUrl } = requireReturnUrls();
     const customerId = await getOrCreateCustomer(userId);
     const stripe = await requireStripe();
-    const session = await stripe.checkout.sessions.create({
-      mode: 'subscription',
-      customer: customerId,
-      client_reference_id: userId,
-      line_items: [
-        {
-          quantity: 1,
-          price_data: {
-            currency,
-            unit_amount: env.PREMIUM_PRICE_CENTS,
-            recurring: { interval: 'month' },
-            product_data: { name: env.PREMIUM_PRODUCT_NAME },
+    // Repeated taps/retries in the same hour return the same hosted Checkout
+    // session. Currency and price bind the key to an identical request.
+    const checkoutWindow = Math.floor(Date.now() / (60 * 60 * 1000));
+    const session = await stripe.checkout.sessions.create(
+      {
+        mode: 'subscription',
+        customer: customerId,
+        client_reference_id: userId,
+        line_items: [
+          {
+            quantity: 1,
+            price_data: {
+              currency,
+              unit_amount: env.PREMIUM_PRICE_CENTS,
+              recurring: { interval: 'month' },
+              product_data: { name: env.PREMIUM_PRODUCT_NAME },
+            },
           },
-        },
-      ],
-      subscription_data: { metadata: { chathouseUserId: userId } },
-      metadata: { chathouseUserId: userId },
-      success_url: returnUrl,
-      cancel_url: refreshUrl,
-    });
+        ],
+        subscription_data: { metadata: { chathouseUserId: userId } },
+        metadata: { chathouseUserId: userId },
+        success_url: returnUrl,
+        cancel_url: refreshUrl,
+      },
+      {
+        idempotencyKey: `premium-checkout:${userId}:${currency}:${env.PREMIUM_PRICE_CENTS}:${checkoutWindow}`,
+      },
+    );
     if (!session.url) throw extError('PAY_INVALID', 'Checkout session has no URL');
     return { url: session.url };
   },
@@ -184,25 +187,27 @@ export const premiumService = {
       ? new Date(sub.current_period_end * 1000)
       : null;
 
-    await prisma.subscription.upsert({
-      where: { userId },
-      create: {
-        userId,
-        stripeSubscriptionId: sub.id,
-        stripeCustomerId: sub.customer,
-        status: sub.status,
-        currentPeriodEnd,
-      },
-      update: {
-        stripeSubscriptionId: sub.id,
-        stripeCustomerId: sub.customer,
-        status: sub.status,
-        currentPeriodEnd,
-      },
-    });
-    await prisma.user.update({
-      where: { id: userId },
-      data: { isPremium: active, premiumUntil: active ? currentPeriodEnd : null },
+    await prisma.$transaction(async tx => {
+      await tx.subscription.upsert({
+        where: { userId },
+        create: {
+          userId,
+          stripeSubscriptionId: sub.id,
+          stripeCustomerId: sub.customer,
+          status: sub.status,
+          currentPeriodEnd,
+        },
+        update: {
+          stripeSubscriptionId: sub.id,
+          stripeCustomerId: sub.customer,
+          status: sub.status,
+          currentPeriodEnd,
+        },
+      });
+      await tx.user.update({
+        where: { id: userId },
+        data: { isPremium: active, premiumUntil: active ? currentPeriodEnd : null },
+      });
     });
   },
 

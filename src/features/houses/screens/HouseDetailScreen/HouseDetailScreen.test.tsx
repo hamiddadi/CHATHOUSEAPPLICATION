@@ -262,7 +262,7 @@ describe('HouseDetailScreen', () => {
     });
     expect(getSpy).not.toHaveBeenCalled();
     fireEvent(UNSAFE_getByType(FlatList), 'refresh');
-    await waitFor(() => expect(getSpy).toHaveBeenCalledWith('house-1'));
+    await waitFor(() => expect(getSpy).toHaveBeenCalledWith('house-1', undefined));
     // live + upcoming + past — one gesture refreshes everything on screen.
     await waitFor(() => expect(roomsSpy).toHaveBeenCalledTimes(3));
   });

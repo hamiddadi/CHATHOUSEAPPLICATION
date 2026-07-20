@@ -1,7 +1,11 @@
+import { MediaKind } from '@prisma/client';
 import { prisma } from '../../config/database';
+import { logger } from '../../config/logger';
 import { AppError } from '../../middlewares/error.middleware';
 import { notificationsService } from '../notifications/notifications.service';
 import { emitChatMessage } from '../../socket/realtime';
+import { mediaService } from '../media/media.service';
+import { scheduleBackgroundTask } from '../../utils/backgroundTasks';
 import type { ListMessagesInput, SendMessageInput, SendVoiceMessageInput } from './chat.schema';
 
 const publicUser = {
@@ -41,16 +45,18 @@ const assertCanMessage = async (senderId: string, recipientId: string): Promise<
   });
   if (blocked) throw new AppError('CHAT_004');
 
-  const recipient = await prisma.user.findUnique({
-    where: { id: recipientId },
+  const recipient = await prisma.user.findFirst({
+    where: { id: recipientId, deletedAt: null },
     select: { dmPrivacy: true },
   });
-  const privacy = recipient?.dmPrivacy ?? 'mutual';
+  if (!recipient) throw new AppError('USER_001');
+  const privacy = recipient.dmPrivacy;
   if (privacy === 'nobody') throw new AppError('CHAT_004');
   if (privacy === 'everyone') return;
 
   const rows = await prisma.follow.findMany({
     where: {
+      status: 'ACCEPTED',
       OR: [
         { followerId: senderId, followingId: recipientId },
         { followerId: recipientId, followingId: senderId },
@@ -135,7 +141,7 @@ export const chatService = {
 
     const peerIds = Array.from(byPeer.keys());
     const peers = await prisma.user.findMany({
-      where: { id: { in: peerIds } },
+      where: { id: { in: peerIds }, deletedAt: null },
       select: publicUser,
     });
     const peerById = new Map(peers.map(p => [p.id, p]));
@@ -171,7 +177,10 @@ export const chatService = {
    */
   async conversationWith(userId: string, peerId: string) {
     if (userId === peerId) throw new AppError('CHAT_001');
-    const peer = await prisma.user.findUnique({ where: { id: peerId }, select: publicUser });
+    const peer = await prisma.user.findFirst({
+      where: { id: peerId, deletedAt: null },
+      select: publicUser,
+    });
     if (!peer) throw new AppError('USER_001');
 
     const [lo, hi] = conversationPair(userId, peerId);
@@ -194,6 +203,11 @@ export const chatService = {
 
   async listWithPeer(userId: string, peerId: string, input: ListMessagesInput) {
     if (userId === peerId) throw new AppError('CHAT_001');
+    const peer = await prisma.user.findFirst({
+      where: { id: peerId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!peer) throw new AppError('USER_001');
     const [lo, hi] = conversationPair(userId, peerId);
     const messages = await prisma.message.findMany({
       where: {
@@ -213,8 +227,8 @@ export const chatService = {
 
   async send(senderId: string, receiverId: string, input: SendMessageInput) {
     if (senderId === receiverId) throw new AppError('CHAT_001');
-    const peer = await prisma.user.findUnique({
-      where: { id: receiverId },
+    const peer = await prisma.user.findFirst({
+      where: { id: receiverId, deletedAt: null },
       select: { id: true, username: true, displayName: true },
     });
     if (!peer) throw new AppError('USER_001');
@@ -241,16 +255,19 @@ export const chatService = {
     // recipient's conversation list / unread badge / open thread update live.
     emitChatMessage(senderId, receiverId, msg);
 
-    // Fire-and-forget notification + push. The realtime emit above handles the
-    // in-app update; the Notification row is the offline fallback that lights
-    // up the bell badge next launch.
-    void notificationsService.create({
-      userId: receiverId,
-      type: 'NEW_MESSAGE',
-      title: handle,
-      body: input.content.slice(0, 160),
-      data: { messageId: msg.id, senderId, conversation: 'dm' },
-    });
+    // The notification remains non-blocking in production, while the task
+    // registry guarantees graceful shutdown and deterministic tests.
+    await scheduleBackgroundTask(
+      notificationsService.create({
+        userId: receiverId,
+        type: 'NEW_MESSAGE',
+        title: handle,
+        body: input.content.slice(0, 160),
+        data: { messageId: msg.id, senderId, conversation: 'dm' },
+      }),
+      err =>
+        logger.warn('chat message notification failed', { err, receiverId, messageId: msg.id }),
+    );
 
     return msg;
   },
@@ -263,13 +280,14 @@ export const chatService = {
    */
   async sendVoice(senderId: string, receiverId: string, input: SendVoiceMessageInput) {
     if (senderId === receiverId) throw new AppError('CHAT_001');
-    const peer = await prisma.user.findUnique({
-      where: { id: receiverId },
+    const peer = await prisma.user.findFirst({
+      where: { id: receiverId, deletedAt: null },
       select: { id: true, username: true, displayName: true },
     });
     if (!peer) throw new AppError('USER_001');
 
     await assertCanMessage(senderId, receiverId);
+    await mediaService.assertOwnedMediaUrl(senderId, input.audioUrl, MediaKind.VOICE);
 
     const sender = await prisma.user.findUnique({
       where: { id: senderId },
@@ -290,13 +308,16 @@ export const chatService = {
 
     emitChatMessage(senderId, receiverId, msg);
 
-    void notificationsService.create({
-      userId: receiverId,
-      type: 'NEW_MESSAGE',
-      title: handle,
-      body: '🎤 Voice message',
-      data: { messageId: msg.id, senderId, conversation: 'dm' },
-    });
+    await scheduleBackgroundTask(
+      notificationsService.create({
+        userId: receiverId,
+        type: 'NEW_MESSAGE',
+        title: handle,
+        body: '🎤 Voice message',
+        data: { messageId: msg.id, senderId, conversation: 'dm' },
+      }),
+      err => logger.warn('chat voice notification failed', { err, receiverId, messageId: msg.id }),
+    );
 
     return msg;
   },

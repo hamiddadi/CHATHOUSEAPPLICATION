@@ -1,8 +1,8 @@
-import { Prisma } from '@prisma/client';
 import { prisma, runWriteWithRetry } from '../../config/database';
 import { AppError } from '../../middlewares/error.middleware';
 import { notificationsService } from '../notifications/notifications.service';
 import { getBlockedIdSet } from '../social/blocks';
+import { hasBlockBetween, lockRelationshipUsers } from '../social/relationship-lock';
 import { emitUserFollowerCount } from '../../socket/realtime';
 import { cursorPage } from '../../utils/paginate';
 
@@ -29,7 +29,11 @@ const displayName = async (userId: string): Promise<string> => {
 const followedSubset = async (viewerId: string, ids: string[]): Promise<Set<string>> => {
   if (ids.length === 0) return new Set();
   const rows = await prisma.follow.findMany({
-    where: { followerId: viewerId, followingId: { in: ids }, status: 'ACCEPTED' },
+    where: {
+      followerId: viewerId,
+      followingId: { in: ids },
+      status: 'ACCEPTED',
+    },
     select: { followingId: true },
   });
   return new Set(rows.map(r => r.followingId));
@@ -39,93 +43,83 @@ export const followService = {
   async follow(followerId: string, followingId: string) {
     if (followerId === followingId) throw new AppError('USER_003');
 
-    const target = await prisma.user.findUnique({ where: { id: followingId } });
-    if (!target) throw new AppError('USER_001');
+    const result = await runWriteWithRetry(() =>
+      prisma.$transaction(
+        async tx => {
+          // Follow and block share this canonical row lock. Whichever mutation
+          // commits last observes the other's committed state, so a follow can
+          // never survive across an already-established block.
+          const lockedIds = await lockRelationshipUsers(tx, followerId, followingId);
+          if (lockedIds.length !== 2) throw new AppError('USER_001');
 
-    // FOLL-02: respect the block graph (both directions) before any write — a
-    // blocked user must not be able to recreate the edge block() wiped or push a
-    // notification at someone who blocked them. Mirrors wave()'s USER_004 gate.
-    const blocked = await getBlockedIdSet(followerId);
-    if (blocked.has(followingId)) throw new AppError('USER_004');
-
-    // FOLL-01: a private account gates the follow behind approval. Create a
-    // PENDING request (NO counter bump, NO NEW_FOLLOWER), notify the target with
-    // a FOLLOW_REQUEST, and report following:false. A public account follows
-    // immediately (ACCEPTED) as before. P2002 = the request/follow already
-    // exists → idempotent, skip the notification.
-    if (target.isPrivateAccount) {
-      let created = true;
-      try {
-        await prisma.follow.create({ data: { followerId, followingId, status: 'PENDING' } });
-      } catch (err) {
-        if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
-          created = false;
-        } else {
-          throw err;
-        }
-      }
-      if (created) {
-        await notificationsService.create({
-          userId: followingId,
-          actorId: followerId,
-          type: 'FOLLOW_REQUEST',
-          title: 'Follow request',
-          body: `${await displayName(followerId)} requested to follow you`,
-          data: { followerId },
-          targetId: followerId,
-          targetType: 'user',
-        });
-      }
-      return { following: false as const, requested: true as const };
-    }
-
-    // Public account → immediate follow. Create the ACCEPTED edge AND bump both
-    // denormalized counts in one transaction so the relation and the counters
-    // can't drift; the counter update RETURNs the new follower count.
-    //
-    // The two `User` row updates are issued in a canonical order (lower id
-    // first) so two reciprocal follows running at the same time (A→B and B→A)
-    // always acquire the row locks in the SAME sequence — otherwise Postgres
-    // detects a deadlock (40P01) and aborts one, which previously surfaced as a
-    // 500. `runWriteWithRetry` is a belt-and-suspenders for any residual
-    // serialization conflict; P2002 (already following) still falls through to
-    // the idempotent branch below.
-    let isNewFollow = true;
-    let newFollowerCount = 0;
-    try {
-      newFollowerCount = await runWriteWithRetry(() =>
-        prisma.$transaction(async tx => {
-          await tx.follow.create({ data: { followerId, followingId } });
-          const bumpFollower = () =>
-            tx.user.update({
-              where: { id: followerId },
-              data: { followingCount: { increment: 1 } },
-            });
-          const bumpTarget = () =>
-            tx.user.update({
-              where: { id: followingId },
-              data: { followerCount: { increment: 1 } },
-              select: { followerCount: true },
-            });
-          if (followerId < followingId) {
-            await bumpFollower();
-            return (await bumpTarget()).followerCount;
+          const [follower, target] = await Promise.all([
+            tx.user.findFirst({
+              where: { id: followerId, deletedAt: null },
+              select: { id: true },
+            }),
+            tx.user.findFirst({
+              where: { id: followingId, deletedAt: null },
+              select: { id: true, isPrivateAccount: true },
+            }),
+          ]);
+          if (!follower || !target) throw new AppError('USER_001');
+          if (await hasBlockBetween(tx, followerId, followingId)) {
+            throw new AppError('USER_004', 'A blocked relationship cannot be followed');
           }
-          const target = await bumpTarget();
-          await bumpFollower();
-          return target.followerCount;
-        }),
-      );
-    } catch (err) {
-      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
-        isNewFollow = false;
-      } else {
-        throw err;
-      }
-    }
 
-    if (isNewFollow) {
-      emitUserFollowerCount(followingId, newFollowerCount);
+          const existing = await tx.follow.findUnique({
+            where: { followerId_followingId: { followerId, followingId } },
+            select: { status: true },
+          });
+          if (existing?.status === 'ACCEPTED') {
+            return { state: 'accepted-existing' as const, followerCount: null };
+          }
+          if (existing?.status === 'PENDING') {
+            return { state: 'pending-existing' as const, followerCount: null };
+          }
+
+          if (target.isPrivateAccount) {
+            await tx.follow.create({
+              data: { followerId, followingId, status: 'PENDING' },
+            });
+            return { state: 'pending-created' as const, followerCount: null };
+          }
+
+          await tx.follow.create({
+            data: { followerId, followingId, status: 'ACCEPTED' },
+          });
+          await tx.user.update({
+            where: { id: followerId },
+            data: { followingCount: { increment: 1 } },
+          });
+          const updatedTarget = await tx.user.update({
+            where: { id: followingId },
+            data: { followerCount: { increment: 1 } },
+            select: { followerCount: true },
+          });
+          return {
+            state: 'accepted-created' as const,
+            followerCount: updatedTarget.followerCount,
+          };
+        },
+        { maxWait: 5_000, timeout: 10_000 },
+      ),
+    );
+
+    if (result.state === 'pending-created') {
+      await notificationsService.create({
+        userId: followingId,
+        actorId: followerId,
+        type: 'FOLLOW_REQUEST',
+        title: 'Follow request',
+        body: `${await displayName(followerId)} requested to follow you`,
+        data: { followerId },
+        targetId: followerId,
+        targetType: 'user',
+      });
+    }
+    if (result.state === 'accepted-created') {
+      emitUserFollowerCount(followingId, result.followerCount);
       await notificationsService.create({
         userId: followingId,
         actorId: followerId,
@@ -138,41 +132,59 @@ export const followService = {
       });
     }
 
+    if (result.state === 'pending-created' || result.state === 'pending-existing') {
+      return { following: false as const, requested: true as const };
+    }
     return { following: true as const };
   },
 
   async unfollow(followerId: string, followingId: string) {
-    // DELETE ... RETURNING the status so counters are only decremented for an
-    // edge that was actually counted (ACCEPTED). Cancelling a PENDING request
-    // must not touch the denormalized counts — they were never incremented.
-    const removed = await prisma.$queryRaw<{ status: 'PENDING' | 'ACCEPTED' }[]>`
+    const result = await runWriteWithRetry(() =>
+      prisma.$transaction(
+        async tx => {
+          await lockRelationshipUsers(tx, followerId, followingId);
+          // DELETE ... RETURNING the status so counters are only decremented for
+          // an edge that was actually counted (ACCEPTED). Cancelling a PENDING
+          // request must not touch denormalized counts.
+          const removed = await tx.$queryRaw<{ status: 'PENDING' | 'ACCEPTED' }[]>`
       DELETE FROM "Follow"
       WHERE "followerId" = ${followerId} AND "followingId" = ${followingId}
       RETURNING "status"`;
-    if (removed.some(r => r.status === 'ACCEPTED')) {
-      // Same reciprocal-write deadlock risk as follow() — retry on a transient
-      // conflict so a concurrent follow/unfollow of the inverse edge can't 500.
-      const [, rows] = await runWriteWithRetry(() =>
-        prisma.$transaction([
-          prisma.$executeRaw`UPDATE "User" SET "followingCount" = GREATEST("followingCount" - 1, 0), "updatedAt" = NOW() WHERE id = ${followerId}`,
-          prisma.$queryRaw<
-            { followerCount: number }[]
-          >`UPDATE "User" SET "followerCount" = GREATEST("followerCount" - 1, 0), "updatedAt" = NOW() WHERE id = ${followingId} RETURNING "followerCount"`,
-        ]),
-      );
-      emitUserFollowerCount(followingId, rows[0]?.followerCount ?? 0);
-      // FOLL-05: retract the NEW_FOLLOWER notification so a follow→unfollow→
-      // re-follow cycle can't spam the target.
-      await prisma.notification.deleteMany({
-        where: { userId: followingId, actorId: followerId, type: 'NEW_FOLLOWER' },
-      });
-    } else if (removed.length > 0) {
-      // Cancelled a pending request — drop the FOLLOW_REQUEST notification too.
-      await prisma.notification.deleteMany({
-        where: { userId: followingId, actorId: followerId, type: 'FOLLOW_REQUEST' },
-      });
+          let followerCount: number | null = null;
+          if (removed.some(r => r.status === 'ACCEPTED')) {
+            await tx.$executeRaw`UPDATE "User" SET "followingCount" = GREATEST("followingCount" - 1, 0), "updatedAt" = NOW() WHERE id = ${followerId}`;
+            const rows = await tx.$queryRaw<
+              { followerCount: number }[]
+            >`UPDATE "User" SET "followerCount" = GREATEST("followerCount" - 1, 0), "updatedAt" = NOW() WHERE id = ${followingId} RETURNING "followerCount"`;
+            followerCount = rows[0]?.followerCount ?? 0;
+            await tx.notification.deleteMany({
+              where: {
+                userId: followingId,
+                actorId: followerId,
+                type: 'NEW_FOLLOWER',
+              },
+            });
+          } else if (removed.length > 0) {
+            await tx.notification.deleteMany({
+              where: {
+                userId: followingId,
+                actorId: followerId,
+                type: 'FOLLOW_REQUEST',
+              },
+            });
+          }
+          return {
+            following: false as const,
+            followerCount,
+          };
+        },
+        { maxWait: 5_000, timeout: 10_000 },
+      ),
+    );
+    if (result.followerCount !== null) {
+      emitUserFollowerCount(followingId, result.followerCount);
     }
-    return { following: false as const };
+    return { following: result.following };
   },
 
   /**
@@ -181,37 +193,100 @@ export const followService = {
    * there's no matching pending request.
    */
   async acceptFollowRequest(meId: string, requesterId: string) {
-    const promoted = await prisma.follow.updateMany({
-      where: { followerId: requesterId, followingId: meId, status: 'PENDING' },
-      data: { status: 'ACCEPTED' },
-    });
-    if (promoted.count === 0) throw new AppError('USER_001');
-    const [, rows] = await runWriteWithRetry(() =>
-      prisma.$transaction([
-        prisma.$executeRaw`UPDATE "User" SET "followingCount" = "followingCount" + 1, "updatedAt" = NOW() WHERE id = ${requesterId}`,
-        prisma.$queryRaw<
-          { followerCount: number }[]
-        >`UPDATE "User" SET "followerCount" = "followerCount" + 1, "updatedAt" = NOW() WHERE id = ${meId} RETURNING "followerCount"`,
-      ]),
+    const result = await runWriteWithRetry(() =>
+      prisma.$transaction(
+        async tx => {
+          const lockedIds = await lockRelationshipUsers(tx, meId, requesterId);
+          if (lockedIds.length !== 2) throw new AppError('USER_001');
+          const activeUsers = await tx.user.count({
+            where: { id: { in: [meId, requesterId] }, deletedAt: null },
+          });
+          if (activeUsers !== 2) throw new AppError('USER_001');
+          if (await hasBlockBetween(tx, meId, requesterId)) {
+            throw new AppError('USER_004', 'A blocked follow request cannot be accepted');
+          }
+
+          const promoted = await tx.follow.updateMany({
+            where: {
+              followerId: requesterId,
+              followingId: meId,
+              status: 'PENDING',
+            },
+            data: { status: 'ACCEPTED' },
+          });
+
+          if (promoted.count === 0) {
+            // Idempotent replay: an already accepted edge is success without a
+            // second counter bump. A missing edge remains a not-found request.
+            const existing = await tx.follow.findFirst({
+              where: {
+                followerId: requesterId,
+                followingId: meId,
+                status: 'ACCEPTED',
+              },
+              select: { id: true },
+            });
+            if (!existing) throw new AppError('USER_001');
+            const me = await tx.user.findUnique({
+              where: { id: meId },
+              select: { followerCount: true },
+            });
+            return { changed: false, followerCount: me?.followerCount ?? 0 };
+          }
+
+          await tx.user.update({
+            where: { id: requesterId },
+            data: { followingCount: { increment: 1 } },
+          });
+          const me = await tx.user.update({
+            where: { id: meId },
+            data: { followerCount: { increment: 1 } },
+            select: { followerCount: true },
+          });
+
+          await tx.notification.deleteMany({
+            where: {
+              userId: meId,
+              actorId: requesterId,
+              type: 'FOLLOW_REQUEST',
+            },
+          });
+          return { changed: true, followerCount: me.followerCount };
+        },
+        { maxWait: 5_000, timeout: 10_000 },
+      ),
     );
-    emitUserFollowerCount(meId, rows[0]?.followerCount ?? 0);
-    // Clear the now-handled FOLLOW_REQUEST notification.
-    await prisma.notification.deleteMany({
-      where: { userId: meId, actorId: requesterId, type: 'FOLLOW_REQUEST' },
-    });
+    if (result.changed) emitUserFollowerCount(meId, result.followerCount);
     return { accepted: true as const };
   },
 
   /** FOLL-01: the private account declines a pending request (just removes it). */
   async rejectFollowRequest(meId: string, requesterId: string) {
-    const removed = await prisma.follow.deleteMany({
-      where: { followerId: requesterId, followingId: meId, status: 'PENDING' },
-    });
-    if (removed.count > 0) {
-      await prisma.notification.deleteMany({
-        where: { userId: meId, actorId: requesterId, type: 'FOLLOW_REQUEST' },
-      });
-    }
+    const removed = await runWriteWithRetry(() =>
+      prisma.$transaction(
+        async tx => {
+          await lockRelationshipUsers(tx, meId, requesterId);
+          const result = await tx.follow.deleteMany({
+            where: {
+              followerId: requesterId,
+              followingId: meId,
+              status: 'PENDING',
+            },
+          });
+          if (result.count > 0) {
+            await tx.notification.deleteMany({
+              where: {
+                userId: meId,
+                actorId: requesterId,
+                type: 'FOLLOW_REQUEST',
+              },
+            });
+          }
+          return result;
+        },
+        { maxWait: 5_000, timeout: 10_000 },
+      ),
+    );
     return { rejected: removed.count > 0 };
   },
 
@@ -221,6 +296,7 @@ export const followService = {
       where: {
         followingId: meId,
         status: 'PENDING',
+        follower: { deletedAt: null },
         ...(cursor ? { createdAt: { lt: new Date(cursor) } } : {}),
       },
       orderBy: { createdAt: 'desc' },
@@ -236,10 +312,20 @@ export const followService = {
   },
 
   async listFollowers(userId: string, viewerId: string, limit = 50, cursor?: string) {
+    const blocked = await getBlockedIdSet(viewerId);
+    if (userId !== viewerId) {
+      const target = await prisma.user.findFirst({
+        where: { id: userId, deletedAt: null },
+        select: { id: true },
+      });
+      if (!target || blocked.has(userId)) throw new AppError('USER_001');
+    }
     const rows = await prisma.follow.findMany({
       where: {
         followingId: userId,
         status: 'ACCEPTED',
+        followerId: { notIn: [...blocked] },
+        follower: { deletedAt: null },
         ...(cursor ? { createdAt: { lt: new Date(cursor) } } : {}),
       },
       orderBy: { createdAt: 'desc' },
@@ -256,14 +342,30 @@ export const followService = {
       viewerId,
       page.data.map(u => u.id),
     );
-    return { ...page, data: page.data.map(u => ({ ...u, isFollowedByMe: followed.has(u.id) })) };
+    return {
+      ...page,
+      data: page.data.map(u => ({
+        ...u,
+        isFollowedByMe: followed.has(u.id),
+      })),
+    };
   },
 
   async listFollowing(userId: string, viewerId: string, limit = 50, cursor?: string) {
+    const blocked = await getBlockedIdSet(viewerId);
+    if (userId !== viewerId) {
+      const target = await prisma.user.findFirst({
+        where: { id: userId, deletedAt: null },
+        select: { id: true },
+      });
+      if (!target || blocked.has(userId)) throw new AppError('USER_001');
+    }
     const rows = await prisma.follow.findMany({
       where: {
         followerId: userId,
         status: 'ACCEPTED',
+        followingId: { notIn: [...blocked] },
+        following: { deletedAt: null },
         ...(cursor ? { createdAt: { lt: new Date(cursor) } } : {}),
       },
       orderBy: { createdAt: 'desc' },
@@ -280,7 +382,13 @@ export const followService = {
       viewerId,
       page.data.map(u => u.id),
     );
-    return { ...page, data: page.data.map(u => ({ ...u, isFollowedByMe: followed.has(u.id) })) };
+    return {
+      ...page,
+      data: page.data.map(u => ({
+        ...u,
+        isFollowedByMe: followed.has(u.id),
+      })),
+    };
   },
 
   /**
@@ -289,6 +397,12 @@ export const followService = {
    * Only ACCEPTED edges on both legs count.
    */
   async mutualFollowers(viewerId: string, targetUserId: string, limit = 5) {
+    const blocked = await getBlockedIdSet(viewerId);
+    const target = await prisma.user.findFirst({
+      where: { id: targetUserId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!target || blocked.has(targetUserId)) throw new AppError('USER_001');
     const mutuals = await prisma.$queryRaw<
       {
         id: string;
@@ -305,8 +419,9 @@ export const followService = {
         AND vf."followingId" != ${targetUserId}
         AND vf."status" = 'ACCEPTED'
         AND tf."status" = 'ACCEPTED'
-      LIMIT ${limit}
+        AND u."deletedAt" IS NULL
+      LIMIT ${Math.min(limit * 10, 50)}
     `;
-    return mutuals;
+    return mutuals.filter(user => !blocked.has(user.id)).slice(0, limit);
   },
 };

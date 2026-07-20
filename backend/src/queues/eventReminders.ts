@@ -1,7 +1,9 @@
 import { Queue, Worker, type Job } from 'bullmq';
 import { logger } from '../config/logger';
-import { prisma } from '../config/database';
+import { prisma, runWriteWithRetry } from '../config/database';
 import { notificationsService } from '../modules/notifications/notifications.service';
+import { getBlockedIdSet } from '../modules/social/blocks';
+import { cancelReminder15, scheduleReminder15 } from '../extensions/queues/reminder15';
 import { bullConnection } from './connection';
 
 /**
@@ -80,11 +82,11 @@ export const scheduleEventReminder = async (roomId: string, scheduledFor: Date):
 
   // ── 1b. T−15min reminder (extension queue) ──
   // EVEN-04: arm the 15-min reminder at room-creation time instead of relying
-  // solely on the narrow per-minute cron scan in `reminder15.ts`. Best-effort
-  // and lazily imported to avoid a load-order coupling between the queues; its
-  // own `delay <= 0` guard no-ops when the room is <15min out or in the past.
+  // solely on the narrow per-minute cron scan in `reminder15.ts`. Best-effort;
+  // its own `delay <= 0` guard no-ops when the room is <15min out or in the
+  // past. Keep this as a static import so disconnect cleanup cannot attempt to
+  // load code after the process/test environment has started shutting down.
   try {
-    const { scheduleReminder15 } = await import('../extensions/queues/reminder15');
     await scheduleReminder15(roomId, scheduledFor);
   } catch (err) {
     logger.warn('event-reminder: scheduleReminder15 failed', { err, roomId });
@@ -118,6 +120,11 @@ export const cancelEventReminder = async (roomId: string): Promise<void> => {
   ]);
   if (reminderJob) await reminderJob.remove();
   if (goLiveJob) await goLiveJob.remove();
+  try {
+    await cancelReminder15(roomId);
+  } catch (err) {
+    logger.warn('event-reminder: cancelReminder15 failed', { err, roomId });
+  }
 };
 
 /**
@@ -128,40 +135,86 @@ export const cancelEventReminder = async (roomId: string): Promise<void> => {
  * `scheduleEventReminder` when the room is programmed for now/the past.
  */
 const openScheduledRoom = async (roomId: string): Promise<void> => {
-  const room = await prisma.room.findUnique({ where: { id: roomId } });
+  const result = await runWriteWithRetry(() =>
+    prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT "id" FROM "Room" WHERE "id" = ${roomId} FOR UPDATE`;
+      const room = await tx.room.findUnique({ where: { id: roomId } });
+      if (!room || room.endedAt || room.isLive) {
+        return { state: 'noop' as const, room };
+      }
+
+      await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${room.hostId} FOR UPDATE`;
+      const host = await tx.user.findUnique({
+        where: { id: room.hostId },
+        select: {
+          deletedAt: true,
+          suspendedUntil: true,
+          currentRoomId: true,
+        },
+      });
+      const now = new Date();
+      const hostUnavailable =
+        !host ||
+        host.deletedAt !== null ||
+        (host.suspendedUntil !== null && host.suspendedUntil > now) ||
+        (host.currentRoomId !== null && host.currentRoomId !== room.id);
+
+      if (hostUnavailable) {
+        await tx.room.update({
+          where: { id: room.id },
+          data: {
+            isLive: false,
+            endedAt: now,
+            canceledAt: now,
+            participantCount: 0,
+          },
+        });
+        return { state: 'canceled' as const, room };
+      }
+
+      await tx.room.update({
+        where: { id: room.id },
+        data: {
+          isLive: true,
+          participantCount: 1,
+          totalAttendees: { increment: 1 },
+        },
+      });
+      await tx.participant.upsert({
+        where: { userId_roomId: { userId: room.hostId, roomId: room.id } },
+        create: { roomId: room.id, userId: room.hostId, role: 'HOST' },
+        update: {
+          role: 'HOST',
+          isMuted: false,
+          leftAt: null,
+          joinedAt: now,
+        },
+      });
+      await tx.user.update({
+        where: { id: room.hostId },
+        data: { currentRoomId: room.id },
+      });
+      return { state: 'opened' as const, room };
+    }),
+  );
+
+  const room = result.room;
   if (!room) {
     logger.warn('event-reminder: go-live room not found', { roomId });
     return;
   }
-  if (room.endedAt) return; // already cancelled or ended
-  if (room.isLive) return; // already opened — keep idempotent
-
-  // EVEN-03: guard against a concurrent cancel (which sets `endedAt`) racing
-  // this go-live flip. The conditional update only matches a room that is
-  // still un-ended; if a cancel won the race (count === 0) we bail rather
-  // than re-open a room that was just torn down.
-  const flipped = await prisma.room.updateMany({
-    where: { id: room.id, endedAt: null },
-    data: { isLive: true },
-  });
-  if (flipped.count !== 1) {
-    logger.info('event-reminder: go-live skipped — room ended concurrently', { roomId: room.id });
+  if (result.state === 'canceled') {
+    logger.info('event-reminder: canceled event because host is unavailable', {
+      roomId: room.id,
+      hostId: room.hostId,
+    });
     return;
   }
-  // Add host as first participant
-  await prisma.participant.upsert({
-    where: { userId_roomId: { userId: room.hostId, roomId: room.id } },
-    create: { roomId: room.id, userId: room.hostId, role: 'HOST' },
-    update: { leftAt: null, joinedAt: new Date() },
-  });
-  await prisma.room.update({
-    where: { id: room.id },
-    data: { participantCount: 1 },
-  });
+  if (result.state === 'noop') return;
   // Broadcast hallway:room_created so live feeds light up. We import
   // lazily to avoid a circular import between queues → realtime → socket.
   const { emitHallwayRoomCreated } = await import('../socket/realtime');
-  if (!room.isPrivate) {
+  if (!room.isPrivate && room.roomType === 'OPEN') {
     emitHallwayRoomCreated({
       id: room.id,
       title: room.title,
@@ -200,11 +253,16 @@ const processReminder = async (job: Job<ReminderJobData>): Promise<void> => {
     return;
   }
 
-  const room = await prisma.room.findUnique({
-    where: { id: job.data.roomId },
+  const room = await prisma.room.findFirst({
+    where: { id: job.data.roomId, host: { deletedAt: null } },
     // EVEN-05: honor the per-user `RoomRsvp.reminder` toggle — only RSVPs that
     // opted in get the reminder fan-out.
-    include: { rsvps: { where: { reminder: true }, select: { userId: true } } },
+    include: {
+      rsvps: {
+        where: { reminder: true, user: { deletedAt: null } },
+        select: { userId: true },
+      },
+    },
   });
   if (!room) {
     logger.warn('event-reminder: room not found', { roomId: job.data.roomId });
@@ -212,7 +270,10 @@ const processReminder = async (job: Job<ReminderJobData>): Promise<void> => {
   }
   if (room.endedAt) return; // already cancelled or ended
 
-  const recipientIds = new Set<string>(room.rsvps.map(r => r.userId));
+  const blocked = await getBlockedIdSet(room.hostId);
+  const recipientIds = new Set<string>(
+    room.rsvps.map(r => r.userId).filter(userId => !blocked.has(userId)),
+  );
   recipientIds.add(room.hostId);
 
   // Club rooms: also notify every active club member who isn't already
@@ -220,7 +281,10 @@ const processReminder = async (job: Job<ReminderJobData>): Promise<void> => {
   // not just a personal calendar ping.
   if (room.clubId) {
     const members = await prisma.clubMember.findMany({
-      where: { clubId: room.clubId },
+      where: {
+        clubId: room.clubId,
+        user: { deletedAt: null, id: { notIn: [...blocked] } },
+      },
       select: { userId: true },
     });
     for (const m of members) recipientIds.add(m.userId);
@@ -276,3 +340,5 @@ export const shutdownReminders = async (): Promise<void> => {
     queue = null;
   }
 };
+
+export const _internals = { openScheduledRoom };

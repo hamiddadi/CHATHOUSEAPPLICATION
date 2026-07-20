@@ -56,6 +56,11 @@ services:
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-dev_only_access_secret_change_me_0123456789abcdef}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-dev_only_refresh_secret_change_me_0123456789abcdef}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8081}
+      PUBLIC_URL: ${PUBLIC_URL:-http://localhost:4000}
+      MEDIA_STORAGE_DRIVER: local
+      MEDIA_URL_SIGNING_SECRET: ${MEDIA_URL_SIGNING_SECRET:-dev_media_signing_secret_change_me_0123456789abcdef}
+      ROOM_RECORDING_ENABLED: 'false'
+      EGRESS_ENABLED: 'false'
       # Dev/QA OTP bypass — these numbers skip the real SMS and log in with
       # OTP_TEST_CODE. Hard-gated to non-production in otp.service, so inert
       # whenever NODE_ENV=production. Override or clear via the host env / .env.
@@ -101,11 +106,9 @@ services:
       - '4000:4000'
       - '40000-40499:40000-40499/udp'
     volumes:
-      # Persist uploaded avatars / voice notes on the host so they survive
-      # container recreation and rebuilds. Matches the app's
-      # UPLOADS_DIR = <repo>/backend/uploads (upload.service.ts). The dir is
-      # git-ignored (except .gitkeep) and served back via /uploads static route.
-      - ./uploads:/app/uploads
+      # Unserved local fallback for development only. Production is forced to
+      # use private S3-compatible storage by env validation.
+      - ./private-media:/app/private-media
 
   # ─── LiveKit server (live audio) — dev single node ───
   # Self-hosted so the token issued by /livekit-token is actually connectable

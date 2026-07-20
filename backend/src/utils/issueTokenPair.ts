@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { prisma } from '../config/database';
+import { AppError } from '../middlewares/error.middleware';
 import { signAccessToken, signRefreshToken } from './jwt';
 
 export const REFRESH_TTL_DAYS = 7;
@@ -19,9 +20,13 @@ export const issueTokenPair = async (
   // requireAuth can reject it after a cross-device logout / password reset.
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { tokenVersion: true },
+    select: { tokenVersion: true, deletedAt: true, suspendedUntil: true },
   });
-  const accessToken = signAccessToken(userId, user?.tokenVersion ?? 0);
+  if (!user || user.deletedAt) throw new AppError('AUTH_003');
+  if (user.suspendedUntil && user.suspendedUntil > new Date()) {
+    throw new AppError('AUTH_007');
+  }
+  const accessToken = signAccessToken(userId, user.tokenVersion);
   const refreshToken = signRefreshToken(userId, jti);
   const expiresAt = new Date(Date.now() + REFRESH_TTL_DAYS * 24 * 60 * 60 * 1000);
 

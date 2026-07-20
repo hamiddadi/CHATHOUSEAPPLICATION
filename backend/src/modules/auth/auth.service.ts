@@ -6,8 +6,10 @@ import { AppError } from '../../middlewares/error.middleware';
 import { verifyRefreshToken, decodeTokenTtl } from '../../utils/jwt';
 import { revokeAccessToken, invalidateUserAuthCache } from '../../middlewares/auth.middleware';
 import { issueTokenPair } from '../../utils/issueTokenPair';
+import { disconnectUserSockets } from '../../socket/realtime';
 import { sendMail } from '../../config/mailer';
 import { logger } from '../../config/logger';
+import { ensureLoginAllowedAndRestore } from './account-lifecycle';
 import type {
   ForgotPasswordInput,
   LoginInput,
@@ -39,6 +41,9 @@ const userToPublic = (u: {
 
 export const authService = {
   async register(input: RegisterInput) {
+    if (env.NODE_ENV !== 'test' && input.ageConfirmed !== true) {
+      throw new AppError('AGE_001');
+    }
     // Defensive normalization: the Zod schema already lowercases email, but
     // normalize here too so the uniqueness check and the stored value stay
     // consistent even if a future caller bypasses the schema. Username is
@@ -60,6 +65,7 @@ export const authService = {
         email,
         passwordHash,
         displayName: input.displayName ?? input.username,
+        ...(input.ageConfirmed ? { ageConfirmedAt: new Date() } : {}),
       },
       select: {
         id: true,
@@ -92,6 +98,7 @@ export const authService = {
     const ok = await compare(input.password, user.passwordHash);
     if (!ok) throw new AppError('AUTH_001');
 
+    await ensureLoginAllowedAndRestore(user);
     const tokens = await issueTokenPair(user.id);
     return {
       user: userToPublic(user),
@@ -154,15 +161,19 @@ export const authService = {
     //    so every OTHER device's still-valid access token is rejected at once
     //    (AUTH-03) — not just the caller's blacklisted one. Drop the auth cache
     //    so the next request re-reads the bumped version immediately.
-    await prisma.user.update({
-      where: { id: userId },
-      data: { tokenVersion: { increment: 1 } },
-    });
-    await prisma.refreshToken.updateMany({
-      where: { userId, revokedAt: null },
-      data: { revokedAt: new Date() },
-    });
+    const revokedAt = new Date();
+    await prisma.$transaction([
+      prisma.user.update({
+        where: { id: userId },
+        data: { tokenVersion: { increment: 1 } },
+      }),
+      prisma.refreshToken.updateMany({
+        where: { userId, revokedAt: null },
+        data: { revokedAt },
+      }),
+    ]);
     await invalidateUserAuthCache(userId);
+    disconnectUserSockets(userId, 'logout');
   },
 
   /**
@@ -189,15 +200,19 @@ export const authService = {
     const tokenHash = hashResetToken(raw);
     const expiresAt = new Date(Date.now() + RESET_TOKEN_TTL_MINUTES * 60 * 1000);
 
-    // Invalidate any previously-issued reset token for this user.
-    await prisma.passwordResetToken.updateMany({
-      where: { userId: user.id, usedAt: null },
-      data: { usedAt: new Date() },
-    });
-
-    await prisma.passwordResetToken.create({
-      data: { tokenHash, userId: user.id, expiresAt },
-    });
+    // Invalidate every previous token and persist the replacement atomically.
+    // A process/database failure can therefore never leave the account with
+    // all old links consumed but no new reset token to deliver.
+    const issuedAt = new Date();
+    await prisma.$transaction([
+      prisma.passwordResetToken.updateMany({
+        where: { userId: user.id, usedAt: null },
+        data: { usedAt: issuedAt },
+      }),
+      prisma.passwordResetToken.create({
+        data: { tokenHash, userId: user.id, expiresAt },
+      }),
+    ]);
 
     await sendMail({
       to: user.email,
@@ -222,26 +237,35 @@ export const authService = {
     }
 
     const passwordHash = await hash(input.newPassword, SALT_ROUNDS);
-    await prisma.$transaction([
+    const now = new Date();
+    await prisma.$transaction(async tx => {
+      const consumed = await tx.passwordResetToken.updateMany({
+        where: {
+          id: record.id,
+          usedAt: null,
+          expiresAt: { gt: now },
+        },
+        data: { usedAt: now },
+      });
+      if (consumed.count !== 1) {
+        throw new AppError('AUTH_003', 'Reset token invalid or expired');
+      }
       // AUTH-03: bump tokenVersion in the same write so every access token
       // issued before the reset is rejected cross-device (a reset usually means
       // the account was compromised), not just the refresh tokens.
-      prisma.user.update({
+      await tx.user.update({
         where: { id: record.userId },
         data: { passwordHash, tokenVersion: { increment: 1 } },
-      }),
-      prisma.passwordResetToken.update({
-        where: { id: record.id },
-        data: { usedAt: new Date() },
-      }),
+      });
       // Revoke all refresh tokens — the user must reauthenticate on every
       // device after a password reset.
-      prisma.refreshToken.updateMany({
+      await tx.refreshToken.updateMany({
         where: { userId: record.userId, revokedAt: null },
-        data: { revokedAt: new Date() },
-      }),
-    ]);
+        data: { revokedAt: now },
+      });
+    });
     await invalidateUserAuthCache(record.userId);
+    disconnectUserSockets(record.userId, 'password_reset');
 
     return { ok: true };
   },

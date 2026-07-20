@@ -1,5 +1,6 @@
 import React from 'react';
-import { Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import MaterialIcons from '@react-native-vector-icons/material-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, radii, spacing } from '../../../shared/constants/theme';
 
@@ -64,10 +65,16 @@ export const LegalEmail: React.FC<{ children: React.ReactNode; address?: string 
 };
 
 interface LegalDocProps {
+  /** Stable native accessibility identifier used by mobile E2E tests. */
+  testID?: string;
   /** Document heading (h1). */
   title: string;
   /** "Last updated" line shown under the heading. */
   lastUpdated: string;
+  /** Explicit navigation control: legal screens otherwise have no visible header. */
+  onBack?: () => void;
+  /** Localized screen-reader label for the back control. */
+  backLabel?: string;
   /** Sections of the document. */
   children: React.ReactNode;
 }
@@ -77,10 +84,18 @@ interface LegalDocProps {
  * offline and the version reviewed at build time matches what the user sees.
  * Update the consuming screen alongside any policy change.
  */
-export const LegalDoc: React.FC<LegalDocProps> = ({ title, lastUpdated, children }) => {
+export const LegalDoc: React.FC<LegalDocProps> = ({
+  testID,
+  title,
+  lastUpdated,
+  onBack,
+  backLabel = 'Back',
+  children,
+}) => {
   const insets = useSafeAreaInsets();
   return (
     <ScrollView
+      testID={testID}
       className="flex-1 bg-background"
       contentContainerStyle={{
         paddingTop: insets.top + spacing.xxl,
@@ -89,6 +104,18 @@ export const LegalDoc: React.FC<LegalDocProps> = ({ title, lastUpdated, children
         gap: spacing.lg,
       }}
     >
+      {onBack ? (
+        <Pressable
+          testID={testID ? `${testID}-back` : undefined}
+          onPress={onBack}
+          accessibilityRole="button"
+          accessibilityLabel={backLabel}
+          hitSlop={12}
+          style={styles.back}
+        >
+          <MaterialIcons name="arrow-back" size={24} color={colors.text} />
+        </Pressable>
+      ) : null}
       <View>
         <Text accessibilityRole="header" style={styles.h1}>
           {title}
@@ -101,6 +128,13 @@ export const LegalDoc: React.FC<LegalDocProps> = ({ title, lastUpdated, children
 };
 
 const styles = StyleSheet.create({
+  back: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: -10,
+  },
   h1: { color: colors.text, fontSize: 24, fontWeight: '700', marginBottom: 4 },
   lastUpdated: { color: colors.textMuted, fontSize: 11 },
   section: {

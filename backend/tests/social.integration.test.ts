@@ -19,8 +19,15 @@ const register = async (app: Express) => {
   const u = `soc_${rand()}`;
   const r = await request(app)
     .post('/api/auth/register')
-    .send({ username: u, email: `${u}@test.local`, password: 'test-password-123' });
-  return { id: r.body.data.user.id as string, token: r.body.data.accessToken as string };
+    .send({
+      username: u,
+      email: `${u}@test.local`,
+      password: 'test-password-123',
+    });
+  return {
+    id: r.body.data.user.id as string,
+    token: r.body.data.accessToken as string,
+  };
 };
 
 describe('Social actions — wave + block + report', () => {
@@ -52,6 +59,11 @@ describe('Social actions — wave + block + report', () => {
     const b = await register(app);
     createdIds.push(a.id, b.id);
 
+    const follow = await request(app)
+      .post(`/api/follow/${b.id}`)
+      .set('Authorization', `Bearer ${a.token}`);
+    expect(follow.status).toBe(200);
+
     const first = await request(app)
       .post(`/api/users/${b.id}/wave`)
       .set('Authorization', `Bearer ${a.token}`);
@@ -72,6 +84,27 @@ describe('Social actions — wave + block + report', () => {
       .set('Authorization', `Bearer ${a.token}`);
     expect(again.status).toBe(429);
     expect(again.body.error.code).toBe('USER_005');
+  });
+
+  it('wave: a PENDING follow request does not authorize the social action', async () => {
+    const a = await register(app);
+    const b = await register(app);
+    createdIds.push(a.id, b.id);
+    await prisma.user.update({
+      where: { id: b.id },
+      data: { isPrivateAccount: true },
+    });
+
+    const follow = await request(app)
+      .post(`/api/follow/${b.id}`)
+      .set('Authorization', `Bearer ${a.token}`);
+    expect(follow.body.data.requested).toBe(true);
+
+    const wave = await request(app)
+      .post(`/api/users/${b.id}/wave`)
+      .set('Authorization', `Bearer ${a.token}`);
+    expect(wave.status).toBe(403);
+    expect(wave.body.error.code).toBe('USER_006');
   });
 
   it('wave: self-wave returns USER_003', async () => {
@@ -110,6 +143,78 @@ describe('Social actions — wave + block + report', () => {
       },
     });
     expect(follows).toHaveLength(0);
+  });
+
+  it('block: wins concurrent follow retries without leaving an edge or drifting counters', async () => {
+    const follower = await register(app);
+    const blocker = await register(app);
+    createdIds.push(follower.id, blocker.id);
+
+    const attempts = await Promise.all([
+      request(app)
+        .post(`/api/follow/${blocker.id}`)
+        .set('Authorization', `Bearer ${follower.token}`),
+      request(app)
+        .post(`/api/users/${follower.id}/block`)
+        .set('Authorization', `Bearer ${blocker.token}`),
+      ...Array.from({ length: 4 }, () =>
+        request(app)
+          .post(`/api/follow/${blocker.id}`)
+          .set('Authorization', `Bearer ${follower.token}`),
+      ),
+    ]);
+    expect(attempts[1]?.status).toBe(200);
+    expect(
+      await prisma.block.count({
+        where: { blockerId: blocker.id, blockedId: follower.id },
+      }),
+    ).toBe(1);
+    expect(
+      await prisma.follow.count({
+        where: { followerId: follower.id, followingId: blocker.id },
+      }),
+    ).toBe(0);
+    const [freshFollower, freshBlocker] = await Promise.all([
+      prisma.user.findUniqueOrThrow({ where: { id: follower.id } }),
+      prisma.user.findUniqueOrThrow({ where: { id: blocker.id } }),
+    ]);
+    expect(freshFollower.followingCount).toBe(0);
+    expect(freshBlocker.followerCount).toBe(0);
+  });
+
+  it('block: serializes against accepting a PENDING request', async () => {
+    const requester = await register(app);
+    const owner = await register(app);
+    createdIds.push(requester.id, owner.id);
+    await prisma.user.update({
+      where: { id: owner.id },
+      data: { isPrivateAccount: true },
+    });
+    const pending = await request(app)
+      .post(`/api/follow/${owner.id}`)
+      .set('Authorization', `Bearer ${requester.token}`);
+    expect(pending.body.data.requested).toBe(true);
+
+    await Promise.all([
+      request(app)
+        .post(`/api/follow/${requester.id}/accept`)
+        .set('Authorization', `Bearer ${owner.token}`),
+      request(app)
+        .post(`/api/users/${requester.id}/block`)
+        .set('Authorization', `Bearer ${owner.token}`),
+    ]);
+
+    expect(
+      await prisma.follow.count({
+        where: { followerId: requester.id, followingId: owner.id },
+      }),
+    ).toBe(0);
+    const [freshRequester, freshOwner] = await Promise.all([
+      prisma.user.findUniqueOrThrow({ where: { id: requester.id } }),
+      prisma.user.findUniqueOrThrow({ where: { id: owner.id } }),
+    ]);
+    expect(freshRequester.followingCount).toBe(0);
+    expect(freshOwner.followerCount).toBe(0);
   });
 
   it('block: excludes the blocked user from search (both directions)', async () => {

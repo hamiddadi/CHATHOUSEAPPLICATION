@@ -97,6 +97,126 @@ describe('Socket.IO integration', () => {
     await expect(connectWith(user.token)).rejects.toThrow();
   }, 20_000);
 
+  it('logout revokes and disconnects every live device for the account', async () => {
+    const user = await register(app);
+    createdIds.push(user.id);
+
+    const phone = await connectWith(user.token);
+    const tablet = await connectWith(user.token);
+
+    const revokedOn = (socket: ClientSocket) =>
+      new Promise<{ reason: string }>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('auth:revoked timeout')), 5_000);
+        socket.once('auth:revoked', payload => {
+          clearTimeout(timer);
+          resolve(payload as { reason: string });
+        });
+      });
+    const disconnected = (socket: ClientSocket) =>
+      new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('disconnect timeout')), 5_000);
+        socket.once('disconnect', () => {
+          clearTimeout(timer);
+          resolve();
+        });
+      });
+
+    const revoked = Promise.all([revokedOn(phone), revokedOn(tablet)]);
+    const closed = Promise.all([disconnected(phone), disconnected(tablet)]);
+
+    const logout = await request(app)
+      .post('/api/auth/logout')
+      .set('Authorization', `Bearer ${user.token}`);
+    expect(logout.status).toBe(200);
+
+    expect(await revoked).toEqual([{ reason: 'logout' }, { reason: 'logout' }]);
+    await closed;
+    expect(phone.connected).toBe(false);
+    expect(tablet.connected).toBe(false);
+
+    // The same access token cannot reconnect a third device after revocation.
+    await expect(connectWith(user.token)).rejects.toThrow();
+  }, 20_000);
+
+  it('keeps map presence until the last device disconnects and streams metadata for new pins', async () => {
+    const viewer = await register(app);
+    const subject = await register(app);
+    createdIds.push(viewer.id, subject.id);
+    await prisma.user.update({
+      where: { id: subject.id },
+      data: { isVisible: true },
+    });
+
+    const viewerSocket = await connectWith(viewer.token);
+    const phone = await connectWith(subject.token);
+    const tablet = await connectWith(subject.token);
+
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('maps:subscribe timeout')), 5_000);
+      viewerSocket.emit('maps:subscribe', (ok: boolean) => {
+        clearTimeout(timer);
+        if (!ok) reject(new Error('maps:subscribe rejected'));
+        else resolve();
+      });
+    });
+
+    const moved = new Promise<Record<string, unknown>>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('maps:user-moved timeout')), 5_000);
+      viewerSocket.on('maps:user-moved', payload => {
+        const row = payload as { userId?: string };
+        if (row.userId !== subject.id) return;
+        clearTimeout(timer);
+        resolve(payload as Record<string, unknown>);
+      });
+    });
+    await new Promise<void>((resolve, reject) => {
+      phone.emit(
+        'maps:update-location',
+        { latitude: 48.8566, longitude: 2.3522 },
+        (ok: boolean) => {
+          if (!ok) reject(new Error('maps:update-location rejected'));
+          else resolve();
+        },
+      );
+    });
+    expect(await moved).toEqual(
+      expect.objectContaining({
+        userId: subject.id,
+        latitude: 48.8566,
+        longitude: 2.3522,
+        username: expect.any(String),
+        lastSeenAt: expect.any(String),
+      }),
+    );
+
+    let removedPrematurely = false;
+    viewerSocket.on('maps:user-offline', (payload: { userId?: string }) => {
+      if (payload.userId === subject.id) removedPrematurely = true;
+    });
+    phone.disconnect();
+    await new Promise(resolve => setTimeout(resolve, 400));
+    expect(removedPrematurely).toBe(false);
+
+    const removedAfterLastDevice = new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('maps:user-offline timeout')), 5_000);
+      viewerSocket.on('maps:user-offline', (payload: { userId?: string }) => {
+        if (payload.userId !== subject.id) return;
+        clearTimeout(timer);
+        resolve();
+      });
+    });
+    tablet.disconnect();
+    await removedAfterLastDevice;
+    expect(
+      await prisma.user.findUniqueOrThrow({
+        where: { id: subject.id },
+        select: { isOnline: true },
+      }),
+    ).toEqual({ isOnline: false });
+
+    viewerSocket.disconnect();
+  }, 20_000);
+
   it('chat:send delivers the message to the receiver in real-time', async () => {
     const alice = await register(app);
     const bob = await register(app);

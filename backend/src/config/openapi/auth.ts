@@ -7,17 +7,22 @@ import {
   registerSchema,
   resetPasswordSchema,
 } from '../../modules/auth/auth.schema';
+import { sendOtpSchema, verifyOtpSchema } from '../../modules/otp/otp.schema';
 import type { OpenApiComponents } from './components';
 
 export const registerAuthPaths = (
   registry: OpenAPIRegistry,
   { ErrorBody, SuccessVoid, TokenPair }: OpenApiComponents,
 ): void => {
+  // The runtime service enforces this in every non-test environment. Keep the
+  // public contract strict even though integration tests may omit the flag.
+  const publicRegisterSchema = registerSchema.extend({ ageConfirmed: z.literal(true) });
+
   registry.registerPath({
     method: 'post',
     path: '/api/auth/register',
     tags: ['Auth'],
-    request: { body: { content: { 'application/json': { schema: registerSchema } } } },
+    request: { body: { content: { 'application/json': { schema: publicRegisterSchema } } } },
     responses: {
       201: {
         description: 'User created, token pair issued.',
@@ -50,6 +55,74 @@ export const registerAuthPaths = (
       },
       401: {
         description: 'Invalid credentials',
+        content: { 'application/json': { schema: ErrorBody } },
+      },
+    },
+  });
+
+  registry.registerPath({
+    method: 'post',
+    path: '/api/auth/send-otp',
+    tags: ['Auth'],
+    request: {
+      body: {
+        content: {
+          'application/json': {
+            schema: sendOtpSchema.extend({ ageConfirmed: z.literal(true) }),
+          },
+        },
+      },
+    },
+    responses: {
+      200: {
+        description: 'OTP accepted for delivery without disclosing account existence.',
+        content: {
+          'application/json': {
+            schema: z.object({
+              success: z.literal(true),
+              data: z.object({ sent: z.boolean() }).passthrough(),
+            }),
+          },
+        },
+      },
+      403: {
+        description: 'Age confirmation missing',
+        content: { 'application/json': { schema: ErrorBody } },
+      },
+      429: {
+        description: 'Rate limited',
+        content: { 'application/json': { schema: ErrorBody } },
+      },
+    },
+  });
+
+  registry.registerPath({
+    method: 'post',
+    path: '/api/auth/verify-otp',
+    tags: ['Auth'],
+    request: {
+      body: {
+        content: {
+          'application/json': {
+            schema: verifyOtpSchema.extend({ ageConfirmed: z.literal(true) }),
+          },
+        },
+      },
+    },
+    responses: {
+      200: {
+        description: 'OTP verified and a token pair issued.',
+        content: {
+          'application/json': {
+            schema: z.object({
+              success: z.literal(true),
+              data: TokenPair.extend({ isNewUser: z.boolean() }),
+            }),
+          },
+        },
+      },
+      401: {
+        description: 'Invalid or expired OTP',
         content: { 'application/json': { schema: ErrorBody } },
       },
     },

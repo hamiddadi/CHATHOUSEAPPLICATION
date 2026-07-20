@@ -51,7 +51,10 @@ const createClub = (
   privacy: 'OPEN' | 'PRIVATE' | 'SOCIAL',
   name: string,
 ) =>
-  request(app).post('/api/clubs').set('Authorization', `Bearer ${token}`).send({ name, privacy });
+  request(app)
+    .post('/api/clubs')
+    .set('Authorization', `Bearer ${token}`)
+    .send({ name: `${name} ${rand()}`, privacy });
 
 describe('Clubs — invitation flow (token + notification accept)', () => {
   let app: Express;
@@ -183,11 +186,13 @@ describe('Clubs — invitation flow (token + notification accept)', () => {
 
     expect(accept.status).toBe(410);
     expect(accept.body.error.code).toBe('CLUB_008');
-    // No membership was granted.
+    // No membership was granted. Private-club metadata is deliberately
+    // undiscoverable to a non-member, even after a stale-link attempt.
     const detail = await request(app)
       .get(`/api/clubs/${clubId}`)
       .set('Authorization', `Bearer ${joiner.token}`);
-    expect(detail.body.data.isJoinedByMe).toBe(false);
+    expect(detail.status).toBe(404);
+    expect(detail.body.error.code).toBe('CLUB_001');
   });
 
   it('a well-signed token for a DIFFERENT club is rejected with 403 CLUB_009', async () => {

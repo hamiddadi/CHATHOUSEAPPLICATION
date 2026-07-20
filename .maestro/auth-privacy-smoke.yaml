@@ -1,0 +1,68 @@
+appId: com.chathouse.app
+name: Authentication, age gate and legal documents
+tags:
+  - smoke
+  - release-gate
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+
+# A clean installation starts with the one-time carousel. The same flow also
+# remains valid when run locally against an installation that has seen it.
+- extendedWaitUntil:
+    visible:
+      id: 'welcome-skip|auth-get-started'
+    timeout: 30000
+- runFlow:
+    when:
+      visible:
+        id: 'welcome-skip'
+    commands:
+      - tapOn:
+          id: 'welcome-skip'
+
+- extendedWaitUntil:
+    visible:
+      id: 'auth-get-started'
+    timeout: 15000
+- tapOn:
+    id: 'auth-get-started'
+
+- assertVisible:
+    id: 'auth-phone-input'
+- assertVisible:
+    id: 'auth-age-confirmation'
+    checked: false
+- assertVisible:
+    id: 'auth-phone-submit'
+    enabled: false
+
+- tapOn:
+    id: 'auth-age-confirmation'
+- assertVisible:
+    id: 'auth-age-confirmation'
+    checked: true
+
+# The legal documents must be available before authentication and offer an
+# explicit in-app return control on both platforms.
+- hideKeyboard
+- tapOn:
+    id: 'auth-terms-link'
+- assertVisible:
+    id: 'terms-screen'
+- tapOn:
+    id: 'terms-screen-back'
+
+- assertVisible:
+    id: 'auth-phone-input'
+- tapOn:
+    id: 'auth-privacy-link'
+- assertVisible:
+    id: 'privacy-policy-screen'
+- tapOn:
+    id: 'privacy-policy-screen-back'
+
+- assertVisible:
+    id: 'auth-phone-submit'
+    enabled: false

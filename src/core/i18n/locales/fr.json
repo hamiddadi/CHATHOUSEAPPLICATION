@@ -1276,67 +1276,63 @@
     "export": {
       "title": "Exporter mes données",
       "description1": "Conformément à l'article 20 du RGPD (droit à la portabilité), vous pouvez télécharger une copie complète de l'ensemble de vos données personnelles dans un fichier JSON structuré.",
-      "description2": "L'archive contient : votre profil, vos rooms hébergées, vos participations, votre graphe d'abonnements, vos messages directs, vos messages de room, vos RSVP, la liste de vos appareils (plateforme et dates, sans le jeton secret) et vos préférences de notification.",
-      "note": "Note : le journal d'audit (actions de modération) et les signalements émis contre votre compte ne sont pas inclus, conformément à l'article 23 du RGPD (intérêt légitime de modération).",
+      "description2": "L'archive contient notamment : profil, rooms et participations, abonnements, messages directs/de groupe/de room, houses, notifications, réactions, signalements émis, paiements Stripe, médias privés et historique lié au compte.",
+      "note": "Les mots de passe, OTP, jetons de session/push, clés de stockage et signalements confidentiels émis par d'autres personnes sont volontairement exclus.",
       "buttonPrepare": "Préparation…",
       "buttonExport": "Générer et partager mon export",
-      "success": "✓ Export généré ({{size}} Ko) — partagez-le via le menu de partage.",
-      "warning": "Le presse-papier est lisible par d'autres applications. Ne copiez l'archive que si nécessaire, puis effacez le presse-papier.",
-      "buttonCopy": "Copier dans le presse-papier",
-      "buttonClear": "Effacer le presse-papier",
+      "success": "✓ Export JSON partagé ({{size}} Ko). Le fichier local temporaire a été supprimé.",
       "errorExportTitle": "Erreur",
-      "errorExportBody": "Échec de l'export",
-      "errorCopyBody": "Échec de la copie"
+      "errorExportBody": "Échec de l'export"
     },
     "delete": {
       "title": "Supprimer mon compte",
-      "description": "La suppression de votre compte est définitive et irréversible. Nous supprimerons immédiatement votre profil, vos messages, vos houses et vos rooms.",
-      "grace": "Une période de grâce de 30 jours est appliquée sur nos serveurs de sauvegarde avant la purge totale de vos données.",
+      "description": "La demande désactive immédiatement votre compte, révoque vos sessions et masque votre profil. La purge définitive intervient après 30 jours.",
+      "grace": "Pendant ces 30 jours, une connexion réussie réactive automatiquement un compte supprimé volontairement. Sans connexion, les données et médias privés sont purgés.",
       "confirmInputLabel": "Pour confirmer, saisissez : ",
-      "buttonDelete": "Supprimer mon compte définitivement",
+      "buttonDelete": "Demander la suppression du compte",
       "buttonCancel": "Annuler",
-      "alertTitle": "Compte supprimé",
-      "alertBody": "Votre compte a été supprimé. Nous sommes désolés de vous voir partir.",
+      "alertTitle": "Suppression programmée",
+      "alertBody": "Votre compte est désactivé et sera purgé après le délai de 30 jours.",
       "errorTitle": "Erreur",
       "errorBody": "Échec de la suppression",
       "warningTitle": "⚠️ Action quasi-irréversible",
       "beforeDelete": "Avant de supprimer",
       "stepExport": "• Vous pouvez exporter vos données depuis Paramètres → Confidentialité → Exporter mes données.",
       "stepRooms": "• Les rooms que vous avez hébergées seront fermées si elles sont actives.",
-      "stepMessages": "• Vos messages directs envoyés à d'autres utilisateurs resteront visibles côté destinataire (impossible de les retirer après envoi).",
+      "stepMessages": "• Vos messages et médias privés seront supprimés lors de la purge définitive.",
       "a11yInput": "Saisie de confirmation de suppression",
       "confirmPhrase": "SUPPRIMER"
     },
     "policy": {
       "title": "Politique de confidentialité",
-      "lastUpdated": "Dernière mise à jour : 25 avril 2026",
+      "lastUpdated": "Dernière mise à jour : 18 juillet 2026",
       "s1": {
         "title": "1. Quelles données nous collectons",
-        "p1": "• Données de compte : numéro de téléphone, nom d'utilisateur, photo de profil, biographie, liens sociaux (optionnels).",
-        "p2": "• Contenu : rooms hébergées, participations, messages directs, messages dans les rooms, réactions, demandes de prise de parole.",
+        "p1": "• Données de compte : téléphone, e-mail si fourni, pseudo, nom, confirmation 16+, photo, biographie, intérêts et liens sociaux optionnels.",
+        "p2": "• Contenu et activité : rooms et participations, messages directs/de groupe/de room, messages vocaux, houses, abonnements, réactions et signalements.",
         "p3": "• Métadonnées : date de création, dernière connexion, listes de followers, intérêts, rôle plateforme.",
-        "p4": "• Géolocalisation (optionnelle, après consentement) : utilisée uniquement pour la fonctionnalité de carte. Stockée à la précision la plus basse compatible.",
-        "p5": "• Données techniques : adresse IP, agent utilisateur, tokens d'appareil pour les notifications push."
+        "p4": "• Géolocalisation précise ou approximative, optionnelle et désactivée par défaut : les utilisateurs ayant activé leur visibilité apparaissent sur la carte en temps réel. La désactivation efface les coordonnées.",
+        "p5": "• Paiements et technique : historique Stripe, adresse IP, journaux de sécurité et identifiants d'appareil nécessaires aux notifications push."
       },
       "s2": {
         "title": "2. Pourquoi nous les collectons",
         "p1": "• Fournir le service : créer un compte, joindre des rooms, échanger des messages.",
         "p2": "• Modération : signalements, suspensions et bannissements (intérêt légitime — sécurité de la communauté).",
         "p3": "• Notifications : informer des invitations, rooms démarrant, messages reçus (vous pouvez les désactiver dans les paramètres).",
-        "p4": "• Statistiques anonymes (optionnel) : crash reports, télémétrie. Désactivé par défaut."
+        "p4": "• Diagnostics mobiles Sentry optionnels : désactivés par défaut, sans PII par défaut, activés uniquement après votre consentement révocable."
       },
       "s3": {
         "title": "3. Avec qui nous les partageons",
         "p1": "• Aucune vente. Aucune publicité tierce.",
-        "p2": "• Sous-traitants techniques uniquement, sous contrat conforme RGPD : hébergement (serveur), envoi de SMS d'authentification, notifications push.",
+        "p2": "• Sous-traitants nécessaires : hébergement et stockage objet privé, Twilio (SMS), Firebase/APNs (push), LiveKit (audio en direct), Stripe (paiement) et Sentry (diagnostics consentis).",
         "p3": "• En cas d'obligation légale, réquisition judiciaire ou protection d'une personne en danger."
       },
       "s4": {
         "title": "4. Combien de temps",
         "p1": "• Profil et contenu : tant que votre compte est actif.",
         "p2": "• Suppression du compte : 30 jours de période de grâce, puis purge définitive.",
-        "p3": "• Logs techniques : 90 jours.",
-        "p4": "• Journal de modération (signalements, suspensions) : conservé 1 an pour la conformité."
+        "p3": "• Journal d'audit en base : 90 jours par défaut ; artefacts d'authentification expirés purgés sur des délais courts.",
+        "p4": "• Certaines traces financières, de sécurité ou légales peuvent être isolées et conservées uniquement pendant la durée imposée par la loi."
       },
       "s5": {
         "title": "5. Vos droits (RGPD)",
@@ -1359,16 +1355,16 @@
     },
     "terms": {
       "title": "Conditions d'utilisation",
-      "lastUpdated": "Dernière mise à jour : 25 avril 2026",
+      "lastUpdated": "Dernière mise à jour : 18 juillet 2026",
       "s1": {
         "title": "1. Acceptation",
         "p1": "En créant un compte ou en utilisant l'application Chathouse, vous acceptez les présentes conditions d'utilisation. Si vous n'acceptez pas l'intégralité des termes, n'utilisez pas le service."
       },
       "s2": {
         "title": "2. Éligibilité",
-        "p1": "Vous devez avoir au moins 16 ans pour utiliser Chathouse. En dessous de cet âge, vous devez obtenir le consentement explicite de votre représentant légal.",
+        "p1": "Vous devez avoir au moins 16 ans pour créer ou utiliser un compte Chathouse. L'inscription des moins de 16 ans n'est pas autorisée.",
         "p2": "• Ne partagez pas de contenu illégal, explicite, ou violant des droits d'auteur.",
-        "p3": "• N'enregistrez pas les rooms sans le consentement de tous les orateurs."
+        "p3": "• L'enregistrement intégré des rooms est désactivé. N'effectuez aucun enregistrement externe sans le consentement explicite de toutes les personnes concernées."
       },
       "s3": {
         "title": "3. Comportements interdits",
@@ -1436,6 +1432,8 @@
       "ROOM_008": "Tu as été banni de cette room.",
       "ROOM_009": "Impossible de couper le micro de l'hôte.",
       "ROOM_010": "Cette room est verrouillée.",
+      "ROOM_011": "L'enregistrement des rooms est actuellement désactivé.",
+      "ROOM_012": "Quitte ta room actuelle avant d'en rejoindre une autre.",
       "PREMIUM_001": "Fonctionnalité réservée aux membres Premium.",
       "USER_001": "Utilisateur introuvable.",
       "USER_002": "Ce nom d'utilisateur est déjà pris.",
@@ -1463,6 +1461,13 @@
       "CLUB_008": "Ce lien d'invitation a expiré.",
       "CLUB_009": "Ce lien d'invitation est invalide.",
       "ACCOUNT_001": "La suppression du compte est déjà programmée.",
+      "AGE_001": "Tu dois confirmer que tu as au moins 16 ans.",
+      "MAPS_001": "Active ta visibilité sur la carte avant de partager ta position.",
+      "UPLOAD_001": "Ce fichier multimédia est trop volumineux.",
+      "PUSH_001": "Le jeton de notification de cet appareil appartient à une autre session.",
+      "IDEMPOTENCY_001": "Cette clé de requête a déjà été utilisée pour une autre opération.",
+      "IDEMPOTENCY_002": "La clé de requête est invalide.",
+      "VALIDATION_001": "Certaines informations envoyées sont invalides.",
       "RATE_LIMIT_001": "Trop de tentatives. Réessaie dans quelques instants.",
       "NOT_FOUND_001": "Ressource introuvable.",
       "SERVER_001": "Un problème est survenu de notre côté."
@@ -1492,7 +1497,7 @@
     "maps": {
       "attribution": "© OpenStreetMap contributors © CARTO",
       "consentTitle": "Consentement de localisation",
-      "consentBody": "ChatHouse utilise votre position pour vous montrer les amis proches sur la carte. Vos données de localisation sont stockées de façon sécurisée sur nos serveurs et supprimées automatiquement après 30 jours d'inactivité. Vous pouvez désactiver ce partage à tout moment via le Mode Fantôme.",
+      "consentBody": "ChatHouse utilise votre position pour afficher sur la carte les utilisateurs qui choisissent d'être visibles. Si vous activez votre visibilité, ces utilisateurs peuvent aussi voir votre position en temps réel. Désactiver le partage efface vos coordonnées ; les positions inactives sont aussi purgées automatiquement.",
       "consentAccept": "J'ai compris",
       "consentDecline": "Plus tard",
       "ghostSee": "VISIBLE",

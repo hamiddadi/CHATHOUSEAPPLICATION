@@ -156,12 +156,13 @@ export const speakInviteService = {
     }
     const part = await prisma.participant.findUnique({
       where: { userId_roomId: { userId, roomId } },
+      select: { role: true, leftAt: true },
     });
-    if (!part) throw extError('SPEAK_002', 'Not in room');
+    if (!part || part.leftAt) throw extError('SPEAK_002', 'Not in room');
     if (part.role !== 'MODERATOR' && part.role !== 'HOST') {
-      await prisma.participant.update({
-        where: { userId_roomId: { userId, roomId } },
-        data: { role: 'MODERATOR' },
+      await roomsService.setRole(roomId, hostId, {
+        userId,
+        role: 'MODERATOR',
       });
     }
     emitRolePromotedToModerator(roomId, userId);

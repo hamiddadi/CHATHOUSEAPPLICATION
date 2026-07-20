@@ -3,6 +3,7 @@
 // messaging instance; AuthorizationStatus is exposed as a static.
 const instance = {
   getToken: jest.fn(async () => 'test-fcm-token'),
+  deleteToken: jest.fn(async () => undefined),
   requestPermission: jest.fn(async () => 1),
   onMessage: jest.fn(() => jest.fn()),
   onTokenRefresh: jest.fn(() => jest.fn()),

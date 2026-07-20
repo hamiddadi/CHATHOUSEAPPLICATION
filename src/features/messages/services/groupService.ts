@@ -1,4 +1,5 @@
 import { apiClient } from '../../../shared/services/api/apiClient';
+import { createIdempotencyKey } from '../../../shared/utils/idempotency';
 import type { Envelope } from '../../../shared/types/api';
 import type { MessageKind, UserSummary } from '../../../shared/types/domain';
 
@@ -157,9 +158,11 @@ export const groupService = {
   async send(id: string, content: string): Promise<GroupMessage> {
     const trimmed = content.trim();
     if (trimmed.length === 0) throw new Error('Message cannot be empty');
-    const res = await apiClient.post<Envelope<RawGroupMessage>>(`/groups/${id}/messages`, {
-      content: trimmed,
-    });
+    const res = await apiClient.post<Envelope<RawGroupMessage>>(
+      `/groups/${id}/messages`,
+      { content: trimmed },
+      { headers: { 'Idempotency-Key': createIdempotencyKey() } },
+    );
     return toMessage(res.data.data);
   },
 
@@ -168,18 +171,23 @@ export const groupService = {
    * voiceService); we post the stored URL + clip length to /groups/:id/voice.
    */
   async sendVoice(id: string, audioUrl: string, durationMs: number): Promise<GroupMessage> {
-    const res = await apiClient.post<Envelope<RawGroupMessage>>(`/groups/${id}/voice`, {
-      audioUrl,
-      durationMs,
-    });
+    const res = await apiClient.post<Envelope<RawGroupMessage>>(
+      `/groups/${id}/voice`,
+      { audioUrl, durationMs },
+      { headers: { 'Idempotency-Key': createIdempotencyKey() } },
+    );
     return toMessage(res.data.data);
   },
 
   async create(memberIds: string[], title?: string): Promise<GroupConversation> {
-    const res = await apiClient.post<Envelope<RawGroupConversation>>('/groups', {
-      memberIds,
-      ...(title && title.trim() ? { title: title.trim() } : {}),
-    });
+    const res = await apiClient.post<Envelope<RawGroupConversation>>(
+      '/groups',
+      {
+        memberIds,
+        ...(title && title.trim() ? { title: title.trim() } : {}),
+      },
+      { headers: { 'Idempotency-Key': createIdempotencyKey() } },
+    );
     return toConversation(res.data.data);
   },
 
@@ -196,9 +204,11 @@ export const groupService = {
   },
 
   async addMembers(id: string, userIds: string[]): Promise<GroupConversation> {
-    const res = await apiClient.post<Envelope<RawGroupConversation>>(`/groups/${id}/members`, {
-      userIds,
-    });
+    const res = await apiClient.post<Envelope<RawGroupConversation>>(
+      `/groups/${id}/members`,
+      { userIds },
+      { headers: { 'Idempotency-Key': createIdempotencyKey() } },
+    );
     return toConversation(res.data.data);
   },
 

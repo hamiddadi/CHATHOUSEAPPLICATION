@@ -33,7 +33,12 @@ export const clubsController = {
   },
 
   async get(req: Request, res: Response) {
-    const club = await clubsService.get(requireUserId(req), paramId(req, 'id'));
+    const inviteHeader = req.get('x-house-invite');
+    const club = await clubsService.get(
+      requireUserId(req),
+      paramId(req, 'id'),
+      inviteHeader || undefined,
+    );
     sendOk(res, club);
   },
 

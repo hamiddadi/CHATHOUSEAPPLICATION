@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_call:
   push:
     branches: [main, develop]
   pull_request:
@@ -12,6 +13,7 @@ concurrency:
 
 env:
   NODE_VERSION: '22.23.1'
+  MAESTRO_VERSION: '2.4.0'
 
 jobs:
   # Frontend (React Native)
@@ -60,7 +62,7 @@ jobs:
 
   # Native builds
   android-build:
-    name: Android — Debug build + lint
+    name: Android — Build, lint + Maestro E2E
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -88,9 +90,47 @@ jobs:
       - name: Assemble and lint one CI architecture
         working-directory: android
         run: ./gradlew :app:assembleDebug :app:lintDebug -PreactNativeArchitectures=x86_64 --no-daemon
+      - name: Install pinned Maestro CLI
+        shell: bash
+        run: |
+          export MAESTRO_VERSION="${{ env.MAESTRO_VERSION }}"
+          curl -fsSL "https://get.maestro.mobile.dev" | bash
+          "$HOME/.maestro/bin/maestro" --version
+      - name: Run smoke flow on an Android emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          profile: pixel_6
+          disable-animations: false
+          script: |
+            mkdir -p e2e-artifacts/android
+            ENVFILE=.env.test nohup npm start -- --reset-cache > e2e-artifacts/android/metro.log 2>&1 &
+            for attempt in {1..60}; do
+              if curl -fsS http://127.0.0.1:8081/status; then
+                break
+              fi
+              sleep 2
+            done
+            curl -fsS http://127.0.0.1:8081/status
+            adb install -r android/app/build/outputs/apk/debug/app-debug.apk
+            "$HOME/.maestro/bin/maestro" test \
+              --format junit \
+              --output e2e-artifacts/android/report.xml \
+              --test-output-dir e2e-artifacts/android/run \
+              .maestro
+      - name: Upload Android E2E diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-maestro
+          path: e2e-artifacts/android/
+          if-no-files-found: warn
+          retention-days: 7
 
   ios-build:
-    name: iOS — Simulator build
+    name: iOS — Build + Maestro E2E
     runs-on: macos-latest
     env:
       SENTRY_DISABLE_AUTO_UPLOAD: 'true'
@@ -124,8 +164,58 @@ jobs:
           -scheme ChatHouse
           -configuration Debug
           -destination 'generic/platform=iOS Simulator'
+          -derivedDataPath ios/build
           CODE_SIGNING_ALLOWED=NO
           build
+      - name: Install pinned Maestro CLI
+        shell: bash
+        run: |
+          export MAESTRO_VERSION="${{ env.MAESTRO_VERSION }}"
+          curl -fsSL "https://get.maestro.mobile.dev" | bash
+          "$HOME/.maestro/bin/maestro" --version
+      - name: Boot an available iPhone simulator
+        shell: bash
+        run: |
+          IOS_SIMULATOR_UDID="$(
+            xcrun simctl list devices available -j |
+              ruby -rjson -e '
+                devices = JSON.parse(STDIN.read).fetch("devices").values.flatten
+                phone = devices.find { |device| device["isAvailable"] && device["name"].start_with?("iPhone") }
+                abort "No available iPhone simulator" unless phone
+                puts phone.fetch("udid")
+              '
+          )"
+          echo "IOS_SIMULATOR_UDID=$IOS_SIMULATOR_UDID" >> "$GITHUB_ENV"
+          xcrun simctl boot "$IOS_SIMULATOR_UDID" || true
+          xcrun simctl bootstatus "$IOS_SIMULATOR_UDID" -b
+      - name: Run smoke flow on iOS Simulator
+        shell: bash
+        run: |
+          mkdir -p e2e-artifacts/ios
+          ENVFILE=.env.test nohup npm start -- --reset-cache > e2e-artifacts/ios/metro.log 2>&1 &
+          for attempt in {1..60}; do
+            if curl -fsS http://127.0.0.1:8081/status; then
+              break
+            fi
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:8081/status
+          APP_PATH="ios/build/Build/Products/Debug-iphonesimulator/ChatHouse.app"
+          test -d "$APP_PATH"
+          xcrun simctl install "$IOS_SIMULATOR_UDID" "$APP_PATH"
+          "$HOME/.maestro/bin/maestro" --device "$IOS_SIMULATOR_UDID" test \
+            --format junit \
+            --output e2e-artifacts/ios/report.xml \
+            --test-output-dir e2e-artifacts/ios/run \
+            .maestro
+      - name: Upload iOS E2E diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-maestro
+          path: e2e-artifacts/ios/
+          if-no-files-found: warn
+          retention-days: 7
 
   # Backend (Express / Prisma)
   backend-lint:
@@ -212,14 +302,108 @@ jobs:
       # catches migration/schema drift instead of masking it with `db push`.
       - name: Apply migrations to CI Postgres
         run: npx prisma migrate deploy
-      - run: npm test -- --forceExit --testTimeout=60000
+      - run: npm run test:ci -- --testTimeout=60000
       # The full suite raises AUTH_RATE_LIMIT_MAX to 1000 (a shared in-memory
       # bucket) so the login rate-limiter assertion self-skips. Run it once in
       # isolation with a low cap so the 429 RATE_LIMIT_001 path is covered in CI.
       - name: Rate-limiter assertion (isolated low cap)
         env:
           AUTH_RATE_LIMIT_MAX: '10'
-        run: npx jest auth.coverage --runInBand --forceExit -t 'rate limiter'
+        run: npx jest auth.coverage --runInBand -t 'rate limiter'
+      - name: Upload backend coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage
+          path: backend/coverage/
+          if-no-files-found: warn
+          retention-days: 7
+
+  backend-load:
+    name: Backend — k6 load thresholds
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: chathouse
+          POSTGRES_PASSWORD: chathouse
+          POSTGRES_DB: chathouse_test
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd="pg_isready -U chathouse"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=10
+    env:
+      DATABASE_URL: postgresql://chathouse:chathouse@localhost:5433/chathouse_test?schema=public
+      REDIS_URL: redis://localhost:6379
+      JWT_ACCESS_SECRET: ci_access_secret_0123456789abcdef0123
+      JWT_REFRESH_SECRET: ci_refresh_secret_0123456789abcdef012
+      NODE_ENV: test
+      HOST: 127.0.0.1
+      PORT: '4000'
+      LOG_LEVEL: warn
+      RATE_LIMIT_MAX: '100000'
+      AUTH_RATE_LIMIT_MAX: '1000'
+      EXTENSIONS_ENABLED: 'false'
+      MEDIASOUP_ENABLED: 'false'
+      ROOM_RECORDING_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npx prisma migrate deploy
+      - run: npm run build
+      - name: Start the compiled mono-server
+        shell: bash
+        run: |
+          nohup npm start > load-api.log 2>&1 &
+          for attempt in {1..60}; do
+            if curl -fsS http://127.0.0.1:4000/health; then
+              break
+            fi
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:4000/health
+      - name: Enforce k6 error-rate and latency thresholds
+        shell: bash
+        run: |
+          docker run --rm --network host \
+            -v "$PWD:/work" \
+            -w /work \
+            -e BASE_URL=http://127.0.0.1:4000 \
+            grafana/k6:1.7.0 run \
+            --summary-export=load-summary.json \
+            tests/load/k6-smoke.js
+      - name: Upload load diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-load
+          path: |
+            backend/load-api.log
+            backend/load-summary.json
+          if-no-files-found: warn
+          retention-days: 7
 
   # ─────────────────────────── Security ────────────────────────────────────────
   secrets-scan:
@@ -236,9 +420,8 @@ jobs:
           GITLEAKS_ENABLE_SUMMARY: 'true'
 
   npm-audit:
-    name: npm audit (non-blocking)
+    name: npm audit (blocking)
     runs-on: ubuntu-latest
-    continue-on-error: true
     strategy:
       matrix:
         workdir: ['.', 'backend']

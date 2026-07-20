@@ -13,6 +13,11 @@ const requestSchema = z.object({
   message: z.string().trim().min(1).max(280).optional(),
 });
 
+const listSchema = z.object({
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+  offset: z.coerce.number().int().min(0).default(0),
+});
+
 clubReqRouter.post(
   '/:clubId/request',
   asyncHandler(async (req, res) => {
@@ -29,7 +34,8 @@ clubReqRouter.post(
 clubReqRouter.get(
   '/:clubId/requests',
   asyncHandler(async (req, res) => {
-    const items = await clubReqService.list(authedUserId(req), String(req.params.clubId));
+    const paging = listSchema.parse(req.query);
+    const items = await clubReqService.list(authedUserId(req), String(req.params.clubId), paging);
     res.json({ items, count: items.length });
   }),
 );

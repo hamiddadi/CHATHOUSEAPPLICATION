@@ -5,7 +5,7 @@ import type { OpenApiComponents } from './components';
 
 export const registerUsersPaths = (
   registry: OpenAPIRegistry,
-  { SuccessVoid, UserPublic }: OpenApiComponents,
+  { ErrorBody, SuccessVoid, UserPublic }: OpenApiComponents,
 ): void => {
   registry.registerPath({
     method: 'get',
@@ -18,6 +18,87 @@ export const registerUsersPaths = (
         content: {
           'application/json': {
             schema: z.object({ success: z.literal(true), data: UserPublic }),
+          },
+        },
+      },
+    },
+  });
+
+  registry.registerPath({
+    method: 'post',
+    path: '/api/users/me/request-deletion',
+    tags: ['Users', 'Privacy'],
+    security: [{ bearerAuth: [] }],
+    responses: {
+      200: {
+        description:
+          'Immediately disables the account and starts the configured 30-day deletion grace period.',
+        content: {
+          'application/json': {
+            schema: z.object({
+              success: z.literal(true),
+              data: z.object({
+                deletedAt: z.string().datetime(),
+                permanentDeletionAt: z.string().datetime(),
+              }),
+            }),
+          },
+        },
+      },
+      409: {
+        description: 'Deletion already scheduled',
+        content: { 'application/json': { schema: ErrorBody } },
+      },
+    },
+  });
+
+  registry.registerPath({
+    method: 'post',
+    path: '/api/users/me/cancel-deletion',
+    tags: ['Users', 'Privacy'],
+    security: [{ bearerAuth: [] }],
+    responses: {
+      200: {
+        description: 'Cancels a self-requested deletion; moderation bans cannot be restored.',
+        content: {
+          'application/json': {
+            schema: z.object({
+              success: z.literal(true),
+              data: z.object({ cancelled: z.literal(true) }),
+            }),
+          },
+        },
+      },
+      403: {
+        description: 'Account is under an active moderation suspension',
+        content: { 'application/json': { schema: ErrorBody } },
+      },
+    },
+  });
+
+  registry.registerPath({
+    method: 'get',
+    path: '/api/users/me/export',
+    tags: ['Users', 'Privacy'],
+    security: [{ bearerAuth: [] }],
+    responses: {
+      200: {
+        description:
+          'GDPR access/portability archive. Secrets, raw push tokens and object-storage keys are excluded.',
+        headers: {
+          'Content-Disposition': {
+            description: 'Attachment filename for the JSON archive.',
+            schema: { type: 'string' },
+          },
+        },
+        content: {
+          'application/json': {
+            schema: z
+              .object({
+                exportVersion: z.string(),
+                generatedAt: z.string().datetime(),
+              })
+              .passthrough(),
           },
         },
       },

@@ -12,6 +12,7 @@ export const houseKeys = {
   all: ['houses'] as const,
   list: (filter: 'mine' | 'discover') => [...houseKeys.all, 'list', filter] as const,
   detail: (id: string) => [...houseKeys.all, 'detail', id] as const,
+  invitation: (id: string) => [...houseKeys.all, 'invitation', id] as const,
   rooms: (id: string, filter: 'live' | 'upcoming' | 'past') =>
     [...houseKeys.all, 'rooms', id, filter] as const,
   inviteLink: (id: string) => [...houseKeys.all, 'inviteLink', id] as const,
@@ -23,10 +24,11 @@ export const useHouses = (filter: 'mine' | 'discover' = 'mine') =>
     queryFn: () => houseService.list(filter),
   });
 
-export const useHouse = (houseId: string) =>
+export const useHouse = (houseId: string, inviteToken?: string) =>
   useQuery<House>({
-    queryKey: houseKeys.detail(houseId),
-    queryFn: () => houseService.get(houseId),
+    // Never place the bearer token in the query key/devtools cache.
+    queryKey: inviteToken ? houseKeys.invitation(houseId) : houseKeys.detail(houseId),
+    queryFn: () => houseService.get(houseId, inviteToken),
     enabled: houseId.length > 0,
   });
 

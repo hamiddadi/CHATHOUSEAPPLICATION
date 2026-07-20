@@ -1,9 +1,14 @@
 import { Worker } from 'bullmq';
 import { logger } from '../config/logger';
 import { prisma } from '../config/database';
-import { redis } from '../config/redis';
+import { env } from '../config/env';
 import { bullConnection } from '../queues/connection';
-import { requireStripe, stripeConfigured } from '../extensions/modules/payments/stripe.client';
+import {
+  scheduleStripeCancellation,
+  teardownStripeForUser,
+} from '../extensions/modules/payments/stripe.gdpr';
+import { mediaService } from '../modules/media/media.service';
+import { purgeExtensionDataForUser } from '../extensions/gdpr';
 import {
   GDPR_PURGE_JOB_NAME,
   GDPR_PURGE_QUEUE_NAME,
@@ -38,66 +43,35 @@ const HOUR_MS = 60 * 60 * 1000;
 
 // Configurable via env (no env.ts change required — read defensively with
 // sane defaults). Recommended additions to env.ts are noted in the manifest.
-const PURGE_CRON = process.env.GDPR_PURGE_CRON ?? '0 3 * * *';
+const PURGE_CRON = env.GDPR_PURGE_CRON;
 
 let worker: Worker | null = null;
 
 /**
- * PAYM-05: cancel the user's Stripe subscription + delete the Stripe customer
- * BEFORE the prisma hard-delete (which cascade-removes the Subscription row,
- * losing the Stripe ids). A purged premium user would otherwise keep being
- * billed and their PII would linger at Stripe.
- *
- * Best-effort: no-op when Stripe isn't configured, and every Stripe call is
- * wrapped so a failure is logged (logger.warn) but never blocks the purge —
- * the hard-delete must proceed regardless.
+ * A deletion request should not allow another recurring charge during the
+ * grace period. Retry pending end-of-period cancellation daily in case Stripe
+ * was unavailable when the user made the request.
  */
-const teardownStripeForUser = async (userId: string): Promise<void> => {
-  if (!stripeConfigured()) return;
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: {
-      stripeCustomerId: true,
-      subscription: { select: { stripeSubscriptionId: true } },
-    },
-  });
-  if (!user) return;
-  const subscriptionId = user.subscription?.stripeSubscriptionId;
-  const customerId = user.stripeCustomerId;
-  if (!subscriptionId && !customerId) return;
-
-  let stripe;
+const scheduleDeletedUserSubscriptionCancellations = async (): Promise<void> => {
   try {
-    stripe = await requireStripe();
+    const subscriptions = await prisma.subscription.findMany({
+      where: { user: { deletedAt: { not: null } } },
+      select: { userId: true },
+    });
+    for (const { userId } of subscriptions) {
+      try {
+        await scheduleStripeCancellation(userId);
+      } catch (err) {
+        logger.error('gdpr-purge: failed to schedule Stripe subscription cancellation', {
+          userId,
+          err: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
   } catch (err) {
-    logger.warn('gdpr-purge: Stripe unavailable, skipping subscription/customer teardown', {
-      userId,
+    logger.error('gdpr-purge: subscription-cancellation lookup failed', {
       err: err instanceof Error ? err.message : String(err),
     });
-    return;
-  }
-
-  if (subscriptionId) {
-    try {
-      await stripe.subscriptions.cancel(subscriptionId);
-    } catch (err) {
-      logger.warn('gdpr-purge: failed to cancel Stripe subscription', {
-        userId,
-        subscriptionId,
-        err: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
-  if (customerId) {
-    try {
-      await stripe.customers.del(customerId);
-    } catch (err) {
-      logger.warn('gdpr-purge: failed to delete Stripe customer', {
-        userId,
-        customerId,
-        err: err instanceof Error ? err.message : String(err),
-      });
-    }
   }
 };
 
@@ -120,7 +94,7 @@ const teardownStripeForUser = async (userId: string): Promise<void> => {
  */
 const purgeSoftDeletedUsers = async (now: number): Promise<void> => {
   try {
-    const graceDays = Number(process.env.ACCOUNT_DELETION_GRACE_DAYS ?? 30);
+    const graceDays = env.ACCOUNT_DELETION_GRACE_DAYS;
     const cutoff = new Date(now - graceDays * DAY_MS);
 
     const victims = await prisma.user.findMany({
@@ -131,27 +105,24 @@ const purgeSoftDeletedUsers = async (now: number): Promise<void> => {
     let deleted = 0;
     for (const v of victims) {
       try {
-        // PAYM-05: cancel the Stripe subscription + delete the customer BEFORE the
-        // cascade delete wipes the Subscription row (and its Stripe ids). Best-effort
-        // — a Stripe failure is logged inside and never blocks the purge.
+        // External Stripe and object-storage cleanup both fail closed. Keeping
+        // local identifiers intact lets the next scheduled run retry safely.
         await teardownStripeForUser(v.id);
+        // Redis extension state is outside PostgreSQL's cascade. Purge or
+        // anonymize it first, and fail closed so a Redis outage is retryable.
+        await purgeExtensionDataForUser(v.id);
+        // Object bytes are external to PostgreSQL. Fail closed if storage is
+        // unavailable so the metadata remains retryable and no personal data
+        // is orphaned by a successful relational cascade.
+        const deletedMediaObjects = await mediaService.deleteAllForUser(v.id);
         await prisma.$transaction(async tx => {
           await tx.user.delete({ where: { id: v.id } });
         });
         deleted += 1;
-        // PAYM-03: the Stripe Connect mapping lives in Redis (not cascaded by the
-        // DB delete). Leaving it orphaned lets a later tip pass the in-app guards
-        // and then loop the webhook on the FK violation. Purge the mapping + its
-        // onboarding lock. Best-effort: a Redis failure must not roll back the
-        // (already committed) hard-delete, so it is logged but not rethrown.
-        try {
-          await redis.del([`ext:stripe:account:${v.id}`, `ext:stripe:account:${v.id}:lock`]);
-        } catch (redisErr) {
-          logger.error('gdpr-purge: failed to purge Stripe Redis mapping', {
-            userId: v.id,
-            err: redisErr instanceof Error ? redisErr.message : String(redisErr),
-          });
-        }
+        logger.info('gdpr-purge: deleted private media objects', {
+          userId: v.id,
+          deleted: deletedMediaObjects,
+        });
       } catch (err) {
         // A single user failing (e.g. a transient FK race) must not abort the
         // batch — log and continue with the next id.
@@ -243,7 +214,7 @@ const purgePasswordResetTokens = async (now: number): Promise<void> => {
  */
 const purgeAuditLogs = async (now: number): Promise<void> => {
   try {
-    const retentionDays = Number(process.env.AUDIT_LOG_RETENTION_DAYS ?? 90);
+    const retentionDays = env.AUDIT_LOG_RETENTION_DAYS;
     const cutoff = new Date(now - retentionDays * DAY_MS);
     const res = await prisma.auditLog.deleteMany({
       where: { createdAt: { lt: cutoff } },
@@ -259,6 +230,19 @@ const purgeAuditLogs = async (now: number): Promise<void> => {
   }
 };
 
+const purgeIdempotencyKeys = async (now: number): Promise<void> => {
+  try {
+    const res = await prisma.idempotencyKey.deleteMany({
+      where: { expiresAt: { lt: new Date(now) } },
+    });
+    logger.info('gdpr-purge: deleted expired idempotency keys', { deleted: res.count });
+  } catch (err) {
+    logger.error('gdpr-purge: idempotency-key step failed', {
+      err: err instanceof Error ? err.message : String(err),
+    });
+  }
+};
+
 /**
  * The job processor. Runs every retention step in sequence; each step owns its
  * own try/catch so one failure never aborts the others.
@@ -266,11 +250,13 @@ const purgeAuditLogs = async (now: number): Promise<void> => {
 const processPurge = async (): Promise<void> => {
   const now = Date.now();
   logger.info('gdpr-purge: starting daily retention sweep');
+  await scheduleDeletedUserSubscriptionCancellations();
   await purgeSoftDeletedUsers(now);
   await purgeRefreshTokens(now);
   await purgeOtpCodes(now);
   await purgePasswordResetTokens(now);
   await purgeAuditLogs(now);
+  await purgeIdempotencyKeys(now);
   logger.info('gdpr-purge: retention sweep complete');
 };
 

@@ -176,6 +176,7 @@ const LandingCTA: React.FC<LandingCTAProps> = memo(
       <View className="gap-sm">
         <Animated.View style={primary.animatedStyle}>
           <Pressable
+            testID="auth-get-started"
             onPress={onGetStarted}
             onPressIn={primary.onPressIn}
             onPressOut={primary.onPressOut}
@@ -191,6 +192,7 @@ const LandingCTA: React.FC<LandingCTAProps> = memo(
 
         <Animated.View style={secondary.animatedStyle}>
           <Pressable
+            testID="auth-login"
             onPress={onLogin}
             onPressIn={secondary.onPressIn}
             onPressOut={secondary.onPressOut}
@@ -205,6 +207,7 @@ const LandingCTA: React.FC<LandingCTAProps> = memo(
 
         {onDevSkip && (
           <Pressable
+            testID="auth-dev-skip"
             onPress={onDevSkip}
             accessibilityRole="button"
             accessibilityLabel={labels.devSkipA11y}

@@ -32,5 +32,16 @@ module.exports = {
   testTimeout: 30000,
   collectCoverageFrom: ['src/**/*.ts', '!src/**/*.d.ts', '!src/app.ts'],
   coverageDirectory: 'coverage',
+  coverageReporters: ['text', 'lcov', 'clover', 'json-summary'],
+  // Establish a blocking backend baseline from the full integration suite.
+  // Raise these values incrementally as legacy modules gain focused tests.
+  coverageThreshold: {
+    global: {
+      statements: 60,
+      branches: 35,
+      functions: 50,
+      lines: 60,
+    },
+  },
   clearMocks: true,
 };

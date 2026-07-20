@@ -46,6 +46,23 @@ const envSchema = z.object({
         .filter(Boolean),
     ),
 
+  // Canonical externally-reachable API origin. Required in production so
+  // media capability URLs never contain an internal proxy/container host.
+  PUBLIC_URL: z.string().url().optional(),
+
+  // Private media storage (avatars + voice notes). Local storage is allowed
+  // only for development/test and is never exposed through express.static.
+  // Production must use a private S3-compatible bucket.
+  MEDIA_STORAGE_DRIVER: z.enum(['local', 's3']).default('local'),
+  MEDIA_URL_SIGNING_SECRET: z.string().min(32).optional(),
+  MEDIA_EXPORT_URL_TTL_SECONDS: z.coerce.number().int().min(300).max(604800).default(3600),
+  MEDIA_S3_BUCKET: z.string().min(1).optional(),
+  MEDIA_S3_REGION: z.string().min(1).default('us-east-1'),
+  MEDIA_S3_ENDPOINT: z.string().url().optional(),
+  MEDIA_S3_ACCESS_KEY: z.string().min(1).optional(),
+  MEDIA_S3_SECRET_KEY: z.string().min(1).optional(),
+  MEDIA_S3_FORCE_PATH_STYLE: boolFromString(false),
+
   RATE_LIMIT_WINDOW_MS: z.coerce
     .number()
     .int()
@@ -53,6 +70,12 @@ const envSchema = z.object({
     .default(15 * 60 * 1000),
   RATE_LIMIT_MAX: z.coerce.number().int().positive().default(100),
   AUTH_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(10),
+
+  // GDPR retention. Keep this validated so login restoration, API responses
+  // and the purge worker cannot silently use different grace windows.
+  ACCOUNT_DELETION_GRACE_DAYS: z.coerce.number().int().min(1).max(365).default(30),
+  AUDIT_LOG_RETENTION_DAYS: z.coerce.number().int().min(1).max(3650).default(90),
+  GDPR_PURGE_CRON: z.string().trim().min(1).default('0 3 * * *'),
 
   // Master switch for the Godmode admin surface. When false, every
   // /api/admin/* endpoint returns ADMIN_003 even for SUPER_ADMINs — useful
@@ -84,6 +107,7 @@ const envSchema = z.object({
   // true AND the bucket + keys below are set AND LiveKit itself is configured
   // (see recordings.service.isConfigured). When unconfigured, rooms still work
   // exactly as before — no Recording rows are ever created.
+  ROOM_RECORDING_ENABLED: boolFromString(false),
   EGRESS_ENABLED: boolFromString(false),
   RECORDING_S3_BUCKET: z.string().optional(),
   RECORDING_S3_REGION: z.string().optional(),
@@ -98,9 +122,9 @@ const envSchema = z.object({
   RECORDING_PUBLIC_BASE_URL: z.string().optional(),
 
   // ─── Monetization (Stripe tips + premium) ───────────────────────────
-  // All optional: payments + premium are feature-flagged and no-op when unset
-  // (mirrors the LiveKit/recording gating). The `stripe` npm package itself is
-  // an optional dynamic import — install it in backend/ to actually charge.
+  // Payments + premium stay available when their server-side Stripe secrets
+  // are configured. The pinned Stripe SDK is a production dependency; missing
+  // credentials still fail closed instead of creating a partial payment flow.
   STRIPE_SECRET_KEY: z.string().optional(),
   // Verifies incoming webhook signatures. Without it the webhook endpoint
   // rejects every event (fail closed) rather than trusting forged ones.
@@ -255,4 +279,28 @@ if (env.NODE_ENV === 'production') {
     );
     process.exit(1);
   }
+}
+
+const mediaConfigErrors: string[] = [];
+if (env.NODE_ENV === 'production' && env.MEDIA_STORAGE_DRIVER !== 's3') {
+  mediaConfigErrors.push('MEDIA_STORAGE_DRIVER must be s3 in production');
+}
+if (env.NODE_ENV === 'production' && !env.PUBLIC_URL) {
+  mediaConfigErrors.push('PUBLIC_URL is required in production');
+}
+if (env.NODE_ENV === 'production' && !env.MEDIA_URL_SIGNING_SECRET) {
+  mediaConfigErrors.push('MEDIA_URL_SIGNING_SECRET is required in production');
+}
+if (env.MEDIA_STORAGE_DRIVER === 's3' && !env.MEDIA_S3_BUCKET) {
+  mediaConfigErrors.push('MEDIA_S3_BUCKET is required when MEDIA_STORAGE_DRIVER=s3');
+}
+if (Boolean(env.MEDIA_S3_ACCESS_KEY) !== Boolean(env.MEDIA_S3_SECRET_KEY)) {
+  mediaConfigErrors.push(
+    'MEDIA_S3_ACCESS_KEY and MEDIA_S3_SECRET_KEY must either both be set or both be unset',
+  );
+}
+if (mediaConfigErrors.length > 0) {
+  // eslint-disable-next-line no-console
+  console.error(`❌ Invalid private media configuration:\n- ${mediaConfigErrors.join('\n- ')}`);
+  process.exit(1);
 }

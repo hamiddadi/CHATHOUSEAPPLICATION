@@ -38,6 +38,8 @@ export const contactsService = {
         phoneNumber: { in: unique },
         deletedAt: null,
         id: { not: userId },
+        blocksCreated: { none: { blockedId: userId } },
+        blocksReceived: { none: { blockerId: userId } },
       },
       select: PUBLIC_USER, // never selects phoneNumber — no PII in the response
     });

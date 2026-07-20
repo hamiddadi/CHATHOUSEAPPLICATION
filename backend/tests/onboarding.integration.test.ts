@@ -9,11 +9,15 @@ process.env.REDIS_URL = process.env.REDIS_URL ?? 'redis://localhost:6379';
 /* eslint-disable @typescript-eslint/no-require-imports */
 const { createApp } = require('../src/app') as typeof import('../src/app');
 const { prisma } = require('../src/config/database') as typeof import('../src/config/database');
+const { mediaService } =
+  require('../src/modules/media/media.service') as typeof import('../src/modules/media/media.service');
 const { connectRedis, disconnectRedis } =
   require('../src/config/redis') as typeof import('../src/config/redis');
 /* eslint-enable @typescript-eslint/no-require-imports */
 
 const rand = () => Math.random().toString(36).slice(2, 10);
+const TINY_PNG_DATA_URL =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
 
 const registerUser = async (app: Express) => {
   const username = `ob_${rand()}`;
@@ -38,6 +42,7 @@ describe('Onboarding integration — interests + completion flag', () => {
 
   afterAll(async () => {
     for (const id of createdUserIds) {
+      await mediaService.deleteAllForUser(id).catch(() => undefined);
       await prisma.user.delete({ where: { id } }).catch(() => undefined);
     }
     await prisma.$disconnect();
@@ -86,13 +91,20 @@ describe('Onboarding integration — interests + completion flag', () => {
     const u = await registerUser(app);
     createdUserIds.push(u.id);
 
+    const upload = await request(app)
+      .post('/api/upload/avatar')
+      .set('Authorization', `Bearer ${u.token}`)
+      .send({ dataUrl: TINY_PNG_DATA_URL });
+    expect(upload.status).toBe(201);
+    const avatarUrl = upload.body.data.url as string;
+
     const res = await request(app)
       .patch('/api/users/me/onboarding')
       .set('Authorization', `Bearer ${u.token}`)
       .send({
         displayName: 'Casey Echo',
         bio: 'Building things at night.',
-        avatarUrl: 'https://example.com/avatars/casey.png',
+        avatarUrl,
         // completeOnboardingSchema requires at least 3 interests (matches the
         // frontend InterestSelection minimum).
         interests: ['Tech', 'music', 'Art'],
@@ -101,7 +113,7 @@ describe('Onboarding integration — interests + completion flag', () => {
     expect(res.body.data.hasCompletedOnboarding).toBe(true);
     expect(res.body.data.displayName).toBe('Casey Echo');
     expect(res.body.data.bio).toBe('Building things at night.');
-    expect(res.body.data.avatarUrl).toBe('https://example.com/avatars/casey.png');
+    expect(res.body.data.avatarUrl).toBe(avatarUrl);
     expect(res.body.data.interests).toEqual(['tech', 'music', 'art']);
 
     // Survives a subsequent /me read (persisted, not just echoed). All three

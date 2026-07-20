@@ -11,6 +11,7 @@ import { colors, radii, spacing, withAlpha } from '../../constants/theme';
 const OTP_LENGTH = 6;
 
 interface OtpInputProps {
+  testID?: string;
   value: string;
   onChange: (code: string) => void;
   error?: string;
@@ -32,6 +33,7 @@ interface OtpInputProps {
  */
 export const OtpInput: React.FC<OtpInputProps> = memo(
   ({
+    testID,
     value,
     onChange,
     error,
@@ -97,6 +99,7 @@ export const OtpInput: React.FC<OtpInputProps> = memo(
           })}
         </Pressable>
         <TextInput
+          testID={testID}
           ref={inputRef}
           value={value}
           onChangeText={handleChange}

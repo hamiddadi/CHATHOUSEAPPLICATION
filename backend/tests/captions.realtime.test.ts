@@ -17,13 +17,15 @@ process.env.ASR_API_KEY = process.env.ASR_API_KEY ?? 'test-key';
 
 /* eslint-disable @typescript-eslint/no-require-imports */
 const { createApp } = require('../src/app') as typeof import('../src/app');
-const { mountExtensions } =
-  require('../src/extensions/mount') as typeof import('../src/extensions/mount');
-const { createSocketServer } =
+const { createSocketServer, drainRoomDisconnectCleanups } =
   require('../src/socket/socket.server') as typeof import('../src/socket/socket.server');
 const { prisma } = require('../src/config/database') as typeof import('../src/config/database');
 const { connectRedis, disconnectRedis } =
   require('../src/config/redis') as typeof import('../src/config/redis');
+const { shutdownReminders } =
+  require('../src/queues/eventReminders') as typeof import('../src/queues/eventReminders');
+const { shutdownReminder15 } =
+  require('../src/extensions/queues/reminder15') as typeof import('../src/extensions/queues/reminder15');
 /* eslint-enable @typescript-eslint/no-require-imports */
 
 const rand = () => Math.random().toString(36).slice(2, 10);
@@ -58,9 +60,6 @@ describe('Live-captions realtime relay', () => {
   beforeAll(async () => {
     await connectRedis();
     app = createApp();
-    // createApp() doesn't mount the /api/ext/* surface (bootstrap does, after
-    // createApp). Mirror that here so the captions REST toggle is reachable.
-    mountExtensions(app);
     server = http.createServer(app);
     io = await createSocketServer(server);
     await new Promise<void>(resolve => server.listen(0, resolve));
@@ -69,10 +68,13 @@ describe('Live-captions realtime relay', () => {
   }, 30_000);
 
   afterAll(async () => {
+    await new Promise<void>(resolve => io.close(() => resolve()));
+    await drainRoomDisconnectCleanups();
     for (const id of createdIds) {
       await prisma.user.delete({ where: { id } }).catch(() => undefined);
     }
-    await new Promise<void>(resolve => io.close(() => resolve()));
+    await shutdownReminders();
+    await shutdownReminder15();
     await prisma.$disconnect();
     await disconnectRedis();
   });

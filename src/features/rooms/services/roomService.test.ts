@@ -59,6 +59,9 @@ describe('roomService.create — the 3 room types map to backend gating fields',
     expect(api.post).toHaveBeenCalledWith(
       '/rooms',
       expect.objectContaining({ isPrivate: false, roomType: 'OPEN' }),
+      expect.objectContaining({
+        headers: expect.objectContaining({ 'Idempotency-Key': expect.any(String) }),
+      }),
     );
   });
 
@@ -67,6 +70,9 @@ describe('roomService.create — the 3 room types map to backend gating fields',
     expect(api.post).toHaveBeenCalledWith(
       '/rooms',
       expect.objectContaining({ isPrivate: false, roomType: 'SOCIAL' }),
+      expect.objectContaining({
+        headers: expect.objectContaining({ 'Idempotency-Key': expect.any(String) }),
+      }),
     );
   });
 
@@ -75,6 +81,9 @@ describe('roomService.create — the 3 room types map to backend gating fields',
     expect(api.post).toHaveBeenCalledWith(
       '/rooms',
       expect.objectContaining({ isPrivate: true, roomType: 'CLOSED' }),
+      expect.objectContaining({
+        headers: expect.objectContaining({ 'Idempotency-Key': expect.any(String) }),
+      }),
     );
   });
 
@@ -83,6 +92,9 @@ describe('roomService.create — the 3 room types map to backend gating fields',
     expect(api.post).toHaveBeenCalledWith(
       '/rooms',
       expect.objectContaining({ title: 'Spaced', chatEnabled: true, recordingEnabled: false }),
+      expect.objectContaining({
+        headers: expect.objectContaining({ 'Idempotency-Key': expect.any(String) }),
+      }),
     );
   });
 

@@ -61,7 +61,10 @@ const mapUser = (raw: RawMe): AuthUser => ({
 
 export const authService = {
   async requestOtp(phoneNumber: string): Promise<{ sent: true; expiresIn: number }> {
-    const res = await apiClient.post<SendOtpResponse>('/auth/send-otp', { phoneNumber });
+    const res = await apiClient.post<SendOtpResponse>('/auth/send-otp', {
+      phoneNumber,
+      ageConfirmed: true,
+    });
     return res.data.data;
   },
 
@@ -72,6 +75,7 @@ export const authService = {
     const res = await apiClient.post<VerifyOtpResponse>('/auth/verify-otp', {
       phoneNumber,
       code,
+      ageConfirmed: true,
     });
     return res.data.data;
   },

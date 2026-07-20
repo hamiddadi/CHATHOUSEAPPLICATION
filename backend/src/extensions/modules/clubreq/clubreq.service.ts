@@ -1,9 +1,9 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../../config/database';
+import { logger } from '../../../config/logger';
 import { redis } from '../../../config/redis';
 import { AppError } from '../../../middlewares/error.middleware';
 import { notificationsService } from '../../../modules/notifications/notifications.service';
-import { logger } from '../../../config/logger';
 
 /**
  * Club join request workflow (Module 10.3 / CLUB-006..009 / NOTIF-008).
@@ -39,17 +39,65 @@ const indexKey = (clubId: string) => `ext:clubreq:club:${clubId}`;
 const TTL_S = 30 * 24 * 3600; // 30 days
 
 const isAdmin = async (clubId: string, userId: string): Promise<boolean> => {
-  const m = await prisma.clubMember.findUnique({
-    where: { clubId_userId: { clubId, userId } },
+  const club = await prisma.club.findFirst({
+    where: {
+      id: clubId,
+      owner: {
+        deletedAt: null,
+        blocksCreated: { none: { blockedId: userId } },
+        blocksReceived: { none: { blockerId: userId } },
+      },
+    },
+    select: { ownerId: true },
+  });
+  if (!club) return false;
+  if (club.ownerId === userId) return true;
+
+  const m = await prisma.clubMember.findFirst({
+    where: { clubId, userId, user: { deletedAt: null } },
     select: { role: true },
   });
   return m?.role === 'ADMIN' || m?.role === 'MODERATOR';
 };
 
+const consumePendingRequest = async (clubId: string, userId: string): Promise<JoinRequest> => {
+  // GETDEL is the request capability claim. Exactly one concurrent
+  // approve/decline call can consume it and therefore emit a result
+  // notification.
+  const raw = await redis.getDel(reqKey(clubId, userId));
+  if (!raw) throw new AppError('CLUB_001', 'Request not found');
+  await redis.sRem(indexKey(clubId), userId);
+
+  try {
+    const parsed = JSON.parse(raw) as Partial<JoinRequest>;
+    if (parsed.clubId !== clubId || parsed.userId !== userId) {
+      throw new Error('Invalid join-request payload');
+    }
+    return parsed as JoinRequest;
+  } catch (err) {
+    logger.warn('ext.clubreq: discarded corrupt request', { err, clubId, userId });
+    throw new AppError('CLUB_001', 'Request not found');
+  }
+};
+
+const restorePendingRequest = async (request: JoinRequest): Promise<void> => {
+  await Promise.all([
+    redis.setEx(reqKey(request.clubId, request.userId), TTL_S, JSON.stringify(request)),
+    redis.sAdd(indexKey(request.clubId), request.userId),
+  ]);
+};
+
 export const clubReqService = {
   async request(callerId: string, clubId: string, message?: string): Promise<JoinRequest> {
-    const club = await prisma.club.findUnique({
-      where: { id: clubId },
+    const club = await prisma.club.findFirst({
+      where: {
+        id: clubId,
+        owner: {
+          deletedAt: null,
+          blocksCreated: { none: { blockedId: callerId } },
+          blocksReceived: { none: { blockerId: callerId } },
+        },
+      },
       select: { id: true, name: true, privacy: true, ownerId: true },
     });
     if (!club) throw new AppError('CLUB_001');
@@ -76,15 +124,26 @@ export const clubReqService = {
     // queuing an approval request (and spamming admins with notifications).
     if (club.privacy === 'OPEN') {
       try {
-        await prisma.$transaction([
-          prisma.clubMember.create({
-            data: { clubId, userId: callerId, role: 'MEMBER' },
-          }),
-          prisma.club.update({
-            where: { id: clubId },
+        await prisma.$transaction(async tx => {
+          const eligible = await tx.club.updateMany({
+            where: {
+              id: clubId,
+              privacy: 'OPEN',
+              owner: {
+                deletedAt: null,
+                blocksCreated: { none: { blockedId: callerId } },
+                blocksReceived: { none: { blockerId: callerId } },
+              },
+            },
             data: { memberCount: { increment: 1 } },
-          }),
-        ]);
+          });
+          if (eligible.count !== 1) {
+            throw new AppError('CLUB_003', 'Club is no longer open');
+          }
+          await tx.clubMember.create({
+            data: { clubId, userId: callerId, role: 'MEMBER' },
+          });
+        });
       } catch (err) {
         // Lost a race with another direct-join — already a member, fine.
         if (!(err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002')) {
@@ -108,7 +167,15 @@ export const clubReqService = {
 
     // Notify all admins/moderators of the club.
     const admins = await prisma.clubMember.findMany({
-      where: { clubId, role: { in: ['ADMIN', 'MODERATOR'] } },
+      where: {
+        clubId,
+        role: { in: ['ADMIN', 'MODERATOR'] },
+        user: {
+          deletedAt: null,
+          blocksCreated: { none: { blockedId: callerId } },
+          blocksReceived: { none: { blockerId: callerId } },
+        },
+      },
       select: { userId: true },
     });
     const recipients = Array.from(new Set([club.ownerId, ...admins.map(a => a.userId)]));
@@ -159,7 +226,12 @@ export const clubReqService = {
         return;
       }
       try {
-        items.push(JSON.parse(raw) as JoinRequest);
+        const parsed = JSON.parse(raw) as JoinRequest;
+        if (parsed.clubId !== clubId || parsed.userId !== uid) {
+          stale.push(uid);
+          return;
+        }
+        items.push(parsed);
       } catch {
         stale.push(uid);
       }
@@ -174,38 +246,97 @@ export const clubReqService = {
     // batched query for the whole page. A requester whose account was hard-
     // deleted keeps the bare userId (the row is harmless and rare).
     const requesters = await prisma.user.findMany({
-      where: { id: { in: items.map(it => it.userId) } },
-      select: { id: true, username: true, displayName: true, avatarUrl: true },
+      where: { id: { in: items.map(it => it.userId) }, deletedAt: null },
+      select: {
+        id: true,
+        username: true,
+        displayName: true,
+        avatarUrl: true,
+        blocksCreated: {
+          where: { blockedId: callerId },
+          select: { id: true },
+          take: 1,
+        },
+        blocksReceived: {
+          where: { blockerId: callerId },
+          select: { id: true },
+          take: 1,
+        },
+      },
     });
     const byId = new Map(requesters.map(u => [u.id, u]));
-    return items.map(it => {
+    return items.flatMap(it => {
       const u = byId.get(it.userId);
-      return u
-        ? { ...it, username: u.username, displayName: u.displayName, avatarUrl: u.avatarUrl }
-        : it;
+      if (!u || u.blocksCreated.length > 0 || u.blocksReceived.length > 0) return [];
+      return [
+        {
+          ...it,
+          username: u.username,
+          displayName: u.displayName,
+          avatarUrl: u.avatarUrl,
+        },
+      ];
     });
   },
 
   async approve(callerId: string, clubId: string, requesterId: string) {
     if (!(await isAdmin(clubId, callerId))) throw new AppError('AUTH_008');
-    const raw = await redis.get(reqKey(clubId, requesterId));
-    if (!raw) throw new AppError('CLUB_001', 'Request not found');
+    const pending = await consumePendingRequest(clubId, requesterId);
 
     // Idempotent add — only the unique-constraint violation (already a
     // member) is swallowed. Any other failure must propagate so we don't
     // notify "approved" while leaving the user a non-member. The create +
     // memberCount increment run in one transaction so the denormalized
     // counter can never diverge from the membership row.
+    let clubName = 'the club';
     try {
-      await prisma.$transaction([
-        prisma.clubMember.create({
-          data: { clubId, userId: requesterId, role: 'MEMBER' },
-        }),
-        prisma.club.update({
-          where: { id: clubId },
+      clubName = await prisma.$transaction(async tx => {
+        const club = await tx.club.findFirst({
+          where: {
+            id: clubId,
+            privacy: 'SOCIAL',
+            owner: {
+              deletedAt: null,
+              blocksCreated: { none: { blockedId: requesterId } },
+              blocksReceived: { none: { blockerId: requesterId } },
+            },
+          },
+          select: { name: true },
+        });
+        const requester = await tx.user.findFirst({
+          where: { id: requesterId, deletedAt: null },
+          select: { id: true },
+        });
+        if (!club || !requester) {
+          throw new AppError('CLUB_001', 'Request is no longer valid');
+        }
+
+        const existing = await tx.clubMember.findUnique({
+          where: { clubId_userId: { clubId, userId: requesterId } },
+          select: { id: true },
+        });
+        if (existing) return club.name;
+
+        const eligible = await tx.club.updateMany({
+          where: {
+            id: clubId,
+            privacy: 'SOCIAL',
+            owner: {
+              deletedAt: null,
+              blocksCreated: { none: { blockedId: requesterId } },
+              blocksReceived: { none: { blockerId: requesterId } },
+            },
+          },
           data: { memberCount: { increment: 1 } },
-        }),
-      ]);
+        });
+        if (eligible.count !== 1) {
+          throw new AppError('CLUB_001', 'Request is no longer valid');
+        }
+        await tx.clubMember.create({
+          data: { clubId, userId: requesterId, role: 'MEMBER' },
+        });
+        return club.name;
+      });
     } catch (err) {
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
         // Already a member — the transaction rolled back, so memberCount was
@@ -214,28 +345,34 @@ export const clubReqService = {
           clubId,
           requesterId,
         });
+        clubName =
+          (
+            await prisma.club.findUnique({
+              where: { id: clubId },
+              select: { name: true },
+            })
+          )?.name ?? clubName;
+      } else if (err instanceof AppError) {
+        throw err;
       } else {
+        await restorePendingRequest(pending);
         throw err;
       }
     }
-    await Promise.all([
-      redis.del(reqKey(clubId, requesterId)),
-      redis.sRem(indexKey(clubId), requesterId),
-    ]);
-    const club = await prisma.club.findUnique({
-      where: { id: clubId },
-      select: { name: true },
-    });
-    await notificationsService.create({
-      userId: requesterId,
-      actorId: callerId,
-      type: 'CLUB_INVITE',
-      title: `Welcome to ${club?.name ?? 'the club'}`,
-      body: 'Your join request was approved',
-      data: { kind: 'join_approved', clubId },
-      targetId: clubId,
-      targetType: 'club',
-    });
+    try {
+      await notificationsService.create({
+        userId: requesterId,
+        actorId: callerId,
+        type: 'CLUB_INVITE',
+        title: `Welcome to ${clubName}`,
+        body: 'Your join request was approved',
+        data: { kind: 'join_approved', clubId },
+        targetId: clubId,
+        targetType: 'club',
+      });
+    } catch (err) {
+      logger.warn('ext.clubreq: approval notification failed', { err, clubId, requesterId });
+    }
     return { approved: true };
   },
 
@@ -243,26 +380,30 @@ export const clubReqService = {
     if (!(await isAdmin(clubId, callerId))) throw new AppError('AUTH_008');
     // Symmetric with approve(): reject if there's no pending request, so a
     // declining admin can't fire a spurious "declined" notification.
-    const raw = await redis.get(reqKey(clubId, requesterId));
-    if (!raw) throw new AppError('CLUB_001', 'Request not found');
-    await Promise.all([
-      redis.del(reqKey(clubId, requesterId)),
-      redis.sRem(indexKey(clubId), requesterId),
+    await consumePendingRequest(clubId, requesterId);
+    const [club, requester] = await Promise.all([
+      prisma.club.findUnique({ where: { id: clubId }, select: { name: true } }),
+      prisma.user.findFirst({
+        where: { id: requesterId, deletedAt: null },
+        select: { id: true },
+      }),
     ]);
-    const club = await prisma.club.findUnique({
-      where: { id: clubId },
-      select: { name: true },
-    });
-    await notificationsService.create({
-      userId: requesterId,
-      actorId: callerId,
-      type: 'CLUB_INVITE',
-      title: club?.name ?? 'Club',
-      body: 'Your join request was declined',
-      data: { kind: 'join_declined', clubId },
-      targetId: clubId,
-      targetType: 'club',
-    });
+    if (requester) {
+      try {
+        await notificationsService.create({
+          userId: requesterId,
+          actorId: callerId,
+          type: 'CLUB_INVITE',
+          title: club?.name ?? 'Club',
+          body: 'Your join request was declined',
+          data: { kind: 'join_declined', clubId },
+          targetId: clubId,
+          targetType: 'club',
+        });
+      } catch (err) {
+        logger.warn('ext.clubreq: decline notification failed', { err, clubId, requesterId });
+      }
+    }
     return { declined: true };
   },
 };

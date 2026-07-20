@@ -252,7 +252,6 @@ RoomCard.displayName = 'RoomCard';
 interface HeaderProps {
   onSearch: () => void;
   onEvents: () => void;
-  onReplays: () => void;
   onActivity: () => void;
 }
 
@@ -348,7 +347,7 @@ const UpcomingRow: React.FC<UpcomingRowProps> = memo(({ rooms, onOpen }) => {
 });
 UpcomingRow.displayName = 'UpcomingRow';
 
-const Header: React.FC<HeaderProps> = memo(({ onSearch, onEvents, onReplays, onActivity }) => {
+const Header: React.FC<HeaderProps> = memo(({ onSearch, onEvents, onActivity }) => {
   const { t } = useTranslation();
   return (
     <View className="flex-row items-center justify-between px-xxl py-lg">
@@ -361,11 +360,6 @@ const Header: React.FC<HeaderProps> = memo(({ onSearch, onEvents, onReplays, onA
       <View className="flex-row items-center gap-sm">
         <HeaderIcon name="search" label={t('feed.exploreA11y', 'Explore')} onPress={onSearch} />
         <HeaderIcon name="event" label={t('feed.eventsA11y', 'Events')} onPress={onEvents} />
-        <HeaderIcon
-          name="play-circle-outline"
-          label={t('replays.title', 'Replays')}
-          onPress={onReplays}
-        />
         {/* Activity bell — opens the extension ActivityFeed (waves, invites,
               follow-backs). */}
         <HeaderIcon
@@ -430,7 +424,6 @@ export const RoomFeedScreen: React.FC = () => {
   const handleStartRoom = useCallback(() => navigation.navigate('CreateRoom'), [navigation]);
   const handleSearch = useCallback(() => navigation.navigate('Explore'), [navigation]);
   const handleEvents = useCallback(() => navigation.navigate('Events'), [navigation]);
-  const handleReplays = useCallback(() => navigation.navigate('Replays'), [navigation]);
   const handleActivity = useCallback(() => navigation.navigate('ActivityFeed'), [navigation]);
 
   // Extension: wave to a user from the available-people strip
@@ -461,12 +454,7 @@ export const RoomFeedScreen: React.FC = () => {
 
   return (
     <View className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
-      <Header
-        onSearch={handleSearch}
-        onEvents={handleEvents}
-        onReplays={handleReplays}
-        onActivity={handleActivity}
-      />
+      <Header onSearch={handleSearch} onEvents={handleEvents} onActivity={handleActivity} />
 
       {isLoading ? (
         <RoomFeedSkeleton />

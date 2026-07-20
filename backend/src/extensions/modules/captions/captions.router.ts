@@ -21,7 +21,10 @@ captionsRouter.get(
 captionsRouter.get(
   '/:roomId',
   asyncHandler(async (req, res) => {
-    const enabled = await captionsService.isEnabled(String(req.params.roomId));
+    const enabled = await captionsService.isEnabledForCaller(
+      authedUserId(req),
+      String(req.params.roomId),
+    );
     res.json({ enabled });
   }),
 );

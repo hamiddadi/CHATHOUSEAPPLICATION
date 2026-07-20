@@ -3,6 +3,7 @@ import { getMessaging, type Messaging } from 'firebase-admin/messaging';
 import { prisma } from '../../config/database';
 import { env } from '../../config/env';
 import { logger } from '../../config/logger';
+import { AppError } from '../../middlewares/error.middleware';
 import type { RegisterPushInput } from './push.schema';
 
 /**
@@ -77,26 +78,36 @@ const stringifyData = (data?: Record<string, unknown>): Record<string, string> |
 
 export const pushService = {
   async register(userId: string, input: RegisterPushInput) {
-    // A token's unique key is the token string itself, so registering a token
-    // currently owned by another account silently reassigns it. That is the
-    // intended behaviour for "same device, new login", but it also lets anyone
-    // who observes a valid token hijack the device's push stream. Probability
-    // is low (tokens are long & opaque) but we trace every reassignment so it's
-    // auditable after the fact.
-    // TODO(audit): gate reassignment behind a device proof-of-possession
-    //   before treating an observed token as authoritative for a new user.
-    const existing = await prisma.pushToken.findUnique({
-      where: { token: input.token },
-      select: { userId: true },
-    });
-    if (existing && existing.userId !== userId) {
-      logger.info('push: token reassigned', { from: existing.userId, to: userId });
-    }
-
-    await prisma.pushToken.upsert({
-      where: { token: input.token },
-      create: { userId, token: input.token, platform: input.platform },
-      update: { userId, platform: input.platform, lastUsed: new Date() },
+    // Serialize claims for the same opaque FCM token. A token observed in logs
+    // or on another device must never be enough to redirect a victim's push
+    // stream to a different account. The mobile client resolves a legitimate
+    // shared-device switch by invalidating its local FCM token and registering
+    // the freshly rotated replacement.
+    await prisma.$transaction(async tx => {
+      await tx.$queryRaw`
+        SELECT pg_advisory_xact_lock(hashtextextended(${input.token}, 0))::text
+      `;
+      const existing = await tx.pushToken.findUnique({
+        where: { token: input.token },
+        select: { userId: true },
+      });
+      if (existing && existing.userId !== userId) {
+        logger.warn('push: rejected cross-account token claim', {
+          currentOwnerId: existing.userId,
+          claimantId: userId,
+        });
+        throw new AppError('PUSH_001');
+      }
+      if (existing) {
+        await tx.pushToken.update({
+          where: { token: input.token },
+          data: { platform: input.platform, lastUsed: new Date() },
+        });
+        return;
+      }
+      await tx.pushToken.create({
+        data: { userId, token: input.token, platform: input.platform },
+      });
     });
     return { registered: true as const };
   },

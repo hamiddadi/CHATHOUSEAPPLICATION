@@ -37,7 +37,7 @@ export const registerComponents = (registry: OpenAPIRegistry) => {
     'UserPublic',
     z.object({
       id: z.string(),
-      username: z.string(),
+      username: z.string().nullable(),
       displayName: z.string().nullable(),
       avatarUrl: z.string().url().nullable(),
       bio: z.string().nullable(),
@@ -46,16 +46,28 @@ export const registerComponents = (registry: OpenAPIRegistry) => {
     }),
   );
 
+  const AuthUser = registry.register(
+    'AuthUser',
+    z.object({
+      id: z.string(),
+      username: z.string(),
+      email: z.string().email(),
+      displayName: z.string().nullable(),
+      avatarUrl: z.string().url().nullable(),
+      bio: z.string().nullable(),
+    }),
+  );
+
   const TokenPair = registry.register(
     'TokenPair',
     z.object({
-      user: UserPublic.extend({ email: z.string().email() }),
+      user: AuthUser,
       accessToken: z.string(),
       refreshToken: z.string(),
     }),
   );
 
-  return { ErrorBody, SuccessVoid, UserPublic, TokenPair };
+  return { ErrorBody, SuccessVoid, UserPublic, AuthUser, TokenPair };
 };
 
 export type OpenApiComponents = ReturnType<typeof registerComponents>;

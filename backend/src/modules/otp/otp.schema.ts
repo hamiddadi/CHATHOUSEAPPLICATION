@@ -6,11 +6,13 @@ const phoneRegex = /^\+[1-9][0-9]{1,14}$/;
 
 export const sendOtpSchema = z.object({
   phoneNumber: z.string().regex(phoneRegex, 'phoneNumber must be E.164 (e.g. +14155551234)'),
+  ageConfirmed: z.boolean().optional(),
 });
 
 export const verifyOtpSchema = z.object({
   phoneNumber: z.string().regex(phoneRegex),
   code: z.string().regex(/^[0-9]{6}$/, 'code must be 6 digits'),
+  ageConfirmed: z.boolean().optional(),
 });
 
 export type SendOtpInput = z.infer<typeof sendOtpSchema>;

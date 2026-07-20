@@ -69,6 +69,7 @@ export const requireAuth: RequestHandler = async (req, _res, next) => {
     const cacheKey = `user:susp:${claims.sub}`;
     const cached = await redis.get(cacheKey);
     if (cached === '1') return next(new AppError('AUTH_007'));
+    if (cached === 'd') return next(new AppError('AUTH_003'));
     // The clean cached verdict is `0:<tokenVersion>` so the cache-hit path can
     // still enforce AUTH-03 (token revocation) without a DB read. A bare legacy
     // '0' or any unexpected value is treated as a miss and re-read, so a
@@ -88,7 +89,7 @@ export const requireAuth: RequestHandler = async (req, _res, next) => {
     } else {
       const user = await prisma.user.findUnique({
         where: { id: claims.sub },
-        select: { suspendedUntil: true, appRole: true, tokenVersion: true },
+        select: { suspendedUntil: true, deletedAt: true, appRole: true, tokenVersion: true },
       });
       // A valid JWT for a user that no longer exists (hard-purged) is
       // unauthorized. NOTE: a soft-deleted (deletion-requested) account is
@@ -97,6 +98,12 @@ export const requireAuth: RequestHandler = async (req, _res, next) => {
       // MODE-07's "strip powers" intent is enforced in requireRole's deletedAt
       // check; blocking all of requireAuth on bare deletedAt breaks self-cancel.
       if (!user) return next(new AppError('AUTH_003'));
+      // Existing tokens never restore an account. Only a fresh credential
+      // login may restore a self-deleted account during its grace period.
+      if (user.deletedAt) {
+        await redis.setEx(cacheKey, SUSPENSION_CACHE_TTL_SECONDS, 'd');
+        return next(new AppError('AUTH_003'));
+      }
       // AUTH-03: same revocation check against the authoritative DB value.
       if (claims.tv !== undefined && claims.tv !== user.tokenVersion) {
         return next(new AppError('AUTH_004'));
@@ -139,6 +146,11 @@ export const revokeAccessToken = async (token: string, ttlSeconds: number): Prom
 // Called after a cross-device logout / password reset bumps User.tokenVersion.
 export const invalidateUserAuthCache = async (userId: string): Promise<void> => {
   await redis.del(`user:susp:${userId}`);
+};
+
+/** Prime a fail-closed verdict as soon as account deletion commits. */
+export const markUserDeletedInAuthCache = async (userId: string): Promise<void> => {
+  await redis.setEx(`user:susp:${userId}`, SUSPENSION_CACHE_TTL_SECONDS, 'd');
 };
 
 export const requireUserId = (req: Request, _res: Response, next: NextFunction): void => {
