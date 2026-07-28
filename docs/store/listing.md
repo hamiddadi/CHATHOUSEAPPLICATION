@@ -13,7 +13,7 @@ moderation operations and hosted URLs still have to be supplied separately.
 - **Bundle ID / package:** `com.chathouse.app`
 - **Category:** Social Networking (App Store) / Social (Google Play)
 - **Primary language:** English (add French — the app ships i18n FR — as a localization)
-- **Support URL:** https://chathouse.app/support _(must resolve before submission)_
+- **Support URL:** https://api.chathouse.app/support _(must resolve before submission)_
 - **Marketing URL:** https://chathouse.app
 - **Privacy Policy URL:** https://api.chathouse.app/privacy
 - **Account deletion URL:** https://api.chathouse.app/account-deletion

@@ -36,6 +36,7 @@ data for its own purposes, change that row to Shared = Yes.
 | Audio files            | Voice or sound recordings     | Yes       | No     | LiveKit, private object storage | App functionality                     | Optional  |
 | Messages               | Other in-app messages         | Yes       | No     | Hosting, private object storage | App functionality                     | Optional  |
 | App activity           | App interactions              | Yes       | No     | Hosting                         | App functionality, personalization    | Required  |
+| App activity           | In-app search history         | Yes       | No     | Hosting                         | App functionality, personalization    | Optional  |
 | App activity           | Other user-generated content  | Yes       | No     | Hosting                         | App functionality, moderation         | Optional  |
 | App info & performance | Crash logs                    | Yes       | No     | Sentry                          | Analytics/diagnostics                 | Optional  |
 | App info & performance | Diagnostics                   | Yes       | No     | Sentry, Google Maps Platform    | Analytics/diagnostics, functionality  | Optional  |

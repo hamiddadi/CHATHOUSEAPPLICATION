@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { PermissionsAndroid } from 'react-native';
 import {
   AudioEncoderAndroidType,
   AudioSourceAndroidType,
@@ -9,6 +8,7 @@ import {
   audioRecorderPlayer,
   useVoicePlayback,
 } from '../../../shared/services/audio/voicePlayback';
+import { requestAudioPermission } from '../../../shared/utils/permissions';
 
 // Clamp the captured length so the backend (durationMs ≤ 5 min) never rejects a
 // send on duration, and ignore taps so short they produce no real audio.
@@ -72,8 +72,9 @@ export const useVoiceRecorder = (): VoiceRecorder => {
     if (activeRef.current) return false;
     setIsPreparing(true);
     try {
-      const granted = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.RECORD_AUDIO);
-      if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
+      // Android needs an explicit runtime request. On iOS, the native recorder
+      // owns the system prompt described by NSMicrophoneUsageDescription.
+      if (!(await requestAudioPermission())) {
         setIsPreparing(false);
         return false;
       }

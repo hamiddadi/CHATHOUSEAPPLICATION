@@ -7,6 +7,11 @@
 > address, transfer safeguards and supervisory authority for the actual
 > jurisdiction. Verify the contact mailbox, host the final text at a stable
 > public URL, and link that exact version in both store consoles.
+> The production backend additionally refuses to start until
+> `LEGAL_ENTITY_NAME`, `LEGAL_REGISTERED_ADDRESS`, `LEGAL_JURISDICTION`,
+> `LEGAL_SUPERVISORY_AUTHORITY`, `LEGAL_TRANSFER_SAFEGUARDS`,
+> `PRIVACY_CONTACT_EMAIL` and `SUPPORT_CONTACT_EMAIL` contain reviewed,
+> non-placeholder values.
 
 Chathouse ("**Chathouse**", "**we**", "**us**") is a social audio application that
 lets people host and join live audio rooms, follow each other, exchange direct
@@ -41,6 +46,9 @@ This policy explains what personal data we process, why, and the rights you have
   your stored coordinates; stale locations are also purged automatically.
 - **Usage & device data:** rooms joined, follows, app interactions, device type,
   OS version, and app version.
+- **Search history:** Explore queries are stored with your signed-in account so
+  you can revisit, remove, or clear recent searches and receive personalized
+  discovery results.
 - **Diagnostics:** crash and error reports (via **Sentry**) — collected **only if
   you consent** to diagnostics; otherwise crash reporting is disabled.
 
@@ -53,6 +61,7 @@ We do **not** sell your personal data.
 | Create and operate your account, deliver rooms/messages | Performance of a contract               |
 | Live audio transport and voice messages                 | Performance of a contract               |
 | Map / nearby features                                   | Consent (location permission)           |
+| Explore search history and personalization              | Performance of a contract               |
 | Tips & premium subscriptions                            | Performance of a contract               |
 | Safety, moderation, abuse prevention                    | Legitimate interests / legal obligation |
 | Crash & error diagnostics                               | Consent                                 |

@@ -1,6 +1,6 @@
 # ChatHouse — audit Go-Live Android et iOS
 
-> **Décision au 20 juillet 2026 : NO-GO.**
+> **Décision au 28 juillet 2026 : NO-GO.**
 >
 > Le dépôt a été fortement durci, mais cette version ne doit pas encore être
 > envoyée en production ni soumise aux stores. Il manque des artefacts signés
@@ -15,19 +15,60 @@
 La variable GitHub `PUBLIC_RELEASE_ENABLED` doit rester absente ou à `false`
 jusqu’à ce que toutes les cases obligatoires soient accompagnées d’une preuve.
 
+## Préflight reproductible
+
+Le contrôle final unique est `scripts/go-live-preflight.mjs`. Il est en lecture
+seule : il ne construit, ne signe, ne téléverse, ne déploie et ne soumet rien.
+Il valide des fichiers et artefacts déjà produits pour le même commit :
+
+```bash
+node scripts/go-live-preflight.mjs --report artifacts/go-live-preflight.json
+```
+
+Le verdict `GO` exige simultanément :
+
+- les environnements mobile/backend et les deux configurations Firebase réels ;
+- une clé upload et un AAB non-debug incluant `arm64-v8a`, avec les endpoints
+  production effectivement embarqués ;
+- une archive `.xcarchive` Apple Distribution, son profil production et le bon
+  Team ID ;
+- DNS, TLS, pages publiques, `assetlinks.json` et
+  `apple-app-site-association` accessibles et cohérents ;
+- les documents juridiques et fiches stores sans brouillon ni placeholder ;
+- une preuve liée au SHA exact pour Play Internal Testing, TestFlight et les
+  tests physiques Android, iPhone et iPad. Le format est fourni dans
+  `docs/GO-LIVE-EVIDENCE.example.json`.
+
+Dans GitHub Actions, lancer manuellement **Go-Live Preflight - Android and iOS**
+sur un commit déjà intégré à `main`, avec les IDs des runs ayant produit les
+artefacts signés. L’environnement GitHub protégé `production` doit fournir :
+
+- secrets : `MOBILE_PRODUCTION_ENV_BASE64`,
+  `BACKEND_PRODUCTION_ENV_BASE64`, `FIREBASE_ANDROID_CONFIG_BASE64`,
+  `FIREBASE_IOS_CONFIG_BASE64`, `ANDROID_UPLOAD_KEYSTORE_BASE64`,
+  `ANDROID_UPLOAD_STORE_PASSWORD`, `ANDROID_UPLOAD_KEY_ALIAS` et
+  `ANDROID_UPLOAD_KEY_PASSWORD` ;
+- variables : `IOS_TEAM_ID`, `ANDROID_APP_SIGNING_SHA256`,
+  `GO_LIVE_STORE_EVIDENCE_BASE64` et, si les valeurs par défaut ne conviennent
+  pas, `API_HEALTH_URL`, `SUPPORT_URL`, `PRIVACY_URL`,
+  `ACCOUNT_DELETION_URL`, `APP_URL`, `LIVEKIT_HTTPS_URL`.
+
+Le rapport Actions est conservé 90 jours. Un rapport absent, un contrôle sauté
+ou un artefact provenant d’un autre commit reste un `NO-GO`.
+
 ## État vérifié dans ce workspace
 
-| Zone                  | État                                                                             | Limite de la preuve                                                                                                    |
-| --------------------- | -------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| Frontend React Native | En revalidation finale                                                           | Les suites complètes doivent être rejouées après le dernier correctif.                                                 |
-| Backend               | Migration 8/8 et tests ciblés critiques validés                                  | La suite complète finale et un clone de la base de production restent requis.                                          |
-| Android               | `compileSdk`/`targetSdk` 36, manifeste Release et configuration Firebase valides | Les artefacts techniques actuels utilisent `.env.test`, x86_64 et la clé debug.                                        |
-| iOS                   | Configuration statique et garde d’environnement contrôlées                       | Aucun build signé, aucune archive Xcode et aucun TestFlight n’ont été produits sous Windows.                           |
-| Production            | Non disponible                                                                   | `api.chathouse.app`, `livekit.chathouse.app` et `app.chathouse.com` n’ont pas d’enregistrement DNS A lors du contrôle. |
+| Zone                  | État                                                                         | Limite de la preuve                                                                                                    |
+| --------------------- | ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Frontend React Native | Qualité OK ; 92/92 suites et 604/604 tests réussis                           | Les builds natifs signés et les essais sur appareils physiques restent requis.                                         |
+| Backend               | Lint, typecheck, build et tests ciblés critiques validés                     | La suite d’intégration avec PostgreSQL/Redis et un clone de la base de production restent requis.                      |
+| Android               | `assembleDebug` et `lintDebug` validés ; `testDebugUnitTest` est `NO-SOURCE` | Aucun AAB production signé : la validation technique utilise `.env.test`, x86_64 et la clé debug.                      |
+| iOS                   | Configuration statique et garde d’environnement contrôlées                   | Aucun build signé, aucune archive Xcode et aucun TestFlight n’ont été produits sous Windows.                           |
+| Production            | Non disponible                                                               | `api.chathouse.app`, `livekit.chathouse.app` et `app.chathouse.com` n’ont pas d’enregistrement DNS A lors du contrôle. |
 
-Les résultats chiffrés de la dernière exécution cohérente seront consignés ici
-après la fin des validations. Un succès local ne remplace jamais les tests
-staging, appareils, TestFlight ou Play Internal Testing.
+Ces résultats locaux ont été obtenus après les derniers correctifs. Ils ne
+remplacent jamais les tests staging, appareils, TestFlight ou Play Internal
+Testing.
 
 ## Artefacts techniques à ne jamais publier
 
@@ -39,7 +80,7 @@ doivent être ni téléversées dans Play Console ni distribuées à des utilisa
 
 ## 1. Gate commune — code et données
 
-- [ ] `npm run quality` réussit sans avertissement.
+- [x] `npm run quality` réussit sans avertissement.
 - [ ] `npm run test:ci` réussit intégralement avec la couverture attendue.
 - [ ] Backend : lint, typecheck, build et suite complète réussissent.
 - [ ] Les patches natifs passent `patch-package --error-on-fail`.

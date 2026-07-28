@@ -1,4 +1,37 @@
 import { Router, type Response } from 'express';
+import { env } from '../config/env';
+
+const escapeHtml = (value: string): string =>
+  value.replace(
+    /[&<>"']/g,
+    character =>
+      (
+        ({
+          '&': '&amp;',
+          '<': '&lt;',
+          '>': '&gt;',
+          '"': '&quot;',
+          "'": '&#39;',
+        }) as const
+      )[character as '&' | '<' | '>' | '"' | "'"],
+  );
+
+const legalIdentity = {
+  entity: escapeHtml(env.LEGAL_ENTITY_NAME ?? 'ChatHouse development operator'),
+  address: escapeHtml(env.LEGAL_REGISTERED_ADDRESS ?? 'Not applicable outside production'),
+  jurisdiction: escapeHtml(env.LEGAL_JURISDICTION ?? 'Not applicable outside production'),
+  authority: escapeHtml(env.LEGAL_SUPERVISORY_AUTHORITY ?? 'Not applicable outside production'),
+  transferSafeguards: escapeHtml(
+    env.LEGAL_TRANSFER_SAFEGUARDS ?? 'Not applicable outside production',
+  ),
+  privacyEmail: escapeHtml(env.PRIVACY_CONTACT_EMAIL ?? 'privacy@chathouse.app'),
+  supportEmail: escapeHtml(env.SUPPORT_CONTACT_EMAIL ?? 'support@chathouse.app'),
+};
+
+const appleTeamId = env.APPLE_TEAM_ID ?? 'TESTTEAMID';
+const androidAppSigningSha256 =
+  env.ANDROID_APP_SIGNING_SHA256 ??
+  '00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00';
 
 const htmlHeaders = (res: Response): void => {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -25,7 +58,8 @@ const layout = (title: string, body: string): string => `<!doctype html>
     </header>
     <main>${body}</main>
     <footer>
-      <p>Privacy contact: privacy@chathouse.app</p>
+      <p>${legalIdentity.entity} · ${legalIdentity.address}</p>
+      <p>Privacy contact: ${legalIdentity.privacyEmail}</p>
     </footer>
   </body>
 </html>`;
@@ -34,14 +68,21 @@ const privacyPolicy = layout(
   'ChatHouse Privacy Policy',
   `
     <section>
+      <h2>Controller and contact</h2>
+      <p>The data controller is ${legalIdentity.entity}, registered at
+      ${legalIdentity.address}. This policy is governed by the laws of
+      ${legalIdentity.jurisdiction}. Privacy enquiries can be sent to
+      <a href="mailto:${legalIdentity.privacyEmail}">${legalIdentity.privacyEmail}</a>.</p>
+    </section>
+    <section>
       <h2>Data we process</h2>
       <p>We process account identifiers and profile data (including phone number,
       email when provided, username, display name, profile image, biography,
       interests and social links); social relationships; rooms and participation;
       direct, group, room-chat and voice messages; houses; reports and moderation
       records; notification tokens and preferences; payment and subscription
-      history; and security metadata such as IP address, user agent and login
-      timestamps.</p>
+      history; Explore search queries and account-linked search history; and
+      security metadata such as IP address, user agent and login timestamps.</p>
       <p>Precise location is optional, disabled by default, and sent only after
       the user enables map visibility. Other opted-in visible users may then see
       the user's location on the real-time map. Turning visibility off clears the
@@ -54,10 +95,11 @@ const privacyPolicy = layout(
       <h2>Purposes and legal bases</h2>
       <p>We process data to provide and secure the service, authenticate accounts,
       deliver live audio and messages, show opted-in map users, process payments,
-      prevent abuse, moderate user-generated content, meet legal obligations and
-      respond to privacy requests. Optional mobile crash reporting is disabled by
-      default and starts only after explicit opt-in consent; consent can be
-      withdrawn in Settings at any time.</p>
+      personalize Explore results and recent searches, prevent abuse, moderate
+      user-generated content, meet legal obligations and respond to privacy
+      requests. Optional mobile crash reporting is disabled by default and starts
+      only after explicit opt-in consent; consent can be withdrawn in Settings at
+      any time.</p>
     </section>
     <section>
       <h2>Processors and transfers</h2>
@@ -67,6 +109,8 @@ const privacyPolicy = layout(
       Stripe (payments), and Sentry (opt-in mobile diagnostics and restricted
       server reliability diagnostics). We do not sell personal data, use it for
       cross-app advertising, or share it with data brokers.</p>
+      <p>Where a transfer leaves the applicable jurisdiction, the safeguards are:
+      ${legalIdentity.transferSafeguards}.</p>
     </section>
     <section>
       <h2>Retention and deletion</h2>
@@ -89,6 +133,7 @@ const privacyPolicy = layout(
       and request deletion in the app. Depending on local law, users may also
       request access, correction, restriction, objection, portability or
       erasure, and complain to their supervisory authority.</p>
+      <p>The relevant supervisory authority is ${legalIdentity.authority}.</p>
     </section>
     <section>
       <h2>Children</h2>
@@ -98,7 +143,8 @@ const privacyPolicy = layout(
     </section>
     <section>
       <h2>Contact</h2>
-      <p>Email privacy@chathouse.app. Never send a password, OTP code, access
+      <p>Email <a href="mailto:${legalIdentity.privacyEmail}">${legalIdentity.privacyEmail}</a>.
+      Never send a password, OTP code, access
       token or payment-card number by email.</p>
     </section>
   `,
@@ -111,7 +157,7 @@ const accountDeletion = layout(
       <h2>Request account and associated-data deletion</h2>
       <p>You can submit the request in ChatHouse under Settings → Privacy →
       Delete my account. If the app is no longer installed or accessible, email
-      <a href="mailto:privacy@chathouse.app?subject=ChatHouse%20account%20deletion%20request">privacy@chathouse.app</a>
+      <a href="mailto:${legalIdentity.privacyEmail}?subject=ChatHouse%20account%20deletion%20request">${legalIdentity.privacyEmail}</a>
       with the subject “ChatHouse account deletion request”. Include the
       username and the phone number or email associated with the account so
       support can verify ownership.</p>
@@ -127,8 +173,25 @@ const accountDeletion = layout(
       purged. Narrow records may be retained only where required for security,
       fraud prevention or law, as described in the privacy policy.</p>
       <p>Customer-service deletion request:
-      <a href="mailto:privacy@chathouse.app?subject=ChatHouse%20account%20deletion%20request">email privacy@chathouse.app</a>.</p>
+      <a href="mailto:${legalIdentity.privacyEmail}?subject=ChatHouse%20account%20deletion%20request">email ${legalIdentity.privacyEmail}</a>.</p>
       <p><a href="/privacy">Read the ChatHouse Privacy Policy</a>.</p>
+    </section>
+  `,
+);
+
+const support = layout(
+  'ChatHouse Support',
+  `
+    <section>
+      <h2>Contact support</h2>
+      <p>For account access, safety, technical or billing support, email
+      <a href="mailto:${legalIdentity.supportEmail}">${legalIdentity.supportEmail}</a>.
+      Do not send passwords, OTP codes, access tokens or full payment-card details.</p>
+    </section>
+    <section>
+      <h2>Privacy and account deletion</h2>
+      <p><a href="/privacy">Read the Privacy Policy</a>.</p>
+      <p><a href="/account-deletion">Request account and associated-data deletion</a>.</p>
     </section>
   `,
 );
@@ -143,4 +206,38 @@ legalRouter.get('/privacy', (_req, res) => {
 legalRouter.get('/account-deletion', (_req, res) => {
   htmlHeaders(res);
   res.status(200).send(accountDeletion);
+});
+
+legalRouter.get('/support', (_req, res) => {
+  htmlHeaders(res);
+  res.status(200).send(support);
+});
+
+legalRouter.get('/.well-known/assetlinks.json', (_req, res) => {
+  res.setHeader('Cache-Control', 'public, max-age=3600');
+  res.status(200).json([
+    {
+      relation: ['delegate_permission/common.handle_all_urls'],
+      target: {
+        namespace: 'android_app',
+        package_name: 'com.chathouse.app',
+        sha256_cert_fingerprints: [androidAppSigningSha256],
+      },
+    },
+  ]);
+});
+
+legalRouter.get('/.well-known/apple-app-site-association', (_req, res) => {
+  res.setHeader('Cache-Control', 'public, max-age=3600');
+  res.status(200).json({
+    applinks: {
+      apps: [],
+      details: [
+        {
+          appID: `${appleTeamId}.com.chathouse.app`,
+          paths: ['*'],
+        },
+      ],
+    },
+  });
 });

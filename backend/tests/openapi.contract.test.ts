@@ -155,6 +155,7 @@ describe('OpenAPI release contract', () => {
   it.each([
     ['/privacy', 'ChatHouse Privacy Policy'],
     ['/account-deletion', 'Delete a ChatHouse account'],
+    ['/support', 'ChatHouse Support'],
   ])('serves public legal resource %s with restrictive browser headers', async (path, title) => {
     const app: Express = createApp();
     const response = await request(app).get(path);
@@ -162,5 +163,26 @@ describe('OpenAPI release contract', () => {
     expect(response.text).toContain(title);
     expect(response.headers['content-security-policy']).toContain("default-src 'none'");
     expect(response.headers['referrer-policy']).toBe('no-referrer');
+  });
+
+  it('serves Android and Apple association documents without redirects', async () => {
+    const app: Express = createApp();
+    const assetLinks = await request(app).get('/.well-known/assetlinks.json');
+    const appleAssociation = await request(app).get('/.well-known/apple-app-site-association');
+
+    expect(assetLinks.status).toBe(200);
+    expect(assetLinks.headers['content-type']).toContain('application/json');
+    expect(assetLinks.body[0].target).toMatchObject({
+      namespace: 'android_app',
+      package_name: 'com.chathouse.app',
+    });
+    expect(assetLinks.body[0].target.sha256_cert_fingerprints).toHaveLength(1);
+
+    expect(appleAssociation.status).toBe(200);
+    expect(appleAssociation.headers['content-type']).toContain('application/json');
+    expect(appleAssociation.body.applinks.details[0]).toMatchObject({
+      appID: 'TESTTEAMID.com.chathouse.app',
+      paths: ['*'],
+    });
   });
 });

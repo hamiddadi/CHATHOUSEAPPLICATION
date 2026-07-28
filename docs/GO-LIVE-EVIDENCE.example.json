@@ -1,0 +1,39 @@
+{
+  "source_sha": "__40_HEXADECIMAL_COMMIT_SHA__",
+  "android": {
+    "artifact_sha256": "__64_HEXADECIMAL_AAB_SHA256__",
+    "play_internal": {
+      "status": "pending",
+      "tested_at": "2026-07-28T12:00:00Z",
+      "reference": "__PLAY_CONSOLE_RELEASE_OR_REPORT_REFERENCE__"
+    },
+    "physical_devices": [
+      {
+        "model": "__ANDROID_DEVICE_MODEL__",
+        "os_version": "__ANDROID_OS_VERSION__",
+        "status": "pending"
+      }
+    ]
+  },
+  "ios": {
+    "testflight": {
+      "status": "pending",
+      "tested_at": "2026-07-28T12:00:00Z",
+      "reference": "__TESTFLIGHT_BUILD_OR_REPORT_REFERENCE__"
+    },
+    "physical_devices": [
+      {
+        "family": "iphone",
+        "model": "__IPHONE_MODEL__",
+        "os_version": "__IOS_VERSION__",
+        "status": "pending"
+      },
+      {
+        "family": "ipad",
+        "model": "__IPAD_MODEL__",
+        "os_version": "__IPADOS_VERSION__",
+        "status": "pending"
+      }
+    ]
+  }
+}

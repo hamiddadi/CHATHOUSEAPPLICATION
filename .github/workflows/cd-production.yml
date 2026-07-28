@@ -206,12 +206,16 @@ jobs:
           DEPLOY_DIR: ${{ vars.DEPLOY_DIR || '/opt/chathouse/backend' }}
           BASE_URL: ${{ vars.BASE_URL || 'http://localhost:4000' }}
           API_SERVICE: ${{ vars.API_SERVICE || 'api' }}
+          CADDY_SERVICE: caddy
+          REQUIRE_PUBLIC_ENDPOINTS: 'true'
+          PUBLIC_API_URL: https://api.chathouse.app
+          PUBLIC_APP_URL: https://app.chathouse.com
         with:
           host: ${{ secrets.PROD_HOST }}
           username: ${{ secrets.PROD_USER }}
           key: ${{ secrets.PROD_SSH_KEY }}
           fingerprint: ${{ secrets.PROD_HOST_FINGERPRINT }}
-          envs: NEW_IMAGE,REGISTRY,REGISTRY_USER,REGISTRY_TOKEN,DEPLOY_BUNDLE,DEPLOY_DIR,BASE_URL,API_SERVICE
+          envs: NEW_IMAGE,REGISTRY,REGISTRY_USER,REGISTRY_TOKEN,DEPLOY_BUNDLE,DEPLOY_DIR,BASE_URL,API_SERVICE,CADDY_SERVICE,REQUIRE_PUBLIC_ENDPOINTS,PUBLIC_API_URL,PUBLIC_APP_URL
           script_stop: true
           command_timeout: 15m
           script: |
@@ -239,9 +243,16 @@ jobs:
             else
               rm -f "$PREVIOUS_COMPOSE"
             fi
+            PREVIOUS_CADDY="$STATE_DIR/Caddyfile.previous"
+            [ -f "$DEPLOY_DIR/Caddyfile" ] || {
+              log "Existing Caddyfile is missing; safe automatic rollback is unavailable"
+              exit 1
+            }
+            install -m 0600 "$DEPLOY_DIR/Caddyfile" "$PREVIOUS_CADDY"
 
             STAGE_DIR="$(mktemp -d /tmp/chathouse-infra.XXXXXX)"
             COMPOSE_ACTIVATED=0
+            CADDYFILE_ACTIVATED=0
             restore_compose() {
               [ "$COMPOSE_ACTIVATED" -eq 1 ] || return 0
               if [ "$HAD_PREVIOUS_COMPOSE" -eq 1 ]; then
@@ -261,9 +272,31 @@ jobs:
               fi
               COMPOSE_ACTIVATED=0
             }
+            restore_caddyfile() {
+              [ "$CADDYFILE_ACTIVATED" -eq 1 ] || return 0
+              if cmp -s "$PREVIOUS_CADDY" "$DEPLOY_DIR/Caddyfile"; then
+                CADDYFILE_ACTIVATED=0
+                return 0
+              fi
+              restore_tmp="$(mktemp "$DEPLOY_DIR/.Caddyfile.restore.XXXXXX")"
+              if ! install -m 0644 "$PREVIOUS_CADDY" "$restore_tmp"; then
+                rm -f "$restore_tmp"
+                return 1
+              fi
+              if ! mv -f "$restore_tmp" "$DEPLOY_DIR/Caddyfile"; then
+                rm -f "$restore_tmp"
+                return 1
+              fi
+              log "Restored the previous Caddyfile atomically"
+              CADDYFILE_ACTIVATED=0
+            }
             cleanup() {
               status=$?
               trap - EXIT
+              if [ "$status" -ne 0 ] && ! restore_caddyfile; then
+                log "CRITICAL: failed to restore the previous Caddyfile"
+                status=1
+              fi
               if [ "$status" -ne 0 ] && ! restore_compose; then
                 log "CRITICAL: failed to restore the previous Compose definition"
                 status=1
@@ -291,14 +324,21 @@ jobs:
 
             # This archive is a reviewed versioned allowlist and cannot replace
             # the host .env, external secret files, media, or Docker volumes.
-            # Install support files first, then atomically switch the Compose
-            # definition. The EXIT trap restores its exact previous state on
-            # every later failure, including pull/config/smoke failures.
-            tar --exclude='docker-compose.prod.yml' -xzf "$DEPLOY_BUNDLE" \
+            # Install support files first, then atomically switch Caddy and
+            # Compose. The EXIT trap restores both exact previous definitions
+            # on every later failure, including public HTTPS smoke failures.
+            tar \
+              --exclude='docker-compose.prod.yml' \
+              --exclude='Caddyfile' \
+              -xzf "$DEPLOY_BUNDLE" \
               --no-same-owner \
               --no-same-permissions \
               -C "$DEPLOY_DIR"
             chmod 0755 "$DEPLOY_DIR"/scripts/deploy/*.sh "$DEPLOY_DIR"/scripts/backup/*.sh
+            candidate_caddy="$(mktemp "$DEPLOY_DIR/.Caddyfile.candidate.XXXXXX")"
+            install -m 0644 "$STAGE_DIR/Caddyfile" "$candidate_caddy"
+            mv -f "$candidate_caddy" "$DEPLOY_DIR/Caddyfile"
+            CADDYFILE_ACTIVATED=1
             candidate_compose="$(mktemp "$DEPLOY_DIR/.docker-compose.prod.candidate.XXXXXX")"
             install -m 0640 "$STAGE_DIR/docker-compose.prod.yml" "$candidate_compose"
             mv -f "$candidate_compose" "$DEPLOY_DIR/docker-compose.prod.yml"
@@ -310,10 +350,17 @@ jobs:
             DEPLOY_DIR="$DEPLOY_DIR" \
               COMPOSE_FILE="$DEPLOY_DIR/docker-compose.prod.yml" \
               ROLLBACK_COMPOSE_FILE="$PREVIOUS_COMPOSE" \
+              CADDY_SERVICE="$CADDY_SERVICE" \
+              CADDYFILE="$DEPLOY_DIR/Caddyfile" \
+              ROLLBACK_CADDYFILE="$PREVIOUS_CADDY" \
               BASE_URL="$BASE_URL" \
               API_SERVICE="$API_SERVICE" \
+              REQUIRE_PUBLIC_ENDPOINTS="$REQUIRE_PUBLIC_ENDPOINTS" \
+              PUBLIC_API_URL="$PUBLIC_API_URL" \
+              PUBLIC_APP_URL="$PUBLIC_APP_URL" \
               "$DEPLOY_DIR/scripts/deploy/deploy-image.sh" "$NEW_IMAGE"
             COMPOSE_ACTIVATED=0
+            CADDYFILE_ACTIVATED=0
             docker image prune -f >/dev/null 2>&1 || true
 
   promote-release:

@@ -17,20 +17,22 @@ for encryption docs.
 
 ## Data linked to you (all "App Functionality" purpose unless noted)
 
-| Category     | Data type           | Purpose                                         |
-| ------------ | ------------------- | ----------------------------------------------- |
-| Contact Info | Name                | App Functionality                               |
-| Contact Info | Email Address       | App Functionality                               |
-| Contact Info | Phone Number        | App Functionality (OTP)                         |
-| User Content | Photos or Videos    | App Functionality (profile photo)               |
-| User Content | Audio Data          | App Functionality (audio rooms, voice messages) |
-| User Content | Other User Content  | App Functionality (messages, room chat, bio)    |
-| Identifiers  | User ID             | App Functionality                               |
-| Identifiers  | Device ID           | App Functionality (push notifications)          |
-| Location     | Precise Location    | App Functionality (map / nearby)                |
-| Location     | Coarse Location     | App Functionality (reduced-accuracy map access) |
-| Purchases    | Purchase History    | App Functionality (account history/entitlement) |
-| Usage Data   | Product Interaction | App Functionality, Product Personalization      |
+| Category     | Data type               | Purpose                                                                  |
+| ------------ | ----------------------- | ------------------------------------------------------------------------ |
+| Contact Info | Name                    | App Functionality                                                        |
+| Contact Info | Email Address           | App Functionality                                                        |
+| Contact Info | Phone Number            | App Functionality (OTP)                                                  |
+| User Content | Photos or Videos        | App Functionality (profile photo)                                        |
+| User Content | Audio Data              | App Functionality (audio rooms, voice messages)                          |
+| User Content | Emails or Text Messages | App Functionality (direct/group/room messages)                           |
+| User Content | Other User Content      | App Functionality, Product Personalization (room chat, bio, interests)   |
+| Identifiers  | User ID                 | App Functionality                                                        |
+| Identifiers  | Device ID               | App Functionality (push notifications)                                   |
+| Location     | Precise Location        | App Functionality, Product Personalization (map / nearby)                |
+| Location     | Coarse Location         | App Functionality, Product Personalization (reduced-accuracy map access) |
+| Purchases    | Purchase History        | App Functionality (account history/entitlement)                          |
+| Usage Data   | Product Interaction     | App Functionality, Product Personalization                               |
+| Usage Data   | Search History          | App Functionality, Product Personalization                               |
 
 ## Data not linked to you
 
@@ -47,6 +49,12 @@ email, request body or stable device linkage requires moving it to "Linked".
 Room recording/replays are release-disabled. `Audio Data` remains required
 because users may deliberately store private voice messages and LiveKit
 ephemerally transports live room audio.
+
+Search queries submitted from Explore are stored in the signed-in account's
+search history so users can revisit, remove, or clear them. Apple defines
+`Search History` as searches performed in the app, so it is declared as linked
+to the user, used for app functionality and product personalization, and not
+used for tracking.
 
 The iOS client does not initiate tips or Premium purchases and does not link to
 Stripe Checkout or the Stripe billing portal. `Purchase History` remains

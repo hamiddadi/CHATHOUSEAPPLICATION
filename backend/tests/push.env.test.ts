@@ -7,6 +7,15 @@ const inlineServiceAccount = JSON.stringify({
 
 const validProductionEnv = (): NodeJS.ProcessEnv => ({
   NODE_ENV: 'production',
+  LEGAL_ENTITY_NAME: 'ChatHouse Test Operator',
+  LEGAL_REGISTERED_ADDRESS: '1 Release Test Street',
+  LEGAL_JURISDICTION: 'Test jurisdiction',
+  LEGAL_SUPERVISORY_AUTHORITY: 'Test Data Protection Authority',
+  LEGAL_TRANSFER_SAFEGUARDS: 'Standard contractual clauses for release tests',
+  PRIVACY_CONTACT_EMAIL: 'privacy@chathouse.test',
+  SUPPORT_CONTACT_EMAIL: 'support@chathouse.test',
+  APPLE_TEAM_ID: 'A1B2C3D4E5',
+  ANDROID_APP_SIGNING_SHA256: Array.from({ length: 32 }, () => 'CD').join(':'),
   DATABASE_URL: 'postgresql://user:password@db.example.com:5432/chathouse',
   REDIS_URL: 'redis://redis.example.com:6379',
   JWT_ACCESS_SECRET: 'production-access-secret-that-is-long-enough',
@@ -80,6 +89,32 @@ describe('production push environment', () => {
     expect(output).toContain(
       'FIREBASE_SERVICE_ACCOUNT and FIREBASE_USE_ADC are mutually exclusive',
     );
+  });
+
+  it('rejects placeholder legal identity', async () => {
+    process.env = {
+      ...validProductionEnv(),
+      FIREBASE_USE_ADC: 'true',
+      LEGAL_ENTITY_NAME: '__CHANGE_ME__',
+    };
+
+    const output = await expectBootRejection();
+
+    expect(output).toContain('LEGAL_ENTITY_NAME');
+  });
+
+  it('rejects malformed production signing identifiers', async () => {
+    process.env = {
+      ...validProductionEnv(),
+      FIREBASE_USE_ADC: 'true',
+      APPLE_TEAM_ID: '__CHANGE_ME__',
+      ANDROID_APP_SIGNING_SHA256: '__CHANGE_ME__',
+    };
+
+    const output = await expectBootRejection();
+
+    expect(output).toContain('APPLE_TEAM_ID');
+    expect(output).toContain('ANDROID_APP_SIGNING_SHA256');
   });
 
   it('accepts a structurally valid inline service account', async () => {

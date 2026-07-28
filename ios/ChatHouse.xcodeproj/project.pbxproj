@@ -13,6 +13,14 @@
 		81AB9BB82411601600AC10FF /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */; };
 		A10000000000000000000001 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB81A68108700A75B9A /* PrivacyInfo.xcprivacy */; };
 		A10000000000000000000002 /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000004 /* GoogleService-Info.plist */; };
+		A20000000000000000000001 /* Inter-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000011 /* Inter-Bold.ttf */; };
+		A20000000000000000000002 /* Inter-Medium.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000012 /* Inter-Medium.ttf */; };
+		A20000000000000000000003 /* Inter-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000013 /* Inter-Regular.ttf */; };
+		A20000000000000000000004 /* Inter-SemiBold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000014 /* Inter-SemiBold.ttf */; };
+		A20000000000000000000005 /* Manrope-Bold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000015 /* Manrope-Bold.ttf */; };
+		A20000000000000000000006 /* Manrope-ExtraBold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000016 /* Manrope-ExtraBold.ttf */; };
+		A20000000000000000000007 /* Manrope-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000017 /* Manrope-Regular.ttf */; };
+		A20000000000000000000008 /* Manrope-SemiBold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000018 /* Manrope-SemiBold.ttf */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -27,6 +35,14 @@
 		5DCACB8F33CDC322A6C60F78 /* libPods-ChatHouse.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-ChatHouse.a"; sourceTree = BUILT_PRODUCTS_DIR; };
 		761780EC2CA45674006654EE /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppDelegate.swift; path = ChatHouse/AppDelegate.swift; sourceTree = "<group>"; };
 		81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = LaunchScreen.storyboard; path = ChatHouse/LaunchScreen.storyboard; sourceTree = "<group>"; };
+		A20000000000000000000011 /* Inter-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Inter-Bold.ttf"; sourceTree = "<group>"; };
+		A20000000000000000000012 /* Inter-Medium.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Inter-Medium.ttf"; sourceTree = "<group>"; };
+		A20000000000000000000013 /* Inter-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Inter-Regular.ttf"; sourceTree = "<group>"; };
+		A20000000000000000000014 /* Inter-SemiBold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Inter-SemiBold.ttf"; sourceTree = "<group>"; };
+		A20000000000000000000015 /* Manrope-Bold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Manrope-Bold.ttf"; sourceTree = "<group>"; };
+		A20000000000000000000016 /* Manrope-ExtraBold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Manrope-ExtraBold.ttf"; sourceTree = "<group>"; };
+		A20000000000000000000017 /* Manrope-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Manrope-Regular.ttf"; sourceTree = "<group>"; };
+		A20000000000000000000018 /* Manrope-SemiBold.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Manrope-SemiBold.ttf"; sourceTree = "<group>"; };
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
@@ -52,9 +68,26 @@
 				A10000000000000000000004 /* GoogleService-Info.plist */,
 				81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */,
 				13B07FB81A68108700A75B9A /* PrivacyInfo.xcprivacy */,
+				A20000000000000000000020 /* App Fonts */,
 			);
 			name = ChatHouse;
 			sourceTree = "<group>";
+		};
+		A20000000000000000000020 /* App Fonts */ = {
+			isa = PBXGroup;
+			children = (
+				A20000000000000000000011 /* Inter-Bold.ttf */,
+				A20000000000000000000012 /* Inter-Medium.ttf */,
+				A20000000000000000000013 /* Inter-Regular.ttf */,
+				A20000000000000000000014 /* Inter-SemiBold.ttf */,
+				A20000000000000000000015 /* Manrope-Bold.ttf */,
+				A20000000000000000000016 /* Manrope-ExtraBold.ttf */,
+				A20000000000000000000017 /* Manrope-Regular.ttf */,
+				A20000000000000000000018 /* Manrope-SemiBold.ttf */,
+			);
+			name = "App Fonts";
+			path = ../android/app/src/main/assets/fonts;
+			sourceTree = SOURCE_ROOT;
 		};
 		2D16E6871FA4F8E400B85C8A /* Frameworks */ = {
 			isa = PBXGroup;
@@ -178,6 +211,14 @@
 				13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */,
 				A10000000000000000000001 /* PrivacyInfo.xcprivacy in Resources */,
 				A10000000000000000000002 /* GoogleService-Info.plist in Resources */,
+				A20000000000000000000001 /* Inter-Bold.ttf in Resources */,
+				A20000000000000000000002 /* Inter-Medium.ttf in Resources */,
+				A20000000000000000000003 /* Inter-Regular.ttf in Resources */,
+				A20000000000000000000004 /* Inter-SemiBold.ttf in Resources */,
+				A20000000000000000000005 /* Manrope-Bold.ttf in Resources */,
+				A20000000000000000000006 /* Manrope-ExtraBold.ttf in Resources */,
+				A20000000000000000000007 /* Manrope-Regular.ttf in Resources */,
+				A20000000000000000000008 /* Manrope-SemiBold.ttf in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

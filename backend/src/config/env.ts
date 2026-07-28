@@ -84,6 +84,36 @@ const envSchema = z.object({
   // media capability URLs never contain an internal proxy/container host.
   PUBLIC_URL: z.string().url().optional(),
 
+  // Public legal identity. Production pages (/privacy, /account-deletion and
+  // /support) are rendered from these values, and production refuses to boot
+  // while any required value is missing or still contains a template marker.
+  LEGAL_ENTITY_NAME: z.string().trim().min(2).optional(),
+  LEGAL_REGISTERED_ADDRESS: z.string().trim().min(5).optional(),
+  LEGAL_JURISDICTION: z.string().trim().min(2).optional(),
+  LEGAL_SUPERVISORY_AUTHORITY: z.string().trim().min(2).optional(),
+  LEGAL_TRANSFER_SAFEGUARDS: z.string().trim().min(5).optional(),
+  PRIVACY_CONTACT_EMAIL: z.string().trim().email().optional(),
+  SUPPORT_CONTACT_EMAIL: z.string().trim().email().optional(),
+  APPLE_TEAM_ID: z
+    .string()
+    .trim()
+    .regex(/^[A-Z0-9]{10}$/, 'APPLE_TEAM_ID must be the 10-character Apple Team ID')
+    .optional(),
+  ANDROID_APP_SIGNING_SHA256: z
+    .string()
+    .trim()
+    .refine(
+      value => {
+        const octets = value.split(':');
+        return octets.length === 32 && octets.every(octet => /^[A-F0-9]{2}$/i.test(octet));
+      },
+      {
+        message:
+          'ANDROID_APP_SIGNING_SHA256 must be a colon-separated SHA-256 certificate fingerprint',
+      },
+    )
+    .optional(),
+
   // Private media storage (avatars + voice notes). Local storage is allowed
   // only for development/test and is never exposed through express.static.
   // Production must use a private S3-compatible bucket.
@@ -331,6 +361,35 @@ if (env.NODE_ENV === 'production') {
     console.error(
       `❌ Invalid production delivery configuration:\n- ${missingDeliveryFields
         .map(field => `${field} is required in production`)
+        .join('\n- ')}`,
+    );
+    process.exit(1);
+  }
+}
+
+if (env.NODE_ENV === 'production') {
+  const requiredLegalFields = [
+    'LEGAL_ENTITY_NAME',
+    'LEGAL_REGISTERED_ADDRESS',
+    'LEGAL_JURISDICTION',
+    'LEGAL_SUPERVISORY_AUTHORITY',
+    'LEGAL_TRANSFER_SAFEGUARDS',
+    'PRIVACY_CONTACT_EMAIL',
+    'SUPPORT_CONTACT_EMAIL',
+    'APPLE_TEAM_ID',
+    'ANDROID_APP_SIGNING_SHA256',
+  ] as const;
+  const placeholder = /change[_ -]?me|placeholder|replace|your[_ -]|example\.(com|net|org)/i;
+  const invalidLegalFields = requiredLegalFields.filter(field => {
+    const value = env[field];
+    return !value || placeholder.test(value);
+  });
+
+  if (invalidLegalFields.length > 0) {
+    // eslint-disable-next-line no-console
+    console.error(
+      `❌ Invalid production legal configuration:\n- ${invalidLegalFields
+        .map(field => `${field} must contain the reviewed production value`)
         .join('\n- ')}`,
     );
     process.exit(1);

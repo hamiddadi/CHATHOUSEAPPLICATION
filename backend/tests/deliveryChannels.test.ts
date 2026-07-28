@@ -18,6 +18,18 @@ const productionEnv: DeliveryEnv = {
   MAIL_FROM: 'no-reply@chathouse.test',
 };
 
+const legalProductionEnv: NodeJS.ProcessEnv = {
+  LEGAL_ENTITY_NAME: 'ChatHouse Test Operator',
+  LEGAL_REGISTERED_ADDRESS: '1 Release Test Street',
+  LEGAL_JURISDICTION: 'Test jurisdiction',
+  LEGAL_SUPERVISORY_AUTHORITY: 'Test Data Protection Authority',
+  LEGAL_TRANSFER_SAFEGUARDS: 'Standard contractual clauses for release tests',
+  PRIVACY_CONTACT_EMAIL: 'privacy@chathouse.test',
+  SUPPORT_CONTACT_EMAIL: 'support@chathouse.test',
+  APPLE_TEAM_ID: 'A1B2C3D4E5',
+  ANDROID_APP_SIGNING_SHA256: Array.from({ length: 32 }, () => 'AB').join(':'),
+};
+
 const loadMailer = (mockEnv: DeliveryEnv) => {
   jest.resetModules();
   const info = jest.fn();
@@ -223,6 +235,7 @@ describe('production delivery configuration at boot', () => {
   it('rejects startup when any required SMS or email setting is absent', async () => {
     process.env = {
       ...originalEnv,
+      ...legalProductionEnv,
       NODE_ENV: 'production',
       DATABASE_URL: 'postgresql://user:password@db.example.com:5432/chathouse',
       REDIS_URL: 'redis://redis.example.com:6379',
@@ -257,6 +270,7 @@ describe('production delivery configuration at boot', () => {
   it('rejects the documented Resend placeholder in production', async () => {
     process.env = {
       ...originalEnv,
+      ...legalProductionEnv,
       NODE_ENV: 'production',
       DATABASE_URL: 'postgresql://user:password@db.example.com:5432/chathouse',
       REDIS_URL: 'redis://redis.example.com:6379',

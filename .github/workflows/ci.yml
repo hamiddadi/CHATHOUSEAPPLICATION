@@ -2,20 +2,66 @@ name: CI
 
 on:
   workflow_call:
+  workflow_dispatch:
   push:
-    branches: [main, develop]
+    branches: ['**']
   pull_request:
-    branches: [main, develop]
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
+
+permissions:
+  contents: read
 
 env:
   NODE_VERSION: '22.23.1'
   MAESTRO_VERSION: '2.4.0'
 
 jobs:
+  source-integrity:
+    name: Source - exact checked-out revision
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Prove that CI validates the event SHA
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          actual_sha="$(git rev-parse HEAD)"
+          if [[ ! "$EXPECTED_SHA" =~ ^[a-f0-9]{40}$ ]]; then
+            echo "GitHub did not provide a full commit SHA: ${EXPECTED_SHA}" >&2
+            exit 1
+          fi
+          if [ "$actual_sha" != "$EXPECTED_SHA" ]; then
+            echo "Checked-out revision ${actual_sha} differs from event SHA ${EXPECTED_SHA}" >&2
+            exit 1
+          fi
+          if [ -n "$(git status --porcelain --untracked-files=all)" ]; then
+            echo "Checkout contains tracked or untracked modifications before validation" >&2
+            exit 1
+          fi
+          echo "Validated exact revision \`${actual_sha}\`." >> "$GITHUB_STEP_SUMMARY"
+
+  go-live-preflight-contract:
+    name: Go-Live preflight - contract tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Test the dependency-free preflight
+        run: node --test scripts/go-live-preflight.test.mjs
+      - name: Validate this exact checkout through the shared preflight
+        env:
+          GO_LIVE_EXPECTED_SHA: ${{ github.sha }}
+        run: node scripts/go-live-preflight.mjs --scope source
+
   # Frontend (React Native)
   frontend-lint:
     name: Frontend — Lint + Prettier
@@ -536,4 +582,4 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-      - run: npm audit --audit-level=high
+      - run: npm audit --omit=dev --audit-level=high

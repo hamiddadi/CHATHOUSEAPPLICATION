@@ -66,7 +66,10 @@ environment:
       value: http://localhost:4000 # health-check target on the host
     - name: API_SERVICE
       value: api # docker compose service name to recreate
-
+    # Required release-gate origins. Deliberately no repository fallback: set
+    # both to the real staging HTTPS hosts after DNS/TLS are provisioned.
+    - name: PUBLIC_API_URL
+    - name: PUBLIC_APP_URL
 
 # ─────────────────────────────────────────────────────────────────────────────
 # PRODUCTION environment (create separately, same mechanism, STRICTER rules):

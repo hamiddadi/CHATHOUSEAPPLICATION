@@ -9,6 +9,9 @@
   <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30"/>
   <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
   <uses-permission android:name="android.permission.CAMERA" tools:node="remove"/>
+  <!-- Keep camera optional for stores/lint even though the transitive permission
+       above is removed from the final merged manifest. -->
+  <uses-feature android:name="android.hardware.camera" android:required="false"/>
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"/>
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE"/>
@@ -21,7 +24,8 @@
   <uses-permission android:name="android.permission.USE_FINGERPRINT" tools:node="remove"/>
   <uses-permission android:name="android.permission.VIBRATE"/>
   <uses-permission android:name="android.permission.WAKE_LOCK"/>
-  <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" tools:node="remove"/>
+  <!-- This is a manifest-merger removal marker, not an app permission. -->
+  <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" tools:node="remove" tools:ignore="ScopedStorage"/>
   <queries>
     <intent>
       <action android:name="android.intent.action.VIEW"/>
@@ -44,7 +48,10 @@
     <meta-data android:name="com.google.firebase.messaging.default_notification_channel_id" android:value="default" tools:replace="android:value"/>
     <service android:name="com.chathouse.audio.RoomForegroundService" android:exported="false" android:foregroundServiceType="mediaPlayback|microphone" android:stopWithTask="true"/>
     <service android:name="com.oney.WebRTCModule.MediaProjectionService" tools:node="remove"/>
-    <service android:name="app.notifee.core.ForegroundService" tools:node="remove"/>
+    <!-- ChatHouse uses RoomForegroundService and never registers Notifee's
+         optional notification foreground service. MissingClass is expected on
+         this manifest-merger removal marker. -->
+    <service android:name="app.notifee.core.ForegroundService" tools:node="remove" tools:ignore="MissingClass"/>
     <activity android:name=".MainActivity" android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|uiMode|smallestScreenSize|locale|layoutDirection" android:launchMode="singleTask" android:windowSoftInputMode="adjustResize" android:theme="@style/Theme.App.SplashScreen" android:exported="true">
       <intent-filter>
         <action android:name="android.intent.action.MAIN"/>
