@@ -1,15 +1,16 @@
 import { z } from 'zod';
+import { publicContentString } from '../../utils/publicContentModeration';
 
 export const createGroupSchema = z.object({
   // Optional group name; when omitted the client falls back to member names.
-  title: z.string().trim().min(1).max(80).optional(),
+  title: publicContentString(z.string().trim().min(1).max(80)).optional(),
   // The OTHER members (the creator is added implicitly). A group is 3+ people,
   // so we require at least two others — a single pick is a 1:1 DM instead.
   memberIds: z.array(z.string().min(1)).min(2).max(50),
 });
 
 export const sendGroupMessageSchema = z.object({
-  content: z.string().trim().min(1).max(2000),
+  content: publicContentString(z.string().trim().min(1).max(2000)),
 });
 
 // Voice note: the client uploads the clip to /upload/voice first, then posts
@@ -33,11 +34,7 @@ export const addGroupMembersSchema = z.object({
 export const renameGroupSchema = z.object({
   // An empty (or whitespace-only) title clears the custom name and reverts the
   // group to its auto-generated member-name label (title column is nullable).
-  title: z
-    .string()
-    .trim()
-    .max(80)
-    .transform(t => (t.length === 0 ? null : t)),
+  title: publicContentString(z.string().trim().max(80)).transform(t => (t.length === 0 ? null : t)),
 });
 
 export type CreateGroupInput = z.infer<typeof createGroupSchema>;

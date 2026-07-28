@@ -88,9 +88,10 @@ else
 fi
 
 # 5. Build the standalone release APK. `assembleRelease` bundles the Hermes JS +
-#    assets into the APK (unlike debug, which expects Metro). With no
-#    CHATHOUSE_UPLOAD_* keystore provided, build.gradle falls back to the debug
-#    keystore, so the output is signed and installable (NOT Play-shippable).
+#    assets into the APK (unlike debug, which expects Metro). The Gradle project
+#    deliberately rejects unsigned release tasks, so this LOCAL-TEST-ONLY builder
+#    explicitly supplies the committed debug keystore. Production/store builds
+#    must use scripts/build-release-aab.ps1 and a private upload keystore.
 echo "==> Building release APK (ABIs: ${APK_ABIS}) — first run downloads Gradle 9, be patient ..."
 cd "${WORK}/android"
 sed -i 's/\r$//' ./gradlew 2>/dev/null || true
@@ -103,7 +104,7 @@ chmod +x ./gradlew
 # worker keeps peak memory bounded.
 mkdir -p "${GRADLE_USER_HOME:-$HOME/.gradle}"
 cat > "${GRADLE_USER_HOME:-$HOME/.gradle}/gradle.properties" <<'EOF'
-org.gradle.jvmargs=-Xmx2560m -XX:MaxMetaspaceSize=512m -Dfile.encoding=UTF-8
+org.gradle.jvmargs=-Xmx2560m -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8
 org.gradle.daemon=false
 org.gradle.parallel=false
 org.gradle.workers.max=1
@@ -114,6 +115,11 @@ EOF
 
 ./gradlew :app:assembleRelease \
   -PreactNativeArchitectures="${APK_ABIS}" \
+  -PCHATHOUSE_UPLOAD_STORE_FILE=debug.keystore \
+  -PCHATHOUSE_UPLOAD_STORE_PASSWORD=android \
+  -PCHATHOUSE_UPLOAD_KEY_ALIAS=androiddebugkey \
+  -PCHATHOUSE_UPLOAD_KEY_PASSWORD=android \
+  -PCHATHOUSE_ALLOW_DEBUG_RELEASE_SIGNING=true \
   --no-daemon --max-workers=1
 
 # 6. Export the APK to the mounted output dir with a host-tagged name.

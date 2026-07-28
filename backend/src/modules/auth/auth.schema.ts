@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { publicContentString } from '../../utils/publicContentModeration';
 
 export const registerSchema = z.object({
   username: z
@@ -16,7 +17,7 @@ export const registerSchema = z.object({
     .max(180)
     .transform(e => e.toLowerCase()),
   password: z.string().min(8).max(128),
-  displayName: z.string().min(1).max(60).optional(),
+  displayName: publicContentString(z.string().min(1).max(60)).optional(),
   ageConfirmed: z.boolean().optional(),
 });
 

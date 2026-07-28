@@ -192,13 +192,14 @@
 			inputPaths = (
 				"$(SRCROOT)/.xcode.env.local",
 				"$(SRCROOT)/.xcode.env",
+				"$(SRCROOT)/scripts/bundle-react-native.sh",
 			);
 			name = "Bundle React Native code and images";
 			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "set -e\n\nexport ENTRY_FILE=\"${ENTRY_FILE:-$PROJECT_DIR/../index.ts}\"\nWITH_ENVIRONMENT=\"$REACT_NATIVE_PATH/scripts/xcode/with-environment.sh\"\nREACT_NATIVE_XCODE=\"$REACT_NATIVE_PATH/scripts/react-native-xcode.sh\"\nSENTRY_XCODE=\"$PROJECT_DIR/../node_modules/@sentry/react-native/scripts/sentry-xcode.sh\"\n\nif [ -z \"$SENTRY_AUTH_TOKEN\" ]; then\n  export SENTRY_DISABLE_AUTO_UPLOAD=true\nfi\n\n/bin/sh -c \"\\\"$WITH_ENVIRONMENT\\\" \\\"$SENTRY_XCODE\\\" \\\"$REACT_NATIVE_XCODE\\\"\"\n";
+			shellScript = "set -e\n\nBUNDLE_WRAPPER=\"$PROJECT_DIR/scripts/bundle-react-native.sh\"\nexec /bin/bash \"$BUNDLE_WRAPPER\"\n";
 		};
 		00EEFC60759A1932668264C0 /* [CP] Embed Pods Frameworks */ = {
 			isa = PBXShellScriptBuildPhase;

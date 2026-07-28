@@ -25,6 +25,22 @@ const checkAndBumpRateLimit = async (phoneNumber: string): Promise<boolean> => {
   return count <= env.OTP_RATE_LIMIT_PER_HOUR;
 };
 
+const refundRateLimit = async (phoneNumber: string): Promise<void> => {
+  // Atomic refund: a provider/DB failure must not consume one of the user's
+  // hourly delivery attempts, and an expired key must not be recreated as a
+  // negative counter.
+  await redis.eval(
+    `
+      local current = tonumber(redis.call('GET', KEYS[1]) or '0')
+      if current <= 1 then
+        return redis.call('DEL', KEYS[1])
+      end
+      return redis.call('DECR', KEYS[1])
+    `,
+    { keys: [rateKey(phoneNumber)], arguments: [] },
+  );
+};
+
 /**
  * Dev/QA test-number allowlist (OTP_TEST_NUMBERS, comma-separated). Entries may
  * be E.164 or bare national digits; matching is digit-suffix so the country
@@ -106,28 +122,29 @@ export const otpService = {
     const codeHash = await hash(code, SALT_ROUNDS);
     const expiresAt = new Date(Date.now() + env.OTP_TTL_MINUTES * 60 * 1000);
 
-    // OTP-03: send the SMS BEFORE touching the DB. If delivery fails we throw
-    // here, leaving previously-issued codes intact — the user isn't locked out
-    // by a phantom unsent code. Only on confirmed delivery do we atomically
-    // invalidate old codes and commit the new one (one transaction so a
-    // partial state — old codes voided but new code missing — can't happen).
-    await sendSms(
-      { to: input.phoneNumber, body: `Your Chathouse code: ${code}` },
-      // Dev hint: the raw code is also logged so you can test without SMS.
-      env.NODE_ENV === 'production' ? undefined : { code },
-    );
-
-    await prisma.$transaction([
-      // Invalidate any previous unused codes for this phone — only the latest
-      // emitted code is valid.
-      prisma.otpCode.updateMany({
-        where: { phoneNumber: input.phoneNumber, isUsed: false },
-        data: { isUsed: true },
-      }),
-      prisma.otpCode.create({
+    // Persist before contacting Twilio so a provider-accepted SMS never carries
+    // a code that a later database failure prevented us from storing.
+    // Verification always selects the newest record (including used records),
+    // so an older code can never become valid again after a resend.
+    let record: { id: string } | undefined;
+    try {
+      record = await prisma.otpCode.create({
         data: { phoneNumber: input.phoneNumber, codeHash, expiresAt },
-      }),
-    ]);
+        select: { id: true },
+      });
+      await sendSms(
+        { to: input.phoneNumber, body: `Your Chathouse code: ${code}` },
+        // Dev hint: the raw code is also logged so you can test without SMS.
+        env.NODE_ENV === 'production' ? undefined : { code },
+      );
+    } catch (err) {
+      const cleanup = record
+        ? prisma.otpCode.delete({ where: { id: record.id } })
+        : Promise.resolve(undefined);
+      await Promise.allSettled([cleanup, refundRateLimit(input.phoneNumber)]);
+      throw err;
+    }
+
     if (env.NODE_ENV !== 'production') {
       logger.info(`[otp] issued ${code} for ${input.phoneNumber} (ttl ${env.OTP_TTL_MINUTES}m)`);
     }
@@ -149,13 +166,12 @@ export const otpService = {
     const record = await prisma.otpCode.findFirst({
       where: {
         phoneNumber: input.phoneNumber,
-        isUsed: false,
         expiresAt: { gt: new Date() },
       },
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     });
 
-    if (!record) {
+    if (!record || record.isUsed) {
       throw new AppError('AUTH_002', 'OTP code expired or not found');
     }
 

@@ -24,12 +24,16 @@ image selection on physical Android and iOS devices.
 
 Configure the upload key as described in
 [`RELEASE-SIGNING.md`](../RELEASE-SIGNING.md), provide the production `.env`,
-Firebase config and Maps key, then run:
+Firebase config and Maps key, then run from the repository root:
 
-```bash
-cd android
-VERSION_CODE=42 VERSION_NAME=1.4.0 ./gradlew :app:bundleRelease
+```powershell
+.\scripts\build-release-aab.ps1 -VersionCode 42 -VersionName 1.4.0
 ```
+
+On macOS/Linux, run the same script with PowerShell 7 (`pwsh`). Do not create a
+store artifact with a raw `gradlew bundleRelease`: the Gradle guard rejects
+non-technical Release tasks that have not passed the production environment,
+version, Firebase, Maps and upload-signing checks.
 
 Upload `android/app/build/outputs/bundle/release/app-release.aab` to an Internal
 testing track first. After Play App Signing is active, register its signing
@@ -49,6 +53,14 @@ open ios/ChatHouse.xcworkspace
 In Xcode, select the production team/profile, increment version/build, archive,
 validate, and distribute to TestFlight. Verify APNs/FCM on a physical TestFlight
 device before App Review.
+
+For the current release, verify that neither mobile platform exposes a Premium
+subscribe/manage row or tip action, and that no Stripe Checkout or billing
+portal can be opened from the app. Do not enable these flows in a store build
+until native store billing is shipped or the app is enrolled in, and implements,
+an applicable regional alternative-billing program. Also verify that an
+existing server-side Premium entitlement does not unlock paid-only mobile
+functionality (profile-viewer history or the expanded profile-link allowance).
 
 For command-line CI archives, provide an Apple Distribution certificate,
 provisioning profile and App Store Connect API key through the CI secret store.

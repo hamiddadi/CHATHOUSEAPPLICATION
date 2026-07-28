@@ -75,6 +75,11 @@ export {
 } from './hooks/usePremium';
 export { ExtTipSheet } from './components/ExtTipSheet';
 export { ExtPremiumRow } from './components/ExtPremiumRow';
+export {
+  areExternalDigitalPurchasesAllowed,
+  assertExternalDigitalPurchasesAllowed,
+  EXTERNAL_DIGITAL_PURCHASES_DISABLED_MESSAGE,
+} from './utils/digitalPurchases';
 
 // ─── Vague 9 ───
 export { calendarApi } from './api/calendarApi';

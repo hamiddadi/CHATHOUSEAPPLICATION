@@ -10,6 +10,12 @@ log() {
   printf '%s [backup-entrypoint] %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$*"
 }
 
+# `docker compose run backup pg_backup.sh|pg_restore.sh` supplies an explicit
+# command. Execute it directly instead of starting the cron daemon.
+if [ "$#" -gt 0 ]; then
+  exec "$@"
+fi
+
 BACKUP_CRON_SCHEDULE="${BACKUP_CRON_SCHEDULE:-0 2 * * *}"
 CRON_LOG="/var/log/pg_backup.log"
 CRONTAB_FILE="/etc/crontabs/root"
@@ -18,8 +24,9 @@ CRONTAB_FILE="/etc/crontabs/root"
 # into /etc/environment so the scheduled job inherits them via the login shell.
 log "Capturing backup environment for cron jobs"
 {
-  for var in POSTGRES_HOST POSTGRES_PORT POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD \
+  for var in POSTGRES_HOST POSTGRES_PORT POSTGRES_DB POSTGRES_ADMIN_DB POSTGRES_USER POSTGRES_PASSWORD \
              BACKUP_DIR BACKUP_RETENTION_DAYS \
+             RESTORE_MODE RESTORE_ALLOW_REPLACE \
              S3_BACKUP_BUCKET S3_BACKUP_PREFIX \
              AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_DEFAULT_REGION AWS_REGION; do
     if [ -n "${!var:-}" ]; then

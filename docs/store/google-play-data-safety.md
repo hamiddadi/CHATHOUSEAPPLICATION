@@ -1,9 +1,10 @@
 # Google Play — Data Safety form (answer sheet)
 
-Fill this into **Play Console → App content → Data safety**. It is the
-source-of-truth answer sheet derived from the application and Prisma schema.
-No advertising SDK or cross-app tracking is present. Console submission remains
-a manual release-gate action; this file cannot update Play Console by itself.
+Use this as a working inventory for **Play Console → App content → Data
+safety**. It is derived from the repository, but the final answers must be
+reconciled with the exact signed build, SDK disclosures and provider contracts.
+No advertising SDK or cross-app tracking is currently identified. Console
+submission remains a manual release gate; this file cannot update Play Console.
 
 ## Overview answers
 
@@ -28,8 +29,8 @@ data for its own purposes, change that row to Shared = Yes.
 | Personal info          | Phone number                  | Yes       | No     | Hosting, Twilio                 | Authentication, account management    | Required  |
 | Personal info          | User IDs                      | Yes       | No     | Hosting, Stripe                 | App functionality, account, fraud     | Required  |
 | Personal info          | Other info (bio/social links) | Yes       | No     | Hosting                         | App functionality, personalization    | Optional  |
-| Location               | Approximate location          | Yes       | No     | Hosting                         | App functionality, personalization    | Optional  |
-| Location               | Precise location              | Yes       | No     | Hosting                         | App functionality, personalization    | Optional  |
+| Location               | Approximate location          | Yes       | No     | Hosting, Google Maps Platform   | App functionality, personalization    | Optional  |
+| Location               | Precise location              | Yes       | No     | Hosting, Google Maps Platform   | App functionality, personalization    | Optional  |
 | Financial info         | Purchase history              | Yes       | No     | Stripe                          | App functionality, fraud/compliance   | Optional  |
 | Photos and videos      | Photos                        | Yes       | No     | Private object storage          | App functionality                     | Optional  |
 | Audio files            | Voice or sound recordings     | Yes       | No     | LiveKit, private object storage | App functionality                     | Optional  |
@@ -37,15 +38,26 @@ data for its own purposes, change that row to Shared = Yes.
 | App activity           | App interactions              | Yes       | No     | Hosting                         | App functionality, personalization    | Required  |
 | App activity           | Other user-generated content  | Yes       | No     | Hosting                         | App functionality, moderation         | Optional  |
 | App info & performance | Crash logs                    | Yes       | No     | Sentry                          | Analytics/diagnostics                 | Optional  |
-| App info & performance | Diagnostics                   | Yes       | No     | Sentry                          | Analytics/diagnostics                 | Optional  |
-| Device or other IDs    | Device or other IDs           | Yes       | No     | Firebase/FCM and APNs           | App functionality (notifications)     | Optional  |
+| App info & performance | Diagnostics                   | Yes       | No     | Sentry, Google Maps Platform    | Analytics/diagnostics, functionality  | Optional  |
+| Device or other IDs    | Device or other IDs           | Yes       | No     | Firebase/FCM, APNs, Google Maps | App functionality, fraud prevention   | Optional  |
 
-> Note on "Financial info": the app never stores card data — Stripe Checkout
-> handles card entry. Declare only **purchase history**, processed by Stripe.
+> Note on "Financial info": the current Android store build does not initiate
+> purchases. It may still display account purchase history previously processed
+> by Stripe, and never stores card data. Declare only **purchase history** while
+> those records remain available in the app.
 
 > Mobile Sentry collection is disabled by default and requires explicit,
 > revocable consent. Room recording/replays are disabled; the audio declaration
 > remains because voice messages may be stored and live audio is transported.
+
+> The Google Maps SDK automatically processes data beyond the coordinates sent
+> to the Chathouse API, including IP address, a pseudonymous SDK identifier,
+> device/app information, diagnostics and map interactions. Reconcile this
+> inventory against the exact shipped Maps SDK version and Google's current
+> [Play data disclosure](https://developers.google.com/maps/documentation/android-sdk/play-data-disclosure)
+> before answering the Console. If the applicable provider terms permit use for
+> Google's own purposes, update the relevant **Shared** answers instead of
+> assuming the service-provider exemption.
 
 ## Security practices to tick
 

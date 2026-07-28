@@ -20,6 +20,8 @@
 #   BASE_URL       base URL of the API           (default http://localhost:4000)
 #   MAX_ATTEMPTS   number of retries             (default 10)
 #   BACKOFF_BASE   initial backoff seconds       (default 2; capped at 30)
+#   CONNECT_TIMEOUT TCP connection timeout       (default 3 seconds)
+#   REQUEST_TIMEOUT whole request timeout        (default 10 seconds)
 #
 # Exit: 0 = all checks passed; 1 = failure (CD uses this to trigger rollback).
 # ─────────────────────────────────────────────────────────────────────────────
@@ -31,6 +33,8 @@ BASE_URL="${1:-${BASE_URL:-http://localhost:4000}}"
 MAX_ATTEMPTS="${MAX_ATTEMPTS:-10}"
 BACKOFF_BASE="${BACKOFF_BASE:-2}"
 BACKOFF_CAP=30
+CONNECT_TIMEOUT="${CONNECT_TIMEOUT:-3}"
+REQUEST_TIMEOUT="${REQUEST_TIMEOUT:-10}"
 
 # jq is nice-to-have; fall back to grep on the raw JSON when it's missing.
 HAVE_JQ=0
@@ -42,7 +46,12 @@ trap 'rm -f "$BODY_FILE"' EXIT
 
 http_status() {
   local url="$1"
-  curl -fsS -o "$BODY_FILE" -w '%{http_code}' --max-time 10 "$url" 2>/dev/null || echo "000"
+  curl -sS \
+    -o "$BODY_FILE" \
+    -w '%{http_code}' \
+    --connect-timeout "$CONNECT_TIMEOUT" \
+    --max-time "$REQUEST_TIMEOUT" \
+    "$url" 2>/dev/null || true
 }
 
 # json_true KEY  → 0 if services.KEY is true in $BODY_FILE, else 1.

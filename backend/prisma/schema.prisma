@@ -63,6 +63,9 @@ enum ReportReason {
 enum ReportTargetKind {
   USER
   ROOM
+  DIRECT_MESSAGE
+  GROUP_MESSAGE
+  ROOM_MESSAGE
 }
 
 // Platform-level role hierarchy — ORTHOGONAL to Room.Role and ClubMemberRole.
@@ -214,6 +217,7 @@ model User {
   blocksReceived          Block[]                 @relation("BlockTarget")
   reportsFiled            Report[]                @relation("ReportAuthor")
   reportsReceived         Report[]                @relation("ReportTarget")
+  contentReportsReceived  Report[]                @relation("ReportContentAuthor")
   notifPreferences        NotificationPreference?
   auditLogsAuthored       AuditLog[]              @relation("AuditActor")
   auditLogsTargeted       AuditLog[]              @relation("AuditTargetUser")
@@ -747,8 +751,8 @@ model PushToken {
 
 // ─── Phone OTP code ────────────────────────────────────
 // Stores bcrypt hashes (never the raw 6-digit code). Multiple rows per
-// phone survive over time; service logic selects the latest non-expired
-// unused row for verification and marks older ones `isUsed`.
+// phone survive over time; service logic always selects the latest non-expired
+// row (including used rows) so an older code can never become valid again.
 model OtpCode {
   id          String   @id @default(cuid())
   phoneNumber String
@@ -760,7 +764,8 @@ model OtpCode {
 
   @@index([phoneNumber])
   @@index([expiresAt])
-  // Covers the verify() lookup: latest unused, unexpired code for a phone.
+  // Supports phone/expiry filtering; verification orders matching rows by
+  // createdAt + id and then checks isUsed on that newest row.
   @@index([phoneNumber, isUsed, expiresAt])
 }
 
@@ -813,27 +818,47 @@ model Block {
 }
 
 // ─── Report (moderation queue) ─────────────────────────
-// Free-form report against another user OR a room. `targetKind` discriminates;
-// `reportedId` is set for USER reports, `reportedRoomId` for ROOM reports.
-// Exactly one of the two must be non-null (enforced in service layer).
+// Moderation queue for user, room and individual-message reports.
+// Message reports retain immutable evidence fields so moderators can still
+// triage them if the source message or its author is later deleted.
 model Report {
-  id             String           @id @default(cuid())
-  reporterId     String
-  targetKind     ReportTargetKind @default(USER)
-  reportedId     String?
-  reportedRoomId String?
-  reason         ReportReason
-  details        String?          @db.VarChar(2000)
-  resolvedAt     DateTime?
-  createdAt      DateTime         @default(now())
+  id                     String           @id @default(cuid())
+  reporterId             String
+  targetKind             ReportTargetKind @default(USER)
+  reportedId             String?
+  reportedRoomId         String?
+  contentAuthorId        String?
+  reportedMessageId      String?
+  reportedGroupMessageId String?
+  reportedRoomMessageId  String?
+  contentSnapshot        String?          @db.VarChar(4000)
+  // Signed private-media capability captured at report time. These fields are
+  // returned only by moderator/admin APIs, never by the report mutation.
+  contentAudioUrl        String?          @db.VarChar(2048)
+  contentAudioDurationMs Int?
+  contentKind            MessageKind?
+  contentCreatedAt       DateTime?
+  contentContextId       String?
+  contentContextSnapshot String?          @db.VarChar(100)
+  reason                 ReportReason
+  details                String?          @db.VarChar(2000)
+  resolvedAt             DateTime?
+  createdAt              DateTime         @default(now())
 
-  reporter     User  @relation("ReportAuthor", fields: [reporterId], references: [id], onDelete: Cascade)
-  reported     User? @relation("ReportTarget", fields: [reportedId], references: [id], onDelete: Cascade)
-  reportedRoom Room? @relation("ReportRoomTarget", fields: [reportedRoomId], references: [id], onDelete: Cascade)
+  reporter      User  @relation("ReportAuthor", fields: [reporterId], references: [id], onDelete: Cascade)
+  reported      User? @relation("ReportTarget", fields: [reportedId], references: [id], onDelete: Cascade)
+  reportedRoom  Room? @relation("ReportRoomTarget", fields: [reportedRoomId], references: [id], onDelete: Cascade)
+  contentAuthor User? @relation("ReportContentAuthor", fields: [contentAuthorId], references: [id], onDelete: SetNull)
 
+  // Message target ids deliberately have no FK: they are immutable evidence
+  // identifiers that must survive deletion of the source message.
+  @@unique([reporterId, reportedMessageId])
+  @@unique([reporterId, reportedGroupMessageId])
+  @@unique([reporterId, reportedRoomMessageId])
   @@index([reportedId, createdAt])
   @@index([reportedRoomId, createdAt])
   @@index([reporterId])
+  @@index([contentAuthorId, createdAt])
 }
 
 // ─── AuditLog (Godmode action trail) ───────────────────

@@ -30,7 +30,7 @@ index 8fce879..1776422 100644
 +//   - dropped the unused pre-AndroidX `com.android.support:appcompat-v7`
 +//     dependency (the module only needs androidx.annotation, pulled in
 +//     transitively via react-android); Jetifier is disabled in this project.
-+// Persisted via patch-package (patches/@react-native-voice+voice+*.patch).
++// Persisted via patch-package (patches/@react-native-voice+voice+3.1.5.patch).
 +
 +def DEFAULT_COMPILE_SDK_VERSION = 34
 +def DEFAULT_BUILD_TOOLS_VERSION = "34.0.0"

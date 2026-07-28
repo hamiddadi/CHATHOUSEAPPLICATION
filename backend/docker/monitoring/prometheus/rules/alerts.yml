@@ -109,4 +109,4 @@ groups:
           service: node-exporter
         annotations:
           summary: 'Disk usage above 85%'
-          description: 'Filesystem {{ $labels.mountpoint }} on {{ $labels.instance }} is over 85% full (current {{ printf "%.1f" (mul $value 100) }}%).'
+          description: 'Filesystem {{ $labels.mountpoint }} on {{ $labels.instance }} is over 85% full (current {{ $value | humanizePercentage }}).'

@@ -31,7 +31,14 @@ allprojects {
   repositories {
     google()
     mavenCentral()
-    maven { url 'https://www.jitpack.io' }
+    maven {
+      url = uri('https://jitpack.io')
+      content {
+        // LiveKit's Android audio routing dependency is published from JitPack.
+        // Keep every other dependency on Google Maven or Maven Central.
+        includeGroup 'com.github.davidliu'
+      }
+    }
   }
 }
 
@@ -40,8 +47,8 @@ apply plugin: "com.facebook.react.rootproject"
 // Force every native-module subproject onto the project's installed NDK
 // (rootProject.ext.ndkVersion = 27.1.12297006). Some libraries — notably
 // react-native-audio-recorder-player — don't set ndkVersion and otherwise fall
-// back to AGP's default NDK (27.0.12077973), which is not installed here,
-// failing C++ configuration. (de-Expo migration.)
+// back to AGP's default NDK (27.0.12077973), which differs from React Native's
+// pinned toolchain and can make C++ configuration non-reproducible.
 subprojects { subproject ->
   ["com.android.library", "com.android.application"].each { pluginId ->
     subproject.plugins.withId(pluginId) {

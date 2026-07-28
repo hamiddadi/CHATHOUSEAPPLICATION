@@ -65,6 +65,23 @@
     "deleteTitle": "Delete message",
     "deleteBody": "This message will be permanently deleted."
   },
+  "moderation": {
+    "reportMessageTitle": "Report this message",
+    "reportMessageBody": "Choose the reason. The moderation team will receive a copy of the message.",
+    "reportMessageA11y": "Report this message",
+    "longPressToReport": "Long press to report this message",
+    "closeReport": "Close report form",
+    "submitting": "Sending report…",
+    "reportSentTitle": "Report sent",
+    "reportSentBody": "The moderation team will review this message.",
+    "reportAlreadySent": "You already reported this message.",
+    "reportFailed": "Couldn't send the report.",
+    "reasons": {
+      "spam": "Spam",
+      "harassment": "Harassment or abuse",
+      "other": "Other"
+    }
+  },
   "voice": {
     "preview": "🎤 Voice message",
     "recording": "Recording…",
@@ -853,6 +870,10 @@
       "roomLive": "Live",
       "roomEnded": "Ended",
       "reportedBy": "Reported by",
+      "messageEvidence": "Reported message",
+      "voiceEvidence": "Voice message",
+      "voiceEvidenceUnavailable": "Voice evidence unavailable",
+      "deletedEvidence": "Message deleted after report",
       "errorTitle": "Couldn't load reports",
       "errorBody": "Check your connection and try again.",
       "emptyTitle": "Nothing here",
@@ -1451,6 +1472,8 @@
       "GROUP_004": "Only the group owner can do that.",
       "GROUP_005": "Use \"Leave group\" to remove yourself.",
       "GROUP_006": "You can't share a group with this person.",
+      "REPORT_001": "You can't report your own content.",
+      "REPORT_002": "This message is no longer available to report.",
       "CLUB_001": "House not found.",
       "CLUB_002": "You're not an admin of this house.",
       "CLUB_003": "Private house — you can't join it directly.",

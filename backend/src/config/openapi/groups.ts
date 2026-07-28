@@ -6,6 +6,10 @@ import {
   listGroupMessagesSchema,
   sendGroupMessageSchema,
 } from '../../modules/groups/groups.schema';
+import {
+  contentReportResultSchema,
+  contentReportSchema,
+} from '../../modules/reports/contentReports.schema';
 import type { OpenApiComponents } from './components';
 
 export const registerGroupsPaths = (
@@ -34,6 +38,31 @@ export const registerGroupsPaths = (
             }),
           },
         },
+      },
+    },
+  });
+
+  registry.registerPath({
+    method: 'post',
+    path: '/api/groups/{id}/messages/{messageId}/report',
+    tags: ['Groups', 'Moderation'],
+    security: [{ bearerAuth: [] }],
+    request: {
+      params: z.object({ id: z.string().min(1), messageId: z.string().min(1) }),
+      body: { content: { 'application/json': { schema: contentReportSchema } } },
+    },
+    responses: {
+      201: {
+        description: 'Queues immutable evidence for a message visible to a current group member.',
+        content: { 'application/json': { schema: contentReportResultSchema } },
+      },
+      403: {
+        description: 'The caller is the message author',
+        content: { 'application/json': { schema: ErrorBody } },
+      },
+      404: {
+        description: 'Message missing or not visible to the caller',
+        content: { 'application/json': { schema: ErrorBody } },
       },
     },
   });

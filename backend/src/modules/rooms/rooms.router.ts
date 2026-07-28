@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { requireAuth } from '../../middlewares/auth.middleware';
 import { socialController } from '../social/social.controller';
+import { contentReportsController } from '../reports/contentReports.controller';
 import { roomsController } from './rooms.controller';
 
 export const roomsRouter: Router = Router();
@@ -46,6 +47,10 @@ roomsRouter.delete('/:id/hand-raises/:userId', asyncHandler(roomsController.dism
 // In-room text chat (distinct from DMs under /api/chat).
 roomsRouter.post('/:id/messages', asyncHandler(roomsController.sendMessage));
 roomsRouter.get('/:id/messages', asyncHandler(roomsController.listMessages));
+roomsRouter.post(
+  '/:id/messages/:messageId/report',
+  asyncHandler(contentReportsController.roomMessage),
+);
 
 // Ephemeral emoji reactions.
 roomsRouter.post('/:id/reactions', asyncHandler(roomsController.reaction));

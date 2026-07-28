@@ -9,6 +9,7 @@ import { issueTokenPair } from '../../utils/issueTokenPair';
 import { disconnectUserSockets } from '../../socket/realtime';
 import { sendMail } from '../../config/mailer';
 import { logger } from '../../config/logger';
+import { scheduleBackgroundTask } from '../../utils/backgroundTasks';
 import { ensureLoginAllowedAndRestore } from './account-lifecycle';
 import type {
   ForgotPasswordInput,
@@ -179,52 +180,57 @@ export const authService = {
   /**
    * Issue a one-shot password reset token. We store only the SHA-256 of the
    * raw token so a DB leak doesn't hand attackers live reset links. The raw
-   * token is the only thing emailed to the user. Intentionally returns
-   * `{ ok: true }` even when the email doesn't exist to avoid an oracle.
+   * token is the only thing emailed to the user. The entire lookup/delivery
+   * flow runs as a tracked background task in production so response status
+   * and provider latency cannot reveal whether the email exists.
    */
   async forgotPassword(input: ForgotPasswordInput) {
-    // Match the normalized (lowercase) email stored at registration time.
-    const user = await prisma.user.findUnique({ where: { email: input.email.toLowerCase() } });
-    // Phone-only users (no email) can't use password reset either.
-    if (!user || !user.email) {
-      // AUTH-06: equalize the cost of the two paths so response timing doesn't
-      // leak whether the address exists. The existent path generates a token
-      // and hashes it before any I/O; do the same throwaway work here so this
-      // branch's synchronous cost mirrors it. Same response either way
-      // (anti-enumeration).
-      hashResetToken(randomBytes(RESET_TOKEN_BYTES).toString('hex'));
-      return { ok: true };
-    }
+    const normalizedEmail = input.email.toLowerCase();
+    await scheduleBackgroundTask(
+      (async () => {
+        // Match the normalized (lowercase) email stored at registration time.
+        const user = await prisma.user.findUnique({ where: { email: normalizedEmail } });
+        // Phone-only users (no email) cannot use password reset either. Perform
+        // the same token/hash work without persisting it as defense in depth;
+        // the HTTP response itself is already detached from this task in prod.
+        if (!user || !user.email) {
+          hashResetToken(randomBytes(RESET_TOKEN_BYTES).toString('hex'));
+          return;
+        }
 
-    const raw = randomBytes(RESET_TOKEN_BYTES).toString('hex');
-    const tokenHash = hashResetToken(raw);
-    const expiresAt = new Date(Date.now() + RESET_TOKEN_TTL_MINUTES * 60 * 1000);
+        const raw = randomBytes(RESET_TOKEN_BYTES).toString('hex');
+        const tokenHash = hashResetToken(raw);
+        const expiresAt = new Date(Date.now() + RESET_TOKEN_TTL_MINUTES * 60 * 1000);
 
-    // Invalidate every previous token and persist the replacement atomically.
-    // A process/database failure can therefore never leave the account with
-    // all old links consumed but no new reset token to deliver.
-    const issuedAt = new Date();
-    await prisma.$transaction([
-      prisma.passwordResetToken.updateMany({
-        where: { userId: user.id, usedAt: null },
-        data: { usedAt: issuedAt },
-      }),
-      prisma.passwordResetToken.create({
-        data: { tokenHash, userId: user.id, expiresAt },
-      }),
-    ]);
+        // Invalidate every previous token and persist the replacement atomically.
+        const issuedAt = new Date();
+        await prisma.$transaction([
+          prisma.passwordResetToken.updateMany({
+            where: { userId: user.id, usedAt: null },
+            data: { usedAt: issuedAt },
+          }),
+          prisma.passwordResetToken.create({
+            data: { tokenHash, userId: user.id, expiresAt },
+          }),
+        ]);
 
-    await sendMail({
-      to: user.email,
-      subject: 'Reset your Chathouse password',
-      text: `Use this token within ${RESET_TOKEN_TTL_MINUTES} minutes to reset your password:\n\n${raw}`,
-    });
-    // Never log the raw reset token, even in dev: logs are not a safe channel
-    // for a live, single-use credential. Log only a non-sensitive marker for
-    // manual testing; the raw token is delivered solely via email.
-    if (env.NODE_ENV === 'test') {
-      logger.debug(`[reset] token issued for user ${user.id} (ttl ${RESET_TOKEN_TTL_MINUTES}m)`);
-    }
+        await sendMail({
+          to: user.email,
+          subject: 'Reset your Chathouse password',
+          text: `Use this token within ${RESET_TOKEN_TTL_MINUTES} minutes to reset your password:\n\n${raw}`,
+        });
+        // Never log the raw reset token, even in dev/test.
+        if (env.NODE_ENV === 'test') {
+          logger.debug(
+            `[reset] token issued for user ${user.id} (ttl ${RESET_TOKEN_TTL_MINUTES}m)`,
+          );
+        }
+      })(),
+      err =>
+        logger.error('password reset delivery task failed', {
+          err: err instanceof Error ? err.message : String(err),
+        }),
+    );
 
     return { ok: true };
   },

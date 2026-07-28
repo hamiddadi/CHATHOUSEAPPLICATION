@@ -32,17 +32,17 @@ the production endpoint guard stays off.
 ## 2. Release / production build
 
 Copy `.env.production.example` to `.env.production` (gitignored) and fill in the
-**public** hosts, then build with `ENVFILE` pointed at it:
+**public** hosts, then use the guarded release entrypoint:
 
 ```powershell
 # PowerShell — bundles .env.production and signs with the upload keystore
-.\scripts\build-release-aab.ps1              # AAB for Play  (-Apk for a standalone APK)
+.\scripts\build-release-aab.ps1 -VersionCode 1 -VersionName 1.0.0
+# Add -Apk only when a standalone production APK is explicitly needed.
 ```
 
-```bash
-# or directly
-ENVFILE=.env.production ./android/gradlew -p android bundleRelease
-```
+On macOS/Linux, run that same script with PowerShell 7 (`pwsh`). A raw
+`gradlew bundleRelease` is not a supported store-build path and is rejected
+unless it is the explicitly debug-signed technical packaging check used by CI.
 
 `.env.production` MUST set `ENV=production`. On boot, `src/config/env.ts`
 fail-fasts if a production build points at a local/dev endpoint or a cleartext
@@ -56,6 +56,16 @@ be public `https://` / `wss://` hosts (behind your TLS reverse proxy).
 `GOOGLE_MAPS_API_KEY` environment variable or a `GOOGLE_MAPS_API_KEY=...` line in
 `~/.gradle/gradle.properties` (see `android/app/build.gradle`). Restrict the key
 by package (`com.chathouse.app`) + the Play App-Signing SHA-1.
+
+## 4. Optional Sentry source-map upload
+
+`SENTRY_DSN` is the public runtime endpoint inlined into the app. Release
+source-map upload is a separate build-time operation and only runs when the
+build environment provides all three secrets/identifiers:
+`SENTRY_AUTH_TOKEN`, `SENTRY_ORG` and `SENTRY_PROJECT`. Never put the auth token
+in `.env.production` because that file is bundled into the application. If the
+three build variables are absent, the Android build skips the upload without
+failing; CI can also set `SENTRY_DISABLE_AUTO_UPLOAD=true` explicitly.
 
 ## Adding a new front-end env var
 

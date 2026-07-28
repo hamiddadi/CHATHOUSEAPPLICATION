@@ -1,13 +1,17 @@
 import { z } from 'zod';
+import { publicContentString } from '../../utils/publicContentModeration';
 
 export const createRoomSchema = z
   .object({
-    title: z.string().min(3).max(120),
-    description: z.string().max(500).optional(),
-    topic: z.string().max(60).optional(),
+    title: publicContentString(z.string().min(3).max(120)),
+    description: publicContentString(z.string().max(500)).optional(),
+    topic: publicContentString(z.string().max(60)).optional(),
     // Topic tags (aligned with User.interests). Max 5 keeps the scoring
     // well-balanced and the payload small.
-    topics: z.array(z.string().min(1).max(32)).max(5).default([]),
+    topics: z
+      .array(publicContentString(z.string().min(1).max(32)))
+      .max(5)
+      .default([]),
     // User ids promoted to SPEAKER on room creation. Host + co-hosts
     // collectively cap at 6 speakers before the audience queue kicks in.
     coHostIds: z.array(z.string().min(1)).max(5).default([]),
@@ -34,12 +38,12 @@ export const createRoomSchema = z
   });
 
 export const sendRoomMessageSchema = z.object({
-  content: z.string().trim().min(1).max(500),
+  content: publicContentString(z.string().trim().min(1).max(500)),
   replyToId: z.string().min(1).optional(),
 });
 
 export const updateRoomTitleSchema = z.object({
-  title: z.string().trim().min(3).max(120),
+  title: publicContentString(z.string().trim().min(3).max(120)),
 });
 
 export const toggleRoomChatSchema = z.object({

@@ -89,7 +89,24 @@ jobs:
       - run: chmod +x android/gradlew
       - name: Assemble and lint one CI architecture
         working-directory: android
-        run: ./gradlew :app:assembleDebug :app:lintDebug -PreactNativeArchitectures=x86_64 --no-daemon
+        run: ./gradlew :app:assembleDebug :app:lintDebug :app:testDebugUnitTest -PreactNativeArchitectures=x86_64 --no-daemon
+      - name: Validate release packaging with the non-production debug key
+        working-directory: android
+        env:
+          ENVFILE: .env.test
+          SENTRY_DISABLE_AUTO_UPLOAD: 'true'
+        run: >-
+          ./gradlew
+          :app:assembleRelease
+          :app:bundleRelease
+          :app:lintRelease
+          -PreactNativeArchitectures=x86_64
+          -PCHATHOUSE_UPLOAD_STORE_FILE=debug.keystore
+          -PCHATHOUSE_UPLOAD_STORE_PASSWORD=android
+          -PCHATHOUSE_UPLOAD_KEY_ALIAS=androiddebugkey
+          -PCHATHOUSE_UPLOAD_KEY_PASSWORD=android
+          -PCHATHOUSE_ALLOW_DEBUG_RELEASE_SIGNING=true
+          --no-daemon
       - name: Install pinned Maestro CLI
         shell: bash
         run: |
@@ -136,6 +153,15 @@ jobs:
       SENTRY_DISABLE_AUTO_UPLOAD: 'true'
     steps:
       - uses: actions/checkout@v4
+      - name: Require an App-Store-compatible Xcode toolchain
+        shell: bash
+        run: |
+          xcodebuild -version
+          XCODE_MAJOR="$(xcodebuild -version | awk '/Xcode/{split($2, v, "."); print v[1]}')"
+          if [[ ! "$XCODE_MAJOR" =~ ^[0-9]+$ ]] || (( XCODE_MAJOR < 26 )); then
+            echo "Xcode 26 or newer is required for App Store submissions." >&2
+            exit 1
+          fi
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -165,6 +191,19 @@ jobs:
           -configuration Debug
           -destination 'generic/platform=iOS Simulator'
           -derivedDataPath ios/build
+          CODE_SIGNING_ALLOWED=NO
+          build
+      - name: Validate unsigned iOS Release build for Simulator
+        env:
+          # Technical compile check only: this is not an App Store archive.
+          ENVFILE: .env.test
+        run: >-
+          xcodebuild
+          -workspace ios/ChatHouse.xcworkspace
+          -scheme ChatHouse
+          -configuration Release
+          -destination 'generic/platform=iOS Simulator'
+          -derivedDataPath ios/build-release
           CODE_SIGNING_ALLOWED=NO
           build
       - name: Install pinned Maestro CLI
@@ -318,6 +357,70 @@ jobs:
           path: backend/coverage/
           if-no-files-found: warn
           retention-days: 7
+
+  monitoring-config:
+    name: Monitoring - render and validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Render Alertmanager and validate all monitoring configs
+        run: |
+          set -euo pipefail
+          render_dir="$RUNNER_TEMP/alertmanager-rendered"
+          secret_dir="$RUNNER_TEMP/monitoring-secrets"
+          mkdir -p "$render_dir" "$secret_dir"
+          printf '%s' 'https://hooks.slack.test/services/test/test/test' > "$secret_dir/slack"
+          printf '%s' 'ci-smtp-password' > "$secret_dir/smtp"
+          printf '%s' 'ci-metrics-token-at-least-32-bytes-long' > "$secret_dir/metrics"
+
+          METRICS_TOKEN_SECRET_FILE="$secret_dir/metrics" \
+          GF_SECURITY_ADMIN_PASSWORD=ci-strong-password \
+          SMTP_SMARTHOST=smtp.example.test:587 \
+          SMTP_FROM=alerts@example.test \
+          SMTP_USERNAME=alerts@example.test \
+          ALERT_EMAIL_TO=oncall@example.test \
+          ALERTMANAGER_SLACK_WEBHOOK_SECRET_FILE="$secret_dir/slack" \
+          ALERTMANAGER_SMTP_PASSWORD_SECRET_FILE="$secret_dir/smtp" \
+            docker compose \
+              -f backend/docker/monitoring/docker-compose.monitoring.yml \
+              config --quiet
+          METRICS_TOKEN_SECRET_FILE="$secret_dir/metrics" \
+            docker compose \
+              --env-file backend/.env.prod.example \
+              -f backend/docker-compose.prod.yml \
+              -f backend/docker/backup/docker-compose.backup.yml \
+              config --quiet
+
+          docker build \
+            -f backend/docker/monitoring/alertmanager/renderer.Dockerfile \
+            -t chathouse/alertmanager-config-renderer:ci \
+            backend/docker/monitoring/alertmanager
+          docker run --rm \
+            -e SMTP_SMARTHOST=smtp.example.test:587 \
+            -e SMTP_FROM=alerts@example.test \
+            -e SMTP_USERNAME=alerts@example.test \
+            -e ALERT_EMAIL_TO=oncall@example.test \
+            -v "$PWD/backend/docker/monitoring/alertmanager/alertmanager.yml:/templates/alertmanager.yml:ro" \
+            -v "$render_dir:/rendered" \
+            chathouse/alertmanager-config-renderer:ci
+          docker run --rm \
+            -v "$render_dir/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro" \
+            -v "$secret_dir/slack:/run/secrets/alertmanager_slack_webhook:ro" \
+            -v "$secret_dir/smtp:/run/secrets/alertmanager_smtp_password:ro" \
+            --entrypoint amtool \
+            prom/alertmanager:v0.32.1 \
+            check-config /etc/alertmanager/alertmanager.yml
+          docker run --rm \
+            -v "$PWD/backend/docker/monitoring/prometheus:/etc/prometheus:ro" \
+            -v "$secret_dir/metrics:/run/secrets/chathouse_metrics_token:ro" \
+            --entrypoint promtool \
+            prom/prometheus:v3.12.0 \
+            check config /etc/prometheus/prometheus.yml
+          docker run --rm \
+            -v "$PWD/backend/docker/monitoring/prometheus/rules:/rules:ro" \
+            --entrypoint promtool \
+            prom/prometheus:v3.12.0 \
+            check rules /rules/alerts.yml
 
   backend-load:
     name: Backend — k6 load thresholds

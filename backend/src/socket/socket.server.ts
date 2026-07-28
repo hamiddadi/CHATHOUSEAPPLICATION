@@ -13,6 +13,11 @@ import { registerCaptionsRealtime } from '../extensions/realtime/captions.realti
 import { roomsService } from '../modules/rooms/rooms.service';
 import { setRealtimeServer } from './realtime';
 import { socketAuth } from './socket.middleware';
+import {
+  attachSocketEventRateLimiter,
+  MAX_SOCKET_PAYLOAD_BYTES,
+  SocketEventRateLimiter,
+} from './socket.rate-limit';
 import { registerRoomHandlers } from './handlers/room.handler';
 import { registerChatHandlers } from './handlers/chat.handler';
 import { registerMapsHandlers } from './handlers/maps.handler';
@@ -46,6 +51,7 @@ export const createSocketServer = async (httpServer: HttpServer): Promise<Server
       credentials: true,
     },
     transports: ['websocket'],
+    maxHttpBufferSize: MAX_SOCKET_PAYLOAD_BYTES,
     pingInterval: 25_000,
     pingTimeout: 20_000,
   });
@@ -88,6 +94,7 @@ export const createSocketServer = async (httpServer: HttpServer): Promise<Server
   };
 
   io.use(socketAuth);
+  const eventRateLimiter = new SocketEventRateLimiter();
 
   // Publish the live Server reference so the HTTP layer can fan events
   // into the socket tier (hallway broadcasts, etc.) without importing
@@ -117,6 +124,7 @@ export const createSocketServer = async (httpServer: HttpServer): Promise<Server
   io.on('connection', (socket: Socket) => {
     const userId = socket.data.userId as string;
     logger.info(`socket connected user=${userId} id=${socket.id}`);
+    attachSocketEventRateLimiter(socket, eventRateLimiter);
     let disconnectingRoomChannels: string[] = [];
     // Account-level fan-out/revocation must not depend on any feature handler
     // being registered. Joining twice is idempotent (chat.handler also joins

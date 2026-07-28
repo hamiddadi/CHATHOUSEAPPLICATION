@@ -109,6 +109,33 @@ describe('Password reset flow', () => {
     expect(res.body.error.code).toBe('AUTH_003');
   });
 
+  it('does not reveal an existing email when the mail provider fails', async () => {
+    const username = `pr_mail_${rand()}`;
+    const email = `${username}@test.local`;
+    const reg = await request(app)
+      .post('/api/auth/register')
+      .send({ username, email, password: 'old-password-123' });
+    expect(reg.status).toBe(201);
+    createdIds.push(reg.body.data.user.id as string);
+
+    const sendSpy = jest
+      .spyOn(mailer, 'sendMail')
+      .mockRejectedValueOnce(new Error('simulated provider outage'));
+    try {
+      const existing = await request(app).post('/api/auth/forgot-password').send({ email });
+      const unknown = await request(app)
+        .post('/api/auth/forgot-password')
+        .send({ email: `unknown_${rand()}@test.local` });
+
+      expect(existing.status).toBe(200);
+      expect(unknown.status).toBe(200);
+      expect(existing.body).toEqual(unknown.body);
+      expect(sendSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      sendSpy.mockRestore();
+    }
+  });
+
   it('consumes a reset token exactly once under concurrent device retries', async () => {
     const username = `pr_race_${rand()}`;
     const email = `${username}@test.local`;

@@ -90,8 +90,8 @@ export const dbPoolConnectionsGauge = new Gauge({
  * counter. Mount it as early as practical so the timer covers downstream
  * middleware. The route label prefers the matched Express route pattern
  * (req.route?.path) to avoid high-cardinality raw paths (e.g. /api/users/:id
- * instead of /api/users/123); it falls back to req.path when no route matched
- * (404s, static, etc.).
+ * instead of /api/users/123). Unmatched requests use one constant label:
+ * attacker-controlled 404 paths must never create unbounded Prometheus series.
  */
 export const httpMetricsMiddleware: RequestHandler = (
   req: Request,
@@ -102,9 +102,9 @@ export const httpMetricsMiddleware: RequestHandler = (
 
   res.on('finish', () => {
     // baseUrl + route.path reconstructs the mounted pattern (router mounted at
-    // /api/users with route '/:id' -> '/api/users/:id'). Fall back to req.path.
+    // /api/users with route '/:id' -> '/api/users/:id').
     const routePath =
-      typeof req.route?.path === 'string' ? `${req.baseUrl}${req.route.path}` : req.path;
+      typeof req.route?.path === 'string' ? `${req.baseUrl}${req.route.path}` : 'unmatched';
 
     const labels = {
       method: req.method,

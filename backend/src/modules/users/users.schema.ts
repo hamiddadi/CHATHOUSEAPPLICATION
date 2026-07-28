@@ -1,13 +1,14 @@
 import { z } from 'zod';
+import { publicContentString } from '../../utils/publicContentModeration';
 
 export const updateMeSchema = z
   .object({
-    displayName: z.string().min(1).max(60).optional(),
+    displayName: publicContentString(z.string().min(1).max(60)).optional(),
     // Real name (Clubhouse-style identity). Optional and separate from the
     // public displayName/username. VarChar(50) in the schema → max 50.
-    firstName: z.string().max(50).optional(),
-    lastName: z.string().max(50).optional(),
-    bio: z.string().max(150).optional(),
+    firstName: publicContentString(z.string().max(50)).optional(),
+    lastName: publicContentString(z.string().max(50)).optional(),
+    bio: publicContentString(z.string().max(150)).optional(),
     avatarUrl: z.string().url().max(500).optional(),
     // Social handles — plain-text, not OAuth. VarChar(50) in the schema → max
     // 50. Allow the empty string so the user can clear a handle from the form.
@@ -67,7 +68,10 @@ export const setUsernameSchema = z.object({
 export const interestsSchema = z.object({
   // 1..10 keeps the interest pane manageable and prevents bloat. Tags
   // are free-form for now — the frontend curates the pickable list.
-  interests: z.array(z.string().min(1).max(32)).min(3).max(10),
+  interests: z
+    .array(publicContentString(z.string().min(1).max(32)))
+    .min(3)
+    .max(10),
 });
 
 export const completeOnboardingSchema = z.object({
@@ -75,12 +79,16 @@ export const completeOnboardingSchema = z.object({
   // submit once. All fields optional — onboarding can be completed
   // without filling the optional profile screen first (a user can still
   // flip the flag directly).
-  displayName: z.string().min(1).max(60).optional(),
-  firstName: z.string().max(50).optional(),
-  lastName: z.string().max(50).optional(),
-  bio: z.string().max(280).optional(),
+  displayName: publicContentString(z.string().min(1).max(60)).optional(),
+  firstName: publicContentString(z.string().max(50)).optional(),
+  lastName: publicContentString(z.string().max(50)).optional(),
+  bio: publicContentString(z.string().max(280)).optional(),
   avatarUrl: z.string().url().max(500).nullish(),
-  interests: z.array(z.string().min(1).max(32)).min(3).max(10).optional(),
+  interests: z
+    .array(publicContentString(z.string().min(1).max(32)))
+    .min(3)
+    .max(10)
+    .optional(),
 });
 
 export type UpdateMeInput = z.infer<typeof updateMeSchema>;

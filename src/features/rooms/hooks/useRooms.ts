@@ -9,6 +9,7 @@ import {
 import { env } from '../../../config/env';
 import { roomService, FEED_PAGE_SIZE, type CreateRoomInput } from '../services/roomService';
 import type { Room, RoomSummary } from '../../../shared/types/domain';
+import type { ContentReportReason } from '../../../shared/types/moderation';
 import { useCurrentRoomStore } from '../store/currentRoomStore';
 import { roomAudioSession } from '../services/roomAudioSession';
 
@@ -208,6 +209,19 @@ export const useSendRoomMessage = () => {
     },
   });
 };
+
+export const useReportRoomMessage = () =>
+  useMutation({
+    mutationFn: ({
+      roomId,
+      messageId,
+      reason,
+    }: {
+      roomId: string;
+      messageId: string;
+      reason: ContentReportReason;
+    }) => roomService.reportMessage(roomId, messageId, reason),
+  });
 
 export const useSendReaction = () =>
   useMutation({

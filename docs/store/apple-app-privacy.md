@@ -6,7 +6,8 @@ the matching app-owned declarations are also present in
 SDKs, IDFA, data broker, or cross-app advertising), so answer **"No, we do not
 use data for tracking."**
 
-The `ITSAppUsesNonExemptEncryption: false` flag is already set in `app.json`
+The `ITSAppUsesNonExemptEncryption: false` flag is already set in
+`ios/ChatHouse/Info.plist`
 (standard HTTPS/WSS only → export-compliance exempt), so the build won't prompt
 for encryption docs.
 
@@ -28,7 +29,7 @@ for encryption docs.
 | Identifiers  | Device ID           | App Functionality (push notifications)          |
 | Location     | Precise Location    | App Functionality (map / nearby)                |
 | Location     | Coarse Location     | App Functionality (reduced-accuracy map access) |
-| Purchases    | Purchase History    | App Functionality (tips / premium via Stripe)   |
+| Purchases    | Purchase History    | App Functionality (account history/entitlement) |
 | Usage Data   | Product Interaction | App Functionality, Product Personalization      |
 
 ## Data not linked to you
@@ -46,6 +47,12 @@ email, request body or stable device linkage requires moving it to "Linked".
 Room recording/replays are release-disabled. `Audio Data` remains required
 because users may deliberately store private voice messages and LiveKit
 ephemerally transports live room audio.
+
+The iOS client does not initiate tips or Premium purchases and does not link to
+Stripe Checkout or the Stripe billing portal. `Purchase History` remains
+declared because an account can retain tip history or a Premium entitlement
+created outside the iOS app. Reassess this declaration if those account records
+are no longer returned to iOS.
 
 ## Third-party processors (for your privacy policy, not a label field)
 

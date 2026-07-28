@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { requireAuth } from '../../middlewares/auth.middleware';
+import { contentReportsController } from '../reports/contentReports.controller';
 import { groupsController } from './groups.controller';
 
 export const groupsRouter: Router = Router();
@@ -16,6 +17,10 @@ groupsRouter.get('/:id', asyncHandler(groupsController.detail));
 groupsRouter.patch('/:id', asyncHandler(groupsController.rename));
 groupsRouter.get('/:id/messages', asyncHandler(groupsController.messages));
 groupsRouter.post('/:id/messages', asyncHandler(groupsController.send));
+groupsRouter.post(
+  '/:id/messages/:messageId/report',
+  asyncHandler(contentReportsController.groupMessage),
+);
 groupsRouter.post('/:id/voice', asyncHandler(groupsController.sendVoice));
 groupsRouter.patch('/:id/read', asyncHandler(groupsController.markRead));
 groupsRouter.post('/:id/members', asyncHandler(groupsController.addMembers));

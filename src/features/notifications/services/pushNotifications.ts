@@ -36,7 +36,11 @@ export const setupForegroundPush = (): (() => void) => {
       title: notification?.title,
       body: notification?.body,
       data,
-      android: { channelId, pressAction: { id: 'default' } },
+      android: {
+        channelId,
+        smallIcon: 'ic_stat_audio',
+        pressAction: { id: 'default' },
+      },
     });
   });
 };

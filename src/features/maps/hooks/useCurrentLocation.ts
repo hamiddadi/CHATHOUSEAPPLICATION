@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, PermissionsAndroid } from 'react-native';
+import { Alert, PermissionsAndroid, Platform } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import Geolocation from '@react-native-community/geolocation';
 import { i18n } from '../../../core/i18n';
 
@@ -8,6 +9,7 @@ const UPDATE_DISTANCE_M = 25;
 // Guard against devices with no GPS fix: getCurrentPosition can otherwise stay
 // pending indefinitely, leaving the user stuck on the "Locating you" loader.
 const INITIAL_FIX_TIMEOUT_MS = 8_000;
+const LOCATION_CONSENT_KEY = 'privacy:location-consent:v1';
 
 export type LocationPermission = 'unknown' | 'granted' | 'denied' | 'disabled';
 
@@ -64,46 +66,78 @@ export const useCurrentLocation = (): UseCurrentLocationReturn => {
 
   const start = useCallback(async () => {
     try {
-      const already = await PermissionsAndroid.check(
-        PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
-      );
+      let already = false;
+      if (Platform.OS === 'android') {
+        const [fine, coarse] = await Promise.all([
+          PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION),
+          PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION),
+        ]);
+        already = fine || coarse;
+      }
 
       if (!already) {
         // GDPR consent pre-prompt before the OS dialog. Localised — the legal
         // body text lives in the locale bundle (explorer.maps.consent*).
-        const userConsented = await new Promise<boolean>(resolve => {
-          Alert.alert(
-            i18n.t('explorer.maps.consentTitle', 'Location Consent'),
-            i18n.t(
-              'explorer.maps.consentBody',
-              'ChatHouse uses your location to show users who choose to be visible on the map. If you enable visibility, those users can also see your live position. Turning sharing off clears your coordinates; inactive locations are also purged automatically.',
-            ),
-            [
-              {
-                text: i18n.t('explorer.maps.consentDecline', 'Not Now'),
-                style: 'cancel',
-                onPress: () => resolve(false),
-              },
-              {
-                text: i18n.t('explorer.maps.consentAccept', 'I Understand'),
-                onPress: () => resolve(true),
-              },
-            ],
-          );
-        });
+        const priorConsent = await AsyncStorage.getItem(LOCATION_CONSENT_KEY).catch(() => null);
+        const userConsented =
+          priorConsent === 'accepted'
+            ? true
+            : await new Promise<boolean>(resolve => {
+                Alert.alert(
+                  i18n.t('explorer.maps.consentTitle', 'Location Consent'),
+                  i18n.t(
+                    'explorer.maps.consentBody',
+                    'ChatHouse uses your location to show users who choose to be visible on the map. If you enable visibility, those users can also see your live position. Turning sharing off clears your coordinates; inactive locations are also purged automatically.',
+                  ),
+                  [
+                    {
+                      text: i18n.t('explorer.maps.consentDecline', 'Not Now'),
+                      style: 'cancel',
+                      onPress: () => resolve(false),
+                    },
+                    {
+                      text: i18n.t('explorer.maps.consentAccept', 'I Understand'),
+                      onPress: () => resolve(true),
+                    },
+                  ],
+                );
+              });
         if (!mountedRef.current) return;
         if (!userConsented) {
           setPermission('denied');
           return;
         }
+        await AsyncStorage.setItem(LOCATION_CONSENT_KEY, 'accepted').catch(() => undefined);
 
-        const result = await PermissionsAndroid.request(
-          PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
-        );
-        if (!mountedRef.current) return;
-        if (result !== PermissionsAndroid.RESULTS.GRANTED) {
-          setPermission('denied');
-          return;
+        if (Platform.OS === 'android') {
+          // Android 12+ requires COARSE and FINE to be requested together so
+          // the user can choose approximate location without a false denial.
+          const results = await PermissionsAndroid.requestMultiple([
+            PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION,
+            PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+          ]);
+          if (!mountedRef.current) return;
+          const granted =
+            results[PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION] ===
+              PermissionsAndroid.RESULTS.GRANTED ||
+            results[PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION] ===
+              PermissionsAndroid.RESULTS.GRANTED;
+          if (!granted) {
+            setPermission('denied');
+            return;
+          }
+        } else if (Platform.OS === 'ios') {
+          const granted = await new Promise<boolean>(resolve => {
+            Geolocation.requestAuthorization(
+              () => resolve(true),
+              () => resolve(false),
+            );
+          });
+          if (!mountedRef.current) return;
+          if (!granted) {
+            setPermission('denied');
+            return;
+          }
         }
       }
       setPermission('granted');

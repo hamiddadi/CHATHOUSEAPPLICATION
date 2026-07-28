@@ -6,6 +6,7 @@ import { notificationsService } from '../notifications/notifications.service';
 import { emitChatMessage } from '../../socket/realtime';
 import { mediaService } from '../media/media.service';
 import { scheduleBackgroundTask } from '../../utils/backgroundTasks';
+import { sendMessageSchema } from './chat.schema';
 import type { ListMessagesInput, SendMessageInput, SendVoiceMessageInput } from './chat.schema';
 
 const publicUser = {
@@ -226,6 +227,11 @@ export const chatService = {
   },
 
   async send(senderId: string, receiverId: string, input: SendMessageInput) {
+    // `chat:send` reaches the service directly (without the REST controller),
+    // so validate again at the shared persistence boundary. This keeps the
+    // pre-publication content guard effective for both transports.
+    const validatedInput = sendMessageSchema.parse(input);
+
     if (senderId === receiverId) throw new AppError('CHAT_001');
     const peer = await prisma.user.findFirst({
       where: { id: receiverId, deletedAt: null },
@@ -245,7 +251,7 @@ export const chatService = {
       data: {
         senderId,
         receiverId,
-        content: input.content,
+        content: validatedInput.content,
       },
       include: { sender: { select: publicUser } },
     });
@@ -262,7 +268,7 @@ export const chatService = {
         userId: receiverId,
         type: 'NEW_MESSAGE',
         title: handle,
-        body: input.content.slice(0, 160),
+        body: validatedInput.content.slice(0, 160),
         data: { messageId: msg.id, senderId, conversation: 'dm' },
       }),
       err =>

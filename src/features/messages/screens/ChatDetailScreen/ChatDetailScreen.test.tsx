@@ -127,6 +127,19 @@ describe('ChatDetailScreen', () => {
     expect(alertSpy).toHaveBeenCalledTimes(1);
   });
 
+  it('long-pressing a received DM reports that individual message', async () => {
+    jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
+    const reportSpy = jest
+      .spyOn(messageService, 'report')
+      .mockResolvedValue({ reportId: 'report-1', alreadyReported: false });
+    const { getByText } = renderChat();
+
+    fireEvent(getByText('Hey there'), 'longPress');
+    fireEvent.press(await waitFor(() => getByText('Harassment or abuse')));
+
+    await waitFor(() => expect(reportSpy).toHaveBeenCalledWith('m1', 'harassment'));
+  });
+
   it('shows an error state with a working Retry when the thread fails to load', async () => {
     // No seeded thread + a rejecting service → the query enters isError.
     const messagesSpy = jest

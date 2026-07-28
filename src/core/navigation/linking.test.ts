@@ -86,3 +86,18 @@ describe('linking — invite deep links', () => {
     expect(leaf?.params?.inviteToken).toBeUndefined();
   });
 });
+
+describe('linking — notification destinations', () => {
+  it('routes the safe notification fallback to the in-app notification list', () => {
+    const result = getState('notifications', options);
+    const leaf = activeRoute(result);
+    expect(leaf?.name).toBe('Notifications');
+  });
+
+  it('routes a notification-generated DM path through the Messages tab', () => {
+    const result = getState('chat/conversation-1', options);
+    const leaf = activeRoute(result);
+    expect(leaf?.name).toBe('ChatDetail');
+    expect(leaf?.params?.conversationId).toBe('conversation-1');
+  });
+});

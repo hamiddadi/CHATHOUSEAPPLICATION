@@ -43,6 +43,10 @@ screen is free to ignore this folder.
 ## Vague 7 — Monetization & external auth
 
 - `api/paymentsApi` (Stripe Connect — feature-flagged)
+- Stripe-hosted Premium checkout/management and tips are disabled in both
+  Android and iOS store builds. Their entry points are hidden and the API layer
+  rejects accidental calls until compliant native billing (or an enrolled
+  regional alternative-billing flow) is implemented.
 
 ## Public surface
 

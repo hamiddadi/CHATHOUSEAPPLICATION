@@ -3,14 +3,15 @@ import { z } from 'zod';
 import { requireAuth } from '../../../middlewares/auth.middleware';
 import { asyncHandler } from '../../../utils/asyncHandler';
 import { authedUserId } from '../../../utils/authedUserId';
+import { publicContentString } from '../../../utils/publicContentModeration';
 import { clubReqService } from './clubreq.service';
 
 export const clubReqRouter: Router = Router();
 
 clubReqRouter.use(requireAuth);
 
-const requestSchema = z.object({
-  message: z.string().trim().min(1).max(280).optional(),
+export const requestSchema = z.object({
+  message: publicContentString(z.string().trim().min(1).max(280)).optional(),
 });
 
 const listSchema = z.object({

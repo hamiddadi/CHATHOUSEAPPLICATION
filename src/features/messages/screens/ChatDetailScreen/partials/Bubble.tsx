@@ -27,7 +27,7 @@ interface BubbleProps {
   message: Message;
   otherAvatar: string | null;
   showAvatar: boolean;
-  /** Long-press handler — only wired on your own messages (sender-only delete). */
+  /** Long press opens delete for your messages and report for received ones. */
   onLongPress?: (message: Message) => void;
 }
 
@@ -75,7 +75,13 @@ const Bubble: React.FC<BubbleProps> = memo(({ message, otherAvatar, showAvatar, 
     );
   }
   return (
-    <View style={styles.receivedRow}>
+    <Pressable
+      style={styles.receivedRow}
+      onLongPress={onLongPress ? () => onLongPress(message) : undefined}
+      delayLongPress={350}
+      accessibilityRole="button"
+      accessibilityHint="Maintenir pour signaler le message"
+    >
       {showAvatar ? (
         <Image
           source={{ uri: otherAvatar ?? DEFAULTS.avatar }}
@@ -103,7 +109,7 @@ const Bubble: React.FC<BubbleProps> = memo(({ message, otherAvatar, showAvatar, 
           {formatTime(message.sentAt)}
         </Text>
       </View>
-    </View>
+    </Pressable>
   );
 });
 Bubble.displayName = 'Bubble';

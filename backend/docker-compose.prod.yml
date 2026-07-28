@@ -115,11 +115,18 @@ services:
       TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:?TWILIO_ACCOUNT_SID is required (phone+OTP is the only login path)}
       TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:?TWILIO_AUTH_TOKEN is required (phone+OTP is the only login path)}
       TWILIO_FROM_NUMBER: ${TWILIO_FROM_NUMBER:?TWILIO_FROM_NUMBER is required (E.164 sender, e.g. +15551234567)}
-      # ─── Push notifications (Firebase Cloud Messaging) — OPTIONAL ───
-      # Full service-account JSON as a single-line string; flip PUSH_DISPATCH_ENABLED
-      # on to actually send. Unset/false = the stack still boots, push is skipped.
+      # ─── Email / password reset (Resend) — REQUIRED ─────────────────────
+      # MAIL_FROM must belong to a domain verified in the Resend account.
+      RESEND_API_KEY: ${RESEND_API_KEY:?RESEND_API_KEY is required (password-reset delivery)}
+      MAIL_FROM: ${MAIL_FROM:?MAIL_FROM is required (verified sender email)}
+      # ─── Push notifications (Firebase Cloud Messaging) — REQUIRED ───
+      # Configure exactly one credential mode: inline service-account JSON, or
+      # explicit ADC (workload identity / GOOGLE_APPLICATION_CREDENTIALS).
+      # env.ts rejects missing, ambiguous or malformed production credentials.
       FIREBASE_SERVICE_ACCOUNT: ${FIREBASE_SERVICE_ACCOUNT:-}
-      PUSH_DISPATCH_ENABLED: ${PUSH_DISPATCH_ENABLED:-false}
+      FIREBASE_USE_ADC: ${FIREBASE_USE_ADC:-false}
+      GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-}
+      PUSH_DISPATCH_ENABLED: 'true'
       # Stripe remains enabled while the public app release is frozen.
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:?STRIPE_SECRET_KEY is required}
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:?STRIPE_WEBHOOK_SECRET is required}
@@ -127,9 +134,13 @@ services:
       STRIPE_REFRESH_URL: ${STRIPE_REFRESH_URL:?STRIPE_REFRESH_URL is required}
       # mediasoup is the abandoned legacy SFU — keep it OFF in production.
       MEDIASOUP_ENABLED: 'false'
-      # Observability (optional but recommended).
+      # Observability. The metrics credential is mounted as a Compose secret;
+      # its value never enters the container environment or this repository.
       SENTRY_DSN: ${SENTRY_DSN:-}
-      METRICS_TOKEN: ${METRICS_TOKEN:-}
+      METRICS_TOKEN_FILE: /run/secrets/chathouse_metrics_token
+    secrets:
+      - source: metrics_token
+        target: chathouse_metrics_token
     # Loopback only — the reverse proxy terminates TLS and forwards here.
     ports:
       - '127.0.0.1:4000:4000'
@@ -188,3 +199,9 @@ volumes:
   redis-data:
   caddy-data:
   caddy-config:
+
+secrets:
+  # The monitoring stack mounts this same host file. Keep it outside the repo
+  # and set METRICS_TOKEN_SECRET_FILE to its absolute path on the host.
+  metrics_token:
+    file: ${METRICS_TOKEN_SECRET_FILE:?METRICS_TOKEN_SECRET_FILE is required}

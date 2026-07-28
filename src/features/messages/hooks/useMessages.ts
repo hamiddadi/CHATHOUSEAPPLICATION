@@ -8,6 +8,7 @@ import {
 } from '@tanstack/react-query';
 import { messageService } from '../services/messageService';
 import type { Conversation, Message } from '../../../shared/types/domain';
+import type { ContentReportReason } from '../../../shared/types/moderation';
 
 export const messageKeys = {
   all: ['messages'] as const,
@@ -104,6 +105,12 @@ export const useDeleteMessage = () => {
     },
   });
 };
+
+export const useReportMessage = () =>
+  useMutation({
+    mutationFn: ({ messageId, reason }: { messageId: string; reason: ContentReportReason }) =>
+      messageService.report(messageId, reason),
+  });
 
 export const useSendVoiceMessage = () => {
   const qc = useQueryClient();

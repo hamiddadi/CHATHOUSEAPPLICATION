@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Linking, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { profileLinksApi, type ProfileLink } from '../api/profileLinksApi';
 import { apiErrorMessage } from '../utils/extUi';
+import { areExternalDigitalPurchasesAllowed } from '../utils/digitalPurchases';
 import { colors } from '../../../shared/constants/theme';
 
 interface Props {
@@ -10,8 +11,9 @@ interface Props {
   editable?: boolean;
 }
 
-/** Clubhouse-style cap on custom profile links (server enforces the same). */
-const MAX_PROFILE_LINKS = 5;
+/** Server-side free/premium caps. Store builds expose only the free allowance. */
+const FREE_MAX_PROFILE_LINKS = 2;
+const PREMIUM_MAX_PROFILE_LINKS = 5;
 
 /**
  * Display + (optional) inline editor for a user's custom profile links
@@ -22,6 +24,9 @@ const MAX_PROFILE_LINKS = 5;
  * small × on each chip to remove. Server enforces the 5-link cap.
  */
 export const ExtProfileLinks: React.FC<Props> = ({ userId, editable = false }) => {
+  const maxEditableLinks = areExternalDigitalPurchasesAllowed()
+    ? PREMIUM_MAX_PROFILE_LINKS
+    : FREE_MAX_PROFILE_LINKS;
   const [links, setLinks] = useState<ProfileLink[]>([]);
   const [label, setLabel] = useState('');
   const [url, setUrl] = useState('');
@@ -99,7 +104,7 @@ export const ExtProfileLinks: React.FC<Props> = ({ userId, editable = false }) =
         ))}
       </View>
 
-      {editable && links.length < MAX_PROFILE_LINKS ? (
+      {editable && links.length < maxEditableLinks ? (
         <View style={styles.form}>
           <TextInput
             placeholder="Label (e.g. Newsletter)"

@@ -7,11 +7,13 @@ import { colors, spacing } from '../../../../shared/constants/theme';
 import { apiClient } from '../../../../shared/services/api/apiClient';
 import { usePingUserToRoom } from '../../hooks/useRooms';
 import { messageService } from '../../../messages/services/messageService';
+import { socialService, type ReportReason } from '../../../social/services/socialService';
 import { errorMessage } from '../../../../shared/utils/errorMessage';
 import type { UserSummary } from '../../../../shared/types/domain';
 import { SHARE_BASE_URL } from '../../../../core/navigation/linking';
 import { useExtBackend } from '../../../extensions/hooks/useExtBackend';
 import { ExtTipSheet } from '../../../extensions/components/ExtTipSheet';
+import { areExternalDigitalPurchasesAllowed } from '../../../extensions/utils/digitalPurchases';
 
 // Direct REST shims — the existing `profileService.follow/wave` are
 // in-memory mocks. We hit the real API here so taps actually mutate
@@ -20,6 +22,12 @@ const realFollow = (userId: string): Promise<unknown> =>
   apiClient.post(`/follow/${userId}`).then(r => r.data);
 const realWave = (userId: string): Promise<unknown> =>
   apiClient.post(`/users/${userId}/wave`).then(r => r.data);
+const REPORT_REASONS: readonly { label: string; value: ReportReason }[] = [
+  { label: 'Spam', value: 'spam' },
+  { label: 'Harcèlement', value: 'harassment' },
+  { label: 'Faux profil', value: 'fake_profile' },
+  { label: 'Autre', value: 'other' },
+];
 
 interface ProfileActionSheetProps {
   /** When null, the sheet is hidden. */
@@ -46,6 +54,11 @@ export const ProfileActionSheet: React.FC<ProfileActionSheetProps> = memo(
     const follow = useMutation({ mutationFn: realFollow });
     const ping = usePingUserToRoom();
     const wave = useMutation({ mutationFn: realWave });
+    const block = useMutation({ mutationFn: socialService.block });
+    const report = useMutation({
+      mutationFn: ({ userId, reason }: { userId: string; reason: ReportReason }) =>
+        socialService.report(userId, { reason }),
+    });
     // #112: post the room link as a DM so the participant can hop in from chat.
     const shareDm = useMutation({
       mutationFn: (userId: string) =>
@@ -55,6 +68,7 @@ export const ProfileActionSheet: React.FC<ProfileActionSheetProps> = memo(
         ),
     });
     const { status: extStatus } = useExtBackend();
+    const externalPurchasesAllowed = areExternalDigitalPurchasesAllowed();
     const [tipping, setTipping] = useState(false);
     const handleTip = useCallback(() => setTipping(true), []);
     const handleTipClose = useCallback(() => setTipping(false), []);
@@ -125,6 +139,55 @@ export const ProfileActionSheet: React.FC<ProfileActionSheetProps> = memo(
       });
     }, [onClose, shareDm, target]);
 
+    const handleBlock = useCallback(() => {
+      if (!target) return;
+      const handle = target.username ?? target.displayName;
+      Alert.alert(
+        `Bloquer @${handle} ?`,
+        'Vous ne pourrez plus vous suivre, échanger de messages ni partager une room.',
+        [
+          { text: 'Annuler', style: 'cancel' },
+          {
+            text: 'Bloquer',
+            style: 'destructive',
+            onPress: () =>
+              block.mutate(target.id, {
+                onSuccess: () => onClose(),
+                onError: e => Alert.alert('Erreur', errorMessage(e, 'Échec du blocage')),
+              }),
+          },
+        ],
+        { cancelable: true },
+      );
+    }, [block, onClose, target]);
+
+    const handleReport = useCallback(() => {
+      if (!target) return;
+      const handle = target.username ?? target.displayName;
+      Alert.alert(
+        `Signaler @${handle}`,
+        'Pourquoi souhaitez-vous signaler ce profil ?',
+        [
+          ...REPORT_REASONS.map(reason => ({
+            text: reason.label,
+            onPress: () =>
+              report.mutate(
+                { userId: target.id, reason: reason.value },
+                {
+                  onSuccess: () => {
+                    Alert.alert('Merci', 'Votre signalement a été transmis à la modération.');
+                    onClose();
+                  },
+                  onError: e => Alert.alert('Erreur', errorMessage(e, 'Échec du signalement')),
+                },
+              ),
+          })),
+          { text: 'Annuler', style: 'cancel' as const },
+        ],
+        { cancelable: true },
+      );
+    }, [onClose, report, target]);
+
     if (!target) return null;
     const isSelf = viewerId === target.id;
 
@@ -155,7 +218,7 @@ export const ProfileActionSheet: React.FC<ProfileActionSheetProps> = memo(
                   <ActionRow icon="notifications" label="Ping (rejoins-moi)" onPress={handlePing} />
                   <ActionRow icon="waves" label="Envoyer un wave 🌊" onPress={handleWave} />
                   <ActionRow icon="share" label="Partager cette room" onPress={handleShareRoom} />
-                  {extStatus.features.payments ? (
+                  {extStatus.features.payments && externalPurchasesAllowed ? (
                     <ActionRow
                       icon="volunteer-activism"
                       label="Envoyer un pourboire 💸"
@@ -169,6 +232,8 @@ export const ProfileActionSheet: React.FC<ProfileActionSheetProps> = memo(
                       onPress={handleOpenProfile}
                     />
                   ) : null}
+                  <ActionRow icon="flag" label="Signaler ce profil" onPress={handleReport} />
+                  <ActionRow icon="block" label="Bloquer ce profil" onPress={handleBlock} />
                 </>
               ) : (
                 <Text style={styles.selfNote}>C&apos;est vous 👋</Text>
@@ -185,7 +250,7 @@ export const ProfileActionSheet: React.FC<ProfileActionSheetProps> = memo(
           </Pressable>
         </Modal>
         <ExtTipSheet
-          target={tipping ? target : null}
+          target={externalPurchasesAllowed && tipping ? target : null}
           onClose={handleTipClose}
           onSent={handleTipSent}
         />

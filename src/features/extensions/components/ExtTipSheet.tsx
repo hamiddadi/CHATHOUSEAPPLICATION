@@ -6,6 +6,7 @@ import { errorMessage } from '../../../shared/utils/errorMessage';
 import { STRIPE_HOSTS, openExternalUrl } from '../../../shared/utils/openExternalUrl';
 import type { UserSummary } from '../../../shared/types/domain';
 import { useTip } from '../hooks/useTip';
+import { areExternalDigitalPurchasesAllowed } from '../utils/digitalPurchases';
 
 const PRESETS = [2, 5, 10, 20];
 const CURRENCIES = [
@@ -29,12 +30,13 @@ interface ExtTipSheetProps {
  */
 export const ExtTipSheet: React.FC<ExtTipSheetProps> = ({ target, onClose, onSent }) => {
   const { t } = useTranslation();
+  const externalPurchasesAllowed = areExternalDigitalPurchasesAllowed();
   const tip = useTip();
   const [currency, setCurrency] = useState<string>('eur');
 
   const handleTip = useCallback(
     (amountMajor: number) => {
-      if (!target) return;
+      if (!externalPurchasesAllowed || !target) return;
       tip.mutate(
         { toUserId: target.id, amountCents: amountMajor * 100, currency },
         {
@@ -48,10 +50,12 @@ export const ExtTipSheet: React.FC<ExtTipSheetProps> = ({ target, onClose, onSen
         },
       );
     },
-    [tip, target, currency, t, onSent],
+    [tip, target, currency, t, onSent, externalPurchasesAllowed],
   );
 
   const symbol = CURRENCIES.find(c => c.code === currency)?.symbol ?? '';
+
+  if (!externalPurchasesAllowed) return null;
 
   return (
     <Modal visible={target !== null} transparent animationType="slide" onRequestClose={onClose}>

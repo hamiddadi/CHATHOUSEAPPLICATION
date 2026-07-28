@@ -7,6 +7,8 @@ const instance = {
   requestPermission: jest.fn(async () => 1),
   onMessage: jest.fn(() => jest.fn()),
   onTokenRefresh: jest.fn(() => jest.fn()),
+  getInitialNotification: jest.fn(async () => null),
+  onNotificationOpenedApp: jest.fn(() => jest.fn()),
   setBackgroundMessageHandler: jest.fn(),
   registerDeviceForRemoteMessages: jest.fn(async () => undefined),
 };

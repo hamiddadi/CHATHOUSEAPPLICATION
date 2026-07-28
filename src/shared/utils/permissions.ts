@@ -6,14 +6,36 @@
 // eslint-disable-next-line react-native/split-platform-components
 import { PermissionsAndroid, Platform } from 'react-native';
 
+const androidApiLevel = (): number =>
+  typeof Platform.Version === 'number' ? Platform.Version : Number.parseInt(Platform.Version, 10);
+
+/**
+ * Android 12+ protects Bluetooth audio-device access separately. A denial does
+ * not block speaker/handset audio, so callers should treat this as optional.
+ */
+export const requestBluetoothAudioPermission = async (): Promise<boolean> => {
+  if (Platform.OS !== 'android' || androidApiLevel() < 31) return true;
+
+  const permission = PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT;
+  if (await PermissionsAndroid.check(permission)) return true;
+  const result = await PermissionsAndroid.request(permission, {
+    title: 'Appareils audio à proximité',
+    message:
+      'Chathouse a besoin de cette autorisation pour utiliser vos casques et écouteurs Bluetooth.',
+    buttonPositive: 'Autoriser',
+    buttonNegative: 'Refuser',
+  });
+  return result === PermissionsAndroid.RESULTS.GRANTED;
+};
+
 /**
  * Cross-platform microphone permission request. iOS uses the descriptions
  * declared in Info.plist (NSMicrophoneUsageDescription) and the system
  * prompts at first audio capture — we just trust the OS dialog.
  *
  * Android needs an explicit `RECORD_AUDIO` runtime permission since API 23.
- * The string is also declared in app.json's android.permissions array so
- * the manifest entry is generated at prebuild.
+ * Android 12+ also asks for optional Bluetooth-device access after the mic is
+ * granted so headset routing works without blocking handset audio on denial.
  */
 export const requestAudioPermission = async (): Promise<boolean> => {
   if (Platform.OS === 'ios') {
@@ -31,7 +53,12 @@ export const requestAudioPermission = async (): Promise<boolean> => {
       buttonPositive: 'Autoriser',
       buttonNegative: 'Refuser',
     });
-    return result === PermissionsAndroid.RESULTS.GRANTED;
+    const microphoneGranted = result === PermissionsAndroid.RESULTS.GRANTED;
+    if (microphoneGranted) {
+      // Optional: room audio still works through the handset if this is denied.
+      await requestBluetoothAudioPermission().catch(() => false);
+    }
+    return microphoneGranted;
   }
 
   // Web / unknown platforms — getUserMedia drives its own prompt.

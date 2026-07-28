@@ -23,7 +23,7 @@ export interface ListUsersParams {
 
 export interface ListReportsParams {
   status?: 'open' | 'resolved' | 'all';
-  kind?: 'USER' | 'ROOM';
+  kind?: 'USER' | 'ROOM' | 'DIRECT_MESSAGE' | 'GROUP_MESSAGE' | 'ROOM_MESSAGE';
   limit?: number;
   cursor?: string;
 }

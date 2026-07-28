@@ -65,6 +65,23 @@
     "deleteTitle": "Supprimer le message",
     "deleteBody": "Ce message sera supprimé définitivement."
   },
+  "moderation": {
+    "reportMessageTitle": "Signaler ce message",
+    "reportMessageBody": "Choisis le motif. L'équipe de modération recevra une copie du message.",
+    "reportMessageA11y": "Signaler ce message",
+    "longPressToReport": "Maintenir pour signaler ce message",
+    "closeReport": "Fermer le formulaire de signalement",
+    "submitting": "Envoi du signalement…",
+    "reportSentTitle": "Signalement envoyé",
+    "reportSentBody": "L'équipe de modération va examiner ce message.",
+    "reportAlreadySent": "Tu as déjà signalé ce message.",
+    "reportFailed": "Impossible d'envoyer le signalement.",
+    "reasons": {
+      "spam": "Spam",
+      "harassment": "Harcèlement ou propos abusifs",
+      "other": "Autre"
+    }
+  },
   "voice": {
     "preview": "🎤 Message vocal",
     "recording": "Enregistrement…",
@@ -853,6 +870,10 @@
       "roomLive": "En direct",
       "roomEnded": "Terminée",
       "reportedBy": "Signalé par",
+      "messageEvidence": "Message signalé",
+      "voiceEvidence": "Message vocal",
+      "voiceEvidenceUnavailable": "Preuve vocale indisponible",
+      "deletedEvidence": "Message supprimé après le signalement",
       "errorTitle": "Impossible de charger les signalements",
       "errorBody": "Vérifiez votre connexion et réessayez.",
       "emptyTitle": "Rien ici",
@@ -1451,6 +1472,8 @@
       "GROUP_004": "Seul le propriétaire du groupe peut faire ça.",
       "GROUP_005": "Utilise « Quitter le groupe » pour te retirer.",
       "GROUP_006": "Impossible de partager un groupe avec cette personne.",
+      "REPORT_001": "Tu ne peux pas signaler ton propre contenu.",
+      "REPORT_002": "Ce message n'est plus disponible pour un signalement.",
       "CLUB_001": "House introuvable.",
       "CLUB_002": "Action réservée aux admins de la house.",
       "CLUB_003": "House privée — impossible de la rejoindre directement.",

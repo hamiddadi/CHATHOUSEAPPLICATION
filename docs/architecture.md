@@ -91,9 +91,10 @@ module/controller/service split without the decorator overhead.
 
 ## Build / Deploy
 
-- Frontend: bare React Native (de-Expo) — Android built with Gradle
-  (`./gradlew :app:assembleDebug` / `:app:bundleRelease`); live audio = LiveKit.
-  See [`docs/RELEASE-SIGNING.md`](./RELEASE-SIGNING.md).
+- Frontend: bare React Native (de-Expo) — Android debug built with Gradle
+  (`./gradlew :app:assembleDebug`); store AAB built only through
+  `scripts/build-release-aab.ps1`; live audio = LiveKit. See
+  [`docs/RELEASE-SIGNING.md`](./RELEASE-SIGNING.md).
 - Backend: `tsc -p tsconfig.build.json` → `node dist/app.js` or
   `dist/extensions/server.js` for the extended stack.
 - Docker compose at `backend/docker-compose.yml` for local Postgres+Redis.

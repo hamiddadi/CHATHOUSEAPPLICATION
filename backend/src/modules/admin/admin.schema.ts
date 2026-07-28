@@ -1,11 +1,19 @@
 import { z } from 'zod';
+import { decodeAdminCursor } from './admin.cursor';
+
+export const adminCursorSchema = z
+  .string()
+  .max(1024)
+  .refine(value => decodeAdminCursor(value) !== null, {
+    message: 'Invalid admin pagination cursor',
+  });
 
 export const listUsersSchema = z.object({
   q: z.string().min(1).max(100).optional(),
   role: z.enum(['USER', 'MODERATOR', 'ADMIN', 'SUPER_ADMIN']).optional(),
   suspended: z.coerce.boolean().optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
-  cursor: z.string().datetime().optional(),
+  cursor: adminCursorSchema.optional(),
 });
 
 export const setRoleSchema = z.object({
@@ -42,14 +50,14 @@ export const listAuditLogSchema = z.object({
     ])
     .optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
-  cursor: z.string().datetime().optional(),
+  cursor: adminCursorSchema.optional(),
 });
 
 export const listReportsSchema = z.object({
   status: z.enum(['open', 'resolved', 'all']).default('open'),
-  kind: z.enum(['USER', 'ROOM']).optional(),
+  kind: z.enum(['USER', 'ROOM', 'DIRECT_MESSAGE', 'GROUP_MESSAGE', 'ROOM_MESSAGE']).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
-  cursor: z.string().datetime().optional(),
+  cursor: adminCursorSchema.optional(),
 });
 
 export const resolveReportSchema = z.object({

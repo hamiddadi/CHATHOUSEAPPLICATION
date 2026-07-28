@@ -33,11 +33,16 @@ POSTGRES_HOST="${POSTGRES_HOST:-postgres}"
 POSTGRES_PORT="${POSTGRES_PORT:-5432}"
 POSTGRES_DB="${POSTGRES_DB:-chathouse}"
 POSTGRES_USER="${POSTGRES_USER:-chathouse}"
-POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-chathouse}"
+POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-}"
 BACKUP_DIR="${BACKUP_DIR:-/backups}"
 BACKUP_RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-7}"
 S3_BACKUP_BUCKET="${S3_BACKUP_BUCKET:-}"
 S3_BACKUP_PREFIX="${S3_BACKUP_PREFIX:-chathouse}"
+
+[ -n "$POSTGRES_PASSWORD" ] || {
+  log "ERROR: POSTGRES_PASSWORD is required"
+  exit 1
+}
 
 # pg_dump / aws read the password from the environment.
 export PGPASSWORD="${POSTGRES_PASSWORD}"
@@ -89,6 +94,11 @@ fi
 # Sanity check: the gzipped dump must be non-empty.
 if [ ! -s "${BACKUP_PATH}" ]; then
   log "ERROR: backup file is empty: ${BACKUP_PATH}"
+  rm -f "${BACKUP_PATH}"
+  exit 1
+fi
+if ! gzip -t "${BACKUP_PATH}"; then
+  log "ERROR: backup gzip integrity check failed: ${BACKUP_PATH}"
   rm -f "${BACKUP_PATH}"
   exit 1
 fi

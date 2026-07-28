@@ -7,6 +7,7 @@ import {
   type QueryClient,
 } from '@tanstack/react-query';
 import { groupService, type GroupConversation, type GroupMessage } from '../services/groupService';
+import type { ContentReportReason } from '../../../shared/types/moderation';
 
 export const groupKeys = {
   all: ['groups'] as const,
@@ -95,6 +96,19 @@ export const useSendGroupVoice = () => {
     },
   });
 };
+
+export const useReportGroupMessage = () =>
+  useMutation({
+    mutationFn: ({
+      conversationId,
+      messageId,
+      reason,
+    }: {
+      conversationId: string;
+      messageId: string;
+      reason: ContentReportReason;
+    }) => groupService.reportMessage(conversationId, messageId, reason),
+  });
 
 export const useCreateGroup = () => {
   const qc = useQueryClient();

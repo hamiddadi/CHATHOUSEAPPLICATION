@@ -6,6 +6,10 @@ import {
   updateRoleSchema,
   muteSchema,
 } from '../../modules/rooms/rooms.schema';
+import {
+  contentReportResultSchema,
+  contentReportSchema,
+} from '../../modules/reports/contentReports.schema';
 import type { OpenApiComponents } from './components';
 
 export const registerRoomsPaths = (
@@ -33,6 +37,32 @@ export const registerRoomsPaths = (
             }),
           },
         },
+      },
+    },
+  });
+
+  registry.registerPath({
+    method: 'post',
+    path: '/api/rooms/{id}/messages/{messageId}/report',
+    tags: ['Rooms', 'Moderation'],
+    security: [{ bearerAuth: [] }],
+    request: {
+      params: z.object({ id: z.string().min(1), messageId: z.string().min(1) }),
+      body: { content: { 'application/json': { schema: contentReportSchema } } },
+    },
+    responses: {
+      201: {
+        description:
+          'Queues immutable evidence for a room-chat message visible under the active participant/chat policy.',
+        content: { 'application/json': { schema: contentReportResultSchema } },
+      },
+      403: {
+        description: 'The caller is the message author',
+        content: { 'application/json': { schema: ErrorBody } },
+      },
+      404: {
+        description: 'Message missing or hidden by membership/chat visibility',
+        content: { 'application/json': { schema: ErrorBody } },
       },
     },
   });

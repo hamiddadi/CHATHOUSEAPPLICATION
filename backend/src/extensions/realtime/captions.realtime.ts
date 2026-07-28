@@ -2,6 +2,7 @@ import type { Server, Socket } from 'socket.io';
 import { prisma } from '../../config/database';
 import { roomChannel } from '../../socket/channels';
 import { getUserId } from '../../socket/socket.middleware';
+import { isPublicContentAllowed } from '../../utils/publicContentModeration';
 import { captionsService } from '../modules/captions/captions.service';
 
 /**
@@ -52,6 +53,9 @@ export const registerCaptionsRealtime = (io: Server, socket: Socket): void => {
       const speakerName =
         typeof payload?.speakerName === 'string' ? payload.speakerName.slice(0, MAX_NAME) : null;
       if (!roomId || !id || text === null) return;
+      // Captions are public UGC just like room-chat text. Drop the narrow,
+      // high-confidence violations handled by the shared classifier.
+      if (!isPublicContentAllowed(text)) return;
 
       // Joined the room channel? (cheap, in-memory)
       if (!socket.rooms.has(roomChannel(roomId))) return;

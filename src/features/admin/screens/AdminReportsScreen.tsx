@@ -12,6 +12,7 @@ import { useAdminReportsInfinite, useResolveReport } from '../hooks/useAdmin';
 import type { AdminReport } from '../types/admin.types';
 import { formatDateTime } from '../../../shared/utils/intl';
 import { errorMessage } from '../../../shared/utils/errorMessage';
+import VoiceMessageBubble from '../../messages/components/VoiceMessageBubble';
 
 const getTabs = (t: TFunction): { id: 'open' | 'resolved' | 'all'; label: string }[] => [
   { id: 'open', label: t('admin.reports.tabs.open') },
@@ -25,7 +26,10 @@ const ReportRow: React.FC<{
   busy: boolean;
 }> = memo(({ report, onResolve, busy }) => {
   const { t } = useTranslation();
-  const target = report.targetKind === 'USER' ? report.reported : null;
+  const isContentReport = ['DIRECT_MESSAGE', 'GROUP_MESSAGE', 'ROOM_MESSAGE'].includes(
+    report.targetKind,
+  );
+  const target = report.targetKind === 'USER' ? report.reported : report.contentAuthor;
   const room = report.reportedRoom;
   return (
     <View style={styles.row}>
@@ -73,6 +77,43 @@ const ReportRow: React.FC<{
               {room.isLive ? t('admin.reports.roomLive') : t('admin.reports.roomEnded')}
             </Text>
           </View>
+        </View>
+      ) : null}
+
+      {isContentReport ? (
+        <View style={styles.evidence}>
+          <Text className="text-[10px] font-body-bold uppercase tracking-widest text-ink-muted">
+            {t('admin.reports.messageEvidence', 'Reported message')}
+            {report.contentContextSnapshot ? ` · ${report.contentContextSnapshot}` : ''}
+          </Text>
+          {report.contentKind === 'VOICE' ? (
+            <>
+              <Text className="text-sm text-ink">
+                {t('admin.reports.voiceEvidence', 'Voice message')}
+              </Text>
+              {report.contentAudioUrl ? (
+                <VoiceMessageBubble
+                  audioUrl={report.contentAudioUrl}
+                  durationMs={report.contentAudioDurationMs}
+                  isMine={false}
+                />
+              ) : (
+                <Text className="text-xs text-ink-dim">
+                  {t('admin.reports.voiceEvidenceUnavailable', 'Voice evidence unavailable')}
+                </Text>
+              )}
+            </>
+          ) : (
+            <Text className="text-sm text-ink" numberOfLines={6}>
+              {report.contentSnapshot ??
+                t('admin.reports.deletedEvidence', 'Message deleted after report')}
+            </Text>
+          )}
+          {report.contentCreatedAt ? (
+            <Text className="text-[10px] text-ink-dim">
+              {formatDateTime(report.contentCreatedAt)}
+            </Text>
+          ) : null}
         </View>
       ) : null}
 
@@ -298,6 +339,14 @@ const styles = StyleSheet.create({
     backgroundColor: withAlpha(colors.accent, 0.1),
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  evidence: {
+    gap: spacing.xxs,
+    padding: spacing.md,
+    borderRadius: radii.sm,
+    backgroundColor: colors.overlayWhite4,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.overlayWhite15,
   },
   actions: {
     flexDirection: 'row',

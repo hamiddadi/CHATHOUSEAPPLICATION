@@ -53,6 +53,7 @@ environment:
     - name: STAGING_HOST # staging host IP / DNS for SSH deploy
     - name: STAGING_USER # SSH user on the staging host
     - name: STAGING_SSH_KEY # private SSH key (PEM) for STAGING_USER
+    - name: STAGING_HOST_FINGERPRINT # pinned SSH host key (SHA256:...)
     - name: SLACK_WEBHOOK_URL # deploy notifications channel webhook
     # GITHUB_TOKEN is auto-provided to the workflow for GHCR push — not set here.
 
@@ -74,6 +75,7 @@ environment:
 #   • protection_rules.prevent_self_review: true
 #   • protection_rules.allow_admins_to_bypass: false
 #   • deployment_branch_policy: tags only (custom policy allowing v*.*.*)
-#   • secrets: PROD_HOST, PROD_USER, PROD_SSH_KEY, SLACK_WEBHOOK_URL
+#   • secrets: PROD_HOST, PROD_USER, PROD_SSH_KEY, PROD_HOST_FINGERPRINT,
+#              SLACK_WEBHOOK_URL
 # Referenced by `.github/workflows/cd-production.yml` (environment: production).
 # ─────────────────────────────────────────────────────────────────────────────

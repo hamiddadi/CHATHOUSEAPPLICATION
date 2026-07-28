@@ -2,10 +2,10 @@
 
 **Last updated: 2026-06-03**
 
-> Launch-ready draft. Have counsel review and fill the bracketed placeholders
-> (`[…]`) before publishing. Host at a stable public URL and reference it in App
-> Store Connect / Google Play and at sign-up. This EULA satisfies the
-> user-generated-content requirements of App Store Review Guideline 1.2.
+> **Not publishable as-is.** Have counsel review it, fill every bracketed
+> placeholder (`[…]`), verify the operational moderation commitments, host the
+> final version at a stable public URL and capture acceptance of that exact
+> version. This draft alone does not prove compliance with store UGC rules.
 
 This End User License Agreement ("**Agreement**") is between you and
 [Legal entity name] ("**Chathouse**", "**we**", "**us**"). By creating an account
@@ -70,10 +70,11 @@ By using the App you acknowledge these tools and our enforcement rights.
 
 ## 7. Purchases (tips & premium)
 
-Tips and premium subscriptions are processed through the platform and/or Stripe.
-Subscriptions renew until cancelled; manage or cancel in your platform account
-settings. Except where required by law or platform policy, payments are
-non-refundable. Prices and features may change with notice.
+The current Android and iOS store builds do not initiate tips, premium checkout
+or other digital purchases. If those features are introduced later, the
+applicable platform billing rules and disclosures will apply; subscriptions will
+renew until cancelled and will be managed through the purchasing platform.
+Except where required by law or platform policy, payments are non-refundable.
 
 ## 8. Privacy
 

@@ -2,6 +2,7 @@ import { apiClient } from '../../../shared/services/api/apiClient';
 import { useAuthStore } from '../../auth/store/authStore';
 import type { Envelope } from '../../../shared/types/api';
 import type { Conversation, Message, UserSummary } from '../../../shared/types/domain';
+import type { ContentReportReason, ContentReportResult } from '../../../shared/types/moderation';
 
 /**
  * DM service — one "conversation" == one peer user. The frontend uses
@@ -166,6 +167,14 @@ export const messageService = {
 
   async remove(messageId: string): Promise<{ deleted: true }> {
     const res = await apiClient.delete<Envelope<{ deleted: true }>>(`/chat/messages/${messageId}`);
+    return res.data.data;
+  },
+
+  async report(messageId: string, reason: ContentReportReason): Promise<ContentReportResult> {
+    const res = await apiClient.post<Envelope<ContentReportResult>>(
+      `/chat/messages/${messageId}/report`,
+      { reason },
+    );
     return res.data.data;
   },
 };

@@ -13,12 +13,21 @@ import {
 } from 'react-native';
 import MaterialIcons from '@react-native-vector-icons/material-icons';
 import { useQueryClient } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
 import { chatmodApi } from '../../../extensions';
 import { Avatar } from '../../../../shared/components/Avatar';
+import { ContentReportSheet } from '../../../../shared/components/ContentReportSheet';
 import { colors, spacing } from '../../../../shared/constants/theme';
 import { getSocket } from '../../../../shared/services/realtime/socketClient';
+import type { ContentReportReason } from '../../../../shared/types/moderation';
 import { errorMessage } from '../../../../shared/utils/errorMessage';
-import { roomKeys, useRoomMessages, useSendRoomMessage } from '../../hooks/useRooms';
+import { useAuthStore } from '../../../auth/store/authStore';
+import {
+  roomKeys,
+  useReportRoomMessage,
+  useRoomMessages,
+  useSendRoomMessage,
+} from '../../hooks/useRooms';
 
 // Defer the scroll-to-end so the FlatList finishes layout before scrolling.
 const SCROLL_DEFER_MS = 50;
@@ -99,9 +108,13 @@ export const RoomChatSidebar: React.FC<RoomChatSidebarProps> = memo(
       : 'Le chat est réservé aux modérateurs.';
     const { data: messages = [] } = useRoomMessages(visible ? roomId : null);
     const sendMessage = useSendRoomMessage();
+    const reportMessage = useReportRoomMessage();
     const qc = useQueryClient();
+    const { t } = useTranslation();
+    const myId = useAuthStore(s => s.user?.id ?? null);
     const [draft, setDraft] = useState('');
     const [replyTo, setReplyTo] = useState<ChatMessage | null>(null);
+    const [reportMessageId, setReportMessageId] = useState<string | null>(null);
     const listRef = useRef<FlatList<ChatMessage>>(null);
 
     // Subscribe to live `room:chat_message` so new entries land instantly
@@ -180,6 +193,35 @@ export const RoomChatSidebar: React.FC<RoomChatSidebarProps> = memo(
     const handleStartReply = useCallback((msg: ChatMessage) => setReplyTo(msg), []);
     const handleCancelReply = useCallback(() => setReplyTo(null), []);
 
+    const handleReportReason = useCallback(
+      (reason: ContentReportReason) => {
+        if (!reportMessageId || reportMessage.isPending) return;
+        reportMessage.mutate(
+          { roomId, messageId: reportMessageId, reason },
+          {
+            onSuccess: result => {
+              setReportMessageId(null);
+              Alert.alert(
+                t('moderation.reportSentTitle', 'Signalement envoyé'),
+                result.alreadyReported
+                  ? t('moderation.reportAlreadySent', 'Vous avez déjà signalé ce message.')
+                  : t(
+                      'moderation.reportSentBody',
+                      "L'équipe de modération va examiner ce message.",
+                    ),
+              );
+            },
+            onError: e =>
+              Alert.alert(
+                t('common.error', 'Erreur'),
+                errorMessage(e, t('moderation.reportFailed', 'Échec du signalement')),
+              ),
+          },
+        );
+      },
+      [reportMessage, reportMessageId, roomId, t],
+    );
+
     // Host/mod-only: drop a message from the cache after the API confirms.
     // Same query key the socket handler writes to, so the list stays in sync.
     const handleDeleteMessage = useCallback(
@@ -223,17 +265,30 @@ export const RoomChatSidebar: React.FC<RoomChatSidebarProps> = memo(
           <View style={styles.bubble}>
             <View style={styles.bubbleHeader}>
               <Text style={styles.author}>{item.user.displayName || item.user.username}</Text>
-              {canModerate ? (
-                <Pressable
-                  onPress={() => handleDeleteMessage(item)}
-                  hitSlop={8}
-                  accessibilityRole="button"
-                  accessibilityLabel="Supprimer le message"
-                  style={styles.deleteBtn}
-                >
-                  <MaterialIcons name="delete-outline" size={16} color={colors.textMuted} />
-                </Pressable>
-              ) : null}
+              <View style={styles.messageActions}>
+                {item.user.id !== myId ? (
+                  <Pressable
+                    onPress={() => setReportMessageId(item.id)}
+                    hitSlop={8}
+                    accessibilityRole="button"
+                    accessibilityLabel={t('moderation.reportMessageA11y', 'Signaler le message')}
+                    style={styles.messageAction}
+                  >
+                    <MaterialIcons name="flag" size={16} color={colors.danger} />
+                  </Pressable>
+                ) : null}
+                {canModerate ? (
+                  <Pressable
+                    onPress={() => handleDeleteMessage(item)}
+                    hitSlop={8}
+                    accessibilityRole="button"
+                    accessibilityLabel="Supprimer le message"
+                    style={styles.messageAction}
+                  >
+                    <MaterialIcons name="delete-outline" size={16} color={colors.textMuted} />
+                  </Pressable>
+                ) : null}
+              </View>
             </View>
             {item.replyTo ? (
               <View style={styles.replyQuote}>
@@ -249,97 +304,105 @@ export const RoomChatSidebar: React.FC<RoomChatSidebarProps> = memo(
           </View>
         </Pressable>
       ),
-      [canModerate, handleDeleteMessage, handleStartReply],
+      [canModerate, handleDeleteMessage, handleStartReply, myId, t],
     );
 
     return (
-      <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-        <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="Fermer le chat">
-          <Pressable style={styles.sheet} onPress={() => undefined}>
-            <KeyboardAvoidingView
-              behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-              style={styles.keyboardWrap}
-            >
-              <View style={styles.header}>
-                <Text style={styles.title}>Chat de la room</Text>
-                <Pressable
-                  onPress={onClose}
-                  hitSlop={8}
-                  accessibilityRole="button"
-                  accessibilityLabel="Fermer"
-                >
-                  <MaterialIcons name="close" size={22} color={colors.text} />
-                </Pressable>
-              </View>
-              <FlatList
-                ref={listRef}
-                data={messages}
-                renderItem={renderItem}
-                keyExtractor={m => m.id}
-                contentContainerStyle={styles.listContent}
-                showsVerticalScrollIndicator={false}
-                initialNumToRender={20}
-                maxToRenderPerBatch={20}
-                windowSize={11}
-                removeClippedSubviews
-              />
-              {replyTo ? (
-                <View style={styles.replyBanner}>
-                  <View style={styles.replyBannerFlex}>
-                    <Text style={styles.replyBannerLabel}>
-                      Réponse à @{replyTo.user.username || replyTo.user.displayName}
-                    </Text>
-                    <Text style={styles.replyBannerSnippet} numberOfLines={1}>
-                      {replyTo.content}
-                    </Text>
-                  </View>
+      <>
+        <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+          <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="Fermer le chat">
+            <Pressable style={styles.sheet} onPress={() => undefined}>
+              <KeyboardAvoidingView
+                behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+                style={styles.keyboardWrap}
+              >
+                <View style={styles.header}>
+                  <Text style={styles.title}>Chat de la room</Text>
                   <Pressable
-                    onPress={handleCancelReply}
-                    accessibilityRole="button"
-                    accessibilityLabel="Annuler la réponse"
+                    onPress={onClose}
                     hitSlop={8}
-                  >
-                    <MaterialIcons name="close" size={16} color={colors.textMuted} />
-                  </Pressable>
-                </View>
-              ) : null}
-              {canPost ? (
-                <View style={styles.composer}>
-                  <TextInput
-                    value={draft}
-                    onChangeText={setDraft}
-                    placeholder={replyTo ? 'Réponse…' : 'Écrire…'}
-                    placeholderTextColor={colors.textMuted}
-                    style={styles.input}
-                    multiline
-                    maxLength={MAX_MESSAGE_LENGTH}
-                    accessibilityLabel="Message de chat"
-                  />
-                  <Pressable
-                    onPress={handleSend}
-                    disabled={draft.trim().length === 0 || sendMessage.isPending}
                     accessibilityRole="button"
-                    accessibilityLabel="Envoyer"
-                    style={[
-                      styles.sendBtn,
-                      draft.trim().length === 0 || sendMessage.isPending
-                        ? styles.sendBtnDisabled
-                        : null,
-                    ]}
+                    accessibilityLabel="Fermer"
                   >
-                    <MaterialIcons name="send" size={18} color={colors.background} />
+                    <MaterialIcons name="close" size={22} color={colors.text} />
                   </Pressable>
                 </View>
-              ) : (
-                <View style={styles.composerDisabled}>
-                  <MaterialIcons name="lock" size={16} color={colors.textMuted} />
-                  <Text style={styles.composerDisabledText}>{cantPostNotice}</Text>
-                </View>
-              )}
-            </KeyboardAvoidingView>
+                <FlatList
+                  ref={listRef}
+                  data={messages}
+                  renderItem={renderItem}
+                  keyExtractor={m => m.id}
+                  contentContainerStyle={styles.listContent}
+                  showsVerticalScrollIndicator={false}
+                  initialNumToRender={20}
+                  maxToRenderPerBatch={20}
+                  windowSize={11}
+                  removeClippedSubviews
+                />
+                {replyTo ? (
+                  <View style={styles.replyBanner}>
+                    <View style={styles.replyBannerFlex}>
+                      <Text style={styles.replyBannerLabel}>
+                        Réponse à @{replyTo.user.username || replyTo.user.displayName}
+                      </Text>
+                      <Text style={styles.replyBannerSnippet} numberOfLines={1}>
+                        {replyTo.content}
+                      </Text>
+                    </View>
+                    <Pressable
+                      onPress={handleCancelReply}
+                      accessibilityRole="button"
+                      accessibilityLabel="Annuler la réponse"
+                      hitSlop={8}
+                    >
+                      <MaterialIcons name="close" size={16} color={colors.textMuted} />
+                    </Pressable>
+                  </View>
+                ) : null}
+                {canPost ? (
+                  <View style={styles.composer}>
+                    <TextInput
+                      value={draft}
+                      onChangeText={setDraft}
+                      placeholder={replyTo ? 'Réponse…' : 'Écrire…'}
+                      placeholderTextColor={colors.textMuted}
+                      style={styles.input}
+                      multiline
+                      maxLength={MAX_MESSAGE_LENGTH}
+                      accessibilityLabel="Message de chat"
+                    />
+                    <Pressable
+                      onPress={handleSend}
+                      disabled={draft.trim().length === 0 || sendMessage.isPending}
+                      accessibilityRole="button"
+                      accessibilityLabel="Envoyer"
+                      style={[
+                        styles.sendBtn,
+                        draft.trim().length === 0 || sendMessage.isPending
+                          ? styles.sendBtnDisabled
+                          : null,
+                      ]}
+                    >
+                      <MaterialIcons name="send" size={18} color={colors.background} />
+                    </Pressable>
+                  </View>
+                ) : (
+                  <View style={styles.composerDisabled}>
+                    <MaterialIcons name="lock" size={16} color={colors.textMuted} />
+                    <Text style={styles.composerDisabledText}>{cantPostNotice}</Text>
+                  </View>
+                )}
+              </KeyboardAvoidingView>
+            </Pressable>
           </Pressable>
-        </Pressable>
-      </Modal>
+        </Modal>
+        <ContentReportSheet
+          visible={reportMessageId !== null}
+          submitting={reportMessage.isPending}
+          onClose={() => setReportMessageId(null)}
+          onSelect={handleReportReason}
+        />
+      </>
     );
   },
 );
@@ -384,7 +447,8 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   author: { color: colors.textMuted, fontSize: 11, fontWeight: '600' },
-  deleteBtn: { marginLeft: spacing.sm },
+  messageActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  messageAction: { padding: 2 },
   content: { color: colors.text, fontSize: 14, lineHeight: 18 },
   composer: {
     flexDirection: 'row',

@@ -1,4 +1,11 @@
-import { initializeApp, getApps, cert, type ServiceAccount } from 'firebase-admin';
+import {
+  applicationDefault,
+  initializeApp,
+  getApps,
+  cert,
+  type ServiceAccount,
+} from 'firebase-admin';
+import type { Credential } from 'firebase-admin/app';
 import { getMessaging, type Messaging } from 'firebase-admin/messaging';
 import { prisma } from '../../config/database';
 import { env } from '../../config/env';
@@ -10,13 +17,14 @@ import type { RegisterPushInput } from './push.schema';
  * Push-token registry + dispatcher over Firebase Cloud Messaging (de-Expo:
  * replaced Expo's hosted push proxy with firebase-admin talking to FCM
  * directly — one SDK covers Android FCM and iOS APNs). The dispatcher is
- * best-effort: a single dead token must not break the notification path, and
- * the write to the Notification table already happened by the time we're here.
+ * best-effort at the notification-call-site level: a single dead token must not
+ * break the notification row write. Initialization and transport failures are
+ * still rejected explicitly so workers and operational logs can detect them.
  *
  * Behaviour per env:
  *   - PUSH_DISPATCH_ENABLED=false (default dev):   log the payload, no FCM call.
  *   - PUSH_DISPATCH_ENABLED=true + credentials:    send via firebase-admin.
- *   - PUSH_DISPATCH_ENABLED=true, no credentials:  warn + skip (fail-safe).
+ *   - Production: dispatch + exactly one explicit credential mode are required.
  */
 
 export interface PushPayload {
@@ -27,6 +35,7 @@ export interface PushPayload {
 
 // FCM caps sendEachForMulticast at 500 tokens per call.
 const FCM_BATCH_SIZE = 500;
+export const PUSH_CREDENTIAL_PROBE_TIMEOUT_MS = 10_000;
 
 // firebase-admin error codes that mean the token is dead and should be pruned.
 // `registration-token-not-registered` = uninstalled / token rotated;
@@ -39,31 +48,119 @@ const DEAD_TOKEN_ERRORS = new Set([
   'messaging/invalid-argument',
 ]);
 
-// Lazily-initialised messaging client. `undefined` = not yet attempted,
-// `null` = init failed / no credentials (don't retry on every dispatch).
-let messagingClient: Messaging | null | undefined;
+// Lazily-initialised messaging client. Production also calls initializePush()
+// during server boot, before accepting traffic.
+let messagingClient: Messaging | undefined;
+let credentialClient: Credential | undefined;
+let credentialProbePromise: Promise<void> | undefined;
 
-const getMessagingClient = (): Messaging | null => {
+type CredentialMode = 'inline_service_account' | 'adc' | 'existing_app' | 'missing';
+let activeCredentialMode: CredentialMode = 'missing';
+
+const configuredCredentialMode = (): CredentialMode => {
+  if (env.FIREBASE_SERVICE_ACCOUNT) return 'inline_service_account';
+  if (env.FIREBASE_USE_ADC) return 'adc';
+  return 'missing';
+};
+
+const getMessagingClient = (): Messaging => {
   if (messagingClient !== undefined) return messagingClient;
+  let credentialMode = configuredCredentialMode();
   try {
-    if (getApps().length === 0) {
+    const apps = getApps();
+    if (apps.length === 0) {
       if (env.FIREBASE_SERVICE_ACCOUNT) {
         const serviceAccount = JSON.parse(env.FIREBASE_SERVICE_ACCOUNT) as ServiceAccount;
-        initializeApp({ credential: cert(serviceAccount) });
+        credentialClient = cert(serviceAccount);
+        initializeApp({ credential: credentialClient });
+      } else if (env.FIREBASE_USE_ADC) {
+        credentialClient = applicationDefault();
+        initializeApp({ credential: credentialClient });
       } else {
-        // Falls back to GOOGLE_APPLICATION_CREDENTIALS / Application Default
-        // Credentials when the inline JSON isn't provided.
-        initializeApp();
+        throw new Error(
+          'no Firebase credential mode configured (set FIREBASE_SERVICE_ACCOUNT or FIREBASE_USE_ADC=true)',
+        );
+      }
+    } else {
+      credentialMode = 'existing_app';
+      credentialClient = apps[0]?.options?.credential;
+      if (!credentialClient && env.NODE_ENV === 'production') {
+        throw new Error('the existing Firebase app has no credential');
       }
     }
+    activeCredentialMode = credentialMode;
     messagingClient = getMessaging();
-  } catch (err) {
+  } catch {
+    // Firebase errors may contain credential paths, service-account identities,
+    // or provider response fragments. Keep logs diagnostic but secret-free.
     logger.error('push: firebase-admin init failed', {
-      err: err instanceof Error ? err.message : String(err),
+      credentialMode,
     });
-    messagingClient = null;
+    throw new Error('Push delivery initialization failed');
   }
   return messagingClient;
+};
+
+const probeCredential = async (): Promise<void> => {
+  const credential = credentialClient;
+  if (!credential) {
+    throw new Error('Push delivery credential is unavailable');
+  }
+
+  let timeout: NodeJS.Timeout | undefined;
+  let timedOut = false;
+  try {
+    const result = await Promise.race([
+      credential.getAccessToken(),
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(() => {
+          timedOut = true;
+          reject(new Error('credential probe timeout'));
+        }, PUSH_CREDENTIAL_PROBE_TIMEOUT_MS);
+      }),
+    ]);
+    if (
+      !result ||
+      typeof result.access_token !== 'string' ||
+      result.access_token.length === 0 ||
+      !Number.isFinite(result.expires_in) ||
+      result.expires_in <= 0
+    ) {
+      throw new Error('credential provider returned an invalid access token');
+    }
+  } catch {
+    logger.error('push: Firebase credential probe failed', {
+      credentialMode: activeCredentialMode,
+      reason: timedOut ? 'timeout' : 'rejected',
+    });
+    throw new Error(
+      timedOut
+        ? 'Push delivery credential probe timed out'
+        : 'Push delivery credential probe failed',
+    );
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+};
+
+/**
+ * Validate and construct the Firebase messaging client before the HTTP server
+ * starts. Production also requests a real OAuth access token with a bounded
+ * timeout: applicationDefault() itself is lazy and would otherwise let a
+ * missing workload identity fail only on the first notification.
+ */
+export const initializePush = async (): Promise<void> => {
+  if (!env.PUSH_DISPATCH_ENABLED) {
+    if (env.NODE_ENV === 'production') {
+      throw new Error('Push delivery cannot be disabled in production');
+    }
+    return;
+  }
+  getMessagingClient();
+  if (env.NODE_ENV === 'production') {
+    credentialProbePromise ??= probeCredential();
+    await credentialProbePromise;
+  }
 };
 
 // FCM data values must be strings — stringify any non-string entries.
@@ -139,14 +236,9 @@ export const pushService = {
     }
 
     const messaging = getMessagingClient();
-    if (!messaging) {
-      logger.warn('push: dispatch enabled but firebase-admin is not configured', { userId });
-      return;
-    }
 
     const data = stringifyData(payload.data);
-    // Chunk + fire. `sendBatch` swallows its own errors so one failing batch
-    // doesn't suppress later ones.
+    // Chunk sequentially so a rejected provider call is visible to the caller.
     for (let i = 0; i < tokenStrings.length; i += FCM_BATCH_SIZE) {
       const batch = tokenStrings.slice(i, i + FCM_BATCH_SIZE);
       await sendBatch(messaging, batch, payload, data);
@@ -169,7 +261,14 @@ const sendBatch = async (
       tokens,
       notification: { title: payload.title, body: payload.body },
       data,
-      android: { priority: 'high', notification: { sound: 'default' } },
+      android: {
+        priority: 'high',
+        notification: {
+          channelId: 'default',
+          icon: 'ic_stat_audio',
+          sound: 'default',
+        },
+      },
     });
 
     if (response.failureCount === 0) return;
@@ -180,9 +279,8 @@ const sendBatch = async (
       const token = tokens[idx];
       const code = res.error?.code;
       logger.warn('push: send error', {
-        token: token ? token.slice(0, 10) + '…' : undefined,
+        batchIndex: idx,
         code,
-        message: res.error?.message,
       });
       if (token && code && DEAD_TOKEN_ERRORS.has(code)) {
         deadTokens.push(token);
@@ -196,11 +294,12 @@ const sendBatch = async (
       logger.info(`push: pruned ${pruned.count} dead token(s)`);
     }
   } catch (err) {
-    // Network errors, credential errors, etc. — never bubble. Push is a
-    // best-effort enhancement to the DB row that already landed.
-    logger.warn('push: dispatch failed', {
+    // The notification caller may keep the already-persisted in-app row, but
+    // transport/authentication failures must remain observable.
+    logger.error('push: dispatch failed', {
       err: err instanceof Error ? err.message : String(err),
       count: tokens.length,
     });
+    throw err;
   }
 };

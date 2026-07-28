@@ -96,6 +96,9 @@ export const ERROR_CODES = {
     message: 'An accepted follow is required to add this user',
   },
 
+  REPORT_001: { status: 403, message: 'You cannot report your own content' },
+  REPORT_002: { status: 404, message: 'Reportable content not found' },
+
   CLUB_001: { status: 404, message: 'Club not found' },
   CLUB_002: { status: 403, message: 'Not a club admin' },
   CLUB_003: { status: 403, message: 'Private club — join forbidden' },

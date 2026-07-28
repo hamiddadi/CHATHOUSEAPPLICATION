@@ -2,6 +2,7 @@ import { apiClient } from '../../../shared/services/api/apiClient';
 import { createIdempotencyKey } from '../../../shared/utils/idempotency';
 import type { Envelope } from '../../../shared/types/api';
 import type { MessageKind, UserSummary } from '../../../shared/types/domain';
+import type { ContentReportReason, ContentReportResult } from '../../../shared/types/moderation';
 
 /**
  * Group DM (Backchannel groups) service. Separate from the 1:1 messageService
@@ -222,5 +223,17 @@ export const groupService = {
   async leave(id: string): Promise<{ left: true }> {
     await apiClient.post(`/groups/${id}/leave`);
     return { left: true };
+  },
+
+  async reportMessage(
+    conversationId: string,
+    messageId: string,
+    reason: ContentReportReason,
+  ): Promise<ContentReportResult> {
+    const res = await apiClient.post<Envelope<ContentReportResult>>(
+      `/groups/${conversationId}/messages/${messageId}/report`,
+      { reason },
+    );
+    return res.data.data;
   },
 };

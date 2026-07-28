@@ -9,6 +9,7 @@ import type {
   UserSummary,
 } from '../../../shared/types/domain';
 import type { Envelope } from '../../../shared/types/api';
+import type { ContentReportReason, ContentReportResult } from '../../../shared/types/moderation';
 
 /**
  * Backend is now authoritative for rooms. The service translates the
@@ -481,6 +482,18 @@ export const roomService = {
           }
         : null,
     };
+  },
+
+  async reportMessage(
+    roomId: string,
+    messageId: string,
+    reason: ContentReportReason,
+  ): Promise<ContentReportResult> {
+    const res = await apiClient.post<Envelope<ContentReportResult>>(
+      `/rooms/${roomId}/messages/${messageId}/report`,
+      { reason },
+    );
+    return res.data.data;
   },
 
   async sendReaction(roomId: string, emoji: string): Promise<{ ok: true }> {

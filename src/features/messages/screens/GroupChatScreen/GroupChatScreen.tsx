@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   Keyboard,
   KeyboardAvoidingView,
@@ -17,16 +18,19 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { Loader } from '../../../../shared/components/Loader';
 import { EmptyState } from '../../../../shared/components/EmptyState';
+import { ContentReportSheet } from '../../../../shared/components/ContentReportSheet';
 import { colors, spacing } from '../../../../shared/constants/theme';
 import { useApiErrorToast } from '../../../../shared/hooks/useApiErrorToast';
 import type { MessageStackParamList } from '../../../../core/navigation/types';
 import { useAuthStore } from '../../../auth/store/authStore';
+import type { ContentReportReason } from '../../../../shared/types/moderation';
 import {
   useGroup,
   useGroupMessages,
   useMarkGroupRead,
   useSendGroupMessage,
   useSendGroupVoice,
+  useReportGroupMessage,
 } from '../../hooks/useGroups';
 import { useGroupSocket } from '../../hooks/useGroupSocket';
 import { useVoiceMessage } from '../../hooks/useVoiceMessage';
@@ -72,7 +76,9 @@ export const GroupChatScreen: React.FC = () => {
   const send = useSendGroupMessage();
   const sendVoice = useSendGroupVoice();
   const markRead = useMarkGroupRead();
+  const reportMessage = useReportGroupMessage();
   const toastError = useApiErrorToast();
+  const [reportMessageId, setReportMessageId] = useState<string | null>(null);
 
   // Track the keyboard so the recording bar drops its bottom inset when the
   // keyboard is up (mirrors ChatDetailScreen).
@@ -160,11 +166,43 @@ export const GroupChatScreen: React.FC = () => {
     [conversationId, navigation],
   );
 
+  const handleReportReason = useCallback(
+    (reason: ContentReportReason) => {
+      if (!reportMessageId || reportMessage.isPending) return;
+      reportMessage.mutate(
+        { conversationId, messageId: reportMessageId, reason },
+        {
+          onSuccess: result => {
+            setReportMessageId(null);
+            Alert.alert(
+              t('moderation.reportSentTitle', 'Report sent'),
+              result.alreadyReported
+                ? t('moderation.reportAlreadySent', 'You already reported this message.')
+                : t('moderation.reportSentBody', 'The moderation team will review this message.'),
+            );
+          },
+          onError: toastError,
+        },
+      );
+    },
+    [conversationId, reportMessage, reportMessageId, t, toastError],
+  );
+
   const renderItem = useCallback(
     ({ item }: { item: GroupMessage }) => {
       const isMine = item.senderId === myId;
       return (
-        <View className={isMine ? 'items-end px-xxl py-xxs' : 'items-start px-xxl py-xxs'}>
+        <Pressable
+          className={isMine ? 'items-end px-xxl py-xxs' : 'items-start px-xxl py-xxs'}
+          onLongPress={!isMine ? () => setReportMessageId(item.id) : undefined}
+          delayLongPress={350}
+          accessibilityRole="button"
+          accessibilityHint={
+            !isMine
+              ? t('moderation.longPressToReport', 'Long press to report this message')
+              : undefined
+          }
+        >
           {!isMine && (
             <Text className="text-xxs font-body-medium text-ink-muted ml-sm mb-xxs">
               {nameById.get(item.senderId) ?? item.sender?.displayName ?? '—'}
@@ -199,10 +237,10 @@ export const GroupChatScreen: React.FC = () => {
           >
             {formatTime(item.createdAt, i18n.language)}
           </Text>
-        </View>
+        </Pressable>
       );
     },
-    [myId, nameById, i18n.language],
+    [myId, nameById, i18n.language, t],
   );
 
   // Inverted list: "end" = the visual TOP = the oldest loaded message. Reaching
@@ -336,6 +374,12 @@ export const GroupChatScreen: React.FC = () => {
           )}
         </View>
       )}
+      <ContentReportSheet
+        visible={reportMessageId !== null}
+        submitting={reportMessage.isPending}
+        onClose={() => setReportMessageId(null)}
+        onSelect={handleReportReason}
+      />
     </KeyboardAvoidingView>
   );
 };

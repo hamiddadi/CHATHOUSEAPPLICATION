@@ -22,7 +22,18 @@ const fakeReport = (overrides: Partial<AdminReport> = {}): AdminReport => ({
   reporter: { id: 'rep-1', username: 'reporter', displayName: 'Reporter', avatarUrl: null },
   reported: { id: 'rep-2', username: 'baduser', displayName: 'Bad User', avatarUrl: null },
   reportedRoom: null,
+  contentAuthor: null,
   targetKind: 'USER',
+  reportedMessageId: null,
+  reportedGroupMessageId: null,
+  reportedRoomMessageId: null,
+  contentSnapshot: null,
+  contentAudioUrl: null,
+  contentAudioDurationMs: null,
+  contentKind: null,
+  contentCreatedAt: null,
+  contentContextId: null,
+  contentContextSnapshot: null,
   reason: 'SPAM',
   details: 'They keep spamming the room.',
   resolvedAt: null,
@@ -75,6 +86,57 @@ describe('AdminReportsScreen', () => {
     });
     fireEvent.press(getByText('Dismiss'));
     expect(alertSpy).toHaveBeenCalled();
+  });
+
+  it('shows the preserved message evidence for a content report', () => {
+    const contentAuthor = {
+      id: 'author-1',
+      username: 'author',
+      displayName: 'Content Author',
+      avatarUrl: null,
+    };
+    const report = fakeReport({
+      reported: null,
+      contentAuthor,
+      targetKind: 'DIRECT_MESSAGE',
+      reportedMessageId: 'message-1',
+      contentSnapshot: 'preserved abusive content',
+      contentKind: 'TEXT',
+      contentCreatedAt: new Date(1).toISOString(),
+    });
+    const { getByText } = renderScreen(<AdminReportsScreen />, {
+      seedQueryData: seedReports([report]),
+    });
+
+    expect(getByText('Target : Content Author')).toBeTruthy();
+    expect(getByText('Reported message')).toBeTruthy();
+    expect(getByText('preserved abusive content')).toBeTruthy();
+  });
+
+  it('offers playback for preserved voice evidence without displaying its capability URL', () => {
+    const evidenceUrl = 'https://api.test/media/private-id/signed-capability';
+    const report = fakeReport({
+      reported: null,
+      contentAuthor: {
+        id: 'author-voice',
+        username: 'voice-author',
+        displayName: 'Voice Author',
+        avatarUrl: null,
+      },
+      targetKind: 'GROUP_MESSAGE',
+      reportedGroupMessageId: 'voice-message-1',
+      contentKind: 'VOICE',
+      contentAudioUrl: evidenceUrl,
+      contentAudioDurationMs: 12_500,
+      contentCreatedAt: new Date(2).toISOString(),
+    });
+    const { getByLabelText, getByText, queryByText } = renderScreen(<AdminReportsScreen />, {
+      seedQueryData: seedReports([report]),
+    });
+
+    expect(getByText('Voice message')).toBeTruthy();
+    expect(getByLabelText('Play voice message')).toBeTruthy();
+    expect(queryByText(evidenceUrl)).toBeNull();
   });
 
   it('switching to the "Resolved" tab re-renders crash-free (empty state)', () => {

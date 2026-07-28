@@ -11,16 +11,18 @@
     1. .env.production - copy from .env.production.example and fill in the REAL
        public https:// / wss:// hosts (the boot guard rejects local/cleartext).
     2. Upload keystore + the four CHATHOUSE_UPLOAD_* Gradle properties, supplied
-       via ~/.gradle/gradle.properties, -P flags, or ORG_GRADLE_PROJECT_* env vars.
-       Without them the build falls back to DEBUG signing (Play rejects it); this
-       script warns loudly in that case.
+       via ~/.gradle/gradle.properties or ORG_GRADLE_PROJECT_* environment vars.
+       Missing values are rejected before Gradle starts; production builds never
+       fall back to the shared debug key.
 
 .EXAMPLE
-  .\scripts\build-release-aab.ps1
-  .\scripts\build-release-aab.ps1 -Apk          # standalone APK instead of an AAB
+  .\scripts\build-release-aab.ps1 -VersionCode 1 -VersionName 1.0.0
+  .\scripts\build-release-aab.ps1 -VersionCode 1 -VersionName 1.0.0 -Apk
 #>
 param(
   [string]$EnvFile = ".env.production",
+  [int]$VersionCode = 0,
+  [string]$VersionName = "",
   [switch]$Apk
 )
 $ErrorActionPreference = "Stop"
@@ -36,38 +38,165 @@ if (-not ($envLines | Where-Object { $_ -match '^\s*ENV\s*=\s*production\s*$' })
   throw "$EnvFile must contain 'ENV=production' - the boot-time guard (src/config/env.ts) requires it."
 }
 
+function Get-EnvFileValue([string]$Name) {
+  $pattern = "^\s*" + [regex]::Escape($Name) + "\s*="
+  $line = $envLines | Where-Object { $_ -match $pattern } | Select-Object -First 1
+  if (-not $line) { return $null }
+  return (($line -replace $pattern, "").Trim().Trim('"').Trim("'"))
+}
+
+$apiBaseUrl = Get-EnvFileValue "API_BASE_URL"
+$wsBaseUrl = Get-EnvFileValue "WS_BASE_URL"
+$liveKitUrl = Get-EnvFileValue "LIVEKIT_URL"
+$realtimeEnabled = Get-EnvFileValue "REALTIME_ENABLED"
+if (-not $apiBaseUrl -or -not $apiBaseUrl.StartsWith("https://", [StringComparison]::OrdinalIgnoreCase)) {
+  throw "API_BASE_URL must be a non-empty public https:// URL in $EnvFile."
+}
+if (-not $wsBaseUrl -or -not $wsBaseUrl.StartsWith("wss://", [StringComparison]::OrdinalIgnoreCase)) {
+  throw "WS_BASE_URL must be a non-empty public wss:// URL in $EnvFile."
+}
+if (-not $liveKitUrl -or -not $liveKitUrl.StartsWith("wss://", [StringComparison]::OrdinalIgnoreCase)) {
+  throw "LIVEKIT_URL must be a non-empty public wss:// URL in $EnvFile."
+}
+if ($realtimeEnabled -ne "true") {
+  throw "REALTIME_ENABLED=true is required for a shippable production build."
+}
+$forbiddenHost = 'localhost|127\.0\.0\.1|10\.0\.2\.2|0\.0\.0\.0|192\.168\.|::1|CHANGE_ME'
+foreach ($url in @($apiBaseUrl, $wsBaseUrl, $liveKitUrl)) {
+  if ($url -match $forbiddenHost) {
+    throw "Production endpoint is local or a placeholder: $url"
+  }
+}
+
 # Extract GOOGLE_MAPS_API_KEY for the manifest placeholder (injected via env, not
 # the JS bundle - see android/app/build.gradle manifestPlaceholders).
-$mapsLine = $envLines | Where-Object { $_ -match '^\s*GOOGLE_MAPS_API_KEY\s*=' } | Select-Object -First 1
-if ($mapsLine) {
-  $env:GOOGLE_MAPS_API_KEY = ($mapsLine -replace '^\s*GOOGLE_MAPS_API_KEY\s*=\s*', '').Trim()
-}
-if (-not $env:GOOGLE_MAPS_API_KEY -or $env:GOOGLE_MAPS_API_KEY -like '*CHANGE_ME*') {
-  Write-Warning "GOOGLE_MAPS_API_KEY is empty/placeholder in $EnvFile - the Map tab will render blank."
+$mapsApiKey = Get-EnvFileValue "GOOGLE_MAPS_API_KEY"
+if (-not $mapsApiKey -or $mapsApiKey -notmatch '^AIza[0-9A-Za-z_-]{35}$') {
+  throw "GOOGLE_MAPS_API_KEY must be a real Google API key in $EnvFile; Maps cannot be optional in a shippable build."
 }
 
-# Warn if release signing isn't configured (the build would silently debug-sign).
+# A compile-only CI build may copy google-services.json.example, but a
+# shippable build must target the real Firebase Android app.
+$firebasePath = Join-Path $android "app\google-services.json"
+if (-not (Test-Path $firebasePath)) {
+  throw "android/app/google-services.json is missing. Install the production Firebase Android config."
+}
+try {
+  $firebase = Get-Content -LiteralPath $firebasePath -Raw -Encoding utf8 | ConvertFrom-Json
+} catch {
+  throw "android/app/google-services.json is not valid JSON."
+}
+$firebaseClient = @($firebase.client) |
+  Where-Object { $_.client_info.android_client_info.package_name -eq "com.chathouse.app" } |
+  Select-Object -First 1
+if (-not $firebaseClient) {
+  throw "google-services.json has no Firebase client for com.chathouse.app."
+}
+$firebaseProjectId = [string]$firebase.project_info.project_id
+$firebaseAppId = [string]$firebaseClient.client_info.mobilesdk_app_id
+$firebaseApiKey = [string](@($firebaseClient.api_key) | Select-Object -First 1).current_key
+if (
+  [string]::IsNullOrWhiteSpace($firebaseProjectId) -or
+  $firebaseProjectId -match 'placeholder|CHANGE_ME|example' -or
+  $firebaseAppId -notmatch '^\d+:\d+:android:[0-9a-f]+$' -or
+  $firebaseApiKey -notmatch '^AIza[0-9A-Za-z_-]{35}$'
+) {
+  throw "google-services.json is a placeholder or has an invalid project/app/API-key configuration."
+}
+
+# A Play versionCode is immutable once uploaded. Require an explicit choice
+# instead of silently falling back to 1/1.0.0.
+if ($VersionCode -le 0) {
+  $rawVersionCode = [Environment]::GetEnvironmentVariable("VERSION_CODE")
+  if ($rawVersionCode -match '^[1-9]\d*$') { $VersionCode = [int]$rawVersionCode }
+}
+if ($VersionCode -le 0) {
+  throw "Set -VersionCode (or VERSION_CODE) to a positive, unused Play version code."
+}
+if ([string]::IsNullOrWhiteSpace($VersionName)) {
+  $VersionName = [Environment]::GetEnvironmentVariable("VERSION_NAME")
+}
+if ([string]::IsNullOrWhiteSpace($VersionName) -or $VersionName -notmatch '^[0-9]+(\.[0-9]+){1,3}([+-][0-9A-Za-z.-]+)?$') {
+  throw "Set -VersionName (or VERSION_NAME) to an explicit release version such as 1.0.0."
+}
+
+# Fail before the expensive bundle step unless all release-signing values exist.
+$gradleUserHome = if ([string]::IsNullOrWhiteSpace($env:GRADLE_USER_HOME)) {
+  Join-Path $HOME ".gradle"
+} else {
+  $env:GRADLE_USER_HOME
+}
+$userProps = Join-Path $gradleUserHome "gradle.properties"
+$projectProps = Join-Path $android "gradle.properties"
 $gradleProps = @()
-$userProps = Join-Path $HOME ".gradle\gradle.properties"
-if (Test-Path $userProps) { $gradleProps = Get-Content $userProps }
-$hasSigning = ($env:ORG_GRADLE_PROJECT_CHATHOUSE_UPLOAD_STORE_FILE) -or
-              ($gradleProps | Where-Object { $_ -match '^\s*CHATHOUSE_UPLOAD_STORE_FILE\s*=' })
-if (-not $hasSigning) {
-  Write-Warning "No CHATHOUSE_UPLOAD_STORE_FILE found - the build will DEBUG-sign and Play will REJECT it. See docs/RELEASE-SIGNING.md."
+if (Test-Path $userProps) { $gradleProps += Get-Content $userProps }
+if (Test-Path $projectProps) { $gradleProps += Get-Content $projectProps }
+$signingKeys = @(
+  "CHATHOUSE_UPLOAD_STORE_FILE",
+  "CHATHOUSE_UPLOAD_STORE_PASSWORD",
+  "CHATHOUSE_UPLOAD_KEY_ALIAS",
+  "CHATHOUSE_UPLOAD_KEY_PASSWORD"
+)
+$signingValues = @{}
+$missingSigning = foreach ($key in $signingKeys) {
+  $envName = "ORG_GRADLE_PROJECT_$key"
+  $envValue = [Environment]::GetEnvironmentVariable($envName)
+  $pattern = "^\s*" + [regex]::Escape($key) + "\s*=\s*\S+"
+  $propertyLine = $gradleProps | Where-Object { $_ -match $pattern } | Select-Object -First 1
+  $propertyValue = if ($propertyLine) { ($propertyLine -split "=", 2)[1].Trim() } else { $null }
+  # Gradle properties (user home first, then project) outrank
+  # ORG_GRADLE_PROJECT_* environment variables.
+  $value = if (-not [string]::IsNullOrWhiteSpace($propertyValue)) { $propertyValue } else { $envValue }
+  if ([string]::IsNullOrWhiteSpace($value)) {
+    $key
+  } else {
+    $signingValues[$key] = $value
+  }
+}
+if ($missingSigning) {
+  throw "Missing release-signing properties: $($missingSigning -join ', '). See docs/RELEASE-SIGNING.md."
+}
+$storeLeaf = [IO.Path]::GetFileName($signingValues["CHATHOUSE_UPLOAD_STORE_FILE"])
+$keyAlias = $signingValues["CHATHOUSE_UPLOAD_KEY_ALIAS"]
+if (
+  $storeLeaf.Equals("debug.keystore", [StringComparison]::OrdinalIgnoreCase) -or
+  $keyAlias.Equals("androiddebugkey", [StringComparison]::OrdinalIgnoreCase)
+) {
+  throw "The shared Android debug key is forbidden for a shippable release. Configure the real upload keystore and alias."
 }
 
-# Tell react-native-dotenv (babel.config.js) which env file to inline.
+# Tell Gradle and react-native-dotenv exactly which release metadata to inline.
+$previousEnvFile = [Environment]::GetEnvironmentVariable("ENVFILE")
+$previousMapsKey = [Environment]::GetEnvironmentVariable("GOOGLE_MAPS_API_KEY")
+$previousVersionCode = [Environment]::GetEnvironmentVariable("VERSION_CODE")
+$previousVersionName = [Environment]::GetEnvironmentVariable("VERSION_NAME")
 $env:ENVFILE = $EnvFile
+$env:GOOGLE_MAPS_API_KEY = $mapsApiKey
+$env:VERSION_CODE = $VersionCode.ToString()
+$env:VERSION_NAME = $VersionName
 $task = if ($Apk) { "assembleRelease" } else { "bundleRelease" }
 
-Write-Host "Building $task with ENVFILE=$EnvFile ..." -ForegroundColor Green
+Write-Host "Building $task version $VersionName ($VersionCode) with ENVFILE=$EnvFile ..." -ForegroundColor Green
 Push-Location $android
 try {
-  & (Join-Path $android "gradlew.bat") $task
+  # Command-line project properties have Gradle's highest priority, so a
+  # shippable build cannot inherit the technical debug-signing opt-in.
+  & (Join-Path $android "gradlew.bat") $task "-PCHATHOUSE_ALLOW_DEBUG_RELEASE_SIGNING=false"
   if ($LASTEXITCODE -ne 0) { throw "Gradle $task failed (exit $LASTEXITCODE)." }
 } finally {
   Pop-Location
-  Remove-Item Env:\ENVFILE -ErrorAction SilentlyContinue
+  foreach ($entry in @(
+    @{ Name = "ENVFILE"; Value = $previousEnvFile },
+    @{ Name = "GOOGLE_MAPS_API_KEY"; Value = $previousMapsKey },
+    @{ Name = "VERSION_CODE"; Value = $previousVersionCode },
+    @{ Name = "VERSION_NAME"; Value = $previousVersionName }
+  )) {
+    if ($null -eq $entry.Value) {
+      [Environment]::SetEnvironmentVariable($entry.Name, $null)
+    } else {
+      [Environment]::SetEnvironmentVariable($entry.Name, [string]$entry.Value)
+    }
+  }
 }
 
 $outDir = if ($Apk) { "android\app\build\outputs\apk\release" } else { "android\app\build\outputs\bundle\release" }

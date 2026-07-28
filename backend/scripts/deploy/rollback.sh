@@ -1,36 +1,23 @@
 #!/usr/bin/env bash
-# ─────────────────────────────────────────────────────────────────────────────
-# rollback.sh — host-side rollback of the ChatHouse API to a known-good image.
 #
-# Run this ON the deploy host (it talks to the local docker daemon + compose
-# stack). It is the same routine the CD workflows invoke for their in-pipeline
-# auto-rollback, exposed as a standalone script for manual/on-call use.
-#
-# Steps:
-#   1. docker pull the requested image tag
-#   2. point compose at it (CHATHOUSE_API_IMAGE) and recreate ONLY the api
-#      service (postgres/redis stay up)
-#   3. run health-check.sh against the API
-#   4. exit non-zero if the rolled-back image is unhealthy
+# Host-side rollback of the ChatHouse API to an immutable image digest.
 #
 # Usage:
-#   ./rollback.sh ghcr.io/owner/repo/api:v1.4.1
-#   ./rollback.sh v1.4.1                 # bare tag → expanded via REGISTRY+IMAGE_NAME
+#   IMAGE_NAME=owner/repo/api ./rollback.sh sha256:<64 lowercase hex chars>
+#   IMAGE_NAME=owner/repo/api ./rollback.sh \
+#     ghcr.io/owner/repo/api@sha256:<64 lowercase hex chars>
 #
-# Env:
-#   DEPLOY_DIR     dir containing docker-compose.yml  (default /opt/chathouse/backend)
-#   BASE_URL       API base URL for health-check      (default http://localhost:4000)
-#   REGISTRY       registry for bare-tag expansion    (default ghcr.io)
-#   IMAGE_NAME     image path for bare-tag expansion  (e.g. owner/repo/api)
-#   API_SERVICE    compose service name               (default api)
-# ─────────────────────────────────────────────────────────────────────────────
-set -euo pipefail
+# Only a digest from REGISTRY/IMAGE_NAME is accepted. If the target cannot start
+# or pass health checks, deploy-image.sh restores and verifies the image that
+# was running before this command.
+set -Eeuo pipefail
 
 log() { printf '%s [rollback] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
 die() { log "ERROR: $*"; exit 1; }
 
-IMAGE_TAG="${1:-}"
-[ -n "$IMAGE_TAG" ] || die "missing IMAGE_TAG (arg 1). Usage: $0 <image-ref-or-tag>"
+IMAGE_REF="${1:-}"
+[ -n "$IMAGE_REF" ] \
+  || die "missing image digest (arg 1). Usage: $0 <sha256:digest|full-repository@sha256:digest>"
 
 DEPLOY_DIR="${DEPLOY_DIR:-/opt/chathouse/backend}"
 BASE_URL="${BASE_URL:-http://localhost:4000}"
@@ -39,44 +26,30 @@ IMAGE_NAME="${IMAGE_NAME:-}"
 API_SERVICE="${API_SERVICE:-api}"
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
-HEALTH_CHECK="${SCRIPT_DIR}/health-check.sh"
+DEPLOY_IMAGE="${SCRIPT_DIR}/deploy-image.sh"
 
-# Expand a bare tag (no slash) into a full registry ref when IMAGE_NAME is set.
-case "$IMAGE_TAG" in
-  */*) IMAGE="$IMAGE_TAG" ;;
-  *)
-    [ -n "$IMAGE_NAME" ] || die "bare tag '${IMAGE_TAG}' given but IMAGE_NAME not set for expansion"
-    IMAGE="${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
-    ;;
+[ -n "$IMAGE_NAME" ] || die "IMAGE_NAME is required to restrict rollback to the application repository"
+[[ "$REGISTRY" =~ ^[a-z0-9][a-z0-9.-]*(:[0-9]+)?$ ]] || die "invalid REGISTRY"
+[[ "$IMAGE_NAME" =~ ^[a-z0-9][a-z0-9._/-]*$ ]] || die "invalid IMAGE_NAME"
+
+# Tags are labels, not immutable identities. Accept either the bare digest or
+# the exact configured repository plus digest, and reject every tag/floating
+# reference.
+PREFIX="${REGISTRY}/${IMAGE_NAME}@"
+case "$IMAGE_REF" in
+  "$PREFIX"sha256:*) DIGEST="${IMAGE_REF#"$PREFIX"}" ;;
+  sha256:*) DIGEST="$IMAGE_REF" ;;
+  *) die "rollback target must be '${PREFIX}sha256:<digest>' or a bare sha256 digest" ;;
 esac
+[[ "$DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]] \
+  || die "rollback digest must be sha256 followed by exactly 64 lowercase hexadecimal characters"
+IMAGE="${PREFIX}${DIGEST}"
 
 command -v docker >/dev/null 2>&1 || die "docker not found on PATH"
-[ -d "$DEPLOY_DIR" ] || die "DEPLOY_DIR '${DEPLOY_DIR}' does not exist"
+[ -x "$DEPLOY_IMAGE" ] || die "deploy-image.sh not found or not executable at '${DEPLOY_IMAGE}'"
 
-cd "$DEPLOY_DIR"
-
-PREV_IMAGE="$(docker inspect --format '{{.Config.Image}}' chathouse-api 2>/dev/null || echo '')"
-log "Currently running image: ${PREV_IMAGE:-<none>}"
-log "Rolling back to:        ${IMAGE}"
-
-log "Pulling ${IMAGE}"
-docker pull "$IMAGE"
-
-export CHATHOUSE_API_IMAGE="$IMAGE"
-log "Recreating ${API_SERVICE} service"
-docker compose up -d --no-deps --pull always "$API_SERVICE" \
-  || docker compose up -d --no-deps "$API_SERVICE"
-
-# Verify the rolled-back image is healthy before declaring success.
-if [ -x "$HEALTH_CHECK" ]; then
-  log "Running health-check.sh against ${BASE_URL}"
-  if BASE_URL="$BASE_URL" bash "$HEALTH_CHECK"; then
-    log "Rollback to ${IMAGE} succeeded (health OK)"
-    exit 0
-  else
-    log "Rollback target ${IMAGE} is UNHEALTHY — manual intervention required"
-    exit 1
-  fi
-else
-  die "health-check.sh not found or not executable at ${HEALTH_CHECK}"
-fi
+log "Activating rollback target ${IMAGE}"
+DEPLOY_DIR="$DEPLOY_DIR" \
+  BASE_URL="$BASE_URL" \
+  API_SERVICE="$API_SERVICE" \
+  bash "$DEPLOY_IMAGE" "$IMAGE"

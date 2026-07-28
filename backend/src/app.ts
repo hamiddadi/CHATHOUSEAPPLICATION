@@ -45,7 +45,9 @@ import { registerGdprPurgeWorker, shutdownGdprPurge } from './workers/gdpr-purge
 import { ensureSearchIndexes } from './config/searchIndexes';
 import { initSentry } from './monitoring/sentry';
 import { httpMetricsMiddleware, metricsHandler } from './monitoring/metrics';
+import { createMetricsAuthMiddleware } from './monitoring/metricsAuth';
 import { drainBackgroundTasks } from './utils/backgroundTasks';
+import { initializePush } from './modules/push/push.service';
 
 // Grace period before a hung Socket.IO/HTTP shutdown is hard-killed.
 const SHUTDOWN_GRACE_MS = 10_000;
@@ -63,6 +65,9 @@ const ACCESS_LOG_FORMAT =
 
 export const createApp = (): express.Express => {
   const app = express();
+  const metricsAuth = createMetricsAuthMiddleware({
+    production: env.NODE_ENV === 'production',
+  });
 
   app.set('trust proxy', 1);
 
@@ -111,22 +116,11 @@ export const createApp = (): express.Express => {
   // the label to avoid high-cardinality raw paths.
   app.use(httpMetricsMiddleware);
 
-  // Prometheus scrape endpoint. In production it is fail-CLOSED: a METRICS_TOKEN
-  // must be configured and presented as `Authorization: Bearer <token>`, so the
-  // metric surface is never publicly enumerable on a prod deploy that forgot to
-  // set the token. Outside production it stays open for local/dev scraping (with
-  // optional token enforcement when one is set). Mounted BEFORE the /api
-  // globalLimiter so scrapes don't burn the API budget.
-  app.get('/metrics', (req, res, next) => {
-    const token = process.env.METRICS_TOKEN;
-    if (env.NODE_ENV === 'production' && !token) {
-      res.status(403).end();
-      return;
-    }
-    if (token && req.get('authorization') !== `Bearer ${token}`) {
-      res.status(403).end();
-      return;
-    }
+  // Prometheus scrape endpoint. Production Compose injects the credential as a
+  // file shared with Prometheus (never as a clear-text environment variable).
+  // Outside production it stays open only when no token source is configured.
+  // Mounted BEFORE the /api globalLimiter so scrapes don't burn the API budget.
+  app.get('/metrics', metricsAuth, (req, res, next) => {
     void metricsHandler(req, res, next);
   });
 
@@ -187,6 +181,11 @@ export const startServer = async (): Promise<void> => {
   // instrumentation can patch the layer before any service connects. No-op
   // when SENTRY_DSN is unset (the normal local/dev/CI state).
   initSentry();
+  // Production push is a required delivery channel. Build the Firebase client
+  // and obtain a real provider token before connecting infrastructure or
+  // accepting HTTP traffic, so lazy/invalid ADC fails the deployment instead
+  // of silently dropping the first notifications.
+  await initializePush();
   await connectRedis();
   await ensureSearchIndexes();
   // mediasoup boots best-effort: if the native build is unavailable the rest
@@ -270,5 +269,12 @@ export const startServer = async (): Promise<void> => {
 };
 
 if (require.main === module) {
-  void startServer();
+  void startServer().catch(err => {
+    // Startup errors can contain provider response fragments or credential
+    // paths in nested causes. Emit only the controlled top-level reason.
+    logger.error('server startup failed', {
+      reason: err instanceof Error ? err.message : 'unknown startup failure',
+    });
+    process.exitCode = 1;
+  });
 }

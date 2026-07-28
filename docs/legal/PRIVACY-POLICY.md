@@ -2,11 +2,11 @@
 
 **Last updated: 2026-07-18**
 
-> This document is a launch-ready draft. Before publishing, have it reviewed by
-> counsel and fill the bracketed placeholders (`[…]`) with your registered legal
-> entity, address, and the supervisory authority for your jurisdiction. Host it
-> at a stable public URL and link that URL in App Store Connect and the Google
-> Play Console.
+> **Not publishable as-is.** Before publishing, have it reviewed by counsel and
+> fill every bracketed placeholder (`[…]`) with the registered legal entity,
+> address, transfer safeguards and supervisory authority for the actual
+> jurisdiction. Verify the contact mailbox, host the final text at a stable
+> public URL, and link that exact version in both store consoles.
 
 Chathouse ("**Chathouse**", "**we**", "**us**") is a social audio application that
 lets people host and join live audio rooms, follow each other, exchange direct

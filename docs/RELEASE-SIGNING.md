@@ -33,13 +33,18 @@ the shared debug key.
 
 ### Version and build
 
-`VERSION_CODE` and `VERSION_NAME` may be passed as environment variables or
-Gradle properties. Defaults are for local development only.
+Choose an explicit, unused `VERSION_CODE` and a release `VERSION_NAME`. Defaults
+are for local/technical builds only. From the repository root:
 
-```bash
-cd android
-VERSION_CODE=42 VERSION_NAME=1.4.0 ./gradlew :app:bundleRelease
+```powershell
+.\scripts\build-release-aab.ps1 -VersionCode 42 -VersionName 1.4.0
 ```
+
+On macOS/Linux, use PowerShell 7 (`pwsh`) to run the same script. Never generate
+a store artifact with a raw `gradlew bundleRelease`; the production entrypoint
+also validates `.env.production`, Firebase, Maps and signing. Gradle permits a
+non-production Release package only when the shared debug key and the explicit
+`CHATHOUSE_ALLOW_DEBUG_RELEASE_SIGNING=true` test opt-in are both present.
 
 Release builds use Hermes, R8 code optimization and resource shrinking. Smoke
 test the signed artifact on a physical device before uploading.

@@ -152,6 +152,23 @@ describe('Live-captions realtime relay', () => {
     });
     await expect(Promise.race([leaked, quiet])).resolves.toBe('quiet');
 
+    // High-confidence prohibited public text is filtered before broadcast,
+    // even when it comes from an authorised speaker.
+    const prohibited = new Promise<'leaked'>(resolve => {
+      listenerSock.once('room:caption', () => resolve('leaked'));
+    });
+    const filtered = new Promise<'filtered'>(resolve =>
+      setTimeout(() => resolve('filtered'), 1_000),
+    );
+    hostSock.emit('caption:publish', {
+      roomId,
+      id: 'cap:host:blocked',
+      text: 'I will kill you',
+      isFinal: true,
+      speakerName: 'Host',
+    });
+    await expect(Promise.race([prohibited, filtered])).resolves.toBe('filtered');
+
     hostSock.disconnect();
     listenerSock.disconnect();
   }, 30_000);

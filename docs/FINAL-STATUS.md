@@ -4,11 +4,11 @@
 > Conformity target : Clubhouse parity, excluding Clips + Replays + audio recording.
 > Constraint respected throughout : **no modification of legacy code**.
 >
-> ⚠️ **Historical status document.** Build/deploy rows mentioning Expo Go,
-> EAS, `app.json`, or an Expo dev client are superseded. The app now has
-> committed bare React Native Android and iOS projects. See
-> [`docs/setup.md`](./setup.md) and
-> [`docs/RELEASE-SIGNING.md`](./RELEASE-SIGNING.md).
+> ⚠️ **Historical feature-parity document — not a release-readiness verdict.**
+> Its percentages and shipping guidance do not establish App Store, Play Store
+> or production readiness. The current dated decision is **NO-GO**; use
+> [`GO-LIVE.md`](./GO-LIVE.md) as the only release gate. Build/deploy rows
+> mentioning Expo Go, EAS, `app.json`, or an Expo dev client are superseded.
 
 ## ✅ Deliverables
 

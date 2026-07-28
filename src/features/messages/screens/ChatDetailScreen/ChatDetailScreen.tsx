@@ -15,11 +15,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { Loader } from '../../../../shared/components/Loader';
 import { EmptyState } from '../../../../shared/components/EmptyState';
+import { ContentReportSheet } from '../../../../shared/components/ContentReportSheet';
 import { useApiErrorToast } from '../../../../shared/hooks/useApiErrorToast';
 import { toAppError } from '../../../../shared/services/api/errorHandler';
 import { colors, spacing } from '../../../../shared/constants/theme';
 import type { MessageStackParamList } from '../../../../core/navigation/types';
 import type { Message, UserSummary } from '../../../../shared/types/domain';
+import type { ContentReportReason } from '../../../../shared/types/moderation';
 import { CURRENT_USER } from '../../../../shared/mocks/users.mock';
 import { useAuthStore } from '../../../auth/store/authStore';
 import {
@@ -29,6 +31,7 @@ import {
   useSendVoiceMessage,
   useMarkConversationRead,
   useDeleteMessage,
+  useReportMessage,
 } from '../../hooks/useMessages';
 import { useChatSocket } from '../../hooks/useChatSocket';
 import { useTypingIndicator } from '../../hooks/useTypingIndicator';
@@ -151,6 +154,8 @@ export const ChatDetailScreen: React.FC = () => {
   const sendVoice = useSendVoiceMessage();
   const markRead = useMarkConversationRead();
   const deleteMessage = useDeleteMessage();
+  const reportMessage = useReportMessage();
+  const [reportMessageId, setReportMessageId] = useState<string | null>(null);
   const { isPeerTyping, notifyTyping } = useTypingIndicator(peerId);
 
   // Voice notes: record → upload → send, then pin the thread to the bottom.
@@ -262,11 +267,14 @@ export const ChatDetailScreen: React.FC = () => {
   const yesterdayLabel = t('chat.dateYesterday');
   const language = i18n.language;
 
-  // Long-press your own message → confirm → DELETE /chat/messages/:id and prune
-  // it from the thread cache. Sender-only on the backend, so we guard on isMine.
-  const handleDeleteMessage = useCallback(
+  // Long press keeps sender-only deletion for your messages and exposes the
+  // required per-item report action for content received from the peer.
+  const handleMessageLongPress = useCallback(
     (message: Message) => {
-      if (!message.isMine) return;
+      if (!message.isMine) {
+        setReportMessageId(message.id);
+        return;
+      }
       Alert.alert(
         t('chat.deleteTitle', 'Supprimer le message'),
         t('chat.deleteBody', 'Ce message sera supprimé définitivement.'),
@@ -287,6 +295,28 @@ export const ChatDetailScreen: React.FC = () => {
     [deleteMessage, peerId, reportApiError, t],
   );
 
+  const handleReportReason = useCallback(
+    (reason: ContentReportReason) => {
+      if (!reportMessageId || reportMessage.isPending) return;
+      reportMessage.mutate(
+        { messageId: reportMessageId, reason },
+        {
+          onSuccess: result => {
+            setReportMessageId(null);
+            Alert.alert(
+              t('moderation.reportSentTitle', 'Report sent'),
+              result.alreadyReported
+                ? t('moderation.reportAlreadySent', 'You already reported this message.')
+                : t('moderation.reportSentBody', 'The moderation team will review this message.'),
+            );
+          },
+          onError: reportApiError,
+        },
+      );
+    },
+    [reportApiError, reportMessage, reportMessageId, t],
+  );
+
   const renderItem = useCallback(
     ({ item }: { item: ChatListItem }) => {
       if (item.kind === 'date' && item.date) {
@@ -300,13 +330,13 @@ export const ChatDetailScreen: React.FC = () => {
             message={item.message}
             otherAvatar={otherAvatar}
             showAvatar={item.showAvatar ?? true}
-            onLongPress={handleDeleteMessage}
+            onLongPress={handleMessageLongPress}
           />
         );
       }
       return null;
     },
-    [language, otherAvatar, todayLabel, yesterdayLabel, handleDeleteMessage],
+    [language, otherAvatar, todayLabel, yesterdayLabel, handleMessageLongPress],
   );
 
   const keyExtractor = useCallback((item: ChatListItem) => item.id, []);
@@ -411,6 +441,12 @@ export const ChatDetailScreen: React.FC = () => {
           onInputFocus={scrollToBottom}
         />
       )}
+      <ContentReportSheet
+        visible={reportMessageId !== null}
+        submitting={reportMessage.isPending}
+        onClose={() => setReportMessageId(null)}
+        onSelect={handleReportReason}
+      />
     </KeyboardAvoidingView>
   );
 };

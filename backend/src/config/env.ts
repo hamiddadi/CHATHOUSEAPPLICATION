@@ -18,6 +18,40 @@ const boolFromString = (def: boolean) =>
       return s === 'true' || s === '1';
     });
 
+const firebaseServiceAccountFromString = z.preprocess(
+  value => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+  z
+    .string()
+    .trim()
+    .superRefine((raw, ctx) => {
+      try {
+        const parsed: unknown = JSON.parse(raw);
+        const result = z
+          .object({
+            type: z.literal('service_account'),
+            project_id: z.string().trim().min(1),
+            private_key: z.string().trim().min(1),
+            client_email: z.string().trim().email(),
+          })
+          .passthrough()
+          .safeParse(parsed);
+        if (!result.success) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message:
+              'FIREBASE_SERVICE_ACCOUNT must be a Firebase service-account JSON with type, project_id, private_key and client_email',
+          });
+        }
+      } catch {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'FIREBASE_SERVICE_ACCOUNT must be valid JSON',
+        });
+      }
+    })
+    .optional(),
+);
+
 /**
  * Runtime environment — validated at process boot. Missing or malformed vars
  * cause the process to exit with code 1 before any route is registered.
@@ -204,20 +238,44 @@ const envSchema = z.object({
     .string()
     .regex(/^[0-9]{6}$/, 'OTP_TEST_CODE must be 6 digits')
     .default('000000'),
-  TWILIO_ACCOUNT_SID: z.string().optional(),
-  TWILIO_AUTH_TOKEN: z.string().optional(),
-  TWILIO_FROM_NUMBER: z.string().optional(),
+  TWILIO_ACCOUNT_SID: z
+    .string()
+    .trim()
+    .regex(/^AC[a-f0-9]{32}$/i, 'TWILIO_ACCOUNT_SID must be a valid Account SID')
+    .optional(),
+  TWILIO_AUTH_TOKEN: z
+    .string()
+    .trim()
+    .min(16, 'TWILIO_AUTH_TOKEN must be at least 16 characters')
+    .optional(),
+  TWILIO_FROM_NUMBER: z
+    .string()
+    .trim()
+    .regex(/^\+[1-9]\d{7,14}$/, 'TWILIO_FROM_NUMBER must be an E.164 phone number')
+    .optional(),
+
+  // Password-reset email. Development/test deliberately use a non-delivering
+  // stub, but production must have a real Resend transport configured.
+  RESEND_API_KEY: z
+    .string()
+    .trim()
+    .min(10, 'RESEND_API_KEY must be at least 10 characters')
+    .startsWith('re_', 'RESEND_API_KEY must start with re_')
+    .optional(),
+  MAIL_FROM: z.string().trim().email('MAIL_FROM must be a valid email address').optional(),
 
   // ─── Push (Module 6) — Firebase Cloud Messaging via firebase-admin ───
   // Service-account credentials for firebase-admin (de-Expo: replaced the Expo
   // push proxy with direct FCM). Provide the full service-account JSON (Firebase
   // console → Project settings → Service accounts → Generate new private key) as
-  // a single-line string in FIREBASE_SERVICE_ACCOUNT, or point
-  // GOOGLE_APPLICATION_CREDENTIALS at a JSON file path (admin SDK default). With
-  // neither set, dispatch warns + skips (see PUSH_DISPATCH_ENABLED).
-  FIREBASE_SERVICE_ACCOUNT: z.string().optional(),
+  // a single-line string in FIREBASE_SERVICE_ACCOUNT. As an alternative,
+  // FIREBASE_USE_ADC=true explicitly selects Application Default Credentials
+  // (workload identity, or GOOGLE_APPLICATION_CREDENTIALS managed by the
+  // runtime). Production requires exactly one credential mode.
+  FIREBASE_SERVICE_ACCOUNT: firebaseServiceAccountFromString,
+  FIREBASE_USE_ADC: boolFromString(false),
   // When false (the default outside production), dispatchToUser logs the
-  // payload instead of calling FCM. Flip on in prod so push reaches devices.
+  // payload instead of calling FCM. Production refuses to boot unless enabled.
   PUSH_DISPATCH_ENABLED: boolFromString(false),
 
   // ICE servers — JSON array string sent to clients for NAT traversal.
@@ -258,6 +316,52 @@ if (!parsed.success) {
 export const env = parsed.data;
 export type Env = typeof env;
 
+if (env.NODE_ENV === 'production') {
+  const requiredDeliveryFields = [
+    'TWILIO_ACCOUNT_SID',
+    'TWILIO_AUTH_TOKEN',
+    'TWILIO_FROM_NUMBER',
+    'RESEND_API_KEY',
+    'MAIL_FROM',
+  ] as const;
+  const missingDeliveryFields = requiredDeliveryFields.filter(field => !env[field]);
+
+  if (missingDeliveryFields.length > 0) {
+    // eslint-disable-next-line no-console
+    console.error(
+      `❌ Invalid production delivery configuration:\n- ${missingDeliveryFields
+        .map(field => `${field} is required in production`)
+        .join('\n- ')}`,
+    );
+    process.exit(1);
+  }
+}
+
+if (env.NODE_ENV === 'production') {
+  const pushConfigErrors: string[] = [];
+  if (!env.PUSH_DISPATCH_ENABLED) {
+    pushConfigErrors.push('PUSH_DISPATCH_ENABLED must be true in production');
+  }
+
+  const configuredCredentialModes =
+    Number(Boolean(env.FIREBASE_SERVICE_ACCOUNT)) + Number(env.FIREBASE_USE_ADC);
+  if (configuredCredentialModes === 0) {
+    pushConfigErrors.push(
+      'set FIREBASE_SERVICE_ACCOUNT or explicitly enable FIREBASE_USE_ADC in production',
+    );
+  } else if (configuredCredentialModes > 1) {
+    pushConfigErrors.push(
+      'FIREBASE_SERVICE_ACCOUNT and FIREBASE_USE_ADC are mutually exclusive; configure exactly one',
+    );
+  }
+
+  if (pushConfigErrors.length > 0) {
+    // eslint-disable-next-line no-console
+    console.error(`❌ Invalid production push configuration:\n- ${pushConfigErrors.join('\n- ')}`);
+    process.exit(1);
+  }
+}
+
 // Defense in depth: refuse to boot in production if a secret still holds a
 // well-known DEV default (e.g. copied from docker-compose.yml). docker-compose.prod.yml
 // already REQUIRES these vars, but a copy-paste of a dev value would otherwise
@@ -268,6 +372,7 @@ if (env.NODE_ENV === 'production') {
     ['JWT_REFRESH_SECRET', 'dev_only_refresh_secret_change_me_0123456789abcdef'],
     ['LIVEKIT_API_KEY', 'devkey'],
     ['LIVEKIT_API_SECRET', 'devsecretdevsecretdevsecretdevsecret'],
+    ['RESEND_API_KEY', 're___CHANGE_ME__'],
   ] as const;
   const offenders = DEV_DEFAULTS.filter(([key, devValue]) => env[key] === devValue).map(
     ([key]) => key,

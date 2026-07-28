@@ -1,7 +1,8 @@
 import { z } from 'zod';
+import { publicContentString } from '../../utils/publicContentModeration';
 
 export const sendMessageSchema = z.object({
-  content: z.string().min(1).max(2000),
+  content: publicContentString(z.string().min(1).max(2000)),
 });
 
 // Voice DM: the client uploads to /upload/voice first, then posts the stored

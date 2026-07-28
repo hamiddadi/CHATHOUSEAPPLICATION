@@ -7,11 +7,13 @@ process.env.DATABASE_URL =
   process.env.DATABASE_URL ??
   'postgresql://chathouse:chathouse@localhost:5433/chathouse?schema=public';
 process.env.REDIS_URL = process.env.REDIS_URL ?? 'redis://localhost:6379';
+const originalPushDispatchEnabled = process.env.PUSH_DISPATCH_ENABLED;
 process.env.PUSH_DISPATCH_ENABLED = 'true';
 
 // Pretend a Firebase app is already initialised so getMessagingClient() skips
 // credential init and goes straight to getMessaging().
 jest.mock('firebase-admin', () => ({
+  applicationDefault: jest.fn(),
   getApps: () => [{}],
   initializeApp: jest.fn(),
   cert: jest.fn(),
@@ -48,6 +50,11 @@ describe('pushService.dispatchToUser — FCM path (mocked firebase-admin)', () =
       await prisma.user.delete({ where: { id } }).catch(() => undefined);
     }
     await prisma.$disconnect();
+    if (originalPushDispatchEnabled === undefined) {
+      delete process.env.PUSH_DISPATCH_ENABLED;
+    } else {
+      process.env.PUSH_DISPATCH_ENABLED = originalPushDispatchEnabled;
+    }
   });
 
   const seedUserWithToken = async (token: string) => {
@@ -59,13 +66,13 @@ describe('pushService.dispatchToUser — FCM path (mocked firebase-admin)', () =
     return user;
   };
 
-  it('sends via FCM and survives a transport error without throwing', async () => {
+  it('rejects explicitly when the FCM transport fails', async () => {
     const user = await seedUserWithToken(`fcm_${rand()}`);
     mockSendEachForMulticast.mockRejectedValue(new Error('boom'));
 
-    await expect(
-      pushService.dispatchToUser(user.id, { title: 't', body: 'b' }),
-    ).resolves.toBeUndefined();
+    await expect(pushService.dispatchToUser(user.id, { title: 't', body: 'b' })).rejects.toThrow(
+      'boom',
+    );
 
     expect(mockSendEachForMulticast).toHaveBeenCalledTimes(1);
   });

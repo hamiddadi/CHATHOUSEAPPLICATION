@@ -10,6 +10,7 @@ import { cancelEventReminder } from '../../queues/eventReminders';
 import { recordingsService } from '../recordings/recordings.service';
 import { notificationsService } from '../notifications/notifications.service';
 import { auditLogService } from './auditLog.service';
+import { decodeAdminCursor, encodeAdminCursor } from './admin.cursor';
 import type {
   ForceEndRoomInput,
   ListAuditLogInput,
@@ -38,9 +39,19 @@ const SUSPENSION_CACHE_TTL_SEC = 60 * 60;
 // decisions deferred here.
 const CSV_EXPORT_LIMIT = 5000;
 
-const csvCell = (v: unknown): string => {
+// Spreadsheet programs may execute a quoted CSV cell as a formula when its
+// first meaningful character is =, +, -, @, TAB, CR or LF. Leading whitespace
+// is deliberately included because spreadsheet importers do not agree on
+// which whitespace they trim before formula detection.
+const DANGEROUS_CSV_STRING_PREFIX = /^(?:\s*[=+\-@]|[^\S\r\n\t]*[\t\r\n])/u;
+
+export const csvCell = (v: unknown): string => {
   if (v === null || v === undefined) return '""';
-  const s = v instanceof Date ? v.toISOString() : String(v);
+  const raw = v instanceof Date ? v.toISOString() : String(v);
+  // An apostrophe is the spreadsheet-standard explicit text marker. Put it
+  // before the original leading whitespace/control character, then apply
+  // normal RFC 4180 escaping below.
+  const s = typeof v === 'string' && DANGEROUS_CSV_STRING_PREFIX.test(raw) ? `'${raw}` : raw;
   // Escape inner quotes per RFC 4180. Newlines/commas survive once wrapped.
   return `"${s.replace(/"/g, '""')}"`;
 };
@@ -118,6 +129,28 @@ const warnIfCsvTruncated = (label: string, rowCount: number): void => {
   }
 };
 
+type StableCursorWhere = {
+  createdAt?: { lt: Date };
+  OR?: [{ createdAt: { lt: Date } }, { createdAt: Date; id: { lt: string } }];
+};
+
+const stableCursorWhere = (cursor: string): StableCursorWhere => {
+  const decoded = decodeAdminCursor(cursor);
+  if (!decoded) throw new AppError('VALIDATION_001');
+
+  if (decoded.id === null) {
+    // Backward compatibility for a cursor emitted by an older API version.
+    return { createdAt: { lt: decoded.createdAt } };
+  }
+
+  return {
+    OR: [
+      { createdAt: { lt: decoded.createdAt } },
+      { createdAt: decoded.createdAt, id: { lt: decoded.id } },
+    ],
+  };
+};
+
 export const adminService = {
   // ──────────────────── Users ────────────────────
   async listUsers(input: ListUsersInput) {
@@ -138,18 +171,20 @@ export const adminService = {
         : input.suspended === false
           ? { OR: [{ suspendedUntil: null }, { suspendedUntil: { lt: new Date() } }] }
           : {}),
-      ...(input.cursor ? { createdAt: { lt: new Date(input.cursor) } } : {}),
+      // Nest the cursor OR under AND so it cannot collide with the search or
+      // suspension OR predicates above.
+      ...(input.cursor ? { AND: [stableCursorWhere(input.cursor)] } : {}),
     };
     const rows = await prisma.user.findMany({
       where,
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: input.limit + 1,
       select: publicAdminUser,
     });
     const hasMore = rows.length > input.limit;
     const data = hasMore ? rows.slice(0, input.limit) : rows;
     const last = data[data.length - 1];
-    const nextCursor = hasMore && last ? last.createdAt.toISOString() : null;
+    const nextCursor = hasMore && last ? encodeAdminCursor(last.createdAt, last.id) : null;
     return { data, nextCursor, hasMore };
   },
 
@@ -391,22 +426,25 @@ export const adminService = {
       ...(input.status === 'open' ? { resolvedAt: null } : {}),
       ...(input.status === 'resolved' ? { resolvedAt: { not: null } } : {}),
       ...(input.kind ? { targetKind: input.kind } : {}),
-      ...(input.cursor ? { createdAt: { lt: new Date(input.cursor) } } : {}),
+      ...(input.cursor ? { AND: [stableCursorWhere(input.cursor)] } : {}),
     };
     const rows = await prisma.report.findMany({
       where,
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: input.limit + 1,
       include: {
         reporter: { select: { id: true, username: true, displayName: true, avatarUrl: true } },
         reported: { select: { id: true, username: true, displayName: true, avatarUrl: true } },
         reportedRoom: { select: { id: true, title: true, isLive: true, hostId: true } },
+        contentAuthor: {
+          select: { id: true, username: true, displayName: true, avatarUrl: true },
+        },
       },
     });
     const hasMore = rows.length > input.limit;
     const data = hasMore ? rows.slice(0, input.limit) : rows;
     const last = data[data.length - 1];
-    const nextCursor = hasMore && last ? last.createdAt.toISOString() : null;
+    const nextCursor = hasMore && last ? encodeAdminCursor(last.createdAt, last.id) : null;
     return { data, nextCursor, hasMore };
   },
 
@@ -439,11 +477,19 @@ export const adminService = {
     await auditLogService.record({
       actorId,
       action: input.outcome === 'resolved' ? 'REPORT_RESOLVED' : 'REPORT_DISMISSED',
-      targetUserId: report.reportedId,
+      targetUserId: report.reportedId ?? report.contentAuthorId,
       targetRoomId: report.reportedRoomId,
       targetType: 'report',
       targetId: reportId,
-      metadata: { notes: input.notes ?? null, kind: report.targetKind, reason: report.reason },
+      metadata: {
+        notes: input.notes ?? null,
+        kind: report.targetKind,
+        reason: report.reason,
+        reportedMessageId: report.reportedMessageId,
+        reportedGroupMessageId: report.reportedGroupMessageId,
+        reportedRoomMessageId: report.reportedRoomMessageId,
+        contentContextId: report.contentContextId,
+      },
       ip: ctx.ip,
       userAgent: ctx.userAgent,
     });
@@ -788,6 +834,7 @@ export const adminService = {
         reporter: { select: { username: true } },
         reported: { select: { username: true } },
         reportedRoom: { select: { title: true } },
+        contentAuthor: { select: { username: true } },
       },
     });
     warnIfCsvTruncated('exportReportsCsv', rows.length);
@@ -803,6 +850,18 @@ export const adminService = {
       targetUsername: r.reported?.username ?? null,
       targetRoomId: r.reportedRoomId,
       targetRoomTitle: r.reportedRoom?.title ?? null,
+      contentAuthorId: r.contentAuthorId,
+      contentAuthorUsername: r.contentAuthor?.username ?? null,
+      reportedMessageId: r.reportedMessageId,
+      reportedGroupMessageId: r.reportedGroupMessageId,
+      reportedRoomMessageId: r.reportedRoomMessageId,
+      contentKind: r.contentKind,
+      contentSnapshot: r.contentSnapshot,
+      contentAudioUrl: r.contentAudioUrl,
+      contentAudioDurationMs: r.contentAudioDurationMs,
+      contentCreatedAt: r.contentCreatedAt?.toISOString() ?? null,
+      contentContextId: r.contentContextId,
+      contentContextSnapshot: r.contentContextSnapshot,
       resolvedAt: r.resolvedAt?.toISOString() ?? null,
     }));
     const header = [
@@ -817,6 +876,18 @@ export const adminService = {
       'targetUsername',
       'targetRoomId',
       'targetRoomTitle',
+      'contentAuthorId',
+      'contentAuthorUsername',
+      'reportedMessageId',
+      'reportedGroupMessageId',
+      'reportedRoomMessageId',
+      'contentKind',
+      'contentSnapshot',
+      'contentAudioUrl',
+      'contentAudioDurationMs',
+      'contentCreatedAt',
+      'contentContextId',
+      'contentContextSnapshot',
       'resolvedAt',
     ];
     return toCsv(header, flat);
@@ -828,11 +899,11 @@ export const adminService = {
       ...(input.actorId ? { actorId: input.actorId } : {}),
       ...(input.targetUserId ? { targetUserId: input.targetUserId } : {}),
       ...(input.action ? { action: input.action } : {}),
-      ...(input.cursor ? { createdAt: { lt: new Date(input.cursor) } } : {}),
+      ...(input.cursor ? { AND: [stableCursorWhere(input.cursor)] } : {}),
     };
     const rows = await prisma.auditLog.findMany({
       where,
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: input.limit + 1,
       include: {
         actor: { select: { id: true, username: true, displayName: true, avatarUrl: true } },
@@ -842,7 +913,7 @@ export const adminService = {
     const hasMore = rows.length > input.limit;
     const data = hasMore ? rows.slice(0, input.limit) : rows;
     const last = data[data.length - 1];
-    const nextCursor = hasMore && last ? last.createdAt.toISOString() : null;
+    const nextCursor = hasMore && last ? encodeAdminCursor(last.createdAt, last.id) : null;
     return { data, nextCursor, hasMore };
   },
 };

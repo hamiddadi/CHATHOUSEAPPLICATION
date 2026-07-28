@@ -5,6 +5,7 @@
  * the back button (→ goBack), and the send button after typing a draft.
  */
 import React from 'react';
+import { Alert } from 'react-native';
 import { fireEvent, waitFor } from '@testing-library/react-native';
 import { groupKeys, GROUP_MESSAGES_PAGE_SIZE } from '../../hooks/useGroups';
 import { renderScreen, mockAuthenticated, resetAuth } from '../../../../test-utils/renderScreen';
@@ -108,6 +109,19 @@ describe('GroupChatScreen', () => {
     await waitFor(() => {
       expect(getByLabelText('Record a voice message')).toBeTruthy();
     });
+  });
+
+  it('long-pressing a received group message reports that individual message', async () => {
+    jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
+    const reportSpy = jest
+      .spyOn(groupService, 'reportMessage')
+      .mockResolvedValue({ reportId: 'report-group-1', alreadyReported: false });
+    const { getByText } = renderGroup();
+
+    fireEvent(getByText('Welcome everyone'), 'longPress');
+    fireEvent.press(await waitFor(() => getByText('Spam')));
+
+    await waitFor(() => expect(reportSpy).toHaveBeenCalledWith(GROUP_ID, 'gm1', 'spam'));
   });
 
   it('reaching the top of the inverted list loads the next (older) page', async () => {

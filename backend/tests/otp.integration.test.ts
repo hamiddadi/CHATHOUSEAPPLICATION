@@ -15,6 +15,7 @@ const { prisma } = require('../src/config/database') as typeof import('../src/co
 const { redis, connectRedis, disconnectRedis } =
   require('../src/config/redis') as typeof import('../src/config/redis');
 const { logger } = require('../src/config/logger') as typeof import('../src/config/logger');
+const smsSender = require('../src/config/smsSender') as typeof import('../src/config/smsSender');
 /* eslint-enable @typescript-eslint/no-require-imports */
 
 // Spy logger to capture the raw OTP (surfaced in dev only). Jest isolates
@@ -148,7 +149,8 @@ describe('OTP flow — send / verify / replay / expired / rate limit', () => {
     });
     expect(firstCode).not.toBe(secondCode);
 
-    // The first code must now be invalid (isUsed=true from the re-send).
+    // Verification is pinned to the newest record, so an older code cannot
+    // become valid again even though it remains available for delivery rollback.
     const replay = await request(app)
       .post('/api/auth/verify-otp')
       .send({ phoneNumber, code: firstCode });
@@ -160,5 +162,36 @@ describe('OTP flow — send / verify / replay / expired / rate limit', () => {
       .send({ phoneNumber, code: secondCode });
     expect(ok.status).toBe(200);
     createdUserIds.push(ok.body.data.user.id);
+  });
+
+  it('keeps the previous code usable and refunds the quota when SMS delivery fails', async () => {
+    const phoneNumber = randomPhone();
+    const firstCode = await captureOtp(async () => {
+      const sent = await request(app).post('/api/auth/send-otp').send({ phoneNumber });
+      expect(sent.status).toBe(200);
+    });
+
+    const sendSpy = jest
+      .spyOn(smsSender, 'sendSms')
+      .mockRejectedValueOnce(new Error('simulated Twilio outage'));
+    try {
+      const failed = await request(app).post('/api/auth/send-otp').send({ phoneNumber });
+      expect(failed.status).toBe(500);
+    } finally {
+      sendSpy.mockRestore();
+    }
+
+    expect(await redis.get(`otp:rate:${phoneNumber}`)).toBe('1');
+    expect(
+      await prisma.otpCode.count({
+        where: { phoneNumber, isUsed: false },
+      }),
+    ).toBe(1);
+
+    const verify = await request(app)
+      .post('/api/auth/verify-otp')
+      .send({ phoneNumber, code: firstCode });
+    expect(verify.status).toBe(200);
+    createdUserIds.push(verify.body.data.user.id);
   });
 });

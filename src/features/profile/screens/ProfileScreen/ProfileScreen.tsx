@@ -26,7 +26,11 @@ import type { ReportReason } from '../../../social/services/socialService';
 import { useHouses } from '../../../houses/hooks/useHouses';
 import { useMyRoomHistory, useUserUpcomingEvents } from '../../../rooms/hooks/useRooms';
 import { formatScheduled } from '../../../../shared/utils/formatScheduled';
-import { ExtBadgesRow, ExtProfileLinks } from '../../../extensions';
+import {
+  areExternalDigitalPurchasesAllowed,
+  ExtBadgesRow,
+  ExtProfileLinks,
+} from '../../../extensions';
 import ProfileHeaderBar from './partials/ProfileHeaderBar';
 import ProfileIdentity from './partials/ProfileIdentity';
 import ProfileStats from './partials/ProfileStats';
@@ -60,6 +64,7 @@ export const ProfileScreen: React.FC = () => {
   const myId = useAuthStore(s => s.user?.id) ?? meQuery.data?.id;
   const userId = route.params?.userId ?? myId ?? '';
   const isSelf = !!myId && userId === myId;
+  const paidDigitalFeaturesAllowed = areExternalDigitalPurchasesAllowed();
 
   const { data: user, isLoading, isError, refetch } = useProfile(userId);
   const follow = useFollow();
@@ -82,7 +87,7 @@ export const ProfileScreen: React.FC = () => {
   // Public scheduled rooms this user is hosting — shown to every viewer.
   const upcomingEvents = useUserUpcomingEvents(userId);
   // Who viewed my profile (#76) — premium, self only.
-  const viewers = useProfileViewers(isSelf);
+  const viewers = useProfileViewers(isSelf && paidDigitalFeaturesAllowed);
 
   // Navigate to EditProfile in the CURRENT host stack (EditProfile is
   // registered in both the Rooms and Settings navigators) so editing from a
@@ -344,7 +349,7 @@ export const ProfileScreen: React.FC = () => {
           </View>
         ) : null}
 
-        {isSelf ? (
+        {isSelf && paidDigitalFeaturesAllowed ? (
           <View className="gap-md">
             <Text className="text-sm font-body-bold text-ink-muted uppercase tracking-wider">
               {t('profile.whoViewed', 'Qui a vu mon profil')}
