@@ -24,6 +24,36 @@ const PUBLIC_USER = {
  *    private account is only visible to approved/reciprocal connections)
  */
 export const presenceService = {
+  /**
+   * Return a peer's presence only when the viewer is allowed to observe it.
+   * A neutral payload prevents this endpoint from becoming an account oracle.
+   */
+  async forPeer(viewerId: string, peerId: string) {
+    const hidden = { visible: false, isOnline: false, lastSeenAt: null };
+    if (viewerId === peerId) return hidden;
+
+    const [peer, viewerFollows, peerFollows, blockedIds] = await Promise.all([
+      prisma.user.findFirst({
+        where: { id: peerId, deletedAt: null },
+        select: { isOnline: true, lastSeenAt: true, isPrivateAccount: true },
+      }),
+      prisma.follow.findFirst({
+        where: { followerId: viewerId, followingId: peerId, status: 'ACCEPTED' },
+        select: { followerId: true },
+      }),
+      prisma.follow.findFirst({
+        where: { followerId: peerId, followingId: viewerId, status: 'ACCEPTED' },
+        select: { followerId: true },
+      }),
+      getBlockedIdSet(viewerId),
+    ]);
+
+    if (!peer || !viewerFollows || blockedIds.has(peerId)) return hidden;
+    if (peer.isPrivateAccount && !peerFollows) return hidden;
+
+    return { visible: true, isOnline: peer.isOnline, lastSeenAt: peer.lastSeenAt };
+  },
+
   async availableForUser(userId: string, limit = 30) {
     const fiveMinAgo = new Date(Date.now() - 5 * 60_000);
 

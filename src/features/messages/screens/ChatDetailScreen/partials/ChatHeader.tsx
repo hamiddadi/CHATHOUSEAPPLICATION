@@ -55,7 +55,7 @@ const ChatHeader: React.FC<ChatHeaderProps> = memo(
               style={styles.headerAvatar}
               resizeMode="cover"
             />
-            {isOnline && <View style={styles.headerStatusDot} />}
+            {isOnline && <View testID="chat-peer-online-dot" style={styles.headerStatusDot} />}
           </View>
           <View>
             <Text className="text-md font-display text-primary tracking-tight">

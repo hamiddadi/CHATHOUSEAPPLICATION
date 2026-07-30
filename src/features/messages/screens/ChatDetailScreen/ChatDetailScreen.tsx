@@ -36,6 +36,7 @@ import {
 import { useChatSocket } from '../../hooks/useChatSocket';
 import { useTypingIndicator } from '../../hooks/useTypingIndicator';
 import { useVoiceMessage } from '../../hooks/useVoiceMessage';
+import { usePeerPresence } from '../../../extensions/hooks/usePeerPresence';
 import VoiceRecordingBar from '../../components/VoiceRecordingBar';
 import Bubble from './partials/Bubble';
 import DateSeparator from './partials/DateSeparator';
@@ -140,6 +141,7 @@ export const ChatDetailScreen: React.FC = () => {
   // The conversation id IS the peer's user id (see messageService), so it
   // doubles as the `receiverId` for the typing relay.
   const peerId = route.params.conversationId;
+  const { data: peerPresence } = usePeerPresence(peerId);
   const { data: conversation } = useConversation(peerId);
   const {
     data: messages,
@@ -352,14 +354,10 @@ export const ChatDetailScreen: React.FC = () => {
     </View>
   ) : null;
 
-  // Presence is not yet wired into the DM thread. The conversation payload
-  // carries no per-peer online flag, so we must not assert a green "online"
-  // dot unconditionally — that was a misleading indicator. Until a real
-  // presence source is plumbed through, treat the peer as offline (dot
-  // hidden).
-  // TODO(audit): wire to a real presence source (e.g. extensions presence
-  // API / socket presence events) instead of defaulting to offline.
-  const isOnline = false;
+  // The server reveals presence only to an allowed relationship. Hidden,
+  // blocked and non-reciprocal private peers all resolve to a neutral offline
+  // payload, so the UI never leaks relationship-sensitive activity.
+  const isOnline = peerPresence?.visible === true && peerPresence.isOnline;
   const canSend = draft.trim().length > 0 && !sendMessage.isPending;
 
   return (

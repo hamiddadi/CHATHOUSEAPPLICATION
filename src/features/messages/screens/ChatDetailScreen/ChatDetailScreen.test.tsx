@@ -12,6 +12,7 @@ import { messageKeys, MESSAGES_PAGE_SIZE } from '../../hooks/useMessages';
 import { renderScreen, mockAuthenticated, resetAuth } from '../../../../test-utils/renderScreen';
 import { messageService } from '../../services/messageService';
 import * as socketClient from '../../../../shared/services/realtime/socketClient';
+import { peerPresenceKey } from '../../../extensions/hooks/usePeerPresence';
 import type { Conversation, Message } from '../../../../shared/types/domain';
 import { ChatDetailScreen } from './ChatDetailScreen';
 
@@ -55,6 +56,10 @@ const renderChat = () =>
     seedQueryData: [
       { key: [...messageKeys.conversation(PEER_ID)], data: conversation() },
       { key: [...messageKeys.messages(PEER_ID)], data: seededThread(messages()) },
+      {
+        key: [...peerPresenceKey(PEER_ID)],
+        data: { visible: true, isOnline: true, lastSeenAt: new Date().toISOString() },
+      },
     ],
   });
 
@@ -68,11 +73,12 @@ describe('ChatDetailScreen', () => {
   });
 
   it('mounts and renders the peer name + an existing message bubble', async () => {
-    const { getByText } = renderChat();
+    const { getByText, getByTestId } = renderChat();
     await waitFor(() => {
       expect(getByText('Alice')).toBeTruthy();
     });
     expect(getByText('Hey there')).toBeTruthy();
+    expect(getByTestId('chat-peer-online-dot')).toBeTruthy();
   });
 
   it('header back button calls navigation.goBack', () => {

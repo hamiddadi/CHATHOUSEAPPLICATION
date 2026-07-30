@@ -9,11 +9,24 @@ export interface AvailableUser {
   isOnline: boolean;
 }
 
+export interface PeerPresence {
+  visible: boolean;
+  isOnline: boolean;
+  lastSeenAt: string | null;
+}
+
 export const presenceApi = {
   async available(limit = 30): Promise<AvailableUser[]> {
     const { data } = await apiClient.get<{ items: AvailableUser[] }>('/ext/presence/available', {
       params: { limit },
     });
     return data.items;
+  },
+
+  async peer(peerId: string): Promise<PeerPresence> {
+    const { data } = await apiClient.get<PeerPresence>(
+      `/ext/presence/${encodeURIComponent(peerId)}`,
+    );
+    return data;
   },
 };

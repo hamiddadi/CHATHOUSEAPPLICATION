@@ -22,3 +22,12 @@ presenceRouter.get(
     res.json({ items, count: items.length });
   }),
 );
+
+presenceRouter.get(
+  '/:peerId',
+  asyncHandler(async (req, res) => {
+    const viewerId = authedUserId(req);
+    const peerId = z.string().min(1).max(191).parse(req.params.peerId);
+    res.json(await presenceService.forPeer(viewerId, peerId));
+  }),
+);
