@@ -8,7 +8,7 @@ import type { MessageStackParamList } from '../../../core/navigation/types';
 import { PulsingAvatar } from './PulsingAvatar';
 
 /* ============================================================
- * Constants — Chathouse dark theme via theme tokens
+ * Constants — ChatHouse dark theme via theme tokens
  * ========================================================== */
 const ITEM_SIZE = 60;
 const ITEM_GAP = 16;

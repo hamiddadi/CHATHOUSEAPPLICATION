@@ -9,6 +9,13 @@ export interface AuthUser {
   bio?: string | null;
   interests?: string[];
   hasCompletedOnboarding?: boolean;
+  termsAcceptedVersion?: string | null;
+  termsAcceptedAt?: string | null;
+  privacyNoticeAcknowledgedVersion?: string | null;
+  privacyNoticeAcknowledgedAt?: string | null;
+  legalAcceptanceLocale?: string | null;
+  legalDocumentVersion?: string;
+  legalAcceptanceRequired?: boolean;
   createdAt: string;
 }
 
@@ -16,4 +23,11 @@ export interface AuthSession {
   accessToken: string;
   refreshToken: string;
   expiresAt: string;
+}
+
+export interface LegalAcceptancePayload {
+  termsAccepted: true;
+  privacyNoticeAcknowledged: true;
+  legalDocumentVersion: string;
+  legalLocale: string;
 }

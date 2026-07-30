@@ -21,7 +21,7 @@ export const requestBluetoothAudioPermission = async (): Promise<boolean> => {
   const result = await PermissionsAndroid.request(permission, {
     title: 'Appareils audio à proximité',
     message:
-      'Chathouse a besoin de cette autorisation pour utiliser vos casques et écouteurs Bluetooth.',
+      'ChatHouse a besoin de cette autorisation pour utiliser vos casques et écouteurs Bluetooth.',
     buttonPositive: 'Autoriser',
     buttonNegative: 'Refuser',
   });
@@ -49,7 +49,7 @@ export const requestAudioPermission = async (): Promise<boolean> => {
   if (Platform.OS === 'android') {
     const result = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.RECORD_AUDIO, {
       title: 'Permission micro',
-      message: 'Chathouse a besoin de votre micro pour parler dans les rooms.',
+      message: 'ChatHouse a besoin de votre micro pour parler dans les rooms.',
       buttonPositive: 'Autoriser',
       buttonNegative: 'Refuser',
     });

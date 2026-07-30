@@ -4,6 +4,7 @@ import * as sfu from '../../webrtc/mediasoup.manager';
 import { canPublishInRoom, isActiveRoomParticipant } from '../../webrtc/roomAuthz';
 import { env } from '../../config/env';
 import { getUserId } from '../socket.middleware';
+import { assertCurrentLegalAcceptance } from '../../modules/auth/legal-acceptance';
 
 interface RoomScoped {
   roomId: string;
@@ -106,6 +107,7 @@ export const registerRtcHandlers = (socket: Socket): void => {
       // promotion flow and produce audio anyway.
       const roomId = sfu.getTransportRoomId(p.transportId);
       if (!roomId) throw new Error('TRANSPORT_NOT_FOUND');
+      await assertCurrentLegalAcceptance(me());
       const allowed = await canPublishInRoom(roomId, me());
       if (!allowed) throw new Error('NOT_A_SPEAKER');
       const producerId = await sfu.produce(p.transportId, p.kind, p.rtpParameters, me(), socket.id);

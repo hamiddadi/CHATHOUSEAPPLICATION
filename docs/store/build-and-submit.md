@@ -39,6 +39,11 @@ Upload `android/app/build/outputs/bundle/release/app-release.aab` to an Internal
 testing track first. After Play App Signing is active, register its signing
 certificate with Firebase and the Maps API restriction.
 
+For protected CI, dispatch
+`.github/workflows/mobile-store-artifacts.yml` from the reviewed release
+commit. Its `android-production-aab` artifact is built only after the full CI
+gate and the same production/signing guards.
+
 ## iOS archive
 
 On macOS:
@@ -64,6 +69,9 @@ functionality (profile-viewer history or the expanded profile-link allowance).
 
 For command-line CI archives, provide an Apple Distribution certificate,
 provisioning profile and App Store Connect API key through the CI secret store.
+The protected mobile-artifact workflow produces
+`ios-production-xcarchive`, which can then be validated/exported and uploaded
+to TestFlight from the authorized App Store Connect account.
 
 ## Domain association files
 

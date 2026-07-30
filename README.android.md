@@ -1,4 +1,4 @@
-# Chathouse — Android : build, run & connexion (device réel)
+# ChatHouse — Android : build, run & connexion (device réel)
 
 Guide pour lancer l'app Android sur un téléphone physique, avec le backend local.
 Plate-forme de référence : Windows + appareil Android branché en USB (débogage activé).
@@ -46,7 +46,7 @@ Ne jamais remplacer cette étape par `prisma db push` : cela masque les dérives
 de migration et ne reproduit pas le chemin de déploiement.
 
 En dev, l'OTP n'est pas envoyé par SMS : il est **loggé** par le stub
-(`[sms-stub] → +213… :: Your Chathouse code: 123456`).
+(`[sms-stub] → +213… :: Your ChatHouse code: 123456`).
 
 ## 4. Build de l'app
 

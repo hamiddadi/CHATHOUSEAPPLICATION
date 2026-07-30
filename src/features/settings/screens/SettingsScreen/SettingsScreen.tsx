@@ -194,7 +194,7 @@ export const SettingsScreen: React.FC = () => {
       await Share.share({
         message: t('invite.shareMessage', {
           url: link.url,
-          defaultValue: `Rejoins-moi sur Chathouse 👋 ${link.url}`,
+          defaultValue: `Rejoins-moi sur ChatHouse 👋 ${link.url}`,
         }),
         url: link.url,
       });
@@ -266,7 +266,7 @@ export const SettingsScreen: React.FC = () => {
         <View className="flex-row items-center gap-sm">
           <MaterialIcons name="graphic-eq" size={22} color={colors.primary} />
           <Text className="text-lg font-display text-primary tracking-tighter">
-            {t('common.appName', 'Chathouse')}
+            {t('common.appName', 'ChatHouse')}
           </Text>
         </View>
         <Pressable

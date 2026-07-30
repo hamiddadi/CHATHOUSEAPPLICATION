@@ -50,7 +50,7 @@ artefacts signés. L’environnement GitHub protégé `production` doit fournir 
   `ANDROID_UPLOAD_KEY_PASSWORD` ;
 - variables : `IOS_TEAM_ID`, `ANDROID_APP_SIGNING_SHA256`,
   `GO_LIVE_STORE_EVIDENCE_BASE64` et, si les valeurs par défaut ne conviennent
-  pas, `API_HEALTH_URL`, `SUPPORT_URL`, `PRIVACY_URL`,
+  pas, `API_HEALTH_URL`, `SUPPORT_URL`, `PRIVACY_URL`, `TERMS_URL`,
   `ACCOUNT_DELETION_URL`, `APP_URL`, `LIVEKIT_HTTPS_URL`.
 
 Le rapport Actions est conservé 90 jours. Un rapport absent, un contrôle sauté
@@ -58,13 +58,13 @@ ou un artefact provenant d’un autre commit reste un `NO-GO`.
 
 ## État vérifié dans ce workspace
 
-| Zone                  | État                                                                         | Limite de la preuve                                                                                                    |
-| --------------------- | ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| Frontend React Native | Qualité OK ; 92/92 suites et 604/604 tests réussis                           | Les builds natifs signés et les essais sur appareils physiques restent requis.                                         |
-| Backend               | Lint, typecheck, build et tests ciblés critiques validés                     | La suite d’intégration avec PostgreSQL/Redis et un clone de la base de production restent requis.                      |
-| Android               | `assembleDebug` et `lintDebug` validés ; `testDebugUnitTest` est `NO-SOURCE` | Aucun AAB production signé : la validation technique utilise `.env.test`, x86_64 et la clé debug.                      |
-| iOS                   | Configuration statique et garde d’environnement contrôlées                   | Aucun build signé, aucune archive Xcode et aucun TestFlight n’ont été produits sous Windows.                           |
-| Production            | Non disponible                                                               | `api.chathouse.app`, `livekit.chathouse.app` et `app.chathouse.com` n’ont pas d’enregistrement DNS A lors du contrôle. |
+| Zone                  | État                                                                                                                                                                           | Limite de la preuve                                                                                                    |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------- |
+| Frontend React Native | Qualité OK ; 92/92 suites et 604/604 tests réussis                                                                                                                             | Les builds natifs signés et les essais sur appareils physiques restent requis.                                         |
+| Backend               | Lint, typecheck, build, 65/65 suites (485 tests) et 8 migrations sur base PostgreSQL vierge validés                                                                            | Un clone anonymisé de production, les tests de charge et un déploiement production restent requis.                     |
+| Android               | Debug/lint validés ; release TLS-only ; smoke debug ARM64 réussi sur OPPO CPH2043 Android 12 (installation, 2 lancements à froid, navigation onboarding, aucune erreur fatale) | Aucun AAB production signé ; ce smoke ne couvre ni Play Internal ni les parcours réseau, micro et notifications.       |
+| iOS                   | Configuration statique, garde d’environnement, AppIcon 1024 × 1024 sans alpha et ressources contrôlées                                                                         | Aucune archive signée ni aucun TestFlight n’a été produit sous Windows.                                                |
+| Production            | Non disponible                                                                                                                                                                 | `api.chathouse.app`, `livekit.chathouse.app` et `app.chathouse.com` n’ont pas d’enregistrement DNS A lors du contrôle. |
 
 Ces résultats locaux ont été obtenus après les derniers correctifs. Ils ne
 remplacent jamais les tests staging, appareils, TestFlight ou Play Internal
@@ -81,10 +81,11 @@ doivent être ni téléversées dans Play Console ni distribuées à des utilisa
 ## 1. Gate commune — code et données
 
 - [x] `npm run quality` réussit sans avertissement.
-- [ ] `npm run test:ci` réussit intégralement avec la couverture attendue.
-- [ ] Backend : lint, typecheck, build et suite complète réussissent.
+- [x] `npm run test:ci` réussit intégralement avec la couverture attendue.
+- [x] Backend : lint, typecheck, build et suite complète réussissent
+      (65 suites, 485 tests réussis, 1 ignoré ; couverture lignes 71,67 %).
 - [ ] Les patches natifs passent `patch-package --error-on-fail`.
-- [ ] Les huit migrations se déploient sur une base PostgreSQL vide.
+- [x] Les huit migrations se déploient sur une base PostgreSQL vide.
 - [ ] `prisma migrate deploy` réussit sur un clone récent et anonymisé de la
       production, sans `db push`, perte de données ni verrou excessif.
 - [ ] La migration suit un schéma expand/contract rétrocompatible avec l’image
@@ -181,12 +182,18 @@ Référence : [`runbook.md`](../backend/docs/deployment/runbook.md).
 
 ## 5. Gate sécurité, UGC, juridique et stores
 
-- [ ] Finaliser l’entité légale, l’adresse, la juridiction, les transferts,
-      l’autorité de contrôle et les e-mails opérationnels dans
-      `docs/legal/*` et sur les pages publiques. Les placeholders interdisent la
+- [ ] Finaliser la fiche
+      `docs/legal/RELEASE-INFORMATION-REQUIRED.md` : identité, litiges et
+      responsabilité, prestataires/pays, transferts, conservation, modération,
+      sécurité des enfants, version/date et contacts. Propager la version de
+      `docs/legal/document-control.json` dans les documents, l’app, le backend et
+      les fiches Store. Les placeholders et le statut `draft` interdisent la
       soumission.
-- [ ] Publier et vérifier en HTTP 200 les URLs Privacy, Terms, Support et Account
-      Deletion.
+- [ ] Publier et vérifier en HTTP 200 les variantes anglaises et françaises
+      (`?lang=fr`) des URLs Privacy, Terms, Community Guidelines, Child Safety
+      Standards, Support et Account Deletion.
+- [ ] Désigner le contact sécurité des enfants dans Play Console, valider le
+      processus CSAE/CSAM réel et compléter l’auto-certification Google Play.
 - [ ] Faire valider les textes par un conseil et enregistrer l’acceptation
       explicite de la version publiée des conditions.
 - [ ] Vérifier dans les binaires finaux le signalement de contenu individuel,
@@ -199,6 +206,9 @@ Référence : [`runbook.md`](../backend/docs/deployment/runbook.md).
       réellement embarqués et les contrats fournisseurs, notamment Google Maps.
 - [ ] Produire toutes les captures, icônes, feature graphics, descriptions,
       coordonnées de review et comptes de démonstration demandés.
+      L’`AppIcon.png` iOS passe désormais le contrôle technique 1024 × 1024
+      sans alpha ; la validation finale de marque et le rendu de l’archive
+      signée restent à effectuer avant soumission.
 - [ ] Maintenir les achats numériques et pourboires désactivés dans les builds
       mobiles tant qu’un parcours conforme StoreKit/Google Play Billing n’est
       pas livré et approuvé.

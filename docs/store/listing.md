@@ -1,5 +1,8 @@
 # Store listing — copy & metadata (working draft)
 
+**Legal document set version:** `2026-07-29`
+**Status:** DRAFT — NOT SUBMISSION EVIDENCE
+
 Draft marketing copy for both consoles. It is **not ready to submit** until the
 current App Store Connect and Play Console questionnaires have been completed
 from the actual shipped build. Screenshots, the feature graphic, legal identity,
@@ -9,14 +12,30 @@ moderation operations and hosted URLs still have to be supplied separately.
 
 ## Shared
 
-- **App name:** Chathouse
+- **App name:** `ChatHouse`
+- **Display-name gate:** must exactly match the final Android and iOS display
+  names before submission.
 - **Bundle ID / package:** `com.chathouse.app`
 - **Category:** Social Networking (App Store) / Social (Google Play)
-- **Primary language:** English (add French — the app ships i18n FR — as a localization)
+- **Primary language:** English
+- **French localization:** required because the app ships French; use the
+  reviewed French legal pages by adding `?lang=fr` to each legal URL.
 - **Support URL:** https://api.chathouse.app/support _(must resolve before submission)_
 - **Marketing URL:** https://chathouse.app
 - **Privacy Policy URL:** https://api.chathouse.app/privacy
+- **Terms / EULA URL:** https://api.chathouse.app/terms
+- **Community Guidelines URL:** https://api.chathouse.app/community-guidelines
+- **Child Safety Standards URL:** https://api.chathouse.app/child-safety
 - **Account deletion URL:** https://api.chathouse.app/account-deletion
+
+Reviewed French localizations must be reachable at:
+
+- https://api.chathouse.app/support?lang=fr
+- https://api.chathouse.app/privacy?lang=fr
+- https://api.chathouse.app/terms?lang=fr
+- https://api.chathouse.app/community-guidelines?lang=fr
+- https://api.chathouse.app/child-safety?lang=fr
+- https://api.chathouse.app/account-deletion?lang=fr
 
 ## Short / promotional text
 
@@ -26,14 +45,14 @@ moderation operations and hosted URLs still have to be supplied separately.
 ## Full description (≤4000 chars — both stores)
 
 ```
-Chathouse is where conversations happen live. Join audio rooms on the topics you
+ChatHouse is where conversations happen live. Join audio rooms on the topics you
 care about, raise your hand to speak, and meet people around you on the map.
 
 • LIVE AUDIO ROOMS — open, social, or closed rooms. Listen in, request to speak,
   react with emojis, and chat alongside the conversation.
 • PEOPLE NEARBY — see who's online around you on the map and start talking.
-• FOLLOW & MESSAGE — follow people you like and send direct messages once you
-  both follow each other.
+• FOLLOW & MESSAGE — follow people you like and exchange direct messages when
+the recipient's privacy setting permits it.
 • CLUBS & EVENTS — join clubs, schedule rooms, and get reminded before they start.
 • VOICE MESSAGES — send quick async voice notes when a live room isn't the moment.
 
@@ -41,7 +60,7 @@ Your safety comes first: report content or users, block anyone, and mute or
 remove disruptive speakers. Reports enter the moderation queue for review.
 You're always in control of your data — export it or delete your account anytime.
 
-Download Chathouse and join the conversation.
+Download ChatHouse and join the conversation.
 ```
 
 ## Keywords
@@ -91,6 +110,15 @@ displayed, but paid-only functionality is not unlocked in these builds.
 Verify every item end to end in the submitted binaries before declaring it:
 report individual content and users, block users, mute/kick speakers, operate a
 moderator queue (suspend / force-end), publish a reviewed zero-tolerance EULA,
-and capture acceptance of the current Terms and Privacy notices. A backend
+Community Guidelines and Child Safety Standards, and capture acceptance of the
+current Terms plus acknowledgement of the current Privacy notice. A backend
 endpoint or draft document alone is not proof that the store build exposes the
-control or that a moderation team is operational.
+control or that a moderation and child-safety team is operational.
+
+### Google Play child-safety declaration
+
+Before submission in the Social category, publish the Child Safety Standards,
+verify the in-app reporting flow, designate an actively monitored child-safety
+contact in Play Console, document the CSAM escalation/reporting procedure and
+complete Google's Child Safety Standards self-certification. The public
+document and Console answers must name the verified legal operator.

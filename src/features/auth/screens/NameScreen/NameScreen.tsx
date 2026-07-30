@@ -77,7 +77,7 @@ export const NameScreen: React.FC = () => {
             {t('auth.name.title', "What's your name?")}
           </Text>
           <Text className="text-md text-ink-muted">
-            {t('auth.name.subtitle', 'This is how people will know you on Chathouse.')}
+            {t('auth.name.subtitle', 'This is how people will know you on ChatHouse.')}
           </Text>
         </View>
 

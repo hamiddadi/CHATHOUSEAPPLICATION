@@ -209,18 +209,15 @@ export const ChatDetailScreen: React.FC = () => {
       setDraft('');
       scrollToBottom();
     } catch (err) {
-      // The only 403 on a DM send is the follow-gate (CHAT_004 — a block, or the
-      // recipient's dmPrivacy not satisfied; default 'mutual'). Spell the rule
-      // out instead of a raw toast, and keep the draft so nothing typed is lost.
-      // The peer's dmPrivacy isn't exposed client-side (it's a `me`-only field),
-      // so this gate can only be surfaced reactively here, not pre-disabled.
+      // Privacy/follows can change after the compose eligibility snapshot.
+      // Keep this authoritative send-time fallback and preserve the draft.
       const e = toAppError(err);
       if (e.kind === 'forbidden') {
         Alert.alert(
           t('chat.cannotMessageTitle', 'Message impossible'),
           t(
             'chat.cannotMessageBody',
-            'Vous devez vous suivre mutuellement pour échanger des messages.',
+            'Cette personne ne peut pas recevoir de message privé de votre part pour le moment.',
           ),
         );
         return;

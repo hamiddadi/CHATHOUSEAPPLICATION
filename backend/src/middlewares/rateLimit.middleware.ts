@@ -1,8 +1,9 @@
 import { rateLimit, type Store } from 'express-rate-limit';
-import { RedisStore, type RedisReply } from 'rate-limit-redis';
+import type { RedisReply } from 'rate-limit-redis';
 import { redis } from '../config/redis';
 import { env } from '../config/env';
 import { ERROR_CODES } from './error.middleware';
+import { ConnectedRedisStore } from './connectedRedisStore';
 
 const baseMessage = {
   success: false,
@@ -15,7 +16,9 @@ const baseMessage = {
  * per-process — with N instances an attacker gets N× the quota, and every
  * redeploy/restart resets the counters, defeating the brute-force (login) and
  * cost-control (SMS/email/tip) ceilings. The shared node-redis client is
- * connected at boot by connectRedis(); `sendCommand` only runs per-request.
+ * connected at boot by connectRedis(). ConnectedRedisStore defers the
+ * rate-limit-redis constructor (which eagerly loads Lua scripts) until the
+ * first request, after Redis is ready.
  *
  * Skipped in the `test` env: a single-process test run doesn't need a
  * distributed store, and a persistent Redis store would leak counters across
@@ -24,8 +27,9 @@ const baseMessage = {
  */
 const makeStore = (prefix: string): Store | undefined => {
   if (env.NODE_ENV === 'test') return undefined; // default MemoryStore
-  return new RedisStore({
+  return new ConnectedRedisStore({
     prefix,
+    isReady: () => redis.isReady,
     sendCommand: (...args: string[]): Promise<RedisReply> =>
       redis.sendCommand(args) as Promise<RedisReply>,
   });
@@ -40,6 +44,10 @@ const makeLimiter = (prefix: string, opts: Partial<Parameters<typeof rateLimit>[
     legacyHeaders: false,
     message: baseMessage,
     store: makeStore(prefix),
+    // Redis backs security and external-cost ceilings. Letting requests
+    // through while its shared counters are unavailable would silently
+    // multiply/reset those quotas, so preserve the existing fail-closed policy.
+    passOnStoreError: false,
     ...opts,
   });
 

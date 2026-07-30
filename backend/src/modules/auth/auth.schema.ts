@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { publicContentString } from '../../utils/publicContentModeration';
+import { legalAcceptanceFieldsSchema } from './legal-acceptance';
 
 export const registerSchema = z.object({
   username: z
@@ -19,6 +20,7 @@ export const registerSchema = z.object({
   password: z.string().min(8).max(128),
   displayName: publicContentString(z.string().min(1).max(60)).optional(),
   ageConfirmed: z.boolean().optional(),
+  ...legalAcceptanceFieldsSchema,
 });
 
 export const loginSchema = z.object({

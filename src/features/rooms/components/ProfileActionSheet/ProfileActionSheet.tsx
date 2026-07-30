@@ -64,7 +64,7 @@ export const ProfileActionSheet: React.FC<ProfileActionSheetProps> = memo(
       mutationFn: (userId: string) =>
         messageService.send(
           userId,
-          `Rejoins-moi sur Chathouse 👉 ${SHARE_BASE_URL}/room/${roomId}`,
+          `Rejoins-moi sur ChatHouse 👉 ${SHARE_BASE_URL}/room/${roomId}`,
         ),
     });
     const { status: extStatus } = useExtBackend();

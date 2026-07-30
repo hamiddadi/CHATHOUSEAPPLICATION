@@ -76,7 +76,7 @@ export const ERROR_CODES = {
   CHAT_003: { status: 403, message: 'Not your message' },
   CHAT_004: {
     status: 403,
-    message: 'Direct messages are limited to mutual follows',
+    message: 'This recipient cannot receive a direct message from you right now',
   },
 
   GROUP_001: { status: 404, message: 'Group conversation not found' },
@@ -119,6 +119,14 @@ export const ERROR_CODES = {
   AGE_001: {
     status: 403,
     message: 'You must confirm that you are at least 16 years old',
+  },
+  LEGAL_001: {
+    status: 403,
+    message: 'You must accept the current Terms and acknowledge the Privacy Notice',
+  },
+  LEGAL_002: {
+    status: 409,
+    message: 'The legal documents have changed; review the current version',
   },
 
   VALIDATION_001: { status: 400, message: 'Invalid request payload' },

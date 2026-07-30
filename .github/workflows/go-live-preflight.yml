@@ -210,6 +210,7 @@ jobs:
           GO_LIVE_API_HEALTH_URL: ${{ vars.API_HEALTH_URL }}
           GO_LIVE_SUPPORT_URL: ${{ vars.SUPPORT_URL }}
           GO_LIVE_PRIVACY_URL: ${{ vars.PRIVACY_URL }}
+          GO_LIVE_TERMS_URL: ${{ vars.TERMS_URL }}
           GO_LIVE_ACCOUNT_DELETION_URL: ${{ vars.ACCOUNT_DELETION_URL }}
           GO_LIVE_APP_URL: ${{ vars.APP_URL }}
           GO_LIVE_LIVEKIT_HTTPS_URL: ${{ vars.LIVEKIT_HTTPS_URL }}

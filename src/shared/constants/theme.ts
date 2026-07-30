@@ -1,5 +1,5 @@
 /**
- * Chathouse Design System — Material 3 Dark
+ * ChatHouse Design System — Material 3 Dark
  * Tokens extracted from the reference HTML mocks in `src/ui/`.
  * Do not hand-pick colors in components; pull from here.
  */

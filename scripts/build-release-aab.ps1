@@ -179,9 +179,17 @@ $task = if ($Apk) { "assembleRelease" } else { "bundleRelease" }
 Write-Host "Building $task version $VersionName ($VersionCode) with ENVFILE=$EnvFile ..." -ForegroundColor Green
 Push-Location $android
 try {
+  $onWindows = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
+    [System.Runtime.InteropServices.OSPlatform]::Windows
+  )
+  $gradleWrapper = Join-Path $android $(if ($onWindows) { "gradlew.bat" } else { "gradlew" })
+  if (-not $onWindows) {
+    & chmod +x $gradleWrapper
+    if ($LASTEXITCODE -ne 0) { throw "Could not make the Gradle wrapper executable." }
+  }
   # Command-line project properties have Gradle's highest priority, so a
   # shippable build cannot inherit the technical debug-signing opt-in.
-  & (Join-Path $android "gradlew.bat") $task "-PCHATHOUSE_ALLOW_DEBUG_RELEASE_SIGNING=false"
+  & $gradleWrapper $task "-PCHATHOUSE_ALLOW_DEBUG_RELEASE_SIGNING=false"
   if ($LASTEXITCODE -ne 0) { throw "Gradle $task failed (exit $LASTEXITCODE)." }
 } finally {
   Pop-Location

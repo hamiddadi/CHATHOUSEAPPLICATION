@@ -4,6 +4,7 @@ import type {
   NativeStackScreenProps,
 } from '@react-navigation/native-stack';
 import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
+import type { LegalAcceptancePayload } from '../../features/auth/types/auth.types';
 
 /* ============================================================
  * AUTH STACK
@@ -12,7 +13,7 @@ export type AuthStackParamList = {
   WelcomeSlides: undefined;
   Landing: undefined;
   Phone: undefined;
-  Otp: { phoneNumber: string };
+  Otp: { phoneNumber: string; legalAcceptance: LegalAcceptancePayload };
   // Real name (Clubhouse asks name BEFORE username). Collected into the
   // onboarding store and flushed at completeOnboarding.
   Name: { phoneNumber: string };

@@ -25,7 +25,7 @@ describe('WelcomeSlidesScreen', () => {
     });
     expect(toJSON()).toBeTruthy();
     // First slide title (welcome) and the not-last CTA label.
-    expect(getByText('Welcome to Chathouse')).toBeTruthy();
+    expect(getByText('Welcome to ChatHouse')).toBeTruthy();
     expect(getByText('Next')).toBeTruthy();
     // Skip is visible while not on the last slide.
     expect(getByText('Skip')).toBeTruthy();

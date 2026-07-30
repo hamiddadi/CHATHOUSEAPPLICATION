@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import messaging from '@react-native-firebase/messaging';
+import { getMessaging, getToken, onTokenRefresh } from '@react-native-firebase/messaging';
 import {
   pushService,
   requestNotificationPermission,
@@ -15,6 +15,8 @@ import {
  * three non-existent routes — /push/tokens,
  * /users/me/push-tokens, /ext/push/tokens — and always errored.)
  */
+
+const firebaseMessaging = getMessaging();
 
 export const useExtPushToken = (enabled = true) => {
   const [token, setToken] = useState<string | null>(null);
@@ -38,11 +40,11 @@ export const useExtPushToken = (enabled = true) => {
           return;
         }
 
-        const fetched = await messaging().getToken();
+        const fetched = await getToken(firebaseMessaging);
         if (cancelled || !fetched) return;
         setToken(fetched);
 
-        unsubscribeRefresh = messaging().onTokenRefresh(refreshed => {
+        unsubscribeRefresh = onTokenRefresh(firebaseMessaging, refreshed => {
           if (cancelled) return;
           setToken(refreshed);
           void pushService.registerTokenWithBackend(refreshed).then(registered => {

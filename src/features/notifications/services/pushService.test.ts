@@ -6,14 +6,18 @@
  * AUTHORIZED/PROVISIONAL → 'granted', DENIED → 'blocked' (iOS never
  * re-prompts), NOT_DETERMINED → 'denied', native failure → 'error'.
  */
-import messaging from '@react-native-firebase/messaging';
+import {
+  AuthorizationStatus,
+  deleteToken,
+  getToken,
+  requestPermission,
+} from '@react-native-firebase/messaging';
 import { apiClient } from '../../../shared/services/api/apiClient';
 import { pushService, requestNotificationPermissionStatus } from './pushService';
 
-const messagingInstance = messaging();
-const requestPermissionMock = messagingInstance.requestPermission as jest.Mock;
-const getTokenMock = messagingInstance.getToken as jest.Mock;
-const deleteTokenMock = messagingInstance.deleteToken as jest.Mock;
+const requestPermissionMock = requestPermission as jest.Mock;
+const getTokenMock = getToken as jest.Mock;
+const deleteTokenMock = deleteToken as jest.Mock;
 
 describe('pushService permission status', () => {
   beforeEach(() => {
@@ -25,27 +29,27 @@ describe('pushService permission status', () => {
   });
 
   it("maps AUTHORIZED to 'granted'", async () => {
-    requestPermissionMock.mockResolvedValueOnce(messaging.AuthorizationStatus.AUTHORIZED);
+    requestPermissionMock.mockResolvedValueOnce(AuthorizationStatus.AUTHORIZED);
     await expect(requestNotificationPermissionStatus()).resolves.toBe('granted');
   });
 
   it("maps PROVISIONAL to 'granted'", async () => {
-    requestPermissionMock.mockResolvedValueOnce(messaging.AuthorizationStatus.PROVISIONAL);
+    requestPermissionMock.mockResolvedValueOnce(AuthorizationStatus.PROVISIONAL);
     await expect(requestNotificationPermissionStatus()).resolves.toBe('granted');
   });
 
   it("maps an iOS DENIED to 'blocked' (the OS never re-prompts)", async () => {
-    requestPermissionMock.mockResolvedValueOnce(messaging.AuthorizationStatus.DENIED);
+    requestPermissionMock.mockResolvedValueOnce(AuthorizationStatus.DENIED);
     await expect(requestNotificationPermissionStatus()).resolves.toBe('blocked');
   });
 
   it("maps NOT_DETERMINED to 'denied'", async () => {
-    requestPermissionMock.mockResolvedValueOnce(messaging.AuthorizationStatus.NOT_DETERMINED);
+    requestPermissionMock.mockResolvedValueOnce(AuthorizationStatus.NOT_DETERMINED);
     await expect(requestNotificationPermissionStatus()).resolves.toBe('denied');
   });
 
   it('getOrRequestToken returns the token with a granted status', async () => {
-    requestPermissionMock.mockResolvedValueOnce(messaging.AuthorizationStatus.AUTHORIZED);
+    requestPermissionMock.mockResolvedValueOnce(AuthorizationStatus.AUTHORIZED);
     await expect(pushService.getOrRequestToken()).resolves.toEqual({
       token: 'test-fcm-token',
       status: 'granted',
@@ -53,7 +57,7 @@ describe('pushService permission status', () => {
   });
 
   it('getOrRequestToken surfaces the refusal status without fetching a token', async () => {
-    requestPermissionMock.mockResolvedValueOnce(messaging.AuthorizationStatus.DENIED);
+    requestPermissionMock.mockResolvedValueOnce(AuthorizationStatus.DENIED);
     await expect(pushService.getOrRequestToken()).resolves.toEqual({
       token: null,
       status: 'blocked',
@@ -62,7 +66,7 @@ describe('pushService permission status', () => {
   });
 
   it("getOrRequestToken reports 'error' when the native token fetch throws", async () => {
-    requestPermissionMock.mockResolvedValueOnce(messaging.AuthorizationStatus.AUTHORIZED);
+    requestPermissionMock.mockResolvedValueOnce(AuthorizationStatus.AUTHORIZED);
     getTokenMock.mockRejectedValueOnce(new Error('no play services'));
     await expect(pushService.getOrRequestToken()).resolves.toEqual({
       token: null,
@@ -71,7 +75,7 @@ describe('pushService permission status', () => {
   });
 
   it('getOrRequestToken serves the cached token without re-prompting', async () => {
-    requestPermissionMock.mockResolvedValueOnce(messaging.AuthorizationStatus.AUTHORIZED);
+    requestPermissionMock.mockResolvedValueOnce(AuthorizationStatus.AUTHORIZED);
     await pushService.getOrRequestToken();
     requestPermissionMock.mockClear();
     await expect(pushService.getOrRequestToken()).resolves.toEqual({
@@ -82,7 +86,7 @@ describe('pushService permission status', () => {
   });
 
   it('registerWithBackend posts the token and returns the granted status', async () => {
-    requestPermissionMock.mockResolvedValueOnce(messaging.AuthorizationStatus.AUTHORIZED);
+    requestPermissionMock.mockResolvedValueOnce(AuthorizationStatus.AUTHORIZED);
     const postSpy = jest.spyOn(apiClient, 'post').mockResolvedValue({ data: {} });
     await expect(pushService.registerWithBackend()).resolves.toBe('granted');
     expect(postSpy).toHaveBeenCalledWith(
@@ -92,20 +96,20 @@ describe('pushService permission status', () => {
   });
 
   it('registerWithBackend skips the POST and reports the refusal status', async () => {
-    requestPermissionMock.mockResolvedValueOnce(messaging.AuthorizationStatus.DENIED);
+    requestPermissionMock.mockResolvedValueOnce(AuthorizationStatus.DENIED);
     const postSpy = jest.spyOn(apiClient, 'post').mockResolvedValue({ data: {} });
     await expect(pushService.registerWithBackend()).resolves.toBe('blocked');
     expect(postSpy).not.toHaveBeenCalled();
   });
 
   it('registerWithBackend stays best-effort when the backend POST rejects', async () => {
-    requestPermissionMock.mockResolvedValueOnce(messaging.AuthorizationStatus.AUTHORIZED);
+    requestPermissionMock.mockResolvedValueOnce(AuthorizationStatus.AUTHORIZED);
     jest.spyOn(apiClient, 'post').mockRejectedValue(new Error('network down'));
     await expect(pushService.registerWithBackend()).resolves.toBe('granted');
   });
 
   it('rotates a token that is still bound to another account, then registers the replacement', async () => {
-    requestPermissionMock.mockResolvedValueOnce(messaging.AuthorizationStatus.AUTHORIZED);
+    requestPermissionMock.mockResolvedValueOnce(AuthorizationStatus.AUTHORIZED);
     getTokenMock
       .mockResolvedValueOnce('old-fcm-token')
       .mockResolvedValueOnce('replacement-fcm-token');
@@ -133,7 +137,7 @@ describe('pushService permission status', () => {
   });
 
   it('invalidates the local FCM token on sign-out even if backend unregister fails', async () => {
-    requestPermissionMock.mockResolvedValueOnce(messaging.AuthorizationStatus.AUTHORIZED);
+    requestPermissionMock.mockResolvedValueOnce(AuthorizationStatus.AUTHORIZED);
     await pushService.getOrRequestToken();
     const postSpy = jest
       .spyOn(apiClient, 'post')

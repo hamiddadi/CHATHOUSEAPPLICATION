@@ -49,7 +49,7 @@ import type {
   UpdateRoleInput,
   UpdateRoomTitleInput,
 } from './rooms.schema';
-import { livekitService } from './livekit.service';
+import { livekitService, type LivekitParticipantRole } from './livekit.service';
 import {
   assertRoomMetadataAccess,
   discoverableRoomWhere,
@@ -113,6 +113,35 @@ const requireHostOrMod = async (roomId: string, userId: string) => {
 };
 
 export const roomsService = {
+  /**
+   * Issue room audio credentials only while both sides of the membership are
+   * active: the Participant has not left and the parent Room is still live.
+   * Reading both records together closes the stale-participant hole where an
+   * ended room retained leftAt = null.
+   */
+  async issueLivekitToken(roomId: string, userId: string) {
+    const participant = await prisma.participant.findUnique({
+      where: { userId_roomId: { userId, roomId } },
+      select: {
+        role: true,
+        leftAt: true,
+        room: { select: { isLive: true, endedAt: true } },
+      },
+    });
+
+    if (!participant) throw new AppError('ROOM_005');
+    if (!participant.room.isLive || participant.room.endedAt) {
+      throw new AppError('ROOM_004');
+    }
+    if (participant.leftAt) throw new AppError('ROOM_005');
+
+    return livekitService.issueRoomToken({
+      roomId,
+      userId,
+      role: participant.role as LivekitParticipantRole,
+    });
+  },
+
   async list(viewerId: string, input: ListRoomsInput) {
     // Default `filter` falls back to the legacy `live` flag so existing
     // callers keep working without code changes.
@@ -690,7 +719,12 @@ export const roomsService = {
       );
     }
 
-    return roomsService.get(roomId, userId);
+    const joinedRoom = await roomsService.get(roomId, userId);
+    // Preserve the idempotency outcome for clients that need to compensate a
+    // late navigation. A cancelled screen must only POST /leave when this
+    // request actually activated the Participant row; otherwise a quick
+    // mini-bar resume/back cycle would evict an already-active session.
+    return { ...joinedRoom, changed: joinResult.changed };
   },
 
   async leave(roomId: string, userId: string) {

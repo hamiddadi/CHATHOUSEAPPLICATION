@@ -11,7 +11,6 @@ concurrency:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}/api
 
 jobs:
   full-ci:
@@ -19,9 +18,27 @@ jobs:
     uses: ./.github/workflows/ci.yml
     secrets: inherit
 
+  image-coordinates:
+    name: Resolve lowercase GHCR image name
+    runs-on: ubuntu-latest
+    outputs:
+      image_name: ${{ steps.normalize.outputs.name }}
+    steps:
+      - name: Normalize repository path for OCI
+        id: normalize
+        shell: bash
+        run: |
+          set -euo pipefail
+          image_name="${GITHUB_REPOSITORY,,}/api"
+          if [[ ! "$image_name" =~ ^[a-z0-9][a-z0-9._/-]+$ ]]; then
+            echo "Invalid lowercase image name: ${image_name}" >&2
+            exit 1
+          fi
+          echo "name=${image_name}" >> "$GITHUB_OUTPUT"
+
   resolve-candidate:
     name: Resolve staging-tested release candidate
-    needs: full-ci
+    needs: [full-ci, image-coordinates]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -121,6 +138,7 @@ jobs:
           EXPECTED_REPOSITORY: ${{ github.repository }}
           EXPECTED_SHA: ${{ steps.source.outputs.sha }}
           EXPECTED_RUN_ID: ${{ steps.staging.outputs.run_id }}
+          IMAGE_NAME: ${{ needs.image-coordinates.outputs.image_name }}
         run: |
           set -euo pipefail
           [ -f "$CANDIDATE_FILE" ] || {
@@ -365,7 +383,7 @@ jobs:
 
   promote-release:
     name: Publish SemVer tag after production acceptance
-    needs: [resolve-candidate, deploy-production]
+    needs: [resolve-candidate, deploy-production, image-coordinates]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -381,6 +399,7 @@ jobs:
         env:
           IMAGE_REF: ${{ needs.resolve-candidate.outputs.image_ref }}
           VERSION: ${{ needs.resolve-candidate.outputs.version }}
+          IMAGE_NAME: ${{ needs.image-coordinates.outputs.image_name }}
         run: |
           set -euo pipefail
           if [[ ! "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then

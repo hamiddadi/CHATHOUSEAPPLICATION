@@ -6,9 +6,11 @@ import { useSocketStore } from './socketStore';
 
 let socket: Socket | null = null;
 let connecting: Promise<Socket | null> | null = null;
+let cancelConnectionWait: (() => void) | null = null;
+
 // Guards against a tight refresh→reconnect→auth-error loop when the refresh
 // token itself is dead (no valid session to recover).
-let refreshingAuth = false;
+let authRefresh: { socket: Socket; promise: Promise<void> } | null = null;
 
 // Subscribers notified after every socket RE-connection (never the first
 // successful connect of a socket instance): realtime events may have been
@@ -47,24 +49,32 @@ const isAuthConnectError = (err: Error & { data?: { code?: unknown } }): boolean
  * picks up the new token on the next `connect()`.
  */
 const refreshAuthAndReconnect = async (s: Socket): Promise<void> => {
-  if (refreshingAuth) return;
-  refreshingAuth = true;
+  if (authRefresh?.socket === s) return authRefresh.promise;
+
+  const promise = (async (): Promise<void> => {
+    try {
+      await apiClient.get('/users/me');
+    } catch {
+      // Refresh failed (e.g. dead refresh token) — leave the socket disconnected
+      // rather than hammering the server. signOut flow will tear it down.
+      return;
+    }
+    // Only reconnect the still-current singleton; a logout may have nulled it.
+    if (socket === s && !s.connected) s.connect();
+  })();
+  authRefresh = { socket: s, promise };
+
   try {
-    await apiClient.get('/users/me');
-  } catch {
-    // Refresh failed (e.g. dead refresh token) — leave the socket disconnected
-    // rather than hammering the server. signOut flow will tear it down.
-    return;
+    await promise;
   } finally {
-    refreshingAuth = false;
+    // A late completion from a logged-out socket must not clear a newer
+    // socket's in-flight refresh guard.
+    if (authRefresh?.promise === promise) authRefresh = null;
   }
-  // Only reconnect the still-current singleton; a logout may have nulled it.
-  if (socket === s && !s.connected) s.connect();
 };
 
 const wireLifecycle = (s: Socket): void => {
-  const store = useSocketStore.getState();
-  store.set('connecting');
+  useSocketStore.getState().set('connecting');
   // Per-socket flag: distinguishes the first successful connect from later
   // RE-connections so onReconnect() subscribers only fire when a gap may have
   // dropped realtime events. A fresh socket after disconnectSocket() starts
@@ -105,46 +115,114 @@ const wireLifecycle = (s: Socket): void => {
 };
 
 /**
- * Returns a connected Socket.IO client, or `null` if realtime is disabled
- * (`env.REALTIME_ENABLED === false`) — callers then fall back to mock data.
- * Idempotent: concurrent calls share the same connection promise.
+ * Wait until Socket.IO has completed its authenticated handshake. Creating an
+ * `io()` instance is not proof of connectivity: returning that instance early
+ * let room code issue `room:join` and request a LiveKit token while the socket
+ * was still disconnected.
+ *
+ * Auth failures remain pending while the REST refresh path obtains a new
+ * token. Transient transport failures stay pending too: Socket.IO owns the
+ * reconnect backoff, so one-shot hooks can finish binding without a remount.
+ * Subscription hooks wait until connectivity returns (or logout cancels the
+ * wait), because resolving `null` would leave one-shot listeners permanently
+ * unbound. Per-caller timeouts are applied by `getSocket()` without cancelling
+ * this shared underlying connection attempt.
  */
-export const getSocket = async (): Promise<Socket | null> => {
+const waitForConnection = (s: Socket): Promise<boolean> => {
+  if (s.connected) return Promise.resolve(true);
+
+  useSocketStore.getState().set('connecting');
+  return new Promise(resolve => {
+    let settled = false;
+
+    function finish(connected: boolean): void {
+      if (settled) return;
+      settled = true;
+      s.off('connect', handleConnect);
+      if (cancelConnectionWait === cancel) cancelConnectionWait = null;
+      resolve(connected);
+    }
+    function handleConnect(): void {
+      finish(true);
+    }
+    const cancel = (): void => finish(false);
+    cancelConnectionWait = cancel;
+    s.on('connect', handleConnect);
+    s.connect();
+  });
+};
+
+const withCallerTimeout = (
+  attempt: Promise<Socket | null>,
+  timeoutMs?: number,
+): Promise<Socket | null> => {
+  if (timeoutMs === undefined) return attempt;
+
+  return new Promise(resolve => {
+    let settled = false;
+    const finish = (result: Socket | null): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(result);
+    };
+    const timer = setTimeout(() => finish(null), Math.max(0, timeoutMs));
+    void attempt.then(finish);
+  });
+};
+
+/**
+ * Returns a connected Socket.IO client, or `null` if realtime is disabled or
+ * an explicitly bounded connection attempt fails. By default the promise
+ * remains pending across offline periods so one-shot subscription hooks bind
+ * as soon as Socket.IO reconnects. Concurrent callers share one attempt and
+ * never receive a socket whose authenticated handshake is still pending.
+ */
+export const getSocket = async (connectionTimeoutMs?: number): Promise<Socket | null> => {
   if (!env.REALTIME_ENABLED) return null;
-  // Reuse the singleton even while it's mid-reconnect: returning it (and nudging
-  // .connect(), which is a no-op if already connecting) prevents a second io()
-  // instance — the old one would otherwise leak with its lifecycle handlers
-  // still attached, duplicating every server event.
-  if (socket) {
-    if (!socket.connected) socket.connect();
-    return socket;
-  }
-  if (connecting) return connecting;
+  if (socket?.connected) return socket;
+  if (!connecting) {
+    const existingSocket = socket;
+    const attempt = (async (): Promise<Socket | null> => {
+      const s =
+        existingSocket ??
+        io(env.WS_BASE_URL, {
+          transports: ['websocket'],
+          // Install lifecycle + connection waiters before opening the transport,
+          // otherwise a fast local handshake can fire before we listen.
+          autoConnect: false,
+          // Callback form: socket.io re-invokes this on EVERY (re)connection, so
+          // the freshest access token from tokenStorage is used each time.
+          auth: cb => {
+            void tokenStorage.get().then(session => cb({ token: session?.accessToken ?? '' }));
+          },
+          reconnection: true,
+          reconnectionDelay: 1_000,
+          reconnectionDelayMax: 10_000,
+        });
 
-  connecting = (async () => {
-    const s = io(env.WS_BASE_URL, {
-      transports: ['websocket'],
-      // Callback form: socket.io re-invokes this on EVERY (re)connection, so
-      // the freshest access token from tokenStorage is used each time. An
-      // object literal here would freeze the token for the socket's lifetime
-      // and break reconnection after the 15-min access token expires.
-      auth: cb => {
-        void tokenStorage.get().then(session => cb({ token: session?.accessToken ?? '' }));
-      },
-      reconnection: true,
-      reconnectionDelay: 1_000,
-      reconnectionDelayMax: 10_000,
+      if (!existingSocket) {
+        wireLifecycle(s);
+        socket = s;
+      }
+
+      const connected = await waitForConnection(s);
+      if (connected && socket === s) return s;
+
+      // A logout may have reset/replaced the singleton while this await was
+      // pending, so a stale attempt must not overwrite the idle state.
+      if (socket === s && !s.connected) {
+        useSocketStore.getState().set('disconnected');
+      }
+      return null;
+    })();
+    connecting = attempt;
+    void attempt.then(() => {
+      if (connecting === attempt) connecting = null;
     });
-    wireLifecycle(s);
-    socket = s;
-    return s;
-  })();
-
-  try {
-    return await connecting;
-  } finally {
-    connecting = null;
   }
+
+  return withCallerTimeout(connecting, connectionTimeoutMs);
 };
 
 /**
@@ -154,7 +232,7 @@ export const getSocket = async (): Promise<Socket | null> => {
  * socket.io's `.timeout()` so a dropped connection rejects instead of hanging.
  */
 export const measureRtt = async (timeoutMs = 5_000): Promise<number | null> => {
-  const s = await getSocket();
+  const s = await getSocket(timeoutMs);
   if (!s) return null;
   const start = Date.now();
   return new Promise<number | null>(resolve => {
@@ -165,16 +243,18 @@ export const measureRtt = async (timeoutMs = 5_000): Promise<number | null> => {
 };
 
 export const disconnectSocket = (): void => {
+  cancelConnectionWait?.();
+  cancelConnectionWait = null;
+  authRefresh = null;
   if (socket) {
     // Remove the lifecycle listeners wired in wireLifecycle (both on the
     // Socket and on its Manager `socket.io`) before dropping the reference,
-    // so a login → logout → login cycle doesn't accumulate orphaned handlers
-    // on Manager instances kept alive by in-flight reconnection timers.
+    // so a login → logout → login cycle doesn't accumulate orphaned handlers.
     socket.removeAllListeners();
     socket.io.removeAllListeners();
     socket.disconnect();
   }
   socket = null;
-  connecting = null; // never hand back a stale connection promise after teardown
+  connecting = null;
   useSocketStore.getState().set('idle');
 };

@@ -3,7 +3,7 @@ import { i18n } from '../../core/i18n';
 /**
  * Map our app's i18n language tag to a BCP-47 locale acceptable by
  * `Intl.DateTimeFormat`. Default to French if the tag is unrecognised —
- * Chathouse's primary audience is FR-speaking and the alternative
+ * ChatHouse's primary audience is FR-speaking and the alternative
  * (Intl falls back to system locale) leads to dates rendered in
  * surprising languages on devices set to e.g. Japanese.
  */

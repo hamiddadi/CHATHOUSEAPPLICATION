@@ -1,5 +1,5 @@
 /**
- * roomAudioService — WebRTC audio backend for Chathouse rooms.
+ * roomAudioService — WebRTC audio backend for ChatHouse rooms.
  *
  * This file is the SINGLE seam between the audio engine and the rest of
  * the app. The engine of record is **LiveKit** (`@livekit/react-native`);
@@ -93,6 +93,8 @@ export type AudioConnectionStatus = 'connected' | 'reconnecting' | 'failed';
 interface StartOptions {
   socket: Socket;
   roomId: string;
+  /** Logical cancellation owned by the singleton session during stop/switch. */
+  isCancelled?: () => boolean;
   /** Triggered when a remote user joins the room. */
   onPeerJoined?: (info: PeerInfo) => void;
   /** Triggered when a remote user leaves. */
@@ -121,12 +123,8 @@ export const startRoomAudio = async ({
   onLocalScore,
   onPeerScore,
   onStatusChange,
+  isCancelled,
 }: StartOptions): Promise<RoomAudioHandle> => {
-  // Mic permission — LiveKit's connect will fail without RECORD_AUDIO
-  // on Android. iOS prompts at first capture.
-  const granted = await requestAudioPermission();
-  if (!granted) throw new Error(MIC_PERMISSION_DENIED_ERROR);
-
   // Create a new LiveKit Room instance. Throws SKELETON_SENTINEL when
   // `@livekit/react-native` isn't installed (Expo Go) — useRoomAudio
   // catches that and surfaces `status: 'unsupported'`.
@@ -136,11 +134,6 @@ export const startRoomAudio = async ({
   } catch (e) {
     throw e;
   }
-
-  // Configure + start the native audio session BEFORE connecting, so Android
-  // sets the in-communication audio mode and routes capture/playback to the
-  // speaker. Without this the mic captures but no audio is audible.
-  await startLiveKitAudioSession();
 
   const events = getLiveKitEvents();
 
@@ -196,6 +189,10 @@ export const startRoomAudio = async ({
   let rejoinTimer: ReturnType<typeof setTimeout> | null = null;
   let renewTimer: ReturnType<typeof setTimeout> | null = null;
   let lastStatus: AudioConnectionStatus | null = null;
+  const inactive = (): boolean => closed || Boolean(isCancelled?.());
+  const throwIfInactive = (): void => {
+    if (inactive()) throw new Error('room audio start cancelled');
+  };
 
   const scheduleRenewal = (expiresAtMs: number | null): void => {
     if (renewTimer) clearTimeout(renewTimer);
@@ -206,13 +203,17 @@ export const startRoomAudio = async ({
     renewTimer = setTimeout(() => {
       void (async () => {
         try {
-          if (closed) return;
+          if (inactive()) return;
           // For LiveKit, token renewal requires a reconnect with the
           // new token. We disconnect and reconnect.
           const next = await fetchToken();
-          if (closed) return;
+          if (inactive()) return;
           disconnectLiveKitRoom(room);
           await connectLiveKitRoom(room, next.url, next.token);
+          if (inactive()) {
+            disconnectLiveKitRoom(room);
+            return;
+          }
           scheduleRenewal(next.expiresAtMs);
           if (next.canPublish) {
             const isMuted = useCurrentRoomStore.getState().isMuted;
@@ -227,7 +228,7 @@ export const startRoomAudio = async ({
   };
 
   const attemptRejoin = (): void => {
-    if (closed || rejoinInFlight) return;
+    if (inactive() || rejoinInFlight) return;
     if (rejoinAttempts >= MAX_REJOIN_ATTEMPTS) return;
     rejoinInFlight = true;
     rejoinAttempts += 1;
@@ -236,10 +237,14 @@ export const startRoomAudio = async ({
     rejoinTimer = setTimeout(() => {
       void (async () => {
         try {
-          if (closed) return;
+          if (inactive()) return;
           const next = await fetchToken();
-          if (closed) return;
+          if (inactive()) return;
           await connectLiveKitRoom(room, next.url, next.token);
+          if (inactive()) {
+            disconnectLiveKitRoom(room);
+            return;
+          }
           scheduleRenewal(next.expiresAtMs);
           if (next.canPublish) {
             const isMuted = useCurrentRoomStore.getState().isMuted;
@@ -345,14 +350,6 @@ export const startRoomAudio = async ({
     handleConnectionStateChanged('connected');
   };
 
-  // Register LiveKit event handlers
-  room.on(events.ParticipantConnected, handleParticipantConnected);
-  room.on(events.ParticipantDisconnected, handleParticipantDisconnected);
-  room.on(events.ActiveSpeakersChanged, handleActiveSpeakersChanged);
-  room.on(events.Disconnected, handleDisconnected);
-  room.on(events.Reconnecting, handleReconnecting);
-  room.on(events.Reconnected, handleReconnected);
-
   // ─── Socket bindings — keep role consistent ───────────────────────
   // When the server announces a user's join/role, we update our state.
   // LiveKit identities = userIds, so no binding map needed.
@@ -379,14 +376,24 @@ export const startRoomAudio = async ({
         ? 'host'
         : 'audience';
     if (next === currentRole) return;
-    currentRole = next;
     // Role change requires a new token with updated canPublish.
     // Reconnect with a fresh token.
     try {
       const fresh = await fetchToken();
-      if (closed) return;
+      if (inactive()) return;
+      if (fresh.canPublish && !(await requestAudioPermission())) {
+        // Keep the existing receive-only connection. A later role event or
+        // explicit retry can request the permission again.
+        return;
+      }
+      if (inactive()) return;
       disconnectLiveKitRoom(room);
       await connectLiveKitRoom(room, fresh.url, fresh.token);
+      if (inactive()) {
+        disconnectLiveKitRoom(room);
+        return;
+      }
+      currentRole = next;
       scheduleRenewal(fresh.expiresAtMs);
       if (fresh.canPublish) {
         const isMuted = useCurrentRoomStore.getState().isMuted;
@@ -406,36 +413,26 @@ export const startRoomAudio = async ({
   const handleSocketMuteChanged = async (payload: SocketMutePayload | undefined): Promise<void> => {
     if (!payload || (payload.roomId && payload.roomId !== roomId)) return;
     if (payload.userId !== me.id) return; // only act on self
+    if (inactive()) return;
     await setLiveKitMuted(room, payload.isMuted);
   };
 
-  socket.on('room:user-joined', handleSocketJoin);
-  socket.on('room:role_changed', handleSocketRoleChange);
-  socket.on('room:mute-changed', handleSocketMuteChanged);
+  // Startup is transactional. Every listener registers its inverse before the
+  // potentially-throwing `.on()` call, so even a partial handler setup is
+  // reversible. The same cleanup owns both failed startup and the successful
+  // handle's close path; concurrent/repeated closes share one promise.
+  const listenerCleanups: Array<() => void> = [];
+  let cleanupPromise: Promise<void> | null = null;
 
-  // ─── Initial join ────────────────────────────────────────────────
-  // Fetch a fresh per-room token from the backend (room = roomId,
-  // identity = userId, canPublish based on current Participant.role).
-  const initial = await fetchToken();
-  await connectLiveKitRoom(room, initial.url, initial.token);
-  scheduleRenewal(initial.expiresAtMs);
-  if (initial.canPublish) {
-    const isMuted = useCurrentRoomStore.getState().isMuted;
-    await setLiveKitMuted(room, isMuted);
-  }
+  const bindListener = (subscribe: () => void, unsubscribe: () => void): void => {
+    listenerCleanups.push(unsubscribe);
+    subscribe();
+  };
 
-  // Now that audio is flowing, promote the Android foreground service so the
-  // OS keeps the process (and the room) alive when backgrounded. Best-effort.
-  void startRoomForeground();
-
-  // Register existing remote participants
-  for (const [, participant] of room.remoteParticipants) {
-    emitJoin(participant.identity);
-  }
-
-  return {
-    close: async () => {
-      closed = true;
+  const cleanupResources = (): Promise<void> => {
+    if (cleanupPromise) return cleanupPromise;
+    closed = true;
+    cleanupPromise = (async () => {
       if (renewTimer) {
         clearTimeout(renewTimer);
         renewTimer = null;
@@ -444,23 +441,123 @@ export const startRoomAudio = async ({
         clearTimeout(rejoinTimer);
         rejoinTimer = null;
       }
-      socket.off('room:user-joined', handleSocketJoin);
-      socket.off('room:role_changed', handleSocketRoleChange);
-      socket.off('room:mute-changed', handleSocketMuteChanged);
-      // Unregister LiveKit event handlers
-      room.off(events.ParticipantConnected, handleParticipantConnected);
-      room.off(events.ParticipantDisconnected, handleParticipantDisconnected);
-      room.off(events.ActiveSpeakersChanged, handleActiveSpeakersChanged);
-      room.off(events.Disconnected, handleDisconnected);
-      room.off(events.Reconnecting, handleReconnecting);
-      room.off(events.Reconnected, handleReconnected);
-      disconnectLiveKitRoom(room);
+
+      for (const removeListener of listenerCleanups.splice(0).reverse()) {
+        try {
+          removeListener();
+        } catch {
+          // Cleanup is best-effort per listener; one native emitter failure
+          // must not prevent the room/audio session from being released.
+        }
+      }
+
+      try {
+        disconnectLiveKitRoom(room);
+      } catch {
+        // A Room that never completed connect can still reject disconnect.
+      }
       peers.clear();
-      // Tear down the foreground service + native audio session so we release
-      // audio focus and stop the ongoing notification once we leave the room.
-      void stopRoomForeground();
-      void stopLiveKitAudioSession();
-    },
+
+      const settleCleanup = async (action: () => void | Promise<void>): Promise<void> => {
+        try {
+          await action();
+        } catch {
+          // Native foreground/audio teardown must not mask the startup error.
+        }
+      };
+      await Promise.all([
+        settleCleanup(() => stopRoomForeground()),
+        settleCleanup(() => stopLiveKitAudioSession()),
+      ]);
+    })();
+    return cleanupPromise;
+  };
+
+  // ─── Initial join ────────────────────────────────────────────────
+  try {
+    // Configure + start the native audio session BEFORE connecting, so Android
+    // sets the in-communication mode and routes capture/playback correctly.
+    await startLiveKitAudioSession();
+    throwIfInactive();
+
+    // A listener only subscribes to remote tracks: RECORD_AUDIO is not required
+    // and requesting it here used to block receive-only audio after a denial.
+    // Ask only when the server-issued capability permits publishing.
+    const initial = await fetchToken();
+    throwIfInactive();
+    if (initial.canPublish && !(await requestAudioPermission())) {
+      throw new Error(MIC_PERMISSION_DENIED_ERROR);
+    }
+    throwIfInactive();
+    currentRole = initial.canPublish ? 'host' : 'audience';
+
+    bindListener(
+      () => room.on(events.ParticipantConnected, handleParticipantConnected),
+      () => room.off(events.ParticipantConnected, handleParticipantConnected),
+    );
+    bindListener(
+      () => room.on(events.ParticipantDisconnected, handleParticipantDisconnected),
+      () => room.off(events.ParticipantDisconnected, handleParticipantDisconnected),
+    );
+    bindListener(
+      () => room.on(events.ActiveSpeakersChanged, handleActiveSpeakersChanged),
+      () => room.off(events.ActiveSpeakersChanged, handleActiveSpeakersChanged),
+    );
+    bindListener(
+      () => room.on(events.Disconnected, handleDisconnected),
+      () => room.off(events.Disconnected, handleDisconnected),
+    );
+    bindListener(
+      () => room.on(events.Reconnecting, handleReconnecting),
+      () => room.off(events.Reconnecting, handleReconnecting),
+    );
+    bindListener(
+      () => room.on(events.Reconnected, handleReconnected),
+      () => room.off(events.Reconnected, handleReconnected),
+    );
+    bindListener(
+      () => socket.on('room:user-joined', handleSocketJoin),
+      () => socket.off('room:user-joined', handleSocketJoin),
+    );
+    bindListener(
+      () => socket.on('room:role_changed', handleSocketRoleChange),
+      () => socket.off('room:role_changed', handleSocketRoleChange),
+    );
+    bindListener(
+      () => socket.on('room:mute-changed', handleSocketMuteChanged),
+      () => socket.off('room:mute-changed', handleSocketMuteChanged),
+    );
+
+    await connectLiveKitRoom(room, initial.url, initial.token);
+    throwIfInactive();
+    scheduleRenewal(initial.expiresAtMs);
+    if (initial.canPublish) {
+      const isMuted = useCurrentRoomStore.getState().isMuted;
+      await setLiveKitMuted(room, isMuted);
+      throwIfInactive();
+    }
+
+    // Serialize this best-effort start with cleanup: an immediate close must
+    // never stop the service before a still-pending start turns it back on.
+    try {
+      await startRoomForeground();
+      throwIfInactive();
+    } catch {
+      // Audio remains usable when the optional foreground service is absent.
+    }
+    throwIfInactive();
+
+    // Register existing remote participants.
+    for (const [, participant] of room.remoteParticipants) {
+      emitJoin(participant.identity);
+    }
+  } catch (error) {
+    await cleanupResources();
+    throw error;
+  }
+
+  return {
+    close: cleanupResources,
     setMuted: async (muted: boolean) => {
       await setLiveKitMuted(room, muted);
     },
@@ -470,13 +567,19 @@ export const startRoomAudio = async ({
       // if needed in the future. No-op for now.
     },
     setRole: async role => {
-      currentRole = role;
       // Role changes require a new token — fetch and reconnect
       try {
         const fresh = await fetchToken();
-        if (closed) return;
+        if (inactive()) return;
+        if (fresh.canPublish && !(await requestAudioPermission())) return;
+        if (inactive()) return;
         disconnectLiveKitRoom(room);
         await connectLiveKitRoom(room, fresh.url, fresh.token);
+        if (inactive()) {
+          disconnectLiveKitRoom(room);
+          return;
+        }
+        currentRole = role;
         scheduleRenewal(fresh.expiresAtMs);
         if (fresh.canPublish) {
           const isMuted = useCurrentRoomStore.getState().isMuted;

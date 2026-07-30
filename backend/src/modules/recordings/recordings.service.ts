@@ -55,14 +55,15 @@ const isConfigured = (): boolean => env.ROOM_RECORDING_ENABLED && egressConfigur
 // available whenever LiveKit itself is configured.
 const hasLivekitKeys = (): boolean => Boolean(env.LIVEKIT_API_KEY && env.LIVEKIT_API_SECRET);
 
-// EgressClient wants the HTTP(S) host; LIVEKIT_URL is the ws(s):// endpoint.
+// EgressClient is also server-to-server: prefer the internal/container
+// endpoint and fall back to the public ws(s) URL converted to http(s).
 const httpHost = (wsUrl: string): string => wsUrl.replace(/^ws/i, 'http');
 
 let egressClientRef: EgressClient | null = null;
 const egress = (): EgressClient => {
   if (!egressClientRef) {
     egressClientRef = new EgressClient(
-      httpHost(env.LIVEKIT_URL as string),
+      httpHost(env.LIVEKIT_INTERNAL_URL ?? (env.LIVEKIT_URL as string)),
       env.LIVEKIT_API_KEY as string,
       env.LIVEKIT_API_SECRET as string,
     );

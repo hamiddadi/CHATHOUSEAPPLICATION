@@ -1,5 +1,6 @@
 import { apiClient } from '../../../shared/services/api/apiClient';
-import type { AuthSession, AuthUser } from '../types/auth.types';
+import { legalDocumentVersion } from '../../../config/env';
+import type { AuthSession, AuthUser, LegalAcceptancePayload } from '../types/auth.types';
 
 /**
  * Live auth service wired to the Express backend (Module 1: Phone + OTP).
@@ -34,6 +35,13 @@ interface RawMe {
   bio?: string | null;
   interests?: string[];
   hasCompletedOnboarding?: boolean;
+  termsAcceptedVersion?: string | null;
+  termsAcceptedAt?: string | null;
+  privacyNoticeAcknowledgedVersion?: string | null;
+  privacyNoticeAcknowledgedAt?: string | null;
+  legalAcceptanceLocale?: string | null;
+  legalDocumentVersion?: string;
+  legalAcceptanceRequired?: boolean;
   createdAt?: string;
 }
 
@@ -56,14 +64,28 @@ const mapUser = (raw: RawMe): AuthUser => ({
   bio: raw.bio ?? null,
   interests: raw.interests ?? [],
   hasCompletedOnboarding: raw.hasCompletedOnboarding ?? false,
+  termsAcceptedVersion: raw.termsAcceptedVersion ?? null,
+  termsAcceptedAt: raw.termsAcceptedAt ?? null,
+  privacyNoticeAcknowledgedVersion: raw.privacyNoticeAcknowledgedVersion ?? null,
+  privacyNoticeAcknowledgedAt: raw.privacyNoticeAcknowledgedAt ?? null,
+  legalAcceptanceLocale: raw.legalAcceptanceLocale ?? null,
+  legalDocumentVersion: raw.legalDocumentVersion ?? legalDocumentVersion,
+  legalAcceptanceRequired:
+    raw.legalAcceptanceRequired ??
+    (raw.termsAcceptedVersion !== legalDocumentVersion ||
+      raw.privacyNoticeAcknowledgedVersion !== legalDocumentVersion),
   createdAt: raw.createdAt ?? new Date().toISOString(),
 });
 
 export const authService = {
-  async requestOtp(phoneNumber: string): Promise<{ sent: true; expiresIn: number }> {
+  async requestOtp(
+    phoneNumber: string,
+    legalAcceptance: LegalAcceptancePayload,
+  ): Promise<{ sent: true; expiresIn: number }> {
     const res = await apiClient.post<SendOtpResponse>('/auth/send-otp', {
       phoneNumber,
       ageConfirmed: true,
+      ...legalAcceptance,
     });
     return res.data.data;
   },
@@ -71,11 +93,13 @@ export const authService = {
   async verifyOtp(
     phoneNumber: string,
     code: string,
+    legalAcceptance: LegalAcceptancePayload,
   ): Promise<{ session: AuthSession; user: AuthUser; isNewUser: boolean }> {
     const res = await apiClient.post<VerifyOtpResponse>('/auth/verify-otp', {
       phoneNumber,
       code,
       ageConfirmed: true,
+      ...legalAcceptance,
     });
     return res.data.data;
   },
@@ -132,6 +156,39 @@ export const authService = {
   async getMe(): Promise<AuthUser> {
     const res = await apiClient.get<MeEnvelope>('/users/me');
     return mapUser(res.data.data);
+  },
+
+  async acceptLegalDocuments(
+    legalAcceptance: LegalAcceptancePayload,
+  ): Promise<
+    Pick<
+      AuthUser,
+      | 'termsAcceptedVersion'
+      | 'termsAcceptedAt'
+      | 'privacyNoticeAcknowledgedVersion'
+      | 'privacyNoticeAcknowledgedAt'
+      | 'legalAcceptanceLocale'
+      | 'legalDocumentVersion'
+      | 'legalAcceptanceRequired'
+    >
+  > {
+    const res = await apiClient.post<{
+      success: true;
+      data: RawMe;
+    }>('/auth/legal-acceptance', legalAcceptance);
+    const accepted = res.data.data;
+    return {
+      termsAcceptedVersion: accepted.termsAcceptedVersion ?? null,
+      termsAcceptedAt: accepted.termsAcceptedAt ?? null,
+      privacyNoticeAcknowledgedVersion: accepted.privacyNoticeAcknowledgedVersion ?? null,
+      privacyNoticeAcknowledgedAt: accepted.privacyNoticeAcknowledgedAt ?? null,
+      legalAcceptanceLocale: accepted.legalAcceptanceLocale ?? null,
+      legalDocumentVersion: accepted.legalDocumentVersion ?? legalDocumentVersion,
+      legalAcceptanceRequired:
+        accepted.legalAcceptanceRequired ??
+        (accepted.termsAcceptedVersion !== legalDocumentVersion ||
+          accepted.privacyNoticeAcknowledgedVersion !== legalDocumentVersion),
+    };
   },
 
   async setInterests(interests: string[]): Promise<{ user: AuthUser }> {

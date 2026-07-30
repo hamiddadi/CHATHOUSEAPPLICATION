@@ -11,6 +11,12 @@ import { sendMail } from '../../config/mailer';
 import { logger } from '../../config/logger';
 import { scheduleBackgroundTask } from '../../utils/backgroundTasks';
 import { ensureLoginAllowedAndRestore } from './account-lifecycle';
+import {
+  currentLegalDocumentVersion,
+  legalAcceptanceSelect,
+  legalAcceptanceStatus,
+  resolveLegalAcceptance,
+} from './legal-acceptance';
 import type {
   ForgotPasswordInput,
   LoginInput,
@@ -31,6 +37,11 @@ const userToPublic = (u: {
   displayName: string | null;
   avatarUrl: string | null;
   bio: string | null;
+  termsAcceptedVersion: string | null;
+  termsAcceptedAt: Date | null;
+  privacyNoticeAcknowledgedVersion: string | null;
+  privacyNoticeAcknowledgedAt: Date | null;
+  legalAcceptanceLocale: string | null;
 }) => ({
   id: u.id,
   username: u.username ?? '',
@@ -38,6 +49,12 @@ const userToPublic = (u: {
   displayName: u.displayName,
   avatarUrl: u.avatarUrl,
   bio: u.bio,
+  termsAcceptedVersion: u.termsAcceptedVersion,
+  termsAcceptedAt: u.termsAcceptedAt?.toISOString() ?? null,
+  privacyNoticeAcknowledgedVersion: u.privacyNoticeAcknowledgedVersion,
+  privacyNoticeAcknowledgedAt: u.privacyNoticeAcknowledgedAt?.toISOString() ?? null,
+  legalAcceptanceLocale: u.legalAcceptanceLocale,
+  ...legalAcceptanceStatus(u),
 });
 
 export const authService = {
@@ -45,6 +62,7 @@ export const authService = {
     if (env.NODE_ENV !== 'test' && input.ageConfirmed !== true) {
       throw new AppError('AGE_001');
     }
+    const legalAcceptance = resolveLegalAcceptance(input);
     // Defensive normalization: the Zod schema already lowercases email, but
     // normalize here too so the uniqueness check and the stored value stay
     // consistent even if a future caller bypasses the schema. Username is
@@ -67,6 +85,7 @@ export const authService = {
         passwordHash,
         displayName: input.displayName ?? input.username,
         ...(input.ageConfirmed ? { ageConfirmedAt: new Date() } : {}),
+        ...legalAcceptance,
       },
       select: {
         id: true,
@@ -75,6 +94,7 @@ export const authService = {
         displayName: true,
         avatarUrl: true,
         bio: true,
+        ...legalAcceptanceSelect,
       },
     });
 
@@ -216,7 +236,7 @@ export const authService = {
 
         await sendMail({
           to: user.email,
-          subject: 'Reset your Chathouse password',
+          subject: 'Reset your ChatHouse password',
           text: `Use this token within ${RESET_TOKEN_TTL_MINUTES} minutes to reset your password:\n\n${raw}`,
         });
         // Never log the raw reset token, even in dev/test.
@@ -293,6 +313,12 @@ export const authService = {
     const username = 'devuser';
     const email = 'dev@chathouse.local';
     const displayName = 'Dev User';
+    const devLegalAcceptance = resolveLegalAcceptance({
+      termsAccepted: true,
+      privacyNoticeAcknowledged: true,
+      legalDocumentVersion: currentLegalDocumentVersion(),
+      legalLocale: 'en',
+    });
 
     // Upsert so repeat calls are idempotent. Force
     // `hasCompletedOnboarding: true` so the RootNavigator skips the
@@ -305,8 +331,13 @@ export const authService = {
         email,
         displayName,
         hasCompletedOnboarding: true,
+        ...devLegalAcceptance,
       },
-      update: { displayName, hasCompletedOnboarding: true },
+      update: {
+        displayName,
+        hasCompletedOnboarding: true,
+        ...devLegalAcceptance,
+      },
       select: {
         id: true,
         username: true,
@@ -315,6 +346,7 @@ export const authService = {
         avatarUrl: true,
         bio: true,
         hasCompletedOnboarding: true,
+        ...legalAcceptanceSelect,
       },
     });
 

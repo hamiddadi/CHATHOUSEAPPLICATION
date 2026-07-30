@@ -1,5 +1,5 @@
 <resources>
-  <string name="app_name">Chathouse</string>
+  <string name="app_name">ChatHouse</string>
   <!-- Live-audio foreground-service notification + channel. Add values-<lang>/
        overrides to localise. -->
   <string name="audio_channel_name">Audio rooms</string>

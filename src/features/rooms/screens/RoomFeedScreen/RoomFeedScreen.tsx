@@ -354,7 +354,7 @@ const Header: React.FC<HeaderProps> = memo(({ onSearch, onEvents, onActivity }) 
       <View className="flex-row items-center gap-sm">
         <MaterialIcons name="graphic-eq" size={HEADER_ICON_SIZE} color={colors.primary} />
         <Text className="text-xxl font-display text-primary tracking-tighter">
-          {t('common.appName', 'Chathouse')}
+          {t('common.appName', 'ChatHouse')}
         </Text>
       </View>
       <View className="flex-row items-center gap-sm">

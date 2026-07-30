@@ -31,6 +31,9 @@ describe('native release guard wiring', () => {
     expect(gradle).toContain('CHATHOUSE_ALLOW_DEBUG_RELEASE_SIGNING');
     expect(gradle).toContain('validateProductionReleaseConfiguration()');
     expect(gradle).toContain("System.getenv('ENVFILE') != '.env.production'");
+    expect(gradle).toContain(
+      'taskName ==~ /^(assemble|bundle|package|install|publish).*release.*$/',
+    );
     expect(gradle).toContain('validateProductionFirebase()');
   });
 });

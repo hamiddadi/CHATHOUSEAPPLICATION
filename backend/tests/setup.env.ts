@@ -38,3 +38,6 @@ process.env.RATE_LIMIT_MAX = process.env.RATE_LIMIT_MAX ?? '100000';
 // it from a developer's backend/.env (which dotenv would otherwise load). Tests
 // exercise the real send→verify path; the bypass is a manual-testing affordance.
 process.env.OTP_TEST_NUMBERS = '';
+process.env.LEGAL_DOCUMENT_VERSION = process.env.LEGAL_DOCUMENT_VERSION ?? '2026-07-29';
+process.env.LEGAL_DOCUMENT_EFFECTIVE_DATE =
+  process.env.LEGAL_DOCUMENT_EFFECTIVE_DATE ?? '2026-07-29';

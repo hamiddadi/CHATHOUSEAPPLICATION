@@ -1,3 +1,4 @@
-# Built APKs land here — keep the folder, ignore the binaries.
-*.apk
+# Local/CI release outputs and evidence land here. Keep the folder only; signed
+# binaries and production acceptance evidence must never enter git history.
+*
 !.gitignore

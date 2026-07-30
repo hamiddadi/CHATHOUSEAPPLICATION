@@ -154,6 +154,9 @@ describe('OpenAPI release contract', () => {
 
   it.each([
     ['/privacy', 'ChatHouse Privacy Policy'],
+    ['/terms', 'ChatHouse Terms of Use'],
+    ['/community-guidelines', 'ChatHouse Community Guidelines'],
+    ['/child-safety', 'ChatHouse Child Safety Standards'],
     ['/account-deletion', 'Delete a ChatHouse account'],
     ['/support', 'ChatHouse Support'],
   ])('serves public legal resource %s with restrictive browser headers', async (path, title) => {
@@ -163,6 +166,44 @@ describe('OpenAPI release contract', () => {
     expect(response.text).toContain(title);
     expect(response.headers['content-security-policy']).toContain("default-src 'none'");
     expect(response.headers['referrer-policy']).toBe('no-referrer');
+    expect(response.headers['content-language']).toBe('en');
+    expect(response.text).toContain('<html lang="en">');
+    expect(response.text).toContain('Version: 2026-07-29');
+  });
+
+  it.each([
+    ['/privacy', 'Politique de confidentialité de ChatHouse'],
+    ['/terms', 'Conditions d’utilisation de ChatHouse'],
+    ['/community-guidelines', 'Règles de la communauté ChatHouse'],
+    ['/child-safety', 'Normes de protection de l’enfance ChatHouse'],
+    ['/account-deletion', 'Supprimer un compte ChatHouse'],
+    ['/support', 'Assistance ChatHouse'],
+  ])('serves an explicitly identified French legal resource %s', async (path, title) => {
+    const app: Express = createApp();
+    const response = await request(app).get(path).query({ lang: 'fr' });
+
+    expect(response.status).toBe(200);
+    expect(response.text).toContain(title);
+    expect(response.text).toContain('<html lang="fr">');
+    expect(response.text).toContain('Français');
+    expect(response.headers['content-language']).toBe('fr');
+  });
+
+  it('cross-links the public Terms, Privacy Policy and support resources', async () => {
+    const app: Express = createApp();
+    const terms = await request(app).get('/terms');
+    const support = await request(app).get('/support');
+    const childSafety = await request(app).get('/child-safety');
+
+    expect(terms.text).toContain('href="/privacy"');
+    expect(terms.text).toContain('href="/account-deletion"');
+    expect(terms.text).toContain('href="/support"');
+    expect(terms.text).toContain('href="/community-guidelines"');
+    expect(terms.text).toContain('href="/child-safety"');
+    expect(support.text).toContain('href="/terms"');
+    expect(support.text).toContain('href="/community-guidelines"');
+    expect(support.text).toContain('href="/child-safety"');
+    expect(childSafety.text).toContain('child-safety@example.invalid');
   });
 
   it('serves Android and Apple association documents without redirects', async () => {

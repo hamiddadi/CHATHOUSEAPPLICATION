@@ -2,7 +2,7 @@ import type { NextFunction, Request, RequestHandler, Response } from 'express';
 import { collectDefaultMetrics, Counter, Gauge, Histogram, register } from 'prom-client';
 
 /**
- * Prometheus metrics for the Chathouse API.
+ * Prometheus metrics for the ChatHouse API.
  *
  * All custom and default metrics are namespaced with the `chathouse_` prefix
  * so a single Prometheus instance can scrape several services without label

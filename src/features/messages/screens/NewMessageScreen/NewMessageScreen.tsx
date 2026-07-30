@@ -31,11 +31,10 @@ type Nav = NativeStackNavigationProp<MessageStackParamList, 'NewMessage'>;
 
 /**
  * Pick one or more people to message. The candidate set is restricted to the
- * people you follow — the DM follow-gate (`chatService.send` →
- * `assertCanMessage`) only lets DMs flow between mutual/followed users, so
- * surfacing every platform user here (the old global search) just produced
- * "select someone → send fails" dead ends. Scoping to your following list
- * mirrors Clubhouse's compose picker and matches the rule the backend enforces.
+ * people you follow. Each row also carries a server-computed
+ * `canDirectMessage` flag, which accounts for the recipient's private DM
+ * setting, reciprocal follows and blocks without revealing which rule applied.
+ * This prevents opening a new 1:1 thread that can only fail with CHAT_004.
  *
  * Selecting exactly one opens a 1:1 thread (a "conversation id" is just the
  * peer's user id — see messageService); selecting two or more creates a group
@@ -79,6 +78,8 @@ export const NewMessageScreen: React.FC = () => {
 
   const selectedPeople = useMemo(() => [...selected.values()], [selected]);
   const selectedCount = selected.size;
+  const directMessageUnavailable =
+    selectedCount === 1 && selectedPeople[0]?.canDirectMessage === false;
 
   const handleEndReached = useCallback(() => {
     if (hasNextPage && !isFetchingNextPage) void fetchNextPage();
@@ -88,6 +89,10 @@ export const NewMessageScreen: React.FC = () => {
     const ids = [...selected.keys()];
     const first = ids[0];
     if (ids.length === 1 && first) {
+      // The disabled CTA is the primary guard; keep this defensive check so an
+      // accessibility/programmatic press cannot navigate into a known-denied
+      // thread. The send-time backend policy remains authoritative.
+      if (selected.get(first)?.canDirectMessage === false) return;
       navigation.replace('ChatDetail', { conversationId: first });
       return;
     }
@@ -111,18 +116,29 @@ export const NewMessageScreen: React.FC = () => {
         count: selectedCount,
         defaultValue: `Create group · ${selectedCount}`,
       });
+    if (directMessageUnavailable)
+      return t('messages.messageUnavailable', 'Direct message unavailable');
     return t('messages.message', 'Message');
-  }, [selectedCount, t]);
+  }, [directMessageUnavailable, selectedCount, t]);
 
   const renderItem = useCallback(
     ({ item }: { item: User }) => {
       const isSelected = selected.has(item.id);
+      const isDirectMessageUnavailable = item.canDirectMessage === false;
       return (
         <Pressable
           onPress={() => toggle(item)}
           accessibilityRole="checkbox"
           accessibilityState={{ checked: isSelected }}
           accessibilityLabel={`${item.displayName || item.username}`}
+          accessibilityHint={
+            isDirectMessageUnavailable
+              ? t(
+                  'messages.messageUnavailableHint',
+                  'This person cannot receive a direct message from you right now.',
+                )
+              : undefined
+          }
           className="flex-row items-center gap-md px-xxl py-md active:opacity-70"
         >
           <Avatar uri={item.avatarUrl ?? undefined} name={item.displayName} size="lg" />
@@ -133,6 +149,11 @@ export const NewMessageScreen: React.FC = () => {
             <Text className="text-sm font-body text-ink-muted" numberOfLines={1}>
               @{item.username}
             </Text>
+            {isDirectMessageUnavailable && (
+              <Text className="text-xs font-body-medium text-danger mt-xxs" numberOfLines={1}>
+                {t('messages.messageUnavailable', 'Direct message unavailable')}
+              </Text>
+            )}
           </View>
           <MaterialIcons
             name={isSelected ? 'check-circle' : 'radio-button-unchecked'}
@@ -142,7 +163,7 @@ export const NewMessageScreen: React.FC = () => {
         </Pressable>
       );
     },
-    [selected, toggle],
+    [selected, t, toggle],
   );
 
   const renderFooter = useCallback(
@@ -192,7 +213,10 @@ export const NewMessageScreen: React.FC = () => {
             leftAdornment={<MaterialIcons name="search" size={18} color={colors.textMuted} />}
           />
           <Text className="text-xs font-body text-ink-muted mt-xs">
-            {t('messages.followGateHint', 'You can message people you follow.')}
+            {t(
+              'messages.followGateHint',
+              'Direct messages depend on each person’s privacy settings.',
+            )}
           </Text>
         </View>
       )}
@@ -237,13 +261,24 @@ export const NewMessageScreen: React.FC = () => {
           className="px-xxl pt-sm border-t border-overlay-white-5"
           style={{ paddingBottom: insets.bottom + spacing.md }}
         >
+          {directMessageUnavailable && (
+            <Text
+              className="text-xs font-body text-danger text-center mb-sm"
+              accessibilityLiveRegion="polite"
+            >
+              {t(
+                'messages.messageUnavailableHint',
+                'This person cannot receive a direct message from you right now.',
+              )}
+            </Text>
+          )}
           <Button
             label={startLabel}
             variant="primary"
             size="lg"
             fullWidth
             loading={createGroup.isPending}
-            disabled={createGroup.isPending}
+            disabled={createGroup.isPending || directMessageUnavailable}
             onPress={handleStart}
           />
         </View>

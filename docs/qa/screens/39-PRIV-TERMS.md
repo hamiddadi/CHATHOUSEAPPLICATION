@@ -6,21 +6,30 @@
   - `SettingsNavigator` (stack authentifie) : atteinte depuis `SettingsScreen` via la ligne `t('settings.termsOfService')` → `navigation.navigate('Terms')` (`goTerms`, `SettingsScreen.tsx:123` et `:467`).
   - `AuthNavigator` (flux pre-auth) : atteinte depuis l'ecran telephone via le lien `t('auth.phone.termsLinkA11y')` (= « Conditions d'utilisation »), `AuthNavigator.tsx:57`.
 - **Composant** : `src/features/privacy/screens/TermsScreen.tsx`, qui rend `LegalDoc` + `LegalSection` + `LegalParagraph` (`src/features/privacy/components/LegalDoc.tsx`).
-- **Roles requis** : aucun. Accessible **guest** (depuis l'ecran telephone du flux d'inscription, non connecte) ET **standard / admin** (depuis Reglages). C'est un document legal statique, identique pour tous les roles.
+- **Roles requis** : aucun. Accessible **guest** (depuis l'ecran telephone du
+  flux d'inscription, non connecte) ET **standard / admin** (depuis Reglages).
+  Le résumé hors ligne est identique pour tous les rôles et renvoie vers les
+  Conditions canoniques publiées.
 - **Comportements temps-reel** : AUCUN. Pas de WebSocket, pas de LiveKit, pas de push, pas d'appel reseau. Le document est embarque dans l'app (texte i18n local, fonctionne hors-ligne par conception — cf. commentaire `LegalDoc.tsx`). Aucun store consomme, aucune action declenchee.
 - **Pre-conditions globales** : aucune (pas de compte, pas de permission micro/notif/localisation/stockage requise, pas de reseau requis).
-- **Etats de donnees pertinents** : contenu 100% statique issu de l'i18n (`privacy.terms.*`). Pas de liste, pas d'etat vide, pas de « non lus ». Le seul etat variable est le contenu textuel selon la **langue active** (FR/EN) et la **taille de police systeme**. Le titre est « Conditions d'utilisation », sous-titre « Derniere mise a jour : 25 avril 2026 », puis 8 sections (s1→s8) avec leurs paragraphes.
+- **Etats de donnees pertinents** : contenu 100% statique issu de l'i18n (`privacy.terms.*`). Pas de liste, pas d'etat vide, pas de « non lus ». Le seul etat variable est le contenu textuel selon la **langue active** (FR/EN) et la **taille de police systeme**. Le titre est « Conditions d'utilisation », sous-titre « Derniere mise a jour : 29 juillet 2026 », puis 8 sections (s1→s8) avec leurs paragraphes.
 
-> **NOTE IMPORTANTE — ecran en lecture seule** : cet ecran ne contient **litteralement aucun bouton, lien, toggle, champ ou cellule pressable**. Le seul code interactif est implicite : le **retour arriere** fourni par le navigateur (`@react-navigation/native-stack`). Comme les deux stacks sont configurees avec `headerShown: false`, il **n'y a pas de bouton retour visible (chevron) dans un header** : le retour se fait via le **geste de retour iOS (swipe depuis le bord gauche)** et le **bouton retour materiel/gestuel Android**. La matrice et les cas ci-dessous couvrent donc ce retour implicite, le scroll, et l'accessibilite du document, conformement a la regle « si l'ecran n'a aucun bouton, traiter au minimum retour/fermer et liens ».
+> **NOTE IMPORTANTE — ecran en lecture seule** : `LegalDoc` affiche un bouton
+> Retour visible (`Pressable`, icone `arrow-back`, testID
+> `terms-screen-back`) qui appelle `navigation.goBack()`. Le lien « Lire les
+> conditions complètes » ouvre la version canonique publiée ; le reste du
+> document est statique et defilable.
 
 ## Matrice bouton
 
-| #   | Bouton                                             | Emplacement                                         | Type                              | Locator reel                                                                                                                                                                                          | Pre-condition                                                       | Priorite |
-| --- | -------------------------------------------------- | --------------------------------------------------- | --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- | -------- |
-| 1   | Retour (geste swipe iOS / bouton materiel Android) | Hors-ecran (navigateur natif, `headerShown: false`) | navigation                        | Aucun locator dans cet ecran ; geste OS / `hardwareBackPress`. Le declencheur en amont a un locator : ligne Reglages `t('settings.termsOfService')` ou lien telephone `t('auth.phone.termsLinkA11y')` | Ecran ouvert au-dessus d'un ecran precedent (Reglages ou Telephone) | P2       |
-| 2   | Document defilable (ScrollView)                    | Corps (plein ecran)                                 | list-item (scroll, non pressable) | Pas de `accessibilityLabel` ; `ScrollView` ; en-tetes via `accessibilityRole="header"` sur le titre `t('privacy.terms.title')` et chaque `t('privacy.terms.sN.title')`                                | Aucune                                                              | P2       |
+| #   | Bouton                          | Emplacement         | Type                              | Locator reel                                                                                                                                        | Pre-condition                                                       | Priorite |
+| --- | ------------------------------- | ------------------- | --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- | -------- |
+| 1   | Retour                          | Haut du document    | navigation                        | `testID="terms-screen-back"`, role `button`, label localise `common.back`                                                                           | Ecran ouvert au-dessus d'un ecran precedent (Reglages ou Telephone) | P2       |
+| 2   | Document defilable (ScrollView) | Corps (plein ecran) | list-item (scroll, non pressable) | `testID="terms-screen"` ; en-tetes via `accessibilityRole="header"` sur le titre `t('privacy.terms.title')` et chaque `t('privacy.terms.sN.title')` | Aucune                                                              | P2       |
+| 3   | Conditions complètes publiées   | Introduction        | link                              | `privacy.terms.fullLink`, composant `LegalLink`, URL canonique se terminant par `/terms`                                                            | Réseau disponible                                                   | P1       |
 
-> Aucun autre element actionnable n'existe dans le code (`grep` : zero `Pressable` / `TouchableOpacity` / `Button` / `onPress` / `accessibilityRole="link"` / `accessibilityRole="button"` dans `TermsScreen.tsx` et `LegalDoc.tsx`). Les seuls `accessibilityRole` presents sont `header`.
+> Aucun autre element actionnable n'existe dans le document Terms au-dela du
+> bouton Retour et du lien canonique.
 
 ## Cas de test
 
@@ -34,7 +43,7 @@
   2. Taper la ligne « Conditions d'utilisation » (locator `t('settings.termsOfService')`, icone `description`).
   3. Attendre l'ouverture de l'ecran `Terms`.
   4. Observer le titre, la ligne « Derniere mise a jour », et faire defiler jusqu'en bas.
-- **Resultat attendu** : l'ecran s'ouvre ; titre « Conditions d'utilisation » (header) ; sous-titre « Derniere mise a jour : 25 avril 2026 » ; les 8 sections s1→s8 sont presentes avec leurs titres en-tete et paragraphes ; le scroll atteint le bas (padding bottom respecte la safe area).
+- **Resultat attendu** : l'ecran s'ouvre ; titre « Conditions d'utilisation » (header) ; sous-titre « Derniere mise a jour : 29 juillet 2026 » ; les 8 sections s1→s8 sont presentes avec leurs titres en-tete et paragraphes ; le scroll atteint le bas (padding bottom respecte la safe area).
 - **Critere d'acceptation (OK/KO)** : OK si le titre + les 8 titres de section (`privacy.terms.s1.title` … `privacy.terms.s8.title`) sont visibles apres scroll, sans troncature ni chevauchement. KO sinon.
 - **Donnees de test** : compte standard `+33600000002` / OTP `000000` (compte de test) ; cle attendue `privacy.terms.title` = « Conditions d'utilisation ».
 - **Duree estimee** : 3 min
@@ -81,7 +90,7 @@
   5. Verifier le contraste du texte muted (sous-titre « Derniere mise a jour » et paragraphes) sur le fond sombre.
 - **Resultat attendu** : le titre `privacy.terms.title` et chaque `privacy.terms.sN.title` sont annonces avec le role **header** (navigation par en-tetes fonctionnelle) ; tous les paragraphes sont lus dans l'ordre ; en police max le texte reste entierement lisible et scrollable (pas de troncature, pas de texte coupe par le bas hors safe area) ; le contraste est suffisant (note : le sous-titre `lastUpdated` est en `textMuted` 11px — point de vigilance contraste/petite taille a verifier vs WCAG AA).
 - **Critere d'acceptation (OK/KO)** : OK si tous les en-tetes sont annonces comme « titre/header », tout le texte est lu et reste lisible en police max. KO si un en-tete est annonce comme texte simple, si du texte est tronque/inaccessible, ou si le contraste du texte muted est insuffisant (< 4.5:1 pour le corps).
-- **Donnees de test** : cles `privacy.terms.title`, `privacy.terms.s1.title` … `privacy.terms.s8.title` ; sous-titre `privacy.terms.lastUpdated` = « Derniere mise a jour : 25 avril 2026 ».
+- **Donnees de test** : cles `privacy.terms.title`, `privacy.terms.s1.title` … `privacy.terms.s8.title` ; sous-titre `privacy.terms.lastUpdated` = « Derniere mise a jour : 29 juillet 2026 ».
 - **Duree estimee** : 6 min
 
 ### PRIV-TERMS-005 - Scroll complet et integrite du contenu (limites de defilement)

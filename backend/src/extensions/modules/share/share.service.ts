@@ -39,7 +39,7 @@ export const shareService = {
     const verb = isScheduled ? 'Join me' : "I'm live";
     const tail =
       isScheduled && room.scheduledFor ? ` on ${room.scheduledFor.toUTCString()}` : ' right now';
-    const text = truncate(`${verb}${tail} for "${room.title}" on Chathouse — hosted by ${host}.`);
+    const text = truncate(`${verb}${tail} for "${room.title}" on ChatHouse — hosted by ${host}.`);
 
     return {
       url,

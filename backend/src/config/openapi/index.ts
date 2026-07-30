@@ -36,7 +36,7 @@ export const buildOpenApiDocument = () => {
   return generator.generateDocument({
     openapi: '3.0.3',
     info: {
-      title: 'Chathouse API',
+      title: 'ChatHouse API',
       version: '0.1.0',
       description:
         'Versioned mobile API contract. Core authentication, privacy, rooms, follow, groups, maps, uploads, chat, clubs, search and notifications are generated from their runtime Zod schemas.',

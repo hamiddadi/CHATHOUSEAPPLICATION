@@ -12,6 +12,12 @@ authRouter.post('/register', authLimiter, asyncHandler(authController.register))
 authRouter.post('/login', authLimiter, asyncHandler(authController.login));
 authRouter.post('/refresh', authLimiter, asyncHandler(authController.refresh));
 authRouter.post('/logout', requireAuth, asyncHandler(authController.logout));
+authRouter.post(
+  '/legal-acceptance',
+  requireAuth,
+  authLimiter,
+  asyncHandler(authController.acceptLegalDocuments),
+);
 // Sends an email — cap successful sends too (sendLimiter), not just failures.
 authRouter.post('/forgot-password', sendLimiter, asyncHandler(authController.forgotPassword));
 authRouter.post('/reset-password', authLimiter, asyncHandler(authController.resetPassword));

@@ -95,7 +95,7 @@ const LandingLogo: React.FC<{ tagline: string }> = memo(({ tagline }) => {
         <Ionicons name="mic" size={LOGO_ICON_SIZE} color={colors.white} />
       </View>
       <Text className="text-hero font-display text-white tracking-tighter">
-        {t('common.appName', 'Chathouse')}
+        {t('common.appName', 'ChatHouse')}
       </Text>
       <Text className="text-md font-body text-overlay-white-75 mt-xs">{tagline}</Text>
     </View>

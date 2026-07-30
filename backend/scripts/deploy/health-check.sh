@@ -7,7 +7,7 @@
 #   1. GET /health        → 200, JSON services.database == true && services.redis == true
 #   2. GET /health/live   → 200, JSON status == "alive"
 #   3. GET /api/users/me  → 401 (no bearer token → unauthorized)
-#   4. GET $PUBLIC_API_URL/support → 200, ChatHouse support page
+#   4. GET the public support, privacy, terms and deletion pages → 200, expected HTML
 #   5. GET $PUBLIC_APP_URL/.well-known/assetlinks.json → production association
 #   6. GET $PUBLIC_APP_URL/.well-known/apple-app-site-association → production association
 #
@@ -107,6 +107,25 @@ content_type_is() {
   grep -Eiq "^content-type:[[:space:]]*${expected}([[:space:]]*;|[[:space:]]*$)" "$HEADER_FILE"
 }
 
+check_public_html() {
+  local path="$1" marker="$2" code
+
+  code="$(http_status "${PUBLIC_API_URL}${path}")"
+  if [ "$code" != "200" ]; then
+    log "FAIL  GET ${PUBLIC_API_URL}${path} → http ${code} (want 200)"
+    return 1
+  fi
+  if ! content_type_is 'text/html'; then
+    log "FAIL  GET ${PUBLIC_API_URL}${path} → content-type is not text/html"
+    return 1
+  fi
+  if ! grep -Fq "$marker" "$BODY_FILE"; then
+    log "FAIL  GET ${PUBLIC_API_URL}${path} → expected page marker is absent"
+    return 1
+  fi
+  log "PASS  public ${path} → 200 over verified HTTPS"
+}
+
 # json_true KEY  → 0 if services.KEY is true in $BODY_FILE, else 1.
 json_true() {
   local key="$1"
@@ -174,20 +193,10 @@ run_public_checks() {
 
   [ -n "$PUBLIC_API_URL" ] || return 0
 
-  code="$(http_status "${PUBLIC_API_URL}/support")"
-  if [ "$code" != "200" ]; then
-    log "FAIL  GET ${PUBLIC_API_URL}/support → http ${code} (want 200)"
-    return 1
-  fi
-  if ! content_type_is 'text/html'; then
-    log "FAIL  GET ${PUBLIC_API_URL}/support → content-type is not text/html"
-    return 1
-  fi
-  if ! grep -Fq 'ChatHouse Support' "$BODY_FILE"; then
-    log "FAIL  GET ${PUBLIC_API_URL}/support → expected support-page marker is absent"
-    return 1
-  fi
-  log "PASS  public /support → 200 over verified HTTPS"
+  check_public_html '/support' 'ChatHouse Support' || return 1
+  check_public_html '/privacy' 'ChatHouse Privacy Policy' || return 1
+  check_public_html '/terms' 'ChatHouse Terms of Use' || return 1
+  check_public_html '/account-deletion' 'Delete a ChatHouse account' || return 1
 
   code="$(http_status "${PUBLIC_APP_URL}/.well-known/assetlinks.json")"
   if [ "$code" != "200" ]; then

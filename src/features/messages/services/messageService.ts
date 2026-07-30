@@ -18,9 +18,9 @@ import type { ContentReportReason, ContentReportResult } from '../../../shared/t
  *  PATCH  /chat/messages/:msgId/read     → RawMessage
  *  DELETE /chat/messages/:msgId          → { deleted }
  *
- * Business rule: DM is only allowed when the two users follow each
- * other. The backend returns 403 CHAT_004 otherwise; the send mutation
- * surfaces that error verbatim to the UI.
+ * Business rule: the recipient's privacy setting, follow graph and block state
+ * decide whether a DM is allowed. The backend returns CHAT_004 otherwise; the
+ * send mutation surfaces that error to the UI.
  */
 
 interface RawUser {
@@ -144,7 +144,7 @@ export const messageService = {
 
   /**
    * Send a voice note. The clip must already be uploaded (see voiceService);
-   * we post the stored URL + clip length. DM is still gated on mutual follow
+   * we post the stored URL + clip length. DM privacy is still enforced
    * server-side (403 CHAT_004), surfaced to the caller verbatim.
    */
   async sendVoice(peerId: string, audioUrl: string, durationMs: number): Promise<Message> {

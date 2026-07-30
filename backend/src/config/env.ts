@@ -56,6 +56,25 @@ const firebaseServiceAccountFromString = z.preprocess(
  * Runtime environment — validated at process boot. Missing or malformed vars
  * cause the process to exit with code 1 before any route is registered.
  */
+export const LIVEKIT_TOKEN_MAX_TTL_SECONDS = 300;
+
+// Accept a legacy value above the current ceiling (notably 3600 from older
+// local .env files), but clamp the parsed runtime value before it reaches the
+// token signer. Invalid values still fail boot validation, and the resulting
+// Env type can never carry an operational LiveKit token TTL above five minutes.
+const livekitTokenTtlSecondsSchema = z.coerce
+  .number()
+  .int()
+  .min(60)
+  .default(LIVEKIT_TOKEN_MAX_TTL_SECONDS)
+  .transform(ttl => Math.min(ttl, LIVEKIT_TOKEN_MAX_TTL_SECONDS))
+  .pipe(z.number().int().min(60).max(LIVEKIT_TOKEN_MAX_TTL_SECONDS));
+
+const optionalUrlFromString = z.preprocess(
+  value => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+  z.string().trim().url().optional(),
+);
+
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().positive().default(4000),
@@ -84,16 +103,47 @@ const envSchema = z.object({
   // media capability URLs never contain an internal proxy/container host.
   PUBLIC_URL: z.string().url().optional(),
 
-  // Public legal identity. Production pages (/privacy, /account-deletion and
-  // /support) are rendered from these values, and production refuses to boot
-  // while any required value is missing or still contains a template marker.
+  // Public legal identity. Production pages (/privacy, /terms,
+  // /community-guidelines, /child-safety, /account-deletion and /support) are
+  // rendered from these values, and production refuses to boot while any
+  // required value is missing or still contains a template marker.
   LEGAL_ENTITY_NAME: z.string().trim().min(2).optional(),
   LEGAL_REGISTERED_ADDRESS: z.string().trim().min(5).optional(),
+  LEGAL_REGISTRATION_NUMBER: z.string().trim().min(2).optional(),
   LEGAL_JURISDICTION: z.string().trim().min(2).optional(),
+  LEGAL_DISPUTE_PROCESS: z.string().trim().min(5).optional(),
+  LEGAL_LIABILITY_TERMS: z.string().trim().min(5).optional(),
   LEGAL_SUPERVISORY_AUTHORITY: z.string().trim().min(2).optional(),
   LEGAL_TRANSFER_SAFEGUARDS: z.string().trim().min(5).optional(),
+  LEGAL_DPO_CONTACT: z.string().trim().min(2).optional(),
+  LEGAL_EU_REPRESENTATIVE: z.string().trim().min(2).optional(),
+  LEGAL_DOCUMENT_VERSION: z
+    .string()
+    .trim()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'LEGAL_DOCUMENT_VERSION must be an ISO date')
+    .optional(),
+  LEGAL_DOCUMENT_EFFECTIVE_DATE: z
+    .string()
+    .trim()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'LEGAL_DOCUMENT_EFFECTIVE_DATE must be an ISO date')
+    .optional(),
+  LEGAL_SERVICE_PROVIDERS: z.string().trim().min(10).optional(),
+  LEGAL_PROCESSING_LOCATIONS: z.string().trim().min(2).optional(),
+  LEGAL_LOG_BACKUP_RETENTION: z.string().trim().min(5).optional(),
+  LEGAL_SUPPORT_MODERATION_RETENTION: z.string().trim().min(5).optional(),
+  LEGAL_MODERATION_APPEAL_ROUTE: z.string().trim().min(5).optional(),
+  LEGAL_ADULT_CONTENT_POLICY: z.string().trim().min(5).optional(),
+  LEGAL_CHILD_SAFETY_REPORTING_PROCESS: z.string().trim().min(5).optional(),
+  LEGAL_CONTACT_PHONE: z
+    .string()
+    .trim()
+    .regex(/^\+[1-9]\d{7,14}$/, 'LEGAL_CONTACT_PHONE must use E.164 format')
+    .optional(),
   PRIVACY_CONTACT_EMAIL: z.string().trim().email().optional(),
   SUPPORT_CONTACT_EMAIL: z.string().trim().email().optional(),
+  SAFETY_CONTACT_EMAIL: z.string().trim().email().optional(),
+  CHILD_SAFETY_CONTACT_NAME: z.string().trim().min(2).optional(),
+  CHILD_SAFETY_CONTACT_EMAIL: z.string().trim().email().optional(),
   APPLE_TEAM_ID: z
     .string()
     .trim()
@@ -159,11 +209,17 @@ const envSchema = z.object({
   // secret must NEVER leak to the bundle.
   // When unset, /rooms/:id/livekit-token returns 503.
   LIVEKIT_URL: z.string().min(1).optional(),
+  // Optional server-to-server endpoint for RoomService/Egress calls. This is
+  // distinct from LIVEKIT_URL because a public/mobile URL such as
+  // ws://127.0.0.1:7880 is not routable from inside the API container.
+  // When absent, admin clients safely fall back to LIVEKIT_URL.
+  LIVEKIT_INTERNAL_URL: optionalUrlFromString,
   LIVEKIT_API_KEY: z.string().min(1).optional(),
   LIVEKIT_API_SECRET: z.string().min(1).optional(),
   // Token TTL — clients renew ~30s before expiry so even short windows
-  // are stable. 1h is a sensible default; raise for low-traffic setups.
-  LIVEKIT_TOKEN_TTL_SECONDS: z.coerce.number().int().min(60).max(86400).default(3600),
+  // are stable. The operational value is capped at five minutes to bound
+  // stale audio access after a role change, kick, or room closure.
+  LIVEKIT_TOKEN_TTL_SECONDS: livekitTokenTtlSecondsSchema,
 
   // ─── Recording / Egress (room Replays) ──────────────────────────────
   // Server-side room recording via LiveKit Egress → an S3-compatible bucket.
@@ -371,15 +427,34 @@ if (env.NODE_ENV === 'production') {
   const requiredLegalFields = [
     'LEGAL_ENTITY_NAME',
     'LEGAL_REGISTERED_ADDRESS',
+    'LEGAL_REGISTRATION_NUMBER',
     'LEGAL_JURISDICTION',
+    'LEGAL_DISPUTE_PROCESS',
+    'LEGAL_LIABILITY_TERMS',
     'LEGAL_SUPERVISORY_AUTHORITY',
     'LEGAL_TRANSFER_SAFEGUARDS',
+    'LEGAL_DPO_CONTACT',
+    'LEGAL_EU_REPRESENTATIVE',
+    'LEGAL_DOCUMENT_VERSION',
+    'LEGAL_DOCUMENT_EFFECTIVE_DATE',
+    'LEGAL_SERVICE_PROVIDERS',
+    'LEGAL_PROCESSING_LOCATIONS',
+    'LEGAL_LOG_BACKUP_RETENTION',
+    'LEGAL_SUPPORT_MODERATION_RETENTION',
+    'LEGAL_MODERATION_APPEAL_ROUTE',
+    'LEGAL_ADULT_CONTENT_POLICY',
+    'LEGAL_CHILD_SAFETY_REPORTING_PROCESS',
+    'LEGAL_CONTACT_PHONE',
     'PRIVACY_CONTACT_EMAIL',
     'SUPPORT_CONTACT_EMAIL',
+    'SAFETY_CONTACT_EMAIL',
+    'CHILD_SAFETY_CONTACT_NAME',
+    'CHILD_SAFETY_CONTACT_EMAIL',
     'APPLE_TEAM_ID',
     'ANDROID_APP_SIGNING_SHA256',
   ] as const;
-  const placeholder = /change[_ -]?me|placeholder|replace|your[_ -]|example\.(com|net|org)/i;
+  const placeholder =
+    /change[_ -]?me|placeholder|replace|your[_ -]|example\.(com|net|org|test|invalid)|\b(todo|tbd|unknown|draft|not published|pending confirmation)\b|\[[^\]]+\]|not applicable outside production/i;
   const invalidLegalFields = requiredLegalFields.filter(field => {
     const value = env[field];
     return !value || placeholder.test(value);

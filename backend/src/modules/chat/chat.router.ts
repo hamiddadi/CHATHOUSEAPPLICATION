@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { requireAuth } from '../../middlewares/auth.middleware';
 import { contentReportsController } from '../reports/contentReports.controller';
+import { requireCurrentLegalAcceptance } from '../auth/legal-acceptance';
 import { chatController } from './chat.controller';
 
 export const chatRouter: Router = Router();
@@ -27,6 +28,10 @@ chatRouter.delete('/messages/:messageId', asyncHandler(chatController.remove));
 
 // Peer-scoped thread operations.
 chatRouter.get('/:userId', asyncHandler(chatController.withPeer));
-chatRouter.post('/:userId', asyncHandler(chatController.send));
-chatRouter.post('/:userId/voice', asyncHandler(chatController.sendVoice));
+chatRouter.post('/:userId', requireCurrentLegalAcceptance, asyncHandler(chatController.send));
+chatRouter.post(
+  '/:userId/voice',
+  requireCurrentLegalAcceptance,
+  asyncHandler(chatController.sendVoice),
+);
 chatRouter.patch('/:userId/read', asyncHandler(chatController.markReadWithPeer));

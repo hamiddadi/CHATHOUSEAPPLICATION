@@ -253,7 +253,7 @@ Categories representatives.
 
 ### 4.1 Contenu legal & statique (lecture seule)
 
-- Privacy-Policy : defilement du document, e-mail de contact non actionnable, Retour natif.
+- Privacy-Policy : defilement du document, lien e-mail `mailto:` et bouton Retour visible.
 - Privacy-Terms : Retour natif, document defilable.
 - Export-Data : Retour natif.
 - Liens « Conditions d'utilisation » / « Politique de confidentialite » (Phone).

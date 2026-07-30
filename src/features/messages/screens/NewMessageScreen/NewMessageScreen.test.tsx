@@ -1,7 +1,8 @@
 /**
  * Render test for NewMessageScreen (the people picker that opens a 1:1 thread or
- * creates a group). The picker is scoped to who you follow (the DM follow-gate),
- * so we seed the `useFollowing` cache rather than mocking a global search.
+ * creates a group). The picker is scoped to who you follow and consumes the
+ * server-computed DM eligibility flag, so we seed the `useFollowing` cache
+ * rather than mocking a global search.
  * Mounts, asserts the no-following empty state, exercises close (→ goBack),
  * filters the list, and selects one / two followed people to assert the CTA
  * `replace`s into ChatDetail or switches to the group-create label.
@@ -15,7 +16,7 @@ import { NewMessageScreen } from './NewMessageScreen';
 
 const ME = 'user-test-1';
 
-const followUser = (id: string, username: string): User =>
+const followUser = (id: string, username: string, canDirectMessage = true): User =>
   ({
     id,
     username,
@@ -31,6 +32,7 @@ const followUser = (id: string, username: string): User =>
     followersCount: 0,
     followingCount: 0,
     isFollowedByMe: true,
+    canDirectMessage,
     invitedBy: null,
     currentRoomId: null,
   }) as User;
@@ -79,6 +81,34 @@ describe('NewMessageScreen', () => {
     // Single selection → CTA label is "Message".
     fireEvent.press(getByText('Message'));
     expect(navigation.replace).toHaveBeenCalledWith('ChatDetail', { conversationId: 'peer-42' });
+  });
+
+  it('prevents a known-ineligible direct message before opening the thread', () => {
+    const { navigation, getAllByText, getByLabelText, getByText } = renderNew([
+      followUser('peer-42', 'alice', false),
+    ]);
+
+    // The row communicates the server-side result without exposing whether it
+    // came from a follow, block, or recipient privacy setting.
+    expect(getByText('Direct message unavailable')).toBeTruthy();
+    fireEvent.press(getByLabelText('alice'));
+
+    expect(
+      getByText('This person cannot receive a direct message from you right now.'),
+    ).toBeTruthy();
+    // The CTA is disabled and its defensive handler cannot enter ChatDetail.
+    fireEvent.press(getAllByText('Direct message unavailable').at(-1)!);
+    expect(navigation.replace).not.toHaveBeenCalled();
+  });
+
+  it('still permits group creation when a selected person cannot receive a 1:1 DM', () => {
+    const { getByText, getByLabelText } = renderNew([
+      followUser('peer-42', 'alice', false),
+      followUser('peer-43', 'bob', true),
+    ]);
+    fireEvent.press(getByLabelText('alice'));
+    fireEvent.press(getByLabelText('bob'));
+    expect(getByText(/create group/i)).toBeTruthy();
   });
 
   it('selecting two people shows a group CTA (create group label)', () => {

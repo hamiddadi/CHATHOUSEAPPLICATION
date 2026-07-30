@@ -8,6 +8,7 @@ import { mediaService } from '../media/media.service';
 import { scheduleBackgroundTask } from '../../utils/backgroundTasks';
 import { sendMessageSchema } from './chat.schema';
 import type { ListMessagesInput, SendMessageInput, SendVoiceMessageInput } from './chat.schema';
+import { assertCanDirectMessage } from './chat.policy';
 
 const publicUser = {
   id: true,
@@ -17,68 +18,6 @@ const publicUser = {
 } as const;
 
 const conversationPair = (a: string, b: string): [string, string] => (a < b ? [a, b] : [b, a]);
-
-/**
- * Direct-message business rule: two users can only exchange DMs if they
- * follow each other. Enforced at the point of send (both REST and the
- * socket handler funnel through `chatService.send`), so there's no way
- * to bypass by skipping the API.
- */
-// #114: honour the RECIPIENT's DM privacy. 'everyone' opens DMs to anyone;
-// 'followers' lets people who follow the recipient message them; 'mutual'
-// (default) keeps the close-friends rule (both follow each other); 'nobody'
-// closes DMs entirely. All paths funnel through chatService.send, so the gate
-// can't be bypassed.
-const assertCanMessage = async (senderId: string, recipientId: string): Promise<void> => {
-  // A block is a symmetric cut: if either party blocked the other, no DM flows
-  // regardless of the recipient's dmPrivacy — including 'everyone'. The privacy
-  // gate below alone let a blocked user keep DMing a recipient open to everyone,
-  // since blocking only severs the follow graph (which 'followers'/'mutual' rely
-  // on) and never touched the Block table here.
-  const blocked = await prisma.block.findFirst({
-    where: {
-      OR: [
-        { blockerId: senderId, blockedId: recipientId },
-        { blockerId: recipientId, blockedId: senderId },
-      ],
-    },
-    select: { id: true },
-  });
-  if (blocked) throw new AppError('CHAT_004');
-
-  const recipient = await prisma.user.findFirst({
-    where: { id: recipientId, deletedAt: null },
-    select: { dmPrivacy: true },
-  });
-  if (!recipient) throw new AppError('USER_001');
-  const privacy = recipient.dmPrivacy;
-  if (privacy === 'nobody') throw new AppError('CHAT_004');
-  if (privacy === 'everyone') return;
-
-  const rows = await prisma.follow.findMany({
-    where: {
-      status: 'ACCEPTED',
-      OR: [
-        { followerId: senderId, followingId: recipientId },
-        { followerId: recipientId, followingId: senderId },
-      ],
-    },
-    select: { followerId: true, followingId: true },
-  });
-  const senderFollowsRecipient = rows.some(
-    r => r.followerId === senderId && r.followingId === recipientId,
-  );
-  const recipientFollowsSender = rows.some(
-    r => r.followerId === recipientId && r.followingId === senderId,
-  );
-
-  if (privacy === 'followers') {
-    if (!senderFollowsRecipient) throw new AppError('CHAT_004');
-    return;
-  }
-  // 'mutual' (default): both must follow each other.
-  if (!(senderFollowsRecipient && recipientFollowsSender)) throw new AppError('CHAT_004');
-};
 
 export const chatService = {
   /**
@@ -239,7 +178,7 @@ export const chatService = {
     });
     if (!peer) throw new AppError('USER_001');
 
-    await assertCanMessage(senderId, receiverId);
+    await assertCanDirectMessage(senderId, receiverId);
 
     const sender = await prisma.user.findUnique({
       where: { id: senderId },
@@ -292,7 +231,7 @@ export const chatService = {
     });
     if (!peer) throw new AppError('USER_001');
 
-    await assertCanMessage(senderId, receiverId);
+    await assertCanDirectMessage(senderId, receiverId);
     await mediaService.assertOwnedMediaUrl(senderId, input.audioUrl, MediaKind.VOICE);
 
     const sender = await prisma.user.findUnique({

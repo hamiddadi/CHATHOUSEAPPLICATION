@@ -4,6 +4,7 @@ const production = {
   API_BASE_URL: 'https://api.chathouse.app/api',
   WS_BASE_URL: 'wss://api.chathouse.app',
   LIVEKIT_URL: 'wss://audio.chathouse.app',
+  LEGAL_DOCUMENT_VERSION: '2026-07-29',
   REALTIME_ENABLED: true,
   ENV: 'production' as const,
 };
@@ -26,6 +27,9 @@ describe('production mobile environment guard', () => {
     expect(() => assertProductionEnvironment({ ...production, LIVEKIT_URL: undefined })).toThrow(
       'LIVEKIT_URL',
     );
+    expect(() =>
+      assertProductionEnvironment({ ...production, LEGAL_DOCUMENT_VERSION: undefined }),
+    ).toThrow('LEGAL_DOCUMENT_VERSION');
   });
 
   it.each([
@@ -56,6 +60,7 @@ describe('production mobile environment guard', () => {
         API_BASE_URL: 'http://localhost:4000/api',
         WS_BASE_URL: 'ws://localhost:4000',
         LIVEKIT_URL: 'ws://localhost:7880',
+        LEGAL_DOCUMENT_VERSION: undefined,
         REALTIME_ENABLED: false,
         ENV: 'development',
       }),

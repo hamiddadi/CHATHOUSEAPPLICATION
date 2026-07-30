@@ -92,4 +92,45 @@ describe('Follow integration', () => {
     expect(unfollow.status).toBe(200);
     expect(unfollow.body.data.following).toBe(false);
   });
+
+  it('following list exposes DM eligibility without leaking recipient privacy', async () => {
+    const alice = await registerUser(app);
+    const bob = await registerUser(app);
+    createdIds.push(alice.id, bob.id);
+
+    await request(app).post(`/api/follow/${bob.id}`).set('Authorization', `Bearer ${alice.token}`);
+
+    const candidate = async () => {
+      const response = await request(app)
+        .get('/api/follow/following')
+        .set('Authorization', `Bearer ${alice.token}`);
+      expect(response.status).toBe(200);
+      return response.body.data.data.find((user: { id: string }) => user.id === bob.id) as {
+        id: string;
+        canDirectMessage: boolean;
+        dmPrivacy?: string;
+      };
+    };
+
+    // Default privacy is mutual: Alice follows Bob, but Bob does not follow
+    // Alice yet, so the compose screen must prevent the known-denied DM.
+    expect(await candidate()).toMatchObject({ id: bob.id, canDirectMessage: false });
+
+    // "followers" means people following Bob may write to him.
+    await prisma.user.update({ where: { id: bob.id }, data: { dmPrivacy: 'followers' } });
+    expect((await candidate()).canDirectMessage).toBe(true);
+
+    await prisma.user.update({ where: { id: bob.id }, data: { dmPrivacy: 'nobody' } });
+    expect((await candidate()).canDirectMessage).toBe(false);
+
+    await prisma.user.update({ where: { id: bob.id }, data: { dmPrivacy: 'everyone' } });
+    const openCandidate = await candidate();
+    expect(openCandidate.canDirectMessage).toBe(true);
+    expect(openCandidate).not.toHaveProperty('dmPrivacy');
+
+    // Back under mutual privacy, a reciprocal accepted follow enables the DM.
+    await prisma.user.update({ where: { id: bob.id }, data: { dmPrivacy: 'mutual' } });
+    await request(app).post(`/api/follow/${alice.id}`).set('Authorization', `Bearer ${bob.token}`);
+    expect((await candidate()).canDirectMessage).toBe(true);
+  });
 });

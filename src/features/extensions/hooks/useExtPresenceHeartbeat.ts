@@ -35,7 +35,9 @@ export const useExtPresenceHeartbeat = (enabled = true): void => {
     const beat = async (): Promise<void> => {
       if (appStateRef.current !== 'active') return;
       try {
-        const socket = await getSocket();
+        // Bound the realtime attempt so an offline device still reaches the
+        // HTTP heartbeat fallback during this interval.
+        const socket = await getSocket(3_000);
         if (socket?.connected) {
           socket.emit(SOCKET_EVENT, { at: Date.now() });
           return;

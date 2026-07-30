@@ -20,7 +20,9 @@ import { useFormApiErrors } from '../../../../shared/hooks/useFormApiErrors';
 import { useAuthStore } from '../../store/authStore';
 import { phoneFormSchema, type PhoneFormValues } from '../../schemas';
 import { colors, spacing } from '../../../../shared/constants/theme';
+import { legalDocumentVersion } from '../../../../config/env';
 import type { AuthStackParamList } from '../../../../core/navigation/types';
+import type { LegalAcceptancePayload } from '../../types/auth.types';
 
 type Nav = NativeStackNavigationProp<AuthStackParamList, 'Phone'>;
 
@@ -28,7 +30,7 @@ export const PhoneScreen: React.FC = () => {
   const navigation = useNavigation<Nav>();
   const insets = useSafeAreaInsets();
   const requestOtp = useAuthStore(s => s.requestOtp);
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
 
   const [countryPickerVisible, setCountryPickerVisible] = useState(false);
 
@@ -48,7 +50,12 @@ export const PhoneScreen: React.FC = () => {
   } = useForm<PhoneFormValues>({
     resolver: zodResolver(phoneFormSchema),
     mode: 'onChange',
-    defaultValues: { phoneNumber: detectedCountry.callingCode, ageConfirmed: false },
+    defaultValues: {
+      phoneNumber: detectedCountry.callingCode,
+      ageConfirmed: false,
+      termsAccepted: false,
+      privacyNoticeAcknowledged: false,
+    },
   });
 
   const handleApiError = useFormApiErrors(setError);
@@ -58,15 +65,21 @@ export const PhoneScreen: React.FC = () => {
   const handlePrivacy = useCallback(() => navigation.navigate('PrivacyPolicy'), [navigation]);
 
   const onSubmit = useCallback(
-    async ({ phoneNumber }: PhoneFormValues) => {
+    async ({ phoneNumber, termsAccepted, privacyNoticeAcknowledged }: PhoneFormValues) => {
       try {
-        await requestOtp(phoneNumber);
-        navigation.navigate('Otp', { phoneNumber });
+        const legalAcceptance: LegalAcceptancePayload = {
+          termsAccepted: termsAccepted as true,
+          privacyNoticeAcknowledged: privacyNoticeAcknowledged as true,
+          legalDocumentVersion,
+          legalLocale: i18n.resolvedLanguage ?? i18n.language ?? 'en',
+        };
+        await requestOtp(phoneNumber, legalAcceptance);
+        navigation.navigate('Otp', { phoneNumber, legalAcceptance });
       } catch (err) {
         handleApiError(err);
       }
     },
-    [handleApiError, navigation, requestOtp],
+    [handleApiError, i18n.language, i18n.resolvedLanguage, navigation, requestOtp],
   );
 
   const handleSelectCountry = useCallback(
@@ -198,6 +211,109 @@ export const PhoneScreen: React.FC = () => {
           </Text>
         )}
 
+        <Controller
+          control={control}
+          name="termsAccepted"
+          render={({ field: { onChange, value } }) => (
+            <View className="flex-row items-center gap-sm mb-sm">
+              <Pressable
+                testID="auth-terms-acceptance"
+                onPress={() => onChange(!value)}
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: value }}
+                accessibilityLabel={t(
+                  'auth.phone.termsAcceptance',
+                  'I accept the current Terms of Use',
+                )}
+              >
+                <View
+                  className={`w-6 h-6 rounded border items-center justify-center ${
+                    value ? 'bg-primary border-primary' : 'border-overlay-white-30 bg-transparent'
+                  }`}
+                >
+                  {value && <MaterialIcons name="check" size={16} color="white" />}
+                </View>
+              </Pressable>
+              <Text className="text-sm font-body-semibold text-ink flex-1">
+                {t('auth.phone.termsAcceptancePrefix', 'I accept the ')}
+                <Text
+                  testID="auth-terms-link"
+                  onPress={handleTerms}
+                  accessibilityRole="link"
+                  accessibilityLabel={t('auth.phone.termsLinkA11y', 'Terms of Service')}
+                  className="text-primary font-body-medium"
+                >
+                  {t('auth.phone.termsLinkA11y', 'Terms of Service')}
+                </Text>
+                {t('auth.phone.legalVersion', ' (version {{version}})', {
+                  version: legalDocumentVersion,
+                })}
+              </Text>
+            </View>
+          )}
+        />
+
+        {errors.termsAccepted?.message && (
+          <Text className="text-xs text-danger mb-sm" accessibilityLiveRegion="polite">
+            {t(
+              errors.termsAccepted.message as string,
+              'You must accept the current Terms of Use to continue.',
+            )}
+          </Text>
+        )}
+
+        <Controller
+          control={control}
+          name="privacyNoticeAcknowledged"
+          render={({ field: { onChange, value } }) => (
+            <View className="flex-row items-center gap-sm mb-md">
+              <Pressable
+                testID="auth-privacy-acknowledgement"
+                onPress={() => onChange(!value)}
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: value }}
+                accessibilityLabel={t(
+                  'auth.phone.privacyAcknowledgement',
+                  'I acknowledge that I have read the Privacy Policy',
+                )}
+              >
+                <View
+                  className={`w-6 h-6 rounded border items-center justify-center ${
+                    value ? 'bg-primary border-primary' : 'border-overlay-white-30 bg-transparent'
+                  }`}
+                >
+                  {value && <MaterialIcons name="check" size={16} color="white" />}
+                </View>
+              </Pressable>
+              <Text className="text-sm font-body-semibold text-ink flex-1">
+                {t(
+                  'auth.phone.privacyAcknowledgementPrefix',
+                  'I acknowledge that I have read the ',
+                )}
+                <Text
+                  testID="auth-privacy-link"
+                  onPress={handlePrivacy}
+                  accessibilityRole="link"
+                  accessibilityLabel={t('auth.phone.privacyLinkA11y', 'Privacy Policy')}
+                  className="text-primary font-body-medium"
+                >
+                  {t('auth.phone.privacyLinkA11y', 'Privacy Policy')}
+                </Text>
+                {t('auth.phone.privacyNotConsent', '. This is not consent to optional processing.')}
+              </Text>
+            </View>
+          )}
+        />
+
+        {errors.privacyNoticeAcknowledged?.message && (
+          <Text className="text-xs text-danger mb-md" accessibilityLiveRegion="polite">
+            {t(
+              errors.privacyNoticeAcknowledged.message as string,
+              'Please acknowledge that you have read the Privacy Policy.',
+            )}
+          </Text>
+        )}
+
         <Button
           testID="auth-phone-submit"
           label={t('auth.phone.submit', 'Next')}
@@ -208,30 +324,6 @@ export const PhoneScreen: React.FC = () => {
           loading={isSubmitting}
           onPress={handleSubmit(onSubmit)}
         />
-
-        <Text className="text-center text-xs text-ink-muted leading-5 mt-md">
-          {t('auth.phone.terms', 'By entering your number, you’re agreeing to our ')}
-          <Text
-            testID="auth-terms-link"
-            onPress={handleTerms}
-            accessibilityRole="link"
-            accessibilityLabel={t('auth.phone.termsLinkA11y', 'Terms of Service')}
-            className="text-primary font-body-medium"
-          >
-            {t('auth.phone.termsLinkA11y', 'Terms of Service')}
-          </Text>
-          {t('auth.phone.termsAnd', ' and ')}
-          <Text
-            testID="auth-privacy-link"
-            onPress={handlePrivacy}
-            accessibilityRole="link"
-            accessibilityLabel={t('auth.phone.privacyLinkA11y', 'Privacy Policy')}
-            className="text-primary font-body-medium"
-          >
-            {t('auth.phone.privacyLinkA11y', 'Privacy Policy')}
-          </Text>
-          .{t('auth.phone.termsEnd', ' Thanks!')}
-        </Text>
       </View>
 
       <CountryPicker

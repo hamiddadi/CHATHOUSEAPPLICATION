@@ -25,6 +25,10 @@ export interface User {
   followersCount: number;
   followingCount: number;
   isFollowedByMe: boolean;
+  // Present on the authenticated viewer's following list. It is an
+  // actionable server-side privacy result, not the recipient's private
+  // dmPrivacy value. Undefined on search/profile payloads.
+  canDirectMessage?: boolean;
   isOnline: boolean;
   createdAt: string;
   // Who invited this user (Clubhouse "Nominated by"). Only present on the

@@ -50,11 +50,11 @@ export const useRooms = (filter: RoomsFilter = {}) =>
     placeholderData: keepPreviousData,
   });
 
-export const useRoom = (roomId: string) =>
+export const useRoom = (roomId: string, enabled = true) =>
   useQuery<Room>({
     queryKey: roomKeys.detail(roomId),
     queryFn: () => roomService.get(roomId),
-    enabled: roomId.length > 0,
+    enabled: enabled && roomId.length > 0,
   });
 
 // Public scheduled rooms a given user is hosting — drives the profile's
@@ -83,11 +83,29 @@ export const useJoinRoom = () =>
 export const useLeaveRoom = () =>
   useMutation({ mutationFn: (roomId: string) => roomService.leave(roomId) });
 
-export const useRaiseHand = () =>
-  useMutation({ mutationFn: (roomId: string) => roomService.raiseHand(roomId) });
+export const useRaiseHand = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (roomId: string) => roomService.raiseHand(roomId),
+    onSuccess: (_data, roomId) => {
+      // Do not rely exclusively on Socket.IO: a REST success while realtime is
+      // reconnecting must still reconcile the local queue/button.
+      void qc.invalidateQueries({ queryKey: roomKeys.handRaises(roomId) });
+      void qc.invalidateQueries({ queryKey: roomKeys.detail(roomId) });
+    },
+  });
+};
 
-export const useLowerHand = () =>
-  useMutation({ mutationFn: (roomId: string) => roomService.lowerHand(roomId) });
+export const useLowerHand = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (roomId: string) => roomService.lowerHand(roomId),
+    onSuccess: (_data, roomId) => {
+      void qc.invalidateQueries({ queryKey: roomKeys.handRaises(roomId) });
+      void qc.invalidateQueries({ queryKey: roomKeys.detail(roomId) });
+    },
+  });
+};
 
 export const useSetMute = () => {
   const qc = useQueryClient();

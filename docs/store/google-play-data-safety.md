@@ -1,5 +1,8 @@
 # Google Play — Data Safety form (answer sheet)
 
+**Legal document set version:** `2026-07-29`
+**Status:** DRAFT — NOT SUBMISSION EVIDENCE
+
 Use this as a working inventory for **Play Console → App content → Data
 safety**. It is derived from the repository, but the final answers must be
 reconciled with the exact signed build, SDK disclosures and provider contracts.
@@ -18,29 +21,29 @@ submission remains a manual release gate; this file cannot update Play Console.
 ## Data types — Collected / Shared / Purpose
 
 "Shared" uses Google Play's definition. Transfers to a contracted service
-provider acting only on Chathouse's instructions are **not** marked as sharing.
+provider acting only on ChatHouse's instructions are **not** marked as sharing.
 Confirm the provider contracts/DPA before submission; if any provider may use
 data for its own purposes, change that row to Shared = Yes.
 
 | Category               | Data type                     | Collected | Shared | Service provider(s)             | Purpose                               | Optional? |
 | ---------------------- | ----------------------------- | --------- | ------ | ------------------------------- | ------------------------------------- | --------- |
 | Personal info          | Name                          | Yes       | No     | Hosting                         | App functionality, account management | Optional  |
-| Personal info          | Email address                 | Yes       | No     | Hosting                         | Account management                    | Optional  |
+| Personal info          | Email address                 | Yes       | No     | Hosting, email provider         | Account management, service messages  | Optional  |
 | Personal info          | Phone number                  | Yes       | No     | Hosting, Twilio                 | Authentication, account management    | Required  |
 | Personal info          | User IDs                      | Yes       | No     | Hosting, Stripe                 | App functionality, account, fraud     | Required  |
 | Personal info          | Other info (bio/social links) | Yes       | No     | Hosting                         | App functionality, personalization    | Optional  |
-| Location               | Approximate location          | Yes       | No     | Hosting, Google Maps Platform   | App functionality, personalization    | Optional  |
-| Location               | Precise location              | Yes       | No     | Hosting, Google Maps Platform   | App functionality, personalization    | Optional  |
+| Location               | Approximate location          | Yes       | No     | Hosting, map/tile providers     | App functionality, personalization    | Optional  |
+| Location               | Precise location              | Yes       | No     | Hosting, map/tile providers     | App functionality, personalization    | Optional  |
 | Financial info         | Purchase history              | Yes       | No     | Stripe                          | App functionality, fraud/compliance   | Optional  |
 | Photos and videos      | Photos                        | Yes       | No     | Private object storage          | App functionality                     | Optional  |
 | Audio files            | Voice or sound recordings     | Yes       | No     | LiveKit, private object storage | App functionality                     | Optional  |
-| Messages               | Other in-app messages         | Yes       | No     | Hosting, private object storage | App functionality                     | Optional  |
+| Messages               | Other in-app messages         | Yes       | No     | Hosting, object storage, FCM    | App functionality, notifications      | Optional  |
 | App activity           | App interactions              | Yes       | No     | Hosting                         | App functionality, personalization    | Required  |
 | App activity           | In-app search history         | Yes       | No     | Hosting                         | App functionality, personalization    | Optional  |
 | App activity           | Other user-generated content  | Yes       | No     | Hosting                         | App functionality, moderation         | Optional  |
 | App info & performance | Crash logs                    | Yes       | No     | Sentry                          | Analytics/diagnostics                 | Optional  |
-| App info & performance | Diagnostics                   | Yes       | No     | Sentry, Google Maps Platform    | Analytics/diagnostics, functionality  | Optional  |
-| Device or other IDs    | Device or other IDs           | Yes       | No     | Firebase/FCM, APNs, Google Maps | App functionality, fraud prevention   | Optional  |
+| App info & performance | Diagnostics                   | Yes       | No     | Sentry, map/tile providers      | Analytics/diagnostics, functionality  | Optional  |
+| Device or other IDs    | Device or other IDs           | Yes       | No     | Firebase/FCM, map providers     | App functionality, fraud prevention   | Optional  |
 
 > Note on "Financial info": the current Android store build does not initiate
 > purchases. It may still display account purchase history previously processed
@@ -52,13 +55,18 @@ data for its own purposes, change that row to Shared = Yes.
 > remains because voice messages may be stored and live audio is transported.
 
 > The Google Maps SDK automatically processes data beyond the coordinates sent
-> to the Chathouse API, including IP address, a pseudonymous SDK identifier,
+> to the ChatHouse API, including IP address, a pseudonymous SDK identifier,
 > device/app information, diagnostics and map interactions. Reconcile this
 > inventory against the exact shipped Maps SDK version and Google's current
 > [Play data disclosure](https://developers.google.com/maps/documentation/android-sdk/play-data-disclosure)
 > before answering the Console. If the applicable provider terms permit use for
 > Google's own purposes, update the relevant **Shared** answers instead of
 > assuming the service-provider exemption.
+
+> The map implementation can also request CARTO/OpenStreetMap tiles, and the
+> provider mix differs by platform/configuration. Resend or the configured mail
+> provider processes service/support email. Verify all shipped endpoints, SDKs,
+> provider roles and DPAs before marking Shared = No.
 
 ## Security practices to tick
 

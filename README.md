@@ -82,6 +82,8 @@ refuses any database whose name does not contain `test`.
 - Android release signing: [`docs/RELEASE-SIGNING.md`](docs/RELEASE-SIGNING.md)
 - Native setup: [`docs/setup.md`](docs/setup.md)
 - Store builds: [`docs/store/build-and-submit.md`](docs/store/build-and-submit.md)
+- Go-live checklist: [`docs/GO-LIVE.md`](docs/GO-LIVE.md)
+- Legal release dossier: [`docs/legal/README.md`](docs/legal/README.md)
 
 The CI verifies lint, formatting, TypeScript, Jest, backend migrations/tests,
 Android assemble/lint, and an iOS Simulator build.

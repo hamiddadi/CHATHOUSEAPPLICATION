@@ -55,7 +55,7 @@ export const OtpScreen: React.FC = () => {
   const verifyOtp = useAuthStore(s => s.verifyOtp);
   const requestOtp = useAuthStore(s => s.requestOtp);
   const { t } = useTranslation();
-  const { phoneNumber } = route.params;
+  const { phoneNumber, legalAcceptance } = route.params;
 
   const [code, setCode] = useState('');
   const [error, setError] = useState<string | undefined>();
@@ -121,7 +121,7 @@ export const OtpScreen: React.FC = () => {
       if (newCode.length === OTP_LENGTH) {
         setIsSubmitting(true);
         try {
-          const { isNewUser } = await verifyOtp(phoneNumber, newCode);
+          const { isNewUser } = await verifyOtp(phoneNumber, newCode, legalAcceptance);
           // New users pick a real name first (Clubhouse order), then a
           // username. `replace` (not `navigate`) so backing out of Name lands
           // on Phone instead of this already-consumed OTP.
@@ -148,14 +148,14 @@ export const OtpScreen: React.FC = () => {
         }
       }
     },
-    [isSubmitting, locked, navigation, phoneNumber, t, triggerShake, verifyOtp],
+    [isSubmitting, legalAcceptance, locked, navigation, phoneNumber, t, triggerShake, verifyOtp],
   );
 
   const handleResend = useCallback(async () => {
     if (countdown > 0 || isResending) return;
     setIsResending(true);
     try {
-      await requestOtp(phoneNumber);
+      await requestOtp(phoneNumber, legalAcceptance);
       setCountdown(RESEND_COOLDOWN_SECONDS);
       setIsCounting(true);
       setAttempts(0);
@@ -173,7 +173,7 @@ export const OtpScreen: React.FC = () => {
     } finally {
       setIsResending(false);
     }
-  }, [countdown, isResending, phoneNumber, requestOtp, t]);
+  }, [countdown, isResending, legalAcceptance, phoneNumber, requestOtp, t]);
 
   const remainingAttempts = MAX_ATTEMPTS - attempts;
   const canResend = countdown === 0 && !isResending;

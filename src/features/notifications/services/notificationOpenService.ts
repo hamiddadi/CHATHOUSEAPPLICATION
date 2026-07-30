@@ -1,5 +1,9 @@
 import notifee, { EventType, type Event } from '@notifee/react-native';
-import messaging from '@react-native-firebase/messaging';
+import {
+  getInitialNotification,
+  getMessaging,
+  onNotificationOpenedApp,
+} from '@react-native-firebase/messaging';
 
 type NotificationData = Record<string, unknown> | undefined;
 type DeepLinkListener = (url: string) => void;
@@ -7,6 +11,7 @@ type DeepLinkListener = (url: string) => void;
 const NOTIFICATIONS_DEEP_LINK = 'chathouse://notifications';
 const DUPLICATE_WINDOW_MS = 2_000;
 const listeners = new Set<DeepLinkListener>();
+const firebaseMessaging = getMessaging();
 
 let pendingDeepLink: string | null = null;
 let lastOpen: { key: string; at: number } | null = null;
@@ -116,7 +121,7 @@ export const getInitialNotificationDeepLink = async (): Promise<string | null> =
   if (queued) return queued;
 
   try {
-    const remoteMessage = await messaging().getInitialNotification();
+    const remoteMessage = await getInitialNotification(firebaseMessaging);
     if (remoteMessage) {
       const opened = openedNotification(remoteMessage.data);
       if (!isDuplicate(opened.key)) return opened.url;
@@ -144,7 +149,7 @@ export const getInitialNotificationDeepLink = async (): Promise<string | null> =
 export const subscribeToNotificationDeepLinks = (listener: DeepLinkListener): (() => void) => {
   listeners.add(listener);
 
-  const unsubscribeMessaging = messaging().onNotificationOpenedApp(remoteMessage => {
+  const unsubscribeMessaging = onNotificationOpenedApp(firebaseMessaging, remoteMessage => {
     publishNotificationOpen(remoteMessage.data);
   });
   const unsubscribeNotifee = notifee.onForegroundEvent(({ type, detail }) => {

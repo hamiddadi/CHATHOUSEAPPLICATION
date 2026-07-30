@@ -8,6 +8,11 @@ import { sendSms } from '../../config/smsSender';
 import { AppError } from '../../middlewares/error.middleware';
 import { issueTokenPair } from '../../utils/issueTokenPair';
 import { ensureLoginAllowedAndRestore } from '../auth/account-lifecycle';
+import {
+  legalAcceptanceStatus,
+  resolveLegalAcceptance,
+  type ResolvedLegalAcceptance,
+} from '../auth/legal-acceptance';
 import type { SendOtpInput, VerifyOtpInput } from './otp.schema';
 
 const SALT_ROUNDS = 10; // 10 is fine for a 6-digit space; 12 takes ~300ms
@@ -62,7 +67,11 @@ const isTestPhone = (phoneNumber: string): boolean => {
  * Find-or-create the user for a verified phone number and mint a token pair.
  * Shared by the normal OTP-verify success path and the dev test-number bypass.
  */
-const establishSession = async (phoneNumber: string, ageConfirmed: boolean) => {
+const establishSession = async (
+  phoneNumber: string,
+  ageConfirmed: boolean,
+  legalAcceptance: ResolvedLegalAcceptance,
+) => {
   // OTP-01: find-or-create via upsert so two requests racing on a brand-new
   // phone number can't both INSERT and collide on the @unique phoneNumber
   // (which would surface as a 500). New users get a placeholder username they
@@ -74,8 +83,15 @@ const establishSession = async (phoneNumber: string, ageConfirmed: boolean) => {
   const isNewUser = existing === null;
   const user = await prisma.user.upsert({
     where: { phoneNumber },
-    create: { phoneNumber, ...(ageConfirmed ? { ageConfirmedAt: new Date() } : {}) },
-    update: ageConfirmed && !existing?.ageConfirmedAt ? { ageConfirmedAt: new Date() } : {},
+    create: {
+      phoneNumber,
+      ...(ageConfirmed ? { ageConfirmedAt: new Date() } : {}),
+      ...legalAcceptance,
+    },
+    update: {
+      ...(ageConfirmed && !existing?.ageConfirmedAt ? { ageConfirmedAt: new Date() } : {}),
+      ...legalAcceptance,
+    },
   });
 
   if (existing) await ensureLoginAllowedAndRestore(existing);
@@ -96,6 +112,12 @@ const establishSession = async (phoneNumber: string, ageConfirmed: boolean) => {
       interests: user.interests,
       hasCompletedOnboarding: user.hasCompletedOnboarding,
       createdAt: user.createdAt.toISOString(),
+      termsAcceptedVersion: user.termsAcceptedVersion,
+      termsAcceptedAt: user.termsAcceptedAt?.toISOString() ?? null,
+      privacyNoticeAcknowledgedVersion: user.privacyNoticeAcknowledgedVersion,
+      privacyNoticeAcknowledgedAt: user.privacyNoticeAcknowledgedAt?.toISOString() ?? null,
+      legalAcceptanceLocale: user.legalAcceptanceLocale,
+      ...legalAcceptanceStatus(user),
     },
     isNewUser,
   };
@@ -106,6 +128,9 @@ export const otpService = {
     if (env.NODE_ENV !== 'test' && input.ageConfirmed !== true) {
       throw new AppError('AGE_001');
     }
+    // Validate before spending an SMS. Verification validates the same payload
+    // again before consuming the OTP and persists it only on successful login.
+    resolveLegalAcceptance(input);
     // Dev/QA test number: no real SMS, no DB code, no rate limit — the tester
     // just enters OTP_TEST_CODE on the next screen (verified in `verify`).
     if (isTestPhone(input.phoneNumber)) {
@@ -133,7 +158,7 @@ export const otpService = {
         select: { id: true },
       });
       await sendSms(
-        { to: input.phoneNumber, body: `Your Chathouse code: ${code}` },
+        { to: input.phoneNumber, body: `Your ChatHouse code: ${code}` },
         // Dev hint: the raw code is also logged so you can test without SMS.
         env.NODE_ENV === 'production' ? undefined : { code },
       );
@@ -156,11 +181,12 @@ export const otpService = {
     if (env.NODE_ENV !== 'test' && input.ageConfirmed !== true) {
       throw new AppError('AGE_001');
     }
+    const legalAcceptance = resolveLegalAcceptance(input);
     // Dev/QA test number: accept the fixed OTP_TEST_CODE and log straight in,
     // bypassing the real code lookup. `isTestPhone` is hard-gated to non-prod.
     if (isTestPhone(input.phoneNumber) && input.code === env.OTP_TEST_CODE) {
       logger.info(`[otp] test-number bypass login for ${input.phoneNumber}`);
-      return establishSession(input.phoneNumber, input.ageConfirmed === true);
+      return establishSession(input.phoneNumber, input.ageConfirmed === true, legalAcceptance);
     }
 
     const record = await prisma.otpCode.findFirst({
@@ -207,6 +233,6 @@ export const otpService = {
       throw new AppError('AUTH_002', 'OTP code expired or not found');
     }
 
-    return establishSession(input.phoneNumber, input.ageConfirmed === true);
+    return establishSession(input.phoneNumber, input.ageConfirmed === true, legalAcceptance);
   },
 };

@@ -215,7 +215,7 @@ export const startServer = async (): Promise<void> => {
 
   server.listen(env.PORT, env.HOST, () => {
     logger.info(
-      `Chathouse API listening on http://${env.HOST}:${env.PORT} (${env.NODE_ENV}) — socket.io ready`,
+      `ChatHouse API listening on http://${env.HOST}:${env.PORT} (${env.NODE_ENV}) — socket.io ready`,
     );
   });
 

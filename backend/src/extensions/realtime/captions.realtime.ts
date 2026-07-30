@@ -4,6 +4,7 @@ import { roomChannel } from '../../socket/channels';
 import { getUserId } from '../../socket/socket.middleware';
 import { isPublicContentAllowed } from '../../utils/publicContentModeration';
 import { captionsService } from '../modules/captions/captions.service';
+import { assertCurrentLegalAcceptance } from '../../modules/auth/legal-acceptance';
 
 /**
  * Live-captions realtime relay (Module 16 / ACCESS-001..003).
@@ -73,6 +74,7 @@ export const registerCaptionsRealtime = (io: Server, socket: Socket): void => {
       if (!(await captionsService.isEnabled(roomId))) return;
 
       const userId = getUserId(socket);
+      await assertCurrentLegalAcceptance(userId);
 
       // Speaker-role check (cached).
       const cacheKey = `${socket.id}:${roomId}`;

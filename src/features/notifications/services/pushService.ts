@@ -1,4 +1,10 @@
-import messaging from '@react-native-firebase/messaging';
+import {
+  AuthorizationStatus,
+  deleteToken,
+  getMessaging,
+  getToken,
+  requestPermission,
+} from '@react-native-firebase/messaging';
 import { PermissionsAndroid, Platform } from 'react-native';
 import { apiClient } from '../../../shared/services/api/apiClient';
 import { isAppError } from '../../../shared/services/api/errorHandler';
@@ -14,6 +20,7 @@ import { isAppError } from '../../../shared/services/api/errorHandler';
  */
 
 let cachedToken: string | null = null;
+const firebaseMessaging = getMessaging();
 const backendPlatform = (): 'ios' | 'android' => (Platform.OS === 'ios' ? 'ios' : 'android');
 
 /**
@@ -30,9 +37,9 @@ const registerToken = async (token: string, allowRotation = true): Promise<boole
   } catch (err) {
     if (!allowRotation || !isAppError(err) || err.code !== 'PUSH_001') return false;
     try {
-      await messaging().deleteToken();
+      await deleteToken(firebaseMessaging);
       cachedToken = null;
-      const replacement = await messaging().getToken();
+      const replacement = await getToken(firebaseMessaging);
       if (!replacement || replacement === token) return false;
       return registerToken(replacement, false);
     } catch {
@@ -71,14 +78,14 @@ export const requestNotificationPermissionStatus = async (): Promise<PushPermiss
     }
     return 'granted';
   }
-  const authStatus = await messaging().requestPermission();
+  const authStatus = await requestPermission(firebaseMessaging);
   if (
-    authStatus === messaging.AuthorizationStatus.AUTHORIZED ||
-    authStatus === messaging.AuthorizationStatus.PROVISIONAL
+    authStatus === AuthorizationStatus.AUTHORIZED ||
+    authStatus === AuthorizationStatus.PROVISIONAL
   ) {
     return 'granted';
   }
-  return authStatus === messaging.AuthorizationStatus.DENIED ? 'blocked' : 'denied';
+  return authStatus === AuthorizationStatus.DENIED ? 'blocked' : 'denied';
 };
 
 /**
@@ -100,7 +107,7 @@ export const pushService = {
     try {
       const status = await requestNotificationPermissionStatus();
       if (status !== 'granted') return { token: null, status };
-      const token = await messaging().getToken();
+      const token = await getToken(firebaseMessaging);
       cachedToken = token || null;
       return { token: cachedToken, status: cachedToken ? 'granted' : 'error' };
     } catch (err) {
@@ -143,7 +150,7 @@ export const pushService = {
     let token = cachedToken;
     if (!token) {
       try {
-        token = await messaging().getToken();
+        token = await getToken(firebaseMessaging);
       } catch {
         token = null;
       }
@@ -155,8 +162,6 @@ export const pushService = {
     // Even if the API call failed because the access token expired, deleting
     // the local FCM token makes the stale backend mapping undeliverable. FCM
     // will mint a fresh token for the next signed-in account.
-    await messaging()
-      .deleteToken()
-      .catch(() => undefined);
+    await deleteToken(firebaseMessaging).catch(() => undefined);
   },
 };

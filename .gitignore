@@ -44,6 +44,7 @@ ios/ChatHouse/GoogleService-Info.plist
 # The committed templates are .env.example / .env.production.example.
 .env.production
 .env.staging
+.env.device-smoke
 
 # IDE
 .idea/
@@ -60,9 +61,13 @@ coverage/
 # Build
 build/
 
-# Build artifacts: prebuilt APKs are large binaries that bloat the repo and
-# stall HTTP pushes — keep them on disk but out of git. Produce via gradle.
+# Store and test artifacts are large binaries and can contain signed production
+# material. Keep them on disk or in the protected CI artifact store, never git.
 *.apk
+*.aab
+*.ipa
+*.xcarchive/
+artifacts/go-live-evidence.json
 
 # Uploaded media (avatars) — created at runtime by the backend upload module;
 # the files are environment-specific and must not be versioned. The directory

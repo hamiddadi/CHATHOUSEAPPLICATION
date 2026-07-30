@@ -1,14 +1,15 @@
 import { AccessToken, RoomServiceClient } from 'livekit-server-sdk';
-import { env } from '../../config/env';
+import { env, LIVEKIT_TOKEN_MAX_TTL_SECONDS } from '../../config/env';
 import { logger } from '../../config/logger';
 import { AppError } from '../../middlewares/error.middleware';
+import { hasCurrentLegalAcceptance } from '../auth/legal-acceptance';
 
 /**
  * LiveKit token signer. Issues short-lived per-room, per-user access tokens.
  *
  * Architecture:
  *  - Room name = roomId (cuids are < 64 ASCII chars, well within LiveKit's
- *    room naming limits). Each Chathouse room maps 1-to-1 to a LiveKit room
+ *    room naming limits). Each ChatHouse room maps 1-to-1 to a LiveKit room
  *    for full acoustic isolation.
  *  - Identity = userId (string). LiveKit uses string identities natively,
  *    so we no longer need the FNV-1a hash that Agora required for uint32 UIDs.
@@ -25,7 +26,9 @@ export type LivekitParticipantRole = 'HOST' | 'MODERATOR' | 'SPEAKER' | 'LISTENE
 const isLivekitConfigured = (): boolean =>
   Boolean(env.LIVEKIT_API_KEY && env.LIVEKIT_API_SECRET && env.LIVEKIT_URL);
 
-// EgressClient/RoomServiceClient want the HTTP(S) host; LIVEKIT_URL is ws(s)://.
+// RoomServiceClient wants an HTTP(S) host. Prefer the server-to-server address
+// when the API and LiveKit run in separate containers; otherwise fall back to
+// the public ws(s) endpoint converted to http(s).
 const httpHost = (wsUrl: string): string => wsUrl.replace(/^ws/i, 'http');
 
 const errorMessage = (err: unknown): string => (err instanceof Error ? err.message : String(err));
@@ -35,6 +38,22 @@ const isAlreadyAbsent = (err: unknown): boolean => {
   return message.includes('does not exist') || message.includes('not found');
 };
 
+const isAlreadyPresent = (err: unknown): boolean => {
+  const message = errorMessage(err).toLowerCase();
+  if (
+    message.includes('already exists') ||
+    message.includes('already_exists') ||
+    message.includes('already-exists')
+  ) {
+    return true;
+  }
+  if (!err || typeof err !== 'object') return false;
+
+  const candidate = err as { code?: unknown; status?: unknown };
+  const code = typeof candidate.code === 'string' ? candidate.code.toLowerCase() : '';
+  return code === 'already_exists' || code === 'alreadyexists' || candidate.status === 409;
+};
+
 // Lazily-built admin client for server-side room moderation (kick / close).
 // Reused across calls; null until LiveKit is configured.
 let roomServiceRef: RoomServiceClient | null = null;
@@ -42,12 +61,26 @@ const roomServiceClient = (): RoomServiceClient | null => {
   if (!isLivekitConfigured()) return null;
   if (!roomServiceRef) {
     roomServiceRef = new RoomServiceClient(
-      httpHost(env.LIVEKIT_URL as string),
+      httpHost(env.LIVEKIT_INTERNAL_URL ?? (env.LIVEKIT_URL as string)),
       env.LIVEKIT_API_KEY as string,
       env.LIVEKIT_API_SECRET as string,
     );
   }
   return roomServiceRef;
+};
+
+const ensureRoomExists = async (room: string): Promise<void> => {
+  const client = roomServiceClient();
+  if (!client) throw new AppError('LIVEKIT_001');
+
+  try {
+    await client.createRoom({ name: room });
+  } catch (err) {
+    // Concurrent token requests can race to create the same room. LiveKit's
+    // already-exists response is the successful/idempotent outcome here.
+    if (isAlreadyPresent(err)) return;
+    throw err;
+  }
 };
 
 export const livekitService = {
@@ -82,12 +115,23 @@ export const livekitService = {
 
     const room = input.roomId;
     const identity = input.userId;
-    const ttl = env.LIVEKIT_TOKEN_TTL_SECONDS;
+    // Defense in depth in case Env is ever populated outside the validated
+    // schema (tests, migrations, or a future config adapter).
+    const ttl = Math.min(env.LIVEKIT_TOKEN_TTL_SECONDS, LIVEKIT_TOKEN_MAX_TTL_SECONDS);
 
     // canPublish controls whether the user can push audio.
     // Listeners get canPublish=false; everything else gets canPublish=true.
-    const canPublish =
+    const roleCanPublish =
       input.role === 'HOST' || input.role === 'MODERATOR' || input.role === 'SPEAKER';
+    // Existing accounts that have not accepted the current Terms may still
+    // listen, but their signed provider capability is receive-only. This
+    // closes the native LiveKit publishing path in addition to HTTP/socket UGC.
+    const canPublish = roleCanPublish && (await hasCurrentLegalAcceptance(input.userId));
+
+    // Self-hosted LiveKit runs with room.auto_create=false. Ensure the
+    // application room exists before minting any usable join capability.
+    // A transport/server failure therefore fails closed: no JWT is signed.
+    await ensureRoomExists(room);
 
     const at = new AccessToken(apiKey, apiSecret, {
       identity,

@@ -25,6 +25,7 @@ import {
 import type { RoomListener } from '../../services/roomService';
 import { MIC_PERMISSION_DENIED_ERROR } from '../../services/roomAudioService';
 import { useRoomSocket } from '../../hooks/useRoomSocket';
+import { useRoomMembership } from '../../hooks/useRoomMembership';
 import {
   SPEAKING_SCORE_THRESHOLD,
   SPEAKING_SELF_KEY,
@@ -93,7 +94,15 @@ export const RoomScreen: React.FC = () => {
   // time and show the "Room ended" alert to the very host who closed it.
   const selfEndedRef = useRef(false);
 
-  const { data: room, isLoading, isError } = useRoom(route.params.roomId);
+  const membership = useRoomMembership(route.params.roomId);
+  // Do not race a public detail GET against the authoritative POST /join
+  // response. The join hook seeds this query first; any subsequent refetch
+  // therefore observes an already-active Participant row.
+  const {
+    data: room,
+    isLoading,
+    isError,
+  } = useRoom(route.params.roomId, membership.status === 'joined');
   const leaveRoom = useLeaveRoom();
   const raiseHand = useRaiseHand();
   const lowerHand = useLowerHand();
@@ -103,8 +112,11 @@ export const RoomScreen: React.FC = () => {
   const viewerId = useAuthStore(s => s.user?.id ?? null);
   // Stable room id for effects that only need the identifier (not the whole
   // `room` object, which gets a fresh reference on every React Query refetch).
-  const roomId = room?.id ?? null;
-  const { data: handRaises = [] } = useHandRaises(room?.id ?? null);
+  const roomId =
+    membership.status === 'joined' && room?.id === route.params.roomId ? room.id : null;
+  // Hand raises require an active Participant row. Passing the gated roomId
+  // prevents the former pre-join 403 race on feed, deep-link and resume entry.
+  const { data: handRaises = [], dataUpdatedAt: handRaisesUpdatedAt } = useHandRaises(roomId);
   const [actionTarget, setActionTarget] = useState<RoomParticipant | null>(null);
   // Listener taps surface a profile sheet (follow / wave / ping); host taps
   // surface the moderation sheet (kick / promote / etc). These two states
@@ -148,7 +160,7 @@ export const RoomScreen: React.FC = () => {
   // mute-changed, kicked, ended). Without this, the screen is static and
   // never reflects what other participants do. The second arg backs out on a
   // gated/denied join (see handleJoinDenied).
-  useRoomSocket(room?.id ?? null, handleJoinDenied);
+  useRoomSocket(roomId, handleJoinDenied);
 
   // #86: a host nominated me to speak — prompt to accept/refuse (respond posts
   // back; on accept the backend promotes me to SPEAKER).
@@ -178,7 +190,7 @@ export const RoomScreen: React.FC = () => {
   // navigate away. Refreshed on every room change; cleared only on explicit
   // leave / kick / room-end — a plain back minimises to the mini-bar.
   useEffect(() => {
-    if (!room) return;
+    if (!room || membership.status !== 'joined') return;
     const store = useCurrentRoomStore.getState();
     // ENTRY into a room the store didn't hold yet: hydrate the mute flag from
     // the viewer's own participant row so the badge matches the server state.
@@ -198,25 +210,25 @@ export const RoomScreen: React.FC = () => {
     // Record this room in the viewer's "recently played" zset (resume parity).
     // Fire-and-forget: the touch is best-effort and must never block the join.
     void recentlyPlayedApi.touch(room.id).catch(() => undefined);
-  }, [room, viewerId]);
+  }, [membership.status, room, viewerId]);
 
-  // Hydrate the hand-raise badge from the server queue on (re)mount: the
-  // local `useState(false)` was never seeded, so returning via the mini-bar
-  // showed "Raise hand" even while the viewer was queued. One-shot on the
-  // first non-empty queue payload so later optimistic toggles aren't clobbered
-  // by a stale refetch.
-  const handHydratedRef = useRef(false);
+  // Keep the optimistic button reconciled with every authoritative queue
+  // response. In particular, a moderator dismissal emits room:hand_lowered;
+  // the resulting empty queue must flip "Lower hand" back to "Raise hand".
   useEffect(() => {
-    if (handHydratedRef.current || !viewerId || handRaises.length === 0) return;
-    handHydratedRef.current = true;
-    if (handRaises.some(h => h.id === viewerId)) setIsHandRaised(true);
-  }, [handRaises, viewerId]);
+    if (!viewerId || !roomId || handRaisesUpdatedAt === 0) return;
+    setIsHandRaised(handRaises.some(h => h.id === viewerId));
+  }, [handRaises, handRaisesUpdatedAt, roomId, viewerId]);
+
+  useEffect(() => {
+    if (!roomId) setIsHandRaised(false);
+  }, [roomId]);
 
   // Capture mic + start producing once we're in the room. The LiveKit
   // engine auto-activates if `@livekit/react-native` is installed; in Expo
   // Go it returns `status: 'unsupported'` and the rest of the screen
   // (chat, hand-raise, reactions) keeps working.
-  const audio = useRoomAudio({ roomId: room?.id ?? null, enabled: Boolean(room) });
+  const audio = useRoomAudio({ roomId, enabled: Boolean(roomId) });
 
   // Live captions (Clubhouse-style). `useExtCaptions` subscribes to the
   // `room:caption` stream + the live on/off flag; the publisher runs the
@@ -513,7 +525,7 @@ export const RoomScreen: React.FC = () => {
     try {
       await Share.share({
         title: room.title,
-        message: `Rejoins-moi sur Chathouse : "${room.title}" — ${ROOM_SHARE_BASE_URL}/${room.id}`,
+        message: `Rejoins-moi sur ChatHouse : "${room.title}" — ${ROOM_SHARE_BASE_URL}/${room.id}`,
         url: `${ROOM_SHARE_BASE_URL}/${room.id}`,
       });
     } catch {
@@ -606,7 +618,30 @@ export const RoomScreen: React.FC = () => {
     void Linking.openSettings();
   }, []);
 
-  if (isLoading) return <Loader fullscreen accessibilityLabel={t('common.loading')} />;
+  if (isLoading || membership.status === 'joining') {
+    return <Loader fullscreen accessibilityLabel={t('room.joining', 'Joining room')} />;
+  }
+  if (membership.status === 'error') {
+    const connectivityFailure =
+      membership.error?.kind === 'network' || membership.error?.kind === 'timeout';
+    return (
+      <EmptyState
+        title={
+          connectivityFailure
+            ? t('room.joinConnectionTitle', 'Unable to connect')
+            : t('room.alert.joinDeniedTitle', 'Unable to join')
+        }
+        description={
+          connectivityFailure
+            ? t('room.joinConnectionBody', 'Check your connection and try again.')
+            : (membership.error?.message ??
+              t('room.alert.joinDeniedBody', "You don't have access to this room."))
+        }
+        actionLabel={connectivityFailure ? t('common.retry', 'Retry') : undefined}
+        onAction={connectivityFailure ? membership.retry : undefined}
+      />
+    );
+  }
   if (isError || !room) {
     return <EmptyState title={t('room.unavailable')} description={t('room.mayHaveEnded')} />;
   }
@@ -617,7 +652,7 @@ export const RoomScreen: React.FC = () => {
         <View className="flex-row items-center gap-sm">
           <MaterialIcons name="graphic-eq" size={HEADER_ICON_SIZE} color={colors.primary} />
           <Text className="text-lg font-display text-primary tracking-tighter">
-            {t('common.appName', 'Chathouse')}
+            {t('common.appName', 'ChatHouse')}
           </Text>
         </View>
         <View className="flex-row items-center gap-xs">
@@ -730,7 +765,10 @@ export const RoomScreen: React.FC = () => {
                             '⚠️ Audio requires an EAS dev-client (@livekit/react-native is unavailable in Expo Go).',
                           )
                         : audio.status === 'error'
-                          ? `❌ ${audio.error ?? t('room.audioError', 'Audio error')}`
+                          ? `❌ ${t(
+                              'room.audioErrorBody',
+                              'Live audio is unavailable. Check your connection and try again.',
+                            )}`
                           : audio.status === 'reconnecting'
                             ? t('room.audioReconnecting', '🔄 Reconnecting audio…')
                             : t('room.audioBanner')}
@@ -745,6 +783,18 @@ export const RoomScreen: React.FC = () => {
                   >
                     <Text className="text-xs font-body-bold text-warning">
                       {t('room.openSettings', 'Open settings')}
+                    </Text>
+                  </Pressable>
+                ) : audio.status === 'error' ? (
+                  <Pressable
+                    onPress={() => void audio.retry()}
+                    accessibilityRole="button"
+                    accessibilityLabel={t('room.retryAudio', 'Retry audio')}
+                    hitSlop={8}
+                    className="self-center mt-sm bg-danger/20 rounded-pill px-lg py-sm min-h-[36px] items-center justify-center"
+                  >
+                    <Text className="text-xs font-body-bold text-danger">
+                      {t('room.retryAudio', 'Retry audio')}
                     </Text>
                   </Pressable>
                 ) : null}

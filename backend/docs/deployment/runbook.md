@@ -248,39 +248,42 @@ The API reads its config from the host's `.env` consumed by `docker-compose`.
 Keep these on the host (or your secrets manager), not in the repo. Required /
 notable:
 
-| Var                                      | Required | Notes                                                                                   |
-| ---------------------------------------- | :------: | --------------------------------------------------------------------------------------- |
-| `DATABASE_URL`                           |   yes    | Postgres DSN. In-compose default: `postgres:5432/chathouse`.                            |
-| `REDIS_URL`                              |   yes    | e.g. `redis://redis:6379`.                                                              |
-| `JWT_ACCESS_SECRET`                      |   yes    | zod-validated; boot fails if missing.                                                   |
-| `JWT_REFRESH_SECRET`                     |   yes    | zod-validated; boot fails if missing.                                                   |
-| `CORS_ORIGINS`                           |   rec    | Comma-separated allowed origins.                                                        |
-| `NODE_ENV`                               |   rec    | `production` on prod.                                                                   |
-| `LIVEKIT_URL`                            |   yes    | Public `wss://` LiveKit endpoint (Cloud or self-hosted). Live audio 503s without it.    |
-| `LIVEKIT_API_KEY`                        |   yes    | LiveKit API key. Boot-guarded against the dev default in prod.                          |
-| `LIVEKIT_API_SECRET`                     |   yes    | LiveKit API secret. Boot-guarded against the dev default in prod.                       |
-| `TWILIO_ACCOUNT_SID`                     |   yes    | Twilio SMS — phone+OTP is the ONLY login path; prod compose fail-closes without it.     |
-| `TWILIO_AUTH_TOKEN`                      |   yes    | Twilio auth token.                                                                      |
-| `TWILIO_FROM_NUMBER`                     |   yes    | E.164 SMS sender number.                                                                |
-| `PUSH_DISPATCH_ENABLED`                  |   yes    | Must be `true` in production; the API refuses to boot otherwise.                        |
-| `FIREBASE_SERVICE_ACCOUNT`               | choice A | Complete FCM service-account JSON on one line; mutually exclusive with ADC.             |
-| `FIREBASE_USE_ADC`                       | choice B | Set `true` to explicitly use workload/instance Application Default Credentials.         |
-| `GOOGLE_APPLICATION_CREDENTIALS`         |   opt    | ADC file path inside the container; not needed for workload identity/instance metadata. |
-| `MEDIASOUP_*`                            |   n/a    | Legacy SFU — audio is LiveKit; prod compose sets `MEDIASOUP_ENABLED=false`. Ignore.     |
-| `ICE_SERVERS_JSON`                       |   opt    | STUN/TURN for self-hosted LiveKit clients behind symmetric NAT.                         |
-| `ACCOUNT_DELETION_GRACE_DAYS`            |   opt    | GDPR hard-delete grace (default 30).                                                    |
-| `AUDIT_LOG_RETENTION_DAYS`               |   opt    | Audit log retention (default 90).                                                       |
-| `SENTRY_DSN`                             |   opt    | Enables error reporting (@sentry/node v8).                                              |
-| `METRICS_TOKEN_SECRET_FILE`              |   yes    | Absolute host path to the shared API/Prometheus Bearer-token file.                      |
-| `GF_SECURITY_ADMIN_PASSWORD`             |  yes\*   | Required when starting the separate Grafana monitoring stack; no default is accepted.   |
-| `CHATHOUSE_API_IMAGE`                    |   yes    | Initial `repository@sha256` digest; CD overrides it with a verified digest.             |
-| `SMTP_SMARTHOST` / `SMTP_FROM`           |  yes\*   | Non-secret SMTP routing rendered before Alertmanager starts.                            |
-| `SMTP_USERNAME` / `ALERT_EMAIL_TO`       |  yes\*   | Non-secret Alertmanager mail routing.                                                   |
-| `ALERTMANAGER_SLACK_WEBHOOK_SECRET_FILE` |  yes\*   | Absolute host path to the Slack webhook secret file.                                    |
-| `ALERTMANAGER_SMTP_PASSWORD_SECRET_FILE` |  yes\*   | Absolute host path to the SMTP password secret file.                                    |
+| Var                                      | Required | Notes                                                                                                  |
+| ---------------------------------------- | :------: | ------------------------------------------------------------------------------------------------------ |
+| `DATABASE_URL`                           |   yes    | Postgres DSN. In-compose default: `postgres:5432/chathouse`.                                           |
+| `REDIS_URL`                              |   yes    | e.g. `redis://redis:6379`.                                                                             |
+| `JWT_ACCESS_SECRET`                      |   yes    | zod-validated; boot fails if missing.                                                                  |
+| `JWT_REFRESH_SECRET`                     |   yes    | zod-validated; boot fails if missing.                                                                  |
+| `CORS_ORIGINS`                           |   rec    | Comma-separated allowed origins.                                                                       |
+| `NODE_ENV`                               |   rec    | `production` on prod.                                                                                  |
+| `LIVEKIT_URL`                            |   yes    | Public `wss://` LiveKit endpoint (Cloud or self-hosted). Live audio 503s without it.                   |
+| `LIVEKIT_INTERNAL_URL`                   |   cond   | Server-to-server HTTP URL; required for self-host (`http://livekit:7880`), Cloud falls back to public. |
+| `LIVEKIT_API_KEY`                        |   yes    | LiveKit API key. Boot-guarded against the dev default in prod.                                         |
+| `LIVEKIT_API_SECRET`                     |   yes    | LiveKit API secret. Boot-guarded against the dev default in prod.                                      |
+| `LIVEKIT_TOKEN_TTL_SECONDS`              |   opt    | LiveKit join-token TTL; defaults to and is operationally capped at 300 seconds.                        |
+| `TWILIO_ACCOUNT_SID`                     |   yes    | Twilio SMS — phone+OTP is the ONLY login path; prod compose fail-closes without it.                    |
+| `TWILIO_AUTH_TOKEN`                      |   yes    | Twilio auth token.                                                                                     |
+| `TWILIO_FROM_NUMBER`                     |   yes    | E.164 SMS sender number.                                                                               |
+| `PUSH_DISPATCH_ENABLED`                  |   yes    | Must be `true` in production; the API refuses to boot otherwise.                                       |
+| `FIREBASE_SERVICE_ACCOUNT`               | choice A | Complete FCM service-account JSON on one line; mutually exclusive with ADC.                            |
+| `FIREBASE_USE_ADC`                       | choice B | Set `true` to explicitly use workload/instance Application Default Credentials.                        |
+| `GOOGLE_APPLICATION_CREDENTIALS`         |   opt    | ADC file path inside the container; not needed for workload identity/instance metadata.                |
+| `MEDIASOUP_*`                            |   n/a    | Legacy SFU — audio is LiveKit; prod compose sets `MEDIASOUP_ENABLED=false`. Ignore.                    |
+| `ICE_SERVERS_JSON`                       |   opt    | STUN/TURN for self-hosted LiveKit clients behind symmetric NAT.                                        |
+| `ACCOUNT_DELETION_GRACE_DAYS`            |   opt    | GDPR hard-delete grace (default 30).                                                                   |
+| `AUDIT_LOG_RETENTION_DAYS`               |   opt    | Audit log retention (default 90).                                                                      |
+| `SENTRY_DSN`                             |   opt    | Enables error reporting (@sentry/node v8).                                                             |
+| `METRICS_TOKEN_SECRET_FILE`              |   yes    | Absolute host path to the shared API/Prometheus Bearer-token file.                                     |
+| `GF_SECURITY_ADMIN_PASSWORD`             |  yes\*   | Required when starting the separate Grafana monitoring stack; no default is accepted.                  |
+| `CHATHOUSE_API_IMAGE`                    |   yes    | Initial `repository@sha256` digest; CD overrides it with a verified digest.                            |
+| `SMTP_SMARTHOST` / `SMTP_FROM`           |  yes\*   | Non-secret SMTP routing rendered before Alertmanager starts.                                           |
+| `SMTP_USERNAME` / `ALERT_EMAIL_TO`       |  yes\*   | Non-secret Alertmanager mail routing.                                                                  |
+| `ALERTMANAGER_SLACK_WEBHOOK_SECRET_FILE` |  yes\*   | Absolute host path to the Slack webhook secret file.                                                   |
+| `ALERTMANAGER_SMTP_PASSWORD_SECRET_FILE` |  yes\*   | Absolute host path to the SMTP password secret file.                                                   |
 
 LiveKit Cloud is the lowest-ops choice — it provides global TURN and needs only
-the three `LIVEKIT_*` values above (no self-host UDP ports / TURN sidecar).
+the three required `LIVEKIT_*` values above; `LIVEKIT_INTERNAL_URL` may stay
+empty and falls back to the public host (no self-host UDP ports / TURN sidecar).
 
 ### 6.3 First host bootstrap
 
@@ -297,7 +300,12 @@ CHATHOUSE_API_IMAGE=ghcr.io/<owner>/<repo>/api@sha256:<64-lowercase-hex-characte
 The file must also contain every `${VAR:?required}` value referenced by
 `docker-compose.prod.yml`: Postgres/Redis credentials, JWT, CORS/public URL,
 private media storage, LiveKit, Twilio, Resend, Firebase, Stripe, metrics secret
-path and the Alertmanager values documented below. Then validate and start the
+path and the Alertmanager values documented below. The `LEGAL_*` and public
+contact values must come from the reviewed
+`docs/legal/RELEASE-INFORMATION-REQUIRED.md` sheet; the version and effective
+date must exactly match `docs/legal/document-control.json`, whose status must be
+`published`. The API and go-live preflight reject unresolved or divergent legal
+values. Then validate and start the
 complete initial stack. Complete the secret-file setup in section 6.4 before
 running these commands:
 

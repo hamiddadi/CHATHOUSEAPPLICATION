@@ -15,6 +15,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import Geolocation from '@react-native-community/geolocation';
 import { fireEvent, waitFor } from '@testing-library/react-native';
 import { renderScreen, mockAuthenticated, resetAuth } from '../../../../test-utils/renderScreen';
+import { createConsentRecord } from '../../../privacy/consentRecord';
 import { MapsScreen } from './MapsScreen';
 
 // react-native-dotenv inlines `.env` into `@env` at babel-transform time, so the
@@ -39,6 +40,9 @@ describe('MapsScreen', () => {
 
   beforeEach(() => {
     mockAuthenticated();
+    (AsyncStorage.getItem as jest.Mock).mockResolvedValue(
+      JSON.stringify(createConsentRecord('location', 'granted')),
+    );
     // Force the granted permission path so the map (not the consent flow) renders.
     jest.spyOn(PermissionsAndroid, 'check').mockResolvedValue(true);
     jest.spyOn(PermissionsAndroid, 'request').mockResolvedValue(PermissionsAndroid.RESULTS.GRANTED);
@@ -79,7 +83,6 @@ describe('MapsScreen', () => {
 
   it('accepts approximate location when Android grants COARSE but denies FINE', async () => {
     (PermissionsAndroid.check as jest.Mock).mockResolvedValue(false);
-    (AsyncStorage.getItem as jest.Mock).mockResolvedValue('accepted');
     const requestMultiple = jest.spyOn(PermissionsAndroid, 'requestMultiple').mockResolvedValue({
       [PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION]: PermissionsAndroid.RESULTS.GRANTED,
       [PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION]: PermissionsAndroid.RESULTS.DENIED,
@@ -99,7 +102,6 @@ describe('MapsScreen', () => {
   it('uses the native geolocation authorization flow on iOS', async () => {
     const originalOs = Platform.OS;
     Object.defineProperty(Platform, 'OS', { value: 'ios', configurable: true });
-    (AsyncStorage.getItem as jest.Mock).mockResolvedValue('accepted');
     const requestAuthorization = Geolocation.requestAuthorization as jest.Mock;
     requestAuthorization.mockImplementationOnce((success?: () => void) => success?.());
 

@@ -4,6 +4,7 @@
  * an explicit navigation control available before authentication.
  */
 import React from 'react';
+import { Linking } from 'react-native';
 import { fireEvent } from '@testing-library/react-native';
 import { renderScreen, mockAuthenticated, resetAuth } from '../../../test-utils/renderScreen';
 import { TermsScreen } from './TermsScreen';
@@ -21,7 +22,7 @@ describe('TermsScreen', () => {
     const { getByText, toJSON } = renderScreen(<TermsScreen />);
     expect(toJSON()).toBeTruthy();
     expect(getByText('Terms of Service')).toBeTruthy();
-    expect(getByText('Last updated: July 18, 2026')).toBeTruthy();
+    expect(getByText('Document version: 2026-07-29')).toBeTruthy();
   });
 
   it('renders the numbered section headers (1..8)', () => {
@@ -29,6 +30,13 @@ describe('TermsScreen', () => {
     expect(getByText('1. Acceptance')).toBeTruthy();
     expect(getByText('3. Prohibited Conduct')).toBeTruthy();
     expect(getByText('8. Governing Law')).toBeTruthy();
+  });
+
+  it('opens the canonical complete Terms link', () => {
+    const openSpy = jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined as never);
+    const { getByText } = renderScreen(<TermsScreen />);
+    fireEvent.press(getByText('Read the complete terms'));
+    expect(openSpy).toHaveBeenCalledWith(expect.stringMatching(/\/terms$/u));
   });
 
   it('renders the Eligibility rules paragraphs (s2.p2 / s2.p3) that were previously dropped', () => {

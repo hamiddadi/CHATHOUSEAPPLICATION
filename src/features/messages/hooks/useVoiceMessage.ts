@@ -51,16 +51,15 @@ export const useVoiceMessage = (send: VoiceSender): VoiceMessageComposer => {
       const url = await voiceService.upload(clip.uri);
       await send(url, clip.durationMs);
     } catch (err) {
-      // A 403 on a DM voice note is the mutual-follow gate (CHAT_004 — the same
-      // rule the text send hits). Spell it out with the same alert instead of a
-      // raw/generic toast so voice notes behave identically to text.
+      // A 403 on a DM voice note is the same privacy gate as text. Use the same
+      // generic alert: the exact recipient setting/block state stays private.
       const e = toAppError(err);
       if (e.kind === 'forbidden') {
         Alert.alert(
           t('chat.cannotMessageTitle', 'Message impossible'),
           t(
             'chat.cannotMessageBody',
-            'Vous devez vous suivre mutuellement pour échanger des messages.',
+            'Cette personne ne peut pas recevoir de message privé de votre part pour le moment.',
           ),
         );
         return;

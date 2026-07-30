@@ -50,17 +50,17 @@ export const calendarService = {
     const end = new Date(start.getTime() + DEFAULT_DURATION_MS);
     const now = new Date();
     const uid = `${room.id}@${ICS_UID_DOMAIN}`;
-    const summary = escapeIcs(`Chathouse — ${room.title}`);
+    const summary = escapeIcs(`ChatHouse — ${room.title}`);
     const description = escapeIcs(
       room.description ??
-        `Live audio room hosted by ${room.host.displayName ?? room.host.username ?? 'a Chathouse user'}.`,
+        `Live audio room hosted by ${room.host.displayName ?? room.host.username ?? 'a ChatHouse user'}.`,
     );
     const url = `${ROOM_URL_BASE}/${room.id}`;
 
     const lines = [
       'BEGIN:VCALENDAR',
       'VERSION:2.0',
-      'PRODID:-//Chathouse//Event Export//EN',
+      'PRODID:-//ChatHouse//Event Export//EN',
       'CALSCALE:GREGORIAN',
       'METHOD:PUBLISH',
       'BEGIN:VEVENT',

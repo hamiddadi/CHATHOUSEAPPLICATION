@@ -19,5 +19,6 @@ export {
 } from './hooks/useRooms';
 export { useRoomAudio } from './hooks/useRoomAudio';
 export { useRoomSocket } from './hooks/useRoomSocket';
+export { useRoomMembership } from './hooks/useRoomMembership';
 export { HostActionsSheet } from './components/HostActionsSheet';
 export { RoomChatSidebar } from './components/RoomChatSidebar';

@@ -73,4 +73,33 @@ describe('useVoiceRecorder microphone permission', () => {
     });
     unmount();
   });
+
+  it('stops a native iOS recording that starts after the hook unmounts', async () => {
+    Object.defineProperty(Platform, 'OS', { value: 'ios', configurable: true });
+    let resolveStart!: (uri: string) => void;
+    const nativeStart = new Promise<string>(resolve => {
+      resolveStart = resolve;
+    });
+    const startRecorder = jest
+      .mocked(audioRecorderPlayer.startRecorder)
+      .mockReturnValueOnce(nativeStart);
+    const stopRecorder = jest.mocked(audioRecorderPlayer.stopRecorder);
+    const { result, unmount } = renderHook(() => useVoiceRecorder());
+
+    let pending!: Promise<boolean>;
+    act(() => {
+      pending = result.current.start();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(startRecorder).toHaveBeenCalledTimes(1);
+
+    unmount();
+    resolveStart('/tmp/late-ios-recording.m4a');
+
+    await expect(pending).resolves.toBe(false);
+    expect(stopRecorder).toHaveBeenCalledTimes(1);
+  });
 });

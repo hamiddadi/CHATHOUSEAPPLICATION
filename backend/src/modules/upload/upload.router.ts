@@ -6,6 +6,7 @@ import { requireAuth } from '../../middlewares/auth.middleware';
 import { uploadLimiter } from '../../middlewares/rateLimit.middleware';
 import { sendOk } from '../../utils/response';
 import { authedUserId } from '../../utils/authedUserId';
+import { requireCurrentLegalAcceptance } from '../auth/legal-acceptance';
 import { uploadService } from './upload.service';
 
 export const uploadRouter: Router = Router();
@@ -16,6 +17,7 @@ export const uploadRouter: Router = Router();
 // Authentication and per-user rate limiting happen BEFORE parsing a potentially
 // large body, so unauthenticated traffic cannot consume the base64 memory budget.
 uploadRouter.use(requireAuth);
+uploadRouter.use(requireCurrentLegalAcceptance);
 uploadRouter.use(uploadLimiter);
 uploadRouter.use(expressJson({ limit: '12mb' }));
 

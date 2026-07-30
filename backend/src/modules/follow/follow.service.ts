@@ -5,6 +5,7 @@ import { getBlockedIdSet } from '../social/blocks';
 import { hasBlockBetween, lockRelationshipUsers } from '../social/relationship-lock';
 import { emitUserFollowerCount } from '../../socket/realtime';
 import { cursorPage } from '../../utils/paginate';
+import { directMessageEligibility } from '../chat/chat.policy';
 
 const publicUser = {
   id: true,
@@ -382,11 +383,18 @@ export const followService = {
       viewerId,
       page.data.map(u => u.id),
     );
+    const messageEligibility = await directMessageEligibility(
+      viewerId,
+      page.data.map(u => u.id),
+    );
     return {
       ...page,
       data: page.data.map(u => ({
         ...u,
         isFollowedByMe: followed.has(u.id),
+        // Actionable compose hint only: never expose the recipient's exact
+        // privacy setting or whether a block caused the denial.
+        canDirectMessage: messageEligibility.get(u.id) ?? false,
       })),
     };
   },

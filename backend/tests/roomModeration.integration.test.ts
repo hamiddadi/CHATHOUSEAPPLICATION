@@ -77,6 +77,20 @@ describe('Room moderation — ping / mute / mute-all / invite / kick / room type
   const participant = (roomId: string, userId: string) =>
     prisma.participant.findUnique({ where: { userId_roomId: { userId, roomId } } });
 
+  it('reports whether POST /join actually activated the participant', async () => {
+    const host = await register();
+    const listener = await register();
+    const roomId = await createRoom(host);
+
+    const first = await join(listener, roomId);
+    expect(first.status).toBe(200);
+    expect(first.body.data.changed).toBe(true);
+
+    const idempotent = await join(listener, roomId);
+    expect(idempotent.status).toBe(200);
+    expect(idempotent.body.data.changed).toBe(false);
+  });
+
   // ─────────────────────────────── PING ────────────────────────────────
   describe('ping (POST /rooms/:id/ping/:userId)', () => {
     it('an active participant pings another user → 200 + a ROOM_INVITE notification', async () => {

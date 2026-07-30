@@ -91,6 +91,15 @@ interface RawRoom {
   hasKnownSpeakers?: boolean;
 }
 
+export interface RoomJoinResult {
+  room: Room;
+  /**
+   * `true` only when this POST transitioned the Participant from absent/left
+   * to active. `null` denotes an older backend response without the field.
+   */
+  changed: boolean | null;
+}
+
 // Feed page size requested from GET /rooms/feed (backend caps at 50). Exported
 // so the infinite-scroll hook can detect a full page (→ another page may exist).
 export const FEED_PAGE_SIZE = 30;
@@ -305,9 +314,20 @@ export const roomService = {
     return toRoom(res.data.data);
   },
 
-  async join(roomId: string): Promise<{ joined: true }> {
-    await apiClient.post(`/rooms/${roomId}/join`);
-    return { joined: true };
+  async join(roomId: string): Promise<RoomJoinResult> {
+    // The backend returns the authoritative post-join room, including the
+    // caller's Participant row. Preserve it instead of discarding the payload:
+    // RoomScreen can seed its cache before hand-raises and LiveKit start.
+    const res = await apiClient.post<Envelope<RawRoom & { changed?: unknown }>>(
+      `/rooms/${roomId}/join`,
+    );
+    const payload = res.data.data;
+    return {
+      room: toRoom(payload),
+      // Compatibility with an older API is deliberately conservative: an
+      // unknown outcome must not make the client leave a pre-existing session.
+      changed: typeof payload.changed === 'boolean' ? payload.changed : null,
+    };
   },
 
   async leave(roomId: string): Promise<{ left: true }> {

@@ -120,7 +120,7 @@ export const AdminHomeScreen: React.FC<SettingsStackScreenProps<'AdminHome'>> = 
         // to a destination the operator picks — no silent clipboard write.
         await Share.share({
           message: csv,
-          title: `Chathouse · export ${kind}`,
+          title: `ChatHouse · export ${kind}`,
         });
       } catch (e) {
         Alert.alert(

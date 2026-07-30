@@ -1,30 +1,41 @@
 import React, { useCallback } from 'react';
 import { useNavigation } from '@react-navigation/native';
 import { useTranslation } from 'react-i18next';
+import { legalDocumentVersion } from '../../../config/env';
 import {
   LegalDoc,
-  LegalEmail,
+  LegalLink,
   LegalParagraph as P,
   LegalSection as Section,
 } from '../components/LegalDoc';
+import { legalUrls, localizedLegalUrl } from '../legalUrls';
 
 /**
- * Static privacy policy. Kept in-app rather than as a remote URL so it
- * works offline and the version reviewed at build time matches what the
- * user sees. Update this file alongside any data-handling change.
+ * Offline privacy summary plus a link to the canonical published policy.
+ * Update the summary and its build-time version whenever the canonical document
+ * changes.
  */
 export const PrivacyPolicyScreen: React.FC = () => {
   const navigation = useNavigation();
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const handleBack = useCallback(() => navigation.goBack(), [navigation]);
   return (
     <LegalDoc
       testID="privacy-policy-screen"
       title={t('privacy.policy.title')}
-      lastUpdated={t('privacy.policy.lastUpdated')}
+      lastUpdated={t('privacy.policy.lastUpdated', { version: legalDocumentVersion })}
       onBack={handleBack}
       backLabel={t('common.back', 'Back')}
     >
+      <P>
+        {t('privacy.policy.fullNotice')}{' '}
+        <LegalLink
+          url={localizedLegalUrl(legalUrls.privacy, i18n.resolvedLanguage ?? i18n.language)}
+        >
+          {t('privacy.policy.fullLink')}
+        </LegalLink>
+      </P>
+
       <Section title={t('privacy.policy.s1.title')}>
         <P>{t('privacy.policy.s1.p1')}</P>
         <P>{t('privacy.policy.s1.p2')}</P>
@@ -69,8 +80,12 @@ export const PrivacyPolicyScreen: React.FC = () => {
 
       <Section title={t('privacy.policy.s7.title')}>
         <P>
-          {t('privacy.policy.s7.p1')}
-          <LegalEmail>privacy@chathouse.app</LegalEmail>
+          {t('privacy.policy.s7.p1')}{' '}
+          <LegalLink
+            url={localizedLegalUrl(legalUrls.privacy, i18n.resolvedLanguage ?? i18n.language)}
+          >
+            {t('privacy.policy.s7.link')}
+          </LegalLink>
         </P>
       </Section>
     </LegalDoc>

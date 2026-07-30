@@ -9,6 +9,7 @@ import {
   registerSchema,
   resetPasswordSchema,
 } from './auth.schema';
+import { legalAcceptanceSchema, acceptCurrentLegalDocuments } from './legal-acceptance';
 
 export const authController = {
   async register(req: Request, res: Response) {
@@ -33,6 +34,13 @@ export const authController = {
     if (!req.userId || !req.accessToken) throw new AppError('AUTH_003');
     await authService.logout(req.userId, req.accessToken);
     sendOk(res, { loggedOut: true });
+  },
+
+  async acceptLegalDocuments(req: Request, res: Response) {
+    if (!req.userId) throw new AppError('AUTH_003');
+    const input = legalAcceptanceSchema.parse(req.body);
+    const result = await acceptCurrentLegalDocuments(req.userId, input);
+    sendOk(res, result);
   },
 
   async forgotPassword(req: Request, res: Response) {

@@ -63,7 +63,7 @@ export const NotificationsPermissionScreen: React.FC = () => {
         t('onboarding.notifications.deniedTitle', 'Notifications are off'),
         t(
           'onboarding.notifications.blockedBody',
-          'Notifications are blocked for Chathouse. Enable them in your phone settings to get notified.',
+          'Notifications are blocked for ChatHouse. Enable them in your phone settings to get notified.',
         ),
         [
           { text: t('common.cancel', 'Cancel'), style: 'cancel' },

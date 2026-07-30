@@ -1,5 +1,5 @@
 import notifee, { EventType } from '@notifee/react-native';
-import messaging from '@react-native-firebase/messaging';
+import { getInitialNotification, onNotificationOpenedApp } from '@react-native-firebase/messaging';
 import {
   getInitialNotificationDeepLink,
   handleBackgroundNotificationEvent,
@@ -8,9 +8,8 @@ import {
   subscribeToNotificationDeepLinks,
 } from './notificationOpenService';
 
-const messagingInstance = messaging();
-const getInitialMessageMock = messagingInstance.getInitialNotification as jest.Mock;
-const onNotificationOpenedAppMock = messagingInstance.onNotificationOpenedApp as jest.Mock;
+const getInitialMessageMock = getInitialNotification as jest.Mock;
+const onNotificationOpenedAppMock = onNotificationOpenedApp as jest.Mock;
 const getInitialNotifeeMock = notifee.getInitialNotification as jest.Mock;
 const onForegroundEventMock = notifee.onForegroundEvent as jest.Mock;
 
@@ -100,7 +99,7 @@ describe('notification open deep links', () => {
         }) => void)
       | undefined;
 
-    onNotificationOpenedAppMock.mockImplementation(callback => {
+    onNotificationOpenedAppMock.mockImplementation((_messaging: unknown, callback) => {
       onFcmOpen = callback;
       return unsubscribeMessaging;
     });

@@ -8,7 +8,12 @@ import { useCurrentRoomStore } from '../../rooms/store/currentRoomStore';
 import { useImpersonationState } from '../../admin/store/impersonationState';
 import { disconnectSocket } from '../../../shared/services/realtime/socketClient';
 import { queryClient } from '../../../core/providers/QueryProvider';
-import type { AuthSession, AuthStatus, AuthUser } from '../types/auth.types';
+import type {
+  AuthSession,
+  AuthStatus,
+  AuthUser,
+  LegalAcceptancePayload,
+} from '../types/auth.types';
 
 interface AuthState {
   status: AuthStatus;
@@ -19,8 +24,13 @@ interface AuthState {
 
   hydrate: () => Promise<void>;
   refreshMe: () => Promise<void>;
-  requestOtp: (phoneNumber: string) => Promise<void>;
-  verifyOtp: (phoneNumber: string, code: string) => Promise<{ isNewUser: boolean }>;
+  requestOtp: (phoneNumber: string, legal: LegalAcceptancePayload) => Promise<void>;
+  verifyOtp: (
+    phoneNumber: string,
+    code: string,
+    legal: LegalAcceptancePayload,
+  ) => Promise<{ isNewUser: boolean }>;
+  acceptLegalDocuments: (legal: LegalAcceptancePayload) => Promise<void>;
   devLogin: () => Promise<{ isNewUser: boolean }>;
   setUsername: (username: string) => Promise<void>;
   completeOnboarding: (input: {
@@ -87,10 +97,10 @@ export const useAuthStore = create<AuthState>((set, _get) => ({
     }
   },
 
-  requestOtp: async phoneNumber => {
+  requestOtp: async (phoneNumber, legal) => {
     set({ status: 'authenticating', error: null });
     try {
-      await authService.requestOtp(phoneNumber);
+      await authService.requestOtp(phoneNumber, legal);
       set({ status: 'unauthenticated' });
     } catch (e) {
       set({ status: 'unauthenticated', error: (e as Error).message });
@@ -98,10 +108,10 @@ export const useAuthStore = create<AuthState>((set, _get) => ({
     }
   },
 
-  verifyOtp: async (phoneNumber, code) => {
+  verifyOtp: async (phoneNumber, code, legal) => {
     set({ status: 'authenticating', error: null });
     try {
-      const { session, user, isNewUser } = await authService.verifyOtp(phoneNumber, code);
+      const { session, user, isNewUser } = await authService.verifyOtp(phoneNumber, code, legal);
       await tokenStorage.set(session);
       if (isNewUser) {
         // Stay 'authenticating' (isAuthenticated=false) so the Auth stack stays
@@ -120,6 +130,13 @@ export const useAuthStore = create<AuthState>((set, _get) => ({
       set({ status: 'unauthenticated', error: (e as Error).message });
       throw e;
     }
+  },
+
+  acceptLegalDocuments: async legal => {
+    const accepted = await authService.acceptLegalDocuments(legal);
+    set(state => ({
+      user: state.user ? { ...state.user, ...accepted } : state.user,
+    }));
   },
 
   devLogin: async () => {

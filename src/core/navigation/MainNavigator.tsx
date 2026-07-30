@@ -4,6 +4,7 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { getFocusedRouteNameFromRoute, type RouteProp } from '@react-navigation/native';
 import MaterialIcons from '@react-native-vector-icons/material-icons';
 import { colors, layout, radii, shadows, spacing } from '../../shared/constants/theme';
+import { useTranslation } from '../i18n';
 import { useUnreadMessageCount } from '../../features/messages/hooks/useMessages';
 import { useChatSocket } from '../../features/messages/hooks/useChatSocket';
 import { useNotificationSocket } from '../../features/notifications/hooks/useNotificationSocket';
@@ -78,6 +79,8 @@ const resolveTabBarStyle = (
 };
 
 export const MainNavigator: React.FC = () => {
+  const { t } = useTranslation();
+
   // Subscribe to chat:message / chat:read at the nav level so the
   // Messages tab badge refreshes even when the user is on another tab
   // or inside a room. Idempotent — the underlying socket is a singleton.
@@ -105,12 +108,18 @@ export const MainNavigator: React.FC = () => {
         <Tab.Screen
           name="RoomsTab"
           component={RoomsNavigator}
-          options={{ tabBarIcon: tabIcon('mic') }}
+          options={{
+            tabBarIcon: tabIcon('mic'),
+            tabBarAccessibilityLabel: t('navigation.tabs.rooms', 'Rooms'),
+          }}
         />
         <Tab.Screen
           name="MapsTab"
           component={MapsNavigator}
-          options={{ tabBarIcon: tabIcon('map') }}
+          options={{
+            tabBarIcon: tabIcon('map'),
+            tabBarAccessibilityLabel: t('navigation.tabs.map', 'Map'),
+          }}
         />
         <Tab.Screen
           name="MessagesTab"
@@ -118,12 +127,16 @@ export const MainNavigator: React.FC = () => {
           options={({ route }) => ({
             tabBarIcon: messagesTabIcon,
             tabBarStyle: resolveTabBarStyle(route),
+            tabBarAccessibilityLabel: t('navigation.tabs.messages', 'Messages'),
           })}
         />
         <Tab.Screen
           name="SettingsTab"
           component={SettingsNavigator}
-          options={{ tabBarIcon: tabIcon('settings') }}
+          options={{
+            tabBarIcon: tabIcon('settings'),
+            tabBarAccessibilityLabel: t('navigation.tabs.settings', 'Settings'),
+          }}
         />
       </Tab.Navigator>
       <RoomMiniBar />

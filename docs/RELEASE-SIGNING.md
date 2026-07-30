@@ -93,3 +93,35 @@ Before any store build:
 
 The runtime environment validator rejects localhost and cleartext endpoints in
 production bundles.
+
+## Protected CI artifact workflow
+
+Run **Mobile Store Artifacts - Signed Android and iOS** from the reviewed
+release commit on `main`. The workflow first requires the complete reusable CI
+gate, then produces the two artifact names consumed by the Go-Live preflight:
+
+- `android-production-aab`;
+- `ios-production-xcarchive`.
+
+Configure these base64-encoded production files in the protected `production`
+GitHub environment:
+
+- `MOBILE_PRODUCTION_ENV_BASE64`;
+- `FIREBASE_ANDROID_CONFIG_BASE64`;
+- `FIREBASE_IOS_CONFIG_BASE64`;
+- `ANDROID_UPLOAD_KEYSTORE_BASE64`;
+- `IOS_DISTRIBUTION_CERTIFICATE_BASE64`;
+- `IOS_APPSTORE_PROVISIONING_PROFILE_BASE64`.
+
+Also configure the Android signing passwords/alias
+(`ANDROID_UPLOAD_STORE_PASSWORD`, `ANDROID_UPLOAD_KEY_ALIAS`,
+`ANDROID_UPLOAD_KEY_PASSWORD`), the iOS certificate password
+(`IOS_DISTRIBUTION_CERTIFICATE_PASSWORD`) and the environment variable
+`IOS_TEAM_ID`.
+
+The workflow verifies that the Android bundle is not debug-signed and that the
+iOS archive contains the expected Apple Distribution team, App Store profile,
+production APNs entitlement and requested version/build. It intentionally does
+not upload to Play or TestFlight: use the verified artifacts on the Internal
+Testing/TestFlight tracks, then record those external runs in the protected
+Go-Live evidence.

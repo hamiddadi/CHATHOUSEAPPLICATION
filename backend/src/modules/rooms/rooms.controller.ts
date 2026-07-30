@@ -1,9 +1,7 @@
 import type { Request, Response } from 'express';
 import { sendOk } from '../../utils/response';
 import { AppError } from '../../middlewares/error.middleware';
-import { prisma } from '../../config/database';
 import { authedUserId as requireUserId } from '../../utils/authedUserId';
-import { livekitService, type LivekitParticipantRole } from './livekit.service';
 import {
   createRoomSchema,
   inviteToRoomSchema,
@@ -272,18 +270,7 @@ export const roomsController = {
   async livekitToken(req: Request, res: Response) {
     const userId = requireUserId(req);
     const roomId = paramId(req, 'id');
-
-    const participant = await prisma.participant.findUnique({
-      where: { userId_roomId: { userId, roomId } },
-      select: { role: true, leftAt: true },
-    });
-    if (!participant || participant.leftAt) throw new AppError('ROOM_005');
-
-    const result = await livekitService.issueRoomToken({
-      roomId,
-      userId,
-      role: participant.role as LivekitParticipantRole,
-    });
+    const result = await roomsService.issueLivekitToken(roomId, userId);
     sendOk(res, result);
   },
 };

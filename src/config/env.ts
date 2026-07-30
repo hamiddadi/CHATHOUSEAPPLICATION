@@ -1,5 +1,13 @@
 import { z } from 'zod';
-import { API_BASE_URL, WS_BASE_URL, REALTIME_ENABLED, ENV, SENTRY_DSN, LIVEKIT_URL } from '@env';
+import {
+  API_BASE_URL,
+  WS_BASE_URL,
+  REALTIME_ENABLED,
+  ENV,
+  SENTRY_DSN,
+  LIVEKIT_URL,
+  LEGAL_DOCUMENT_VERSION,
+} from '@env';
 
 export const normalizeOptionalEnvUrl = (value: unknown): unknown =>
   typeof value === 'string' && value.trim() === '' ? undefined : value;
@@ -31,6 +39,11 @@ const envSchema = z.object({
   // The URL is also returned in the token response, but having it
   // here allows early connection setup.
   LIVEKIT_URL: z.string().min(1).optional(),
+  LEGAL_DOCUMENT_VERSION: z
+    .string()
+    .trim()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
 });
 
 interface ProductionEnvironmentCandidate {
@@ -39,6 +52,7 @@ interface ProductionEnvironmentCandidate {
   REALTIME_ENABLED: boolean;
   ENV: 'development' | 'staging' | 'production';
   LIVEKIT_URL?: string;
+  LEGAL_DOCUMENT_VERSION?: string;
 }
 
 const RELEASE_PLACEHOLDER =
@@ -150,6 +164,9 @@ export const assertProductionEnvironment = (candidate: ProductionEnvironmentCand
   if (!candidate.LIVEKIT_URL) {
     throw new Error('[env] Production requires LIVEKIT_URL.');
   }
+  if (!candidate.LEGAL_DOCUMENT_VERSION) {
+    throw new Error('[env] Production requires LEGAL_DOCUMENT_VERSION.');
+  }
   assertPublicProductionUrl('API_BASE_URL', candidate.API_BASE_URL, 'https');
   assertPublicProductionUrl('WS_BASE_URL', candidate.WS_BASE_URL, 'wss');
   assertPublicProductionUrl('LIVEKIT_URL', candidate.LIVEKIT_URL, 'wss');
@@ -162,6 +179,7 @@ const extra = {
   ENV,
   SENTRY_DSN,
   LIVEKIT_URL,
+  LEGAL_DOCUMENT_VERSION,
 };
 const parsed = envSchema.safeParse(extra);
 
@@ -178,6 +196,10 @@ assertProductionEnvironment(parsed.data);
 
 export const env = parsed.data;
 export type Env = typeof env;
+
+// Non-production bundles use the checked-in draft version so local auth keeps
+// working. Production is fail-closed above and must inline the explicit value.
+export const legalDocumentVersion = parsed.data.LEGAL_DOCUMENT_VERSION ?? '2026-07-29';
 
 export const isDev = env.ENV === 'development';
 export const isProd = env.ENV === 'production';

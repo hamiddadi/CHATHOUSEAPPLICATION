@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo } from 'react';
 import { env } from '../../../config/env';
+import { useAuthStore } from '../../auth/store/authStore';
 import {
   roomAudioSession,
   useRoomAudioStore,
@@ -27,6 +28,8 @@ interface UseRoomAudioState {
    * 0 = silent, 1 = speaking.
    */
   scores: ReadonlyMap<string, number>;
+  /** Retry a failed socket/LiveKit start without leaving the room. */
+  retry: () => Promise<void>;
   setMuted: (muted: boolean) => Promise<void>;
   setPeerVolume: (userId: string, volume: number) => void;
 }
@@ -55,16 +58,26 @@ export const useRoomAudio = ({
   const rawStatus = useRoomAudioStore(s => s.status);
   const rawError = useRoomAudioStore(s => s.error);
   const rawScores = useRoomAudioStore(s => s.scores);
+  // Deep links can mount RoomScreen before auth hydration has restored the
+  // user object. Subscribe to the id so startup waits instead of permanently
+  // failing with "user not authenticated", then retries automatically when
+  // hydration completes.
+  const authenticatedUserId = useAuthStore(s =>
+    s.status === 'authenticated' ? (s.user?.id ?? null) : null,
+  );
 
   useEffect(() => {
-    if (!roomId || !enabled || !env.REALTIME_ENABLED) return;
+    if (!roomId || !enabled || !env.REALTIME_ENABLED || !authenticatedUserId) return;
     void roomAudioSession.start(roomId);
     // No cleanup: the session outlives this screen on purpose.
-  }, [roomId, enabled]);
+  }, [roomId, enabled, authenticatedUserId]);
 
   const setMuted = useCallback(async (muted: boolean) => {
     await roomAudioSession.setMuted(muted);
   }, []);
+  const retry = useCallback(async () => {
+    if (roomId && authenticatedUserId) await roomAudioSession.start(roomId);
+  }, [roomId, authenticatedUserId]);
   const setPeerVolume = useCallback((userId: string, volume: number) => {
     roomAudioSession.setPeerVolume(userId, volume);
   }, []);
@@ -82,10 +95,11 @@ export const useRoomAudio = ({
       reconnecting: status === 'reconnecting',
       error,
       scores,
+      retry,
       setMuted,
       setPeerVolume,
     }),
-    [status, error, scores, setMuted, setPeerVolume],
+    [status, error, scores, retry, setMuted, setPeerVolume],
   );
 };
 

@@ -64,6 +64,7 @@ jest.mock('../../features/extensions', () => ({
 // stub it to a no-op so these routing tests stay isolated from the network.
 jest.mock('../../features/privacy', () => ({
   AccountRestorationGate: () => null,
+  LegalAcceptanceGate: () => null,
 }));
 
 const usernameInitialState = {

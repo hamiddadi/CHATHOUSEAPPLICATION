@@ -11,7 +11,6 @@ concurrency:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}/api
   NODE_VERSION: '22.23.1'
 
 jobs:
@@ -19,6 +18,24 @@ jobs:
     name: Full CI gate
     uses: ./.github/workflows/ci.yml
     secrets: inherit
+
+  image-coordinates:
+    name: Resolve lowercase GHCR image name
+    runs-on: ubuntu-latest
+    outputs:
+      image_name: ${{ steps.normalize.outputs.name }}
+    steps:
+      - name: Normalize repository path for OCI
+        id: normalize
+        shell: bash
+        run: |
+          set -euo pipefail
+          image_name="${GITHUB_REPOSITORY,,}/api"
+          if [[ ! "$image_name" =~ ^[a-z0-9][a-z0-9._/-]+$ ]]; then
+            echo "Invalid lowercase image name: ${image_name}" >&2
+            exit 1
+          fi
+          echo "name=${image_name}" >> "$GITHUB_OUTPUT"
 
   verify:
     name: Quality gate
@@ -43,7 +60,7 @@ jobs:
 
   build-and-push:
     name: Build and push image
-    needs: [verify, full-ci]
+    needs: [verify, full-ci, image-coordinates]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -66,8 +83,8 @@ jobs:
           file: ./backend/Dockerfile
           push: true
           tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:staging-${{ github.sha }}
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:staging-latest
+            ${{ env.REGISTRY }}/${{ needs.image-coordinates.outputs.image_name }}:staging-${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ needs.image-coordinates.outputs.image_name }}:staging-latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
           labels: |
@@ -77,7 +94,7 @@ jobs:
       - name: Resolve immutable image digest
         id: image
         env:
-          IMAGE_REPOSITORY: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          IMAGE_REPOSITORY: ${{ env.REGISTRY }}/${{ needs.image-coordinates.outputs.image_name }}
           IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
         run: |
           set -euo pipefail
@@ -259,7 +276,7 @@ jobs:
 
   attest-staging-candidate:
     name: Attest tested staging candidate
-    needs: [build-and-push, deploy-staging]
+    needs: [build-and-push, deploy-staging, image-coordinates]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -267,6 +284,7 @@ jobs:
       - name: Record the exact image accepted by staging
         env:
           IMAGE_REF: ${{ needs.build-and-push.outputs.image_ref }}
+          IMAGE_NAME: ${{ needs.image-coordinates.outputs.image_name }}
           SOURCE_SHA: ${{ github.sha }}
           REPOSITORY: ${{ github.repository }}
           WORKFLOW_RUN_ID: ${{ github.run_id }}

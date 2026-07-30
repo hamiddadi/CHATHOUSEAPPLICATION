@@ -1,6 +1,6 @@
 import 'react-native-gesture-handler';
 import notifee from '@notifee/react-native';
-import messaging from '@react-native-firebase/messaging';
+import { getMessaging, setBackgroundMessageHandler } from '@react-native-firebase/messaging';
 import { AppRegistry } from 'react-native';
 import { App } from './App';
 import { handleBackgroundNotificationEvent } from './src/features/notifications/services/notificationOpenService';
@@ -9,7 +9,7 @@ import { handleBackgroundNotificationEvent } from './src/features/notifications/
 // by the OS automatically; registering this satisfies @react-native-firebase's
 // requirement that a background handler exists so data-only messages don't warn
 // or get dropped. Must be set at module top level (before AppRegistry).
-messaging().setBackgroundMessageHandler(async () => {
+setBackgroundMessageHandler(getMessaging(), async () => {
   // No-op: the server sends `notification` payloads which the system tray
   // displays without app code. Extend here for data-only background work.
 });

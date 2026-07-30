@@ -8,6 +8,7 @@ import {
   resetPasswordSchema,
 } from '../../modules/auth/auth.schema';
 import { sendOtpSchema, verifyOtpSchema } from '../../modules/otp/otp.schema';
+import { legalAcceptanceSchema } from '../../modules/auth/legal-acceptance';
 import type { OpenApiComponents } from './components';
 
 export const registerAuthPaths = (
@@ -16,7 +17,16 @@ export const registerAuthPaths = (
 ): void => {
   // The runtime service enforces this in every non-test environment. Keep the
   // public contract strict even though integration tests may omit the flag.
-  const publicRegisterSchema = registerSchema.extend({ ageConfirmed: z.literal(true) });
+  const requiredLegalAcceptance = {
+    termsAccepted: z.literal(true),
+    privacyNoticeAcknowledged: z.literal(true),
+    legalDocumentVersion: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    legalLocale: z.string().min(2).max(16),
+  } as const;
+  const publicRegisterSchema = registerSchema.extend({
+    ageConfirmed: z.literal(true),
+    ...requiredLegalAcceptance,
+  });
 
   registry.registerPath({
     method: 'post',
@@ -68,7 +78,10 @@ export const registerAuthPaths = (
       body: {
         content: {
           'application/json': {
-            schema: sendOtpSchema.extend({ ageConfirmed: z.literal(true) }),
+            schema: sendOtpSchema.extend({
+              ageConfirmed: z.literal(true),
+              ...requiredLegalAcceptance,
+            }),
           },
         },
       },
@@ -104,7 +117,10 @@ export const registerAuthPaths = (
       body: {
         content: {
           'application/json': {
-            schema: verifyOtpSchema.extend({ ageConfirmed: z.literal(true) }),
+            schema: verifyOtpSchema.extend({
+              ageConfirmed: z.literal(true),
+              ...requiredLegalAcceptance,
+            }),
           },
         },
       },
@@ -123,6 +139,36 @@ export const registerAuthPaths = (
       },
       401: {
         description: 'Invalid or expired OTP',
+        content: { 'application/json': { schema: ErrorBody } },
+      },
+    },
+  });
+
+  registry.registerPath({
+    method: 'post',
+    path: '/api/auth/legal-acceptance',
+    tags: ['Auth'],
+    security: [{ bearerAuth: [] }],
+    request: {
+      body: {
+        content: {
+          'application/json': {
+            schema: legalAcceptanceSchema.extend(requiredLegalAcceptance),
+          },
+        },
+      },
+    },
+    responses: {
+      200: {
+        description: 'Current Terms acceptance and distinct Privacy Notice acknowledgement saved.',
+        content: { 'application/json': { schema: SuccessVoid } },
+      },
+      403: {
+        description: 'Explicit acceptance/acknowledgement missing',
+        content: { 'application/json': { schema: ErrorBody } },
+      },
+      409: {
+        description: 'Submitted version is not current',
         content: { 'application/json': { schema: ErrorBody } },
       },
     },

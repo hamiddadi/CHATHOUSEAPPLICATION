@@ -133,7 +133,7 @@ export const ProfileScreen: React.FC = () => {
     try {
       await Share.share({
         title: handle,
-        message: `${handle} sur Chathouse — ${url}`,
+        message: `${handle} sur ChatHouse — ${url}`,
         url,
       });
     } catch {

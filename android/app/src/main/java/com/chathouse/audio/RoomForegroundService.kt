@@ -17,7 +17,7 @@ import androidx.annotation.RequiresApi
 import com.chathouse.app.R
 
 /**
- * Foreground service that keeps the process alive while a Chathouse audio room
+ * Foreground service that keeps the process alive while a ChatHouse audio room
  * (LiveKit) is active in the background, so Android does not kill live audio.
  *
  * Declared in AndroidManifest.xml with

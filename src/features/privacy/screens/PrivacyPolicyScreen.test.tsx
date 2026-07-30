@@ -1,9 +1,7 @@
 /**
- * Render-test for PrivacyPolicyScreen. This is a static legal document (no
- * route params, no queries, no buttons) built from <LegalDoc>. The test just
- * asserts it mounts without throwing and renders its real translated heading
- * and a few section titles, so a future i18n-key rename or LegalDoc regression
- * is caught.
+ * Render-test for PrivacyPolicyScreen. This is a static legal document built
+ * from <LegalDoc>. It also exposes explicit back, mailto and canonical-policy
+ * links.
  */
 import React from 'react';
 import { Linking } from 'react-native';
@@ -24,7 +22,7 @@ describe('PrivacyPolicyScreen', () => {
     const { getByText, toJSON } = renderScreen(<PrivacyPolicyScreen />);
     expect(toJSON()).toBeTruthy();
     expect(getByText('Privacy Policy')).toBeTruthy();
-    expect(getByText('Last updated: July 18, 2026')).toBeTruthy();
+    expect(getByText('Document version: 2026-07-29')).toBeTruthy();
   });
 
   it('renders the numbered section headers', () => {
@@ -34,16 +32,11 @@ describe('PrivacyPolicyScreen', () => {
     expect(getByText('7. Contact')).toBeTruthy();
   });
 
-  it('renders the contact e-mail address', () => {
-    const { getByText } = renderScreen(<PrivacyPolicyScreen />);
-    expect(getByText('privacy@chathouse.app')).toBeTruthy();
-  });
-
-  it('opens a mailto: link when the contact e-mail is tapped', () => {
+  it('opens the canonical complete Privacy Policy link', () => {
     const openSpy = jest.spyOn(Linking, 'openURL').mockResolvedValue(undefined as never);
     const { getByText } = renderScreen(<PrivacyPolicyScreen />);
-    fireEvent.press(getByText('privacy@chathouse.app'));
-    expect(openSpy).toHaveBeenCalledWith('mailto:privacy@chathouse.app');
+    fireEvent.press(getByText('Read the complete policy'));
+    expect(openSpy).toHaveBeenCalledWith(expect.stringMatching(/\/privacy$/u));
   });
 
   it('returns through the explicit legal-document back control', () => {

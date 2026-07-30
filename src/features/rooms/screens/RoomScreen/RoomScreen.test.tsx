@@ -30,6 +30,43 @@ import {
 } from '../../../../test-utils/renderScreen';
 import { RoomScreen } from './RoomScreen';
 
+const mockAudioRetry = jest.fn().mockResolvedValue(undefined);
+const mockAudioSetMuted = jest.fn().mockResolvedValue(undefined);
+interface MockAudioState {
+  status: 'idle' | 'error';
+  reconnecting: boolean;
+  error: string | null;
+  scores: ReadonlyMap<string, number>;
+  retry: typeof mockAudioRetry;
+  setMuted: typeof mockAudioSetMuted;
+  setPeerVolume: jest.Mock;
+}
+const mockUseRoomAudio = jest.fn<MockAudioState, []>(() => ({
+  status: 'idle',
+  reconnecting: false,
+  error: null,
+  scores: new Map(),
+  retry: mockAudioRetry,
+  setMuted: mockAudioSetMuted,
+  setPeerVolume: jest.fn(),
+}));
+
+jest.mock('../../hooks/useRoomAudio', () => ({
+  SPEAKING_SCORE_THRESHOLD: 0.5,
+  SPEAKING_SELF_KEY: '__self__',
+  useRoomAudio: () => mockUseRoomAudio(),
+}));
+
+// Membership ordering is covered by useRoomMembership.test.tsx. These render
+// tests exercise the populated in-room controls after that prerequisite.
+jest.mock('../../hooks/useRoomMembership', () => ({
+  useRoomMembership: () => ({
+    status: 'joined',
+    error: null,
+    retry: jest.fn(),
+  }),
+}));
+
 const ROOM_ID = 'room-test-1';
 const VIEWER_ID = fakeAuthUser().id; // 'user-test-1'
 
@@ -75,6 +112,15 @@ const mountRoom = (room: Room) =>
 describe('RoomScreen', () => {
   beforeEach(() => {
     mockAuthenticated();
+    mockUseRoomAudio.mockReturnValue({
+      status: 'idle',
+      reconnecting: false,
+      error: null,
+      scores: new Map(),
+      retry: mockAudioRetry,
+      setMuted: mockAudioSetMuted,
+      setPeerVolume: jest.fn(),
+    });
     // Clear BEFORE each mount too: a prior test's still-mounted screen (RTL
     // unmounts in its own afterEach, which may run after ours) can otherwise
     // leave the shared store holding this room id, skipping mute hydration.
@@ -112,6 +158,27 @@ describe('RoomScreen', () => {
       expect(() => fireEvent.press(getByLabelText('Open chat'))).not.toThrow();
     });
 
+    it('localizes an audio failure and lets the user retry without exposing SDK details', () => {
+      mockUseRoomAudio.mockReturnValue({
+        status: 'error',
+        reconnecting: false,
+        error: 'could not establish signal connection',
+        scores: new Map(),
+        retry: mockAudioRetry,
+        setMuted: mockAudioSetMuted,
+        setPeerVolume: jest.fn(),
+      });
+      const { getByLabelText, getByText, queryByText } = mountRoom(fakeRoom());
+
+      expect(
+        getByText('❌ Live audio is unavailable. Check your connection and try again.'),
+      ).toBeTruthy();
+      expect(queryByText('could not establish signal connection')).toBeNull();
+
+      fireEvent.press(getByLabelText('Retry audio'));
+      expect(mockAudioRetry).toHaveBeenCalledTimes(1);
+    });
+
     it('navigates to InviteToRoom from the action-bar invite button', () => {
       const { navigation, getByLabelText } = mountRoom(fakeRoom());
       // room.invite → "Invite".
@@ -138,6 +205,27 @@ describe('RoomScreen', () => {
       expect(queryByLabelText('Mute microphone')).toBeNull();
       // Raise hand has a real handler; pressing it flips local state.
       expect(() => fireEvent.press(getByLabelText('Raise hand'))).not.toThrow();
+    });
+
+    it('returns to Raise hand when the authoritative queue is cleared externally', async () => {
+      const { getByLabelText, queryClient } = mountRoom(fakeRoom());
+      act(() => {
+        queryClient.setQueryData(roomKeys.handRaises(ROOM_ID), [
+          {
+            id: VIEWER_ID,
+            username: 'tester',
+            displayName: 'Test User',
+            avatarUrl: null,
+            raisedAt: '2026-07-29T10:00:00.000Z',
+          },
+        ]);
+      });
+      await waitFor(() => expect(getByLabelText('Lower hand')).toBeTruthy());
+
+      act(() => {
+        queryClient.setQueryData(roomKeys.handRaises(ROOM_ID), []);
+      });
+      await waitFor(() => expect(getByLabelText('Raise hand')).toBeTruthy());
     });
   });
 

@@ -5,6 +5,12 @@ import { useAuthStore } from '../../store/authStore';
 import { OtpScreen } from './OtpScreen';
 
 const PHONE = '+14155551234';
+const LEGAL = {
+  termsAccepted: true,
+  privacyNoticeAcknowledged: true,
+  legalDocumentVersion: '2026-07-29',
+  legalLocale: 'en',
+} as const;
 
 /**
  * OtpScreen — needs a `phoneNumber` route param. Back arrow → goBack. The OTP
@@ -27,7 +33,7 @@ describe('OtpScreen', () => {
 
   it('mounts without throwing and shows the title (with phoneNumber param)', () => {
     const { getByText, toJSON } = renderScreen(<OtpScreen />, {
-      route: { name: 'Otp', params: { phoneNumber: PHONE } },
+      route: { name: 'Otp', params: { phoneNumber: PHONE, legalAcceptance: LEGAL } },
     });
     expect(toJSON()).toBeTruthy();
     expect(getByText('Enter the code you received')).toBeTruthy();
@@ -35,7 +41,7 @@ describe('OtpScreen', () => {
 
   it('goes back when the header back button is pressed', () => {
     const { navigation, getByLabelText } = renderScreen(<OtpScreen />, {
-      route: { name: 'Otp', params: { phoneNumber: PHONE } },
+      route: { name: 'Otp', params: { phoneNumber: PHONE, legalAcceptance: LEGAL } },
     });
     fireEvent.press(getByLabelText('Back'));
     expect(navigation.goBack).toHaveBeenCalledTimes(1);
@@ -43,7 +49,7 @@ describe('OtpScreen', () => {
 
   it('shows the resend countdown (resend disabled on mount)', () => {
     const { queryByLabelText, getByText } = renderScreen(<OtpScreen />, {
-      route: { name: 'Otp', params: { phoneNumber: PHONE } },
+      route: { name: 'Otp', params: { phoneNumber: PHONE, legalAcceptance: LEGAL } },
     });
     // Resend button is hidden until the countdown hits 0.
     expect(queryByLabelText('Resend code')).toBeNull();
@@ -56,7 +62,7 @@ describe('OtpScreen', () => {
     useAuthStore.setState({ verifyOtp });
 
     const { getByLabelText, navigation } = renderScreen(<OtpScreen />, {
-      route: { name: 'Otp', params: { phoneNumber: PHONE } },
+      route: { name: 'Otp', params: { phoneNumber: PHONE, legalAcceptance: LEGAL } },
     });
 
     // The single hidden TextInput carries the whole code; the cells are decorative.
@@ -64,7 +70,7 @@ describe('OtpScreen', () => {
     fireEvent.changeText(hiddenInput, '123456');
 
     await waitFor(() => {
-      expect(verifyOtp).toHaveBeenCalledWith(PHONE, '123456');
+      expect(verifyOtp).toHaveBeenCalledWith(PHONE, '123456', LEGAL);
     });
     // `replace` (not `navigate`) so back from Name cannot land on a consumed OTP.
     expect(navigation.replace).toHaveBeenCalledWith('Name', { phoneNumber: PHONE });
@@ -76,7 +82,7 @@ describe('OtpScreen', () => {
     useAuthStore.setState({ verifyOtp });
 
     const { getByLabelText, findByText, queryByText } = renderScreen(<OtpScreen />, {
-      route: { name: 'Otp', params: { phoneNumber: PHONE } },
+      route: { name: 'Otp', params: { phoneNumber: PHONE, legalAcceptance: LEGAL } },
     });
 
     fireEvent.changeText(getByLabelText('Verification code, 6 digits'), '123456');
@@ -95,7 +101,7 @@ describe('OtpScreen', () => {
     useAuthStore.setState({ verifyOtp });
 
     const { getByLabelText, findByText, getByText } = renderScreen(<OtpScreen />, {
-      route: { name: 'Otp', params: { phoneNumber: PHONE } },
+      route: { name: 'Otp', params: { phoneNumber: PHONE, legalAcceptance: LEGAL } },
     });
 
     fireEvent.changeText(getByLabelText('Verification code, 6 digits'), '123456');
@@ -114,7 +120,7 @@ describe('OtpScreen', () => {
     useAuthStore.setState({ requestOtp });
 
     const { getByText } = renderScreen(<OtpScreen />, {
-      route: { name: 'Otp', params: { phoneNumber: PHONE } },
+      route: { name: 'Otp', params: { phoneNumber: PHONE, legalAcceptance: LEGAL } },
     });
 
     // Burn through the 60s cooldown so the resend button appears.
@@ -127,7 +133,7 @@ describe('OtpScreen', () => {
       await Promise.resolve();
     });
 
-    expect(requestOtp).toHaveBeenCalledWith(PHONE);
+    expect(requestOtp).toHaveBeenCalledWith(PHONE, LEGAL);
     expect(getByText('Too many attempts. Please try again in a moment.')).toBeTruthy();
   });
 });

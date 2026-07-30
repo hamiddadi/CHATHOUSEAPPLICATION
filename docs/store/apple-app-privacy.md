@@ -1,8 +1,15 @@
 # Apple App Store — App Privacy (nutrition labels) answer sheet
 
+**Legal document set version:** `2026-07-29`
+**Status:** DRAFT — NOT SUBMISSION EVIDENCE
+
+> **Working inventory — not submission evidence.** Reconcile every answer with
+> the exact signed iOS archive, merged privacy report, enabled production
+> configuration and provider contracts before completing App Store Connect.
+
 Fill into **App Store Connect → App Privacy**. This is the console answer sheet;
 the matching app-owned declarations are also present in
-`ios/ChatHouse/PrivacyInfo.xcprivacy`. Chathouse does **no tracking** (no ad
+`ios/ChatHouse/PrivacyInfo.xcprivacy`. ChatHouse does **no tracking** (no ad
 SDKs, IDFA, data broker, or cross-app advertising), so answer **"No, we do not
 use data for tracking."**
 
@@ -33,18 +40,17 @@ for encryption docs.
 | Purchases    | Purchase History        | App Functionality (account history/entitlement)                          |
 | Usage Data   | Product Interaction     | App Functionality, Product Personalization                               |
 | Usage Data   | Search History          | App Functionality, Product Personalization                               |
-
-## Data not linked to you
-
-| Category    | Data type        | Purpose                    |
-| ----------- | ---------------- | -------------------------- |
-| Diagnostics | Crash Data       | App Functionality (Sentry) |
-| Diagnostics | Performance Data | App Functionality (Sentry) |
+| Diagnostics  | Crash Data              | App Functionality                                                        |
+| Diagnostics  | Performance Data        | App Functionality                                                        |
 
 Mobile Sentry is off by default, starts only after explicit opt-in, disables
-automatic sessions and tracing, and uses `sendDefaultPii: false`. Keep
-Diagnostics as "Not Linked" only while that remains true; any future user ID,
-email, request body or stable device linkage requires moving it to "Linked".
+automatic sessions and tracing, and uses `sendDefaultPii: false`. The current
+code can nevertheless attach room or feature context to an event. Apple permits
+"Not Linked" only where data is de-identified before collection and cannot be
+re-linked, so the conservative release answer is **Linked to the user**. Move
+Diagnostics to "Not Linked" only after the exact shipped build and Sentry
+configuration prove irreversible pre-collection de-identification and no stable
+or account context.
 
 Room recording/replays are release-disabled. `Audio Data` remains required
 because users may deliberately store private voice messages and LiveKit
@@ -66,8 +72,10 @@ are no longer returned to iOS.
 
 Stripe (payments), Sentry (opt-in diagnostics), LiveKit (ephemeral live-audio
 transport), private S3-compatible object storage (avatars and voice messages),
-Twilio (OTP SMS), Firebase/FCM/APNs (push delivery), and Google Maps SDK (map
-rendering).
+Twilio (OTP SMS), Firebase/FCM/APNs (push delivery), Resend or the configured
+mail provider, CARTO/OpenStreetMap tile services, Apple MapKit and Google Maps
+SDK where enabled. Reconcile the list against the exact iOS binary and
+production contracts before submission.
 
 App Store Connect still requires a publicly reachable policy URL. Use
 `https://api.chathouse.app/privacy` only after the deployed endpoint and final

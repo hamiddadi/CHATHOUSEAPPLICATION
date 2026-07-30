@@ -64,6 +64,22 @@ export const LegalEmail: React.FC<{ children: React.ReactNode; address?: string 
   );
 };
 
+/** Inline link to the canonical published legal document. */
+export const LegalLink: React.FC<{ children: React.ReactNode; url: string }> = ({
+  children,
+  url,
+}) => (
+  <Text
+    style={styles.email}
+    accessibilityRole="link"
+    onPress={() => {
+      void Linking.openURL(url).catch(() => undefined);
+    }}
+  >
+    {children}
+  </Text>
+);
+
 interface LegalDocProps {
   /** Stable native accessibility identifier used by mobile E2E tests. */
   testID?: string;
@@ -80,9 +96,9 @@ interface LegalDocProps {
 }
 
 /**
- * Static legal document. Kept in-app rather than as a remote URL so it works
- * offline and the version reviewed at build time matches what the user sees.
- * Update the consuming screen alongside any policy change.
+ * Static legal summary. It remains readable offline while the consuming screen
+ * links to the canonical published document. Update both the summary and its
+ * build-time version alongside any policy change.
  */
 export const LegalDoc: React.FC<LegalDocProps> = ({
   testID,

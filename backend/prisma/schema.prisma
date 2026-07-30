@@ -180,6 +180,14 @@ model User {
   // ─── Account deletion ───────────────────
   deletedAt              DateTime? // Soft delete: non-null = pending deletion
   ageConfirmedAt         DateTime? // Self-attestation that the user meets the 16+ policy
+  // Versioned legal acknowledgement. Terms acceptance is the contractual
+  // action; privacyNoticeAcknowledged* only proves that the notice was shown
+  // and acknowledged — it is deliberately not named or treated as consent.
+  termsAcceptedVersion                 String?   @db.VarChar(32)
+  termsAcceptedAt                      DateTime?
+  privacyNoticeAcknowledgedVersion     String?   @db.VarChar(32)
+  privacyNoticeAcknowledgedAt          DateTime?
+  legalAcceptanceLocale                String?   @db.VarChar(16)
   // ─── Platform admin role + suspension ───
   // appRole defaults to USER. Only SUPER_ADMIN can grant ADMIN+. The
   // suspendedUntil field is a temporary sanction (null = active, future

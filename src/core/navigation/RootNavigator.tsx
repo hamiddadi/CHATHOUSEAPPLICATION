@@ -4,7 +4,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { StatusBar } from 'react-native';
 import { useAuthStore } from '../../features/auth/store/authStore';
 import { useExtColorScheme } from '../../features/extensions';
-import { AccountRestorationGate } from '../../features/privacy';
+import { AccountRestorationGate, LegalAcceptanceGate } from '../../features/privacy';
 import { Loader } from '../../shared/components/Loader';
 import { AnimatedSplashScreen } from '../../shared/components/AnimatedSplashScreen';
 import { colors } from '../../shared/constants/theme';
@@ -77,6 +77,7 @@ export const RootNavigator: React.FC<RootNavigatorProps> = ({ onReady }) => {
       {/* RGPD grace-period restoration prompt — offers "Restore my account" when
           a soft-deleted user signs back in within the 30-day window. */}
       <AccountRestorationGate />
+      <LegalAcceptanceGate />
 
       <RootStack.Navigator
         screenOptions={{

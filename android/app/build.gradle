@@ -223,7 +223,9 @@ def validateReleaseSigning = {
 // "release"; they must not bypass the signing guard.
 gradle.taskGraph.whenReady { graph ->
     def releaseTaskScheduled = graph.allTasks.any { task ->
-        task.project == project && task.name.toLowerCase().contains('release')
+        def taskName = task.name.toLowerCase()
+        task.project == project &&
+            taskName ==~ /^(assemble|bundle|package|install|publish).*release.*$/
     }
     if (releaseTaskScheduled) {
         validateReleaseSigning()

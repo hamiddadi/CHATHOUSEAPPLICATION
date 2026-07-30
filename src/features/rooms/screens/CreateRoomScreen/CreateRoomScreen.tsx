@@ -44,7 +44,7 @@ const VISIBILITY_OPTIONS: readonly VisibilityOption[] = [
 // createRoom.visibility.*). Kept beside the options so the two stay in sync.
 const VISIBILITY_DEFAULTS: Record<VisibilityOption['key'], { label: string; description: string }> =
   {
-    public: { label: 'Open', description: 'Anyone in Chathouse can join' },
+    public: { label: 'Open', description: 'Anyone in ChatHouse can join' },
     social: { label: 'Social', description: 'Only people you follow can join' },
     closed: { label: 'Closed', description: 'Only people you invite' },
   };

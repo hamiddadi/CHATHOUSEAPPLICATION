@@ -54,6 +54,9 @@ export const useVoiceRecorder = (): VoiceRecorder => {
   const [isPreparing, setIsPreparing] = useState(false);
   const [elapsedMs, setElapsedMs] = useState(0);
   const activeRef = useRef(false);
+  const preparingRef = useRef(false);
+  const mountedRef = useRef(true);
+  const operationRef = useRef(0);
   const lastPosRef = useRef(0);
   const uriRef = useRef<string | null>(null);
 
@@ -69,27 +72,53 @@ export const useVoiceRecorder = (): VoiceRecorder => {
   }, []);
 
   const start = useCallback(async (): Promise<boolean> => {
-    if (activeRef.current) return false;
+    if (activeRef.current || preparingRef.current) return false;
+    const operation = ++operationRef.current;
+    preparingRef.current = true;
     setIsPreparing(true);
+    const isCurrent = (): boolean => mountedRef.current && operationRef.current === operation;
     try {
       // Android needs an explicit runtime request. On iOS, the native recorder
       // owns the system prompt described by NSMicrophoneUsageDescription.
       if (!(await requestAudioPermission())) {
-        setIsPreparing(false);
+        preparingRef.current = false;
+        if (isCurrent()) {
+          setIsPreparing(false);
+        }
+        return false;
+      }
+      if (!isCurrent()) {
+        preparingRef.current = false;
         return false;
       }
       // The recorder + player share one native instance — stop any voice note
       // that's currently playing before we capture.
       await useVoicePlayback.getState().stop();
+      if (!isCurrent()) {
+        preparingRef.current = false;
+        return false;
+      }
 
       lastPosRef.current = 0;
       const uri = await audioRecorderPlayer.startRecorder(undefined, AUDIO_SET);
       uriRef.current = uri;
+      if (!isCurrent()) {
+        // The native iOS permission/start operation can resolve after the
+        // screen has disappeared. Stop the recorder immediately instead of
+        // leaving a background capture with no mounted owner.
+        audioRecorderPlayer.removeRecordBackListener();
+        await audioRecorderPlayer.stopRecorder().catch(() => undefined);
+        uriRef.current = null;
+        preparingRef.current = false;
+        return false;
+      }
       audioRecorderPlayer.addRecordBackListener(e => {
+        if (!mountedRef.current) return;
         lastPosRef.current = e.currentPosition;
         setElapsedMs(e.currentPosition);
       });
       activeRef.current = true;
+      preparingRef.current = false;
       setElapsedMs(0);
       setIsRecording(true);
       setIsPreparing(false);
@@ -97,8 +126,11 @@ export const useVoiceRecorder = (): VoiceRecorder => {
     } catch (err) {
       console.warn('[voice] start recording failed', err);
       activeRef.current = false;
-      setIsPreparing(false);
-      setIsRecording(false);
+      preparingRef.current = false;
+      if (isCurrent()) {
+        setIsPreparing(false);
+        setIsRecording(false);
+      }
       await teardownRecorder();
       return false;
     }
@@ -118,24 +150,34 @@ export const useVoiceRecorder = (): VoiceRecorder => {
   }, [teardownRecorder]);
 
   const cancel = useCallback(async (): Promise<void> => {
+    ++operationRef.current;
+    if (mountedRef.current) setIsPreparing(false);
     if (!activeRef.current) return;
     activeRef.current = false;
-    setIsRecording(false);
-    setElapsedMs(0);
+    if (mountedRef.current) {
+      setIsRecording(false);
+      setElapsedMs(0);
+    }
     await teardownRecorder();
   }, [teardownRecorder]);
 
   // Stop a live recording if the screen unmounts mid-record (back button, etc.).
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      // This is a logical generation counter, not a rendered node reference;
+      // cleanup intentionally invalidates whichever async start is current.
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      ++operationRef.current;
+      preparingRef.current = false;
       if (activeRef.current) {
         activeRef.current = false;
         audioRecorderPlayer.removeRecordBackListener();
         void audioRecorderPlayer.stopRecorder().catch(() => undefined);
       }
-    },
-    [],
-  );
+    };
+  }, []);
 
   return { isRecording, isPreparing, elapsedMs, start, finish, cancel };
 };

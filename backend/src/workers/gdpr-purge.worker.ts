@@ -41,8 +41,8 @@ import {
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
 
-// Configurable via env (no env.ts change required — read defensively with
-// sane defaults). Recommended additions to env.ts are noted in the manifest.
+// Parsed centrally by env.ts so the worker, account-status API and production
+// deployment all use the same validated value.
 const PURGE_CRON = env.GDPR_PURGE_CRON;
 
 let worker: Worker | null = null;

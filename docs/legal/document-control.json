@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "productName": "ChatHouse",
+  "status": "draft",
+  "version": "2026-07-29",
+  "lastReviewedDate": "2026-07-29",
+  "effectiveDate": null,
+  "defaultLanguage": "en",
+  "supportedLanguages": ["en", "fr"],
+  "documents": {
+    "privacy": {
+      "route": "/privacy",
+      "files": {
+        "en": "docs/legal/PRIVACY-POLICY.md",
+        "fr": "docs/legal/PRIVACY-POLICY.fr.md"
+      }
+    },
+    "terms": {
+      "route": "/terms",
+      "files": {
+        "en": "docs/legal/EULA.md",
+        "fr": "docs/legal/EULA.fr.md"
+      }
+    },
+    "communityGuidelines": {
+      "route": "/community-guidelines",
+      "files": {
+        "en": "docs/legal/COMMUNITY-GUIDELINES.md",
+        "fr": "docs/legal/COMMUNITY-GUIDELINES.fr.md"
+      }
+    },
+    "childSafety": {
+      "route": "/child-safety",
+      "files": {
+        "en": "docs/legal/CHILD-SAFETY-STANDARDS.md",
+        "fr": "docs/legal/CHILD-SAFETY-STANDARDS.fr.md"
+      }
+    }
+  },
+  "storeInventories": [
+    "docs/store/listing.md",
+    "docs/store/apple-app-privacy.md",
+    "docs/store/google-play-data-safety.md"
+  ]
+}

@@ -31,6 +31,7 @@ import {
   enqueueSocketDisconnectCleanup,
   trackSocketDisconnectCleanup,
 } from './disconnect-cleanup';
+import { isSocketOriginAllowed } from './socket.origin';
 
 // Backward-compatible name used by integration teardown and app shutdown.
 export { drainSocketDisconnectCleanups as drainRoomDisconnectCleanups } from './disconnect-cleanup';
@@ -45,8 +46,12 @@ export const createSocketServer = async (httpServer: HttpServer): Promise<Server
   const io = new Server(httpServer, {
     cors: {
       origin: (origin, cb) => {
-        if (!origin) return cb(null, true);
-        return env.CORS_ORIGINS.includes(origin) ? cb(null, true) : cb(new Error('CORS'));
+        const allowed = isSocketOriginAllowed(origin, {
+          corsOrigins: env.CORS_ORIGINS,
+          publicUrl: env.PUBLIC_URL,
+          nodeEnv: env.NODE_ENV,
+        });
+        return allowed ? cb(null, true) : cb(new Error('CORS'));
       },
       credentials: true,
     },

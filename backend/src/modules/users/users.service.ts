@@ -19,6 +19,7 @@ import {
 } from '../../extensions/modules/payments/stripe.gdpr';
 import { exportExtensionData } from '../../extensions/gdpr';
 import { scheduleBackgroundTask } from '../../utils/backgroundTasks';
+import { legalAcceptanceSelect, legalAcceptanceStatus } from '../auth/legal-acceptance';
 import type {
   CompleteOnboardingInput,
   InterestsInput,
@@ -63,6 +64,7 @@ const meSelect = {
   interests: true,
   hasCompletedOnboarding: true,
   deletedAt: true,
+  ...legalAcceptanceSelect,
 } as const;
 
 // Only surface users seen within this window on the live map.
@@ -143,7 +145,13 @@ export const usersService = {
   async getMe(userId: string) {
     const me = await prisma.user.findUnique({ where: { id: userId }, select: meSelect });
     if (!me) throw new AppError('USER_001');
-    return me;
+    return {
+      ...me,
+      permanentDeletionAt: me.deletedAt
+        ? new Date(me.deletedAt.getTime() + DELETION_GRACE_MS).toISOString()
+        : null,
+      ...legalAcceptanceStatus(me),
+    };
   },
 
   async updateMe(userId: string, input: UpdateMeInput) {
@@ -767,6 +775,7 @@ export const usersService = {
           stripeConnectAccountId: true,
           deletedAt: true,
           ageConfirmedAt: true,
+          ...legalAcceptanceSelect,
           createdAt: true,
           updatedAt: true,
           lastSeenAt: true,

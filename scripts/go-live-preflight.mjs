@@ -25,15 +25,17 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { inflateRawSync } from 'node:zlib';
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_ROOT = path.resolve(SCRIPT_DIR, '..');
 const PACKAGE_ID = 'com.chathouse.app';
 const DEFAULT_SCOPES = ['source', 'production', 'android', 'ios', 'network', 'legal', 'evidence'];
+const ALLOWED_SCOPES = [...DEFAULT_SCOPES, 'native'];
 const PLACEHOLDER_PATTERN =
-  /(?:change[_ -]?me|placeholder|replace[-_. ]?with|your[-_. ]?project|example\.(?:com|net|org|test)|__[A-Za-z0-9][A-Za-z0-9_-]*__|\[(?:legal entity|registered address|address|authority|confirm|jurisdiction|…|\.\.\.)[^\]]*\])/i;
+  /(?:change[_ -]?me|placeholder|replace[-_. ]?with|your[-_. ]?project|example\.(?:com|net|org|test|invalid)|\b(?:todo|tbd|unknown|not published|pending confirmation)\b|__[A-Za-z0-9][A-Za-z0-9_-]*__|\[(?:publication date|full registered|complete registered|company registration|legal entity|registered address|address|authority|confirm|jurisdiction|governing|competent courts|operated|verified|insert|list every|adequacy|dpo|representative|name\/role|…|\.\.\.)[^\]]*\])/i;
 const DRAFT_PATTERN =
-  /(?:not publishable as[- ]is|working draft|must resolve before submission|fill every .*placeholder|\b(?:todo|tbd)\b)/i;
+  /(?:not publishable(?:\s+as[- ]is|\s+yet)?|release blocker|working (?:draft|inventory)|draft legal copy|must resolve before submission|fill every .*placeholder|pas encore publiable|blocage (?:de |pour la )?mise en production|\bbrouillon\b|\b(?:todo|tbd)\b)/i;
 
 export function parseEnv(text) {
   const values = {};
@@ -118,8 +120,22 @@ export function buildPublicEndpoints(mobileEnv = {}, overrides = {}) {
   return {
     api_health: overrides.GO_LIVE_API_HEALTH_URL || `${apiUrl.origin}/health`,
     privacy: overrides.GO_LIVE_PRIVACY_URL || `${apiUrl.origin}/privacy`,
+    privacy_fr: overrides.GO_LIVE_PRIVACY_FR_URL || `${apiUrl.origin}/privacy?lang=fr`,
+    terms: overrides.GO_LIVE_TERMS_URL || `${apiUrl.origin}/terms`,
+    terms_fr: overrides.GO_LIVE_TERMS_FR_URL || `${apiUrl.origin}/terms?lang=fr`,
+    community_guidelines:
+      overrides.GO_LIVE_COMMUNITY_GUIDELINES_URL || `${apiUrl.origin}/community-guidelines`,
+    community_guidelines_fr:
+      overrides.GO_LIVE_COMMUNITY_GUIDELINES_FR_URL ||
+      `${apiUrl.origin}/community-guidelines?lang=fr`,
+    child_safety: overrides.GO_LIVE_CHILD_SAFETY_URL || `${apiUrl.origin}/child-safety`,
+    child_safety_fr:
+      overrides.GO_LIVE_CHILD_SAFETY_FR_URL || `${apiUrl.origin}/child-safety?lang=fr`,
     account_deletion: overrides.GO_LIVE_ACCOUNT_DELETION_URL || `${apiUrl.origin}/account-deletion`,
+    account_deletion_fr:
+      overrides.GO_LIVE_ACCOUNT_DELETION_FR_URL || `${apiUrl.origin}/account-deletion?lang=fr`,
     support: overrides.GO_LIVE_SUPPORT_URL || `${apiUrl.origin}/support`,
+    support_fr: overrides.GO_LIVE_SUPPORT_FR_URL || `${apiUrl.origin}/support?lang=fr`,
     app: overrides.GO_LIVE_APP_URL || 'https://app.chathouse.com',
     livekit:
       overrides.GO_LIVE_LIVEKIT_HTTPS_URL ||
@@ -193,14 +209,447 @@ export function legalDraftReasons(text) {
   return reasons;
 }
 
+const LEGAL_DOCUMENT_IDS = ['privacy', 'terms', 'communityGuidelines', 'childSafety'];
+
+export function validateLegalDocumentAlignment({
+  control,
+  documentSources,
+  storeSources,
+  backendMetadataSource,
+  mobileMetadataSource,
+  mobileVersion,
+}) {
+  if (!control || typeof control !== 'object' || Array.isArray(control)) {
+    throw new Error('document-control.json doit contenir un objet');
+  }
+  if (control.schemaVersion !== 1) {
+    throw new Error('schemaVersion du contrôle juridique doit valoir 1');
+  }
+  if (!['draft', 'published'].includes(control.status)) {
+    throw new Error('status juridique doit valoir draft ou published');
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/u.test(control.version ?? '')) {
+    throw new Error('version juridique canonique invalide');
+  }
+  if (control.lastReviewedDate !== control.version) {
+    throw new Error('lastReviewedDate doit correspondre à la version juridique');
+  }
+  if (control.effectiveDate !== null && !/^\d{4}-\d{2}-\d{2}$/u.test(control.effectiveDate ?? '')) {
+    throw new Error("date d'entrée en vigueur juridique invalide");
+  }
+  if (
+    control.defaultLanguage !== 'en' ||
+    !Array.isArray(control.supportedLanguages) ||
+    !control.supportedLanguages.includes('en') ||
+    !control.supportedLanguages.includes('fr')
+  ) {
+    throw new Error('les langues juridiques en et fr doivent être déclarées');
+  }
+
+  const expectedDocumentPaths = new Set();
+  for (const id of LEGAL_DOCUMENT_IDS) {
+    const descriptor = control.documents?.[id];
+    if (!descriptor || typeof descriptor.route !== 'string') {
+      throw new Error(`document juridique ${id} absent du contrôle`);
+    }
+    for (const language of ['en', 'fr']) {
+      const filePath = descriptor.files?.[language];
+      if (typeof filePath !== 'string' || !filePath) {
+        throw new Error(`fichier ${language} absent pour ${id}`);
+      }
+      expectedDocumentPaths.add(filePath);
+      const source = documentSources?.[filePath];
+      if (typeof source !== 'string') {
+        throw new Error(`source juridique introuvable: ${filePath}`);
+      }
+      const versionHeader =
+        language === 'fr'
+          ? `**Version du document :** \`${control.version}\``
+          : `**Document version:** \`${control.version}\``;
+      const languageHeader =
+        language === 'fr' ? '**Langue :** Français (`fr`)' : '**Language:** English (`en`)';
+      if (!source.includes(versionHeader)) {
+        throw new Error(`version ${control.version} absente ou divergente dans ${filePath}`);
+      }
+      if (!source.includes(languageHeader)) {
+        throw new Error(`langue ${language} non identifiée dans ${filePath}`);
+      }
+    }
+  }
+
+  if (Object.keys(documentSources ?? {}).length !== expectedDocumentPaths.size) {
+    throw new Error('ensemble de sources juridiques différent du manifeste');
+  }
+
+  const expectedStorePaths = control.storeInventories;
+  if (!Array.isArray(expectedStorePaths) || expectedStorePaths.length !== 3) {
+    throw new Error('les trois fiches Store doivent être déclarées');
+  }
+  for (const filePath of expectedStorePaths) {
+    const source = storeSources?.[filePath];
+    if (typeof source !== 'string') throw new Error(`fiche Store introuvable: ${filePath}`);
+    if (!source.includes(`**Legal document set version:** \`${control.version}\``)) {
+      throw new Error(`version juridique divergente dans ${filePath}`);
+    }
+  }
+  if (Object.keys(storeSources ?? {}).length !== expectedStorePaths.length) {
+    throw new Error('ensemble de fiches Store différent du manifeste');
+  }
+
+  if (
+    typeof backendMetadataSource !== 'string' ||
+    !backendMetadataSource.includes(`LEGAL_DOCUMENT_FALLBACK_VERSION = '${control.version}'`)
+  ) {
+    throw new Error('version juridique backend divergente');
+  }
+  if (
+    typeof mobileMetadataSource !== 'string' ||
+    !mobileMetadataSource.includes(`LEGAL_DOCUMENT_VERSION ?? '${control.version}'`)
+  ) {
+    throw new Error('version juridique mobile de secours divergente');
+  }
+  if (mobileVersion !== undefined && mobileVersion !== control.version) {
+    throw new Error(
+      `version juridique mobile ${mobileVersion || 'absente'} différente de ${control.version}`,
+    );
+  }
+  return `${expectedDocumentPaths.size} documents, ${expectedStorePaths.length} fiches Store, app et backend alignés sur ${control.version}`;
+}
+
+export function validateLegalPublicationControl(control) {
+  if (control?.status !== 'published') {
+    throw new Error('document-control.json reste en statut draft');
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/u.test(control.effectiveDate ?? '')) {
+    throw new Error("date d'entrée en vigueur publiée absente");
+  }
+  return `version ${control.version}, entrée en vigueur ${control.effectiveDate}`;
+}
+
+export function validateStoreListingMetadata(listing, expectedProductName = 'ChatHouse') {
+  const codeValue = label => {
+    const escaped = label.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+    return listing.match(new RegExp(`\\*\\*${escaped}:\\*\\*\\s*\`([^\`]+)\``, 'u'))?.[1] ?? '';
+  };
+  const appName = codeValue('App name');
+  const appleSubtitle = codeValue('Apple subtitle (≤30 chars)');
+  const googleShortDescription = codeValue('Google short description (≤80 chars)');
+  const appleKeywords = codeValue('Apple keywords (≤100 chars, comma-separated)');
+  const packageId = listing.match(/\*\*Bundle ID \/ package:\*\*\s*`([^`]+)`/u)?.[1] ?? '';
+  const fullDescription =
+    listing.match(/## Full description[^\n]*\n\n```\r?\n([\s\S]*?)\r?\n```/u)?.[1] ?? '';
+
+  if (appName !== expectedProductName) {
+    throw new Error(`nom Store ${appName || 'absent'} différent de ${expectedProductName}`);
+  }
+  if (packageId !== PACKAGE_ID) throw new Error(`package Store doit être ${PACKAGE_ID}`);
+  for (const [label, value, maximum] of [
+    ['sous-titre Apple', appleSubtitle, 30],
+    ['description courte Google', googleShortDescription, 80],
+    ['mots-clés Apple', appleKeywords, 100],
+    ['description complète', fullDescription, 4000],
+  ]) {
+    if (!value) throw new Error(`${label} absent`);
+    if (value.length > maximum) {
+      throw new Error(`${label}: ${value.length} caractères, maximum ${maximum}`);
+    }
+  }
+  return `nom/package alignés; limites ${appleSubtitle.length}/30, ${googleShortDescription.length}/80, ${appleKeywords.length}/100 et ${fullDescription.length}/4000`;
+}
+
+function readLegalDocumentControl(root) {
+  const filePath = path.join(root, 'docs', 'legal', 'document-control.json');
+  let control;
+  try {
+    control = JSON.parse(readText(filePath, 'contrôle des documents juridiques'));
+  } catch (error) {
+    throw new Error(
+      `document-control.json invalide (${error instanceof Error ? error.message : error})`,
+    );
+  }
+  return control;
+}
+
+function pngMetadata(buffer) {
+  const signature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+  if (
+    !Buffer.isBuffer(buffer) ||
+    buffer.length < 45 ||
+    !buffer.subarray(0, 8).equals(signature) ||
+    buffer.toString('ascii', 12, 16) !== 'IHDR'
+  ) {
+    throw new Error("l'icône iOS n'est pas un PNG valide");
+  }
+  const width = buffer.readUInt32BE(16);
+  const height = buffer.readUInt32BE(20);
+  const colorType = buffer[25];
+  let offset = 8;
+  let hasTransparencyChunk = false;
+  let sawEnd = false;
+  while (offset + 12 <= buffer.length) {
+    const length = buffer.readUInt32BE(offset);
+    if (offset + length + 12 > buffer.length) {
+      throw new Error("l'icône iOS contient un chunk PNG tronqué");
+    }
+    const type = buffer.toString('ascii', offset + 4, offset + 8);
+    if (type === 'tRNS') hasTransparencyChunk = true;
+    offset += length + 12;
+    if (type === 'IEND') {
+      sawEnd = true;
+      break;
+    }
+  }
+  if (!sawEnd) throw new Error("l'icône iOS ne contient pas de fin PNG");
+  return {
+    width,
+    height,
+    hasAlpha: colorType === 4 || colorType === 6 || hasTransparencyChunk,
+  };
+}
+
+export function validateAndroidNativeConfiguration({
+  buildGradle,
+  gradleProperties,
+  manifest,
+  debugManifest,
+  debugOptimizedManifest,
+  releaseNetworkSecurity,
+  debugNetworkSecurity,
+  debugOptimizedNetworkSecurity,
+}) {
+  const failures = [];
+  const properties = parseEnv(gradleProperties);
+  const architectures = String(properties.reactNativeArchitectures ?? '')
+    .split(',')
+    .map(value => value.trim())
+    .filter(Boolean);
+
+  for (const architecture of ['armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64']) {
+    if (!architectures.includes(architecture))
+      failures.push(`ABI Android absente: ${architecture}`);
+  }
+  for (const [key, expected] of [
+    ['android.minSdkVersion', '24'],
+    ['android.compileSdkVersion', '36'],
+    ['android.targetSdkVersion', '36'],
+    ['android.enableMinifyInReleaseBuilds', 'true'],
+    ['android.enableShrinkResourcesInReleaseBuilds', 'true'],
+  ]) {
+    if (properties[key] !== expected) failures.push(`${key} doit valoir ${expected}`);
+  }
+
+  for (const required of [
+    "applicationId = 'com.chathouse.app'",
+    'validateProductionReleaseConfiguration',
+    "System.getenv('ENVFILE') != '.env.production'",
+    "productionEnv['REALTIME_ENABLED'] != 'true'",
+    'validateProductionFirebase',
+    'validateReleaseSigning',
+    'gradle.taskGraph.whenReady',
+    'CHATHOUSE_ALLOW_DEBUG_RELEASE_SIGNING',
+  ]) {
+    if (!buildGradle.includes(required)) failures.push(`garde Gradle absente: ${required}`);
+  }
+
+  for (const required of [
+    'android:allowBackup="false"',
+    'android:fullBackupContent="false"',
+    'android:dataExtractionRules="@xml/data_extraction_rules"',
+    'android:networkSecurityConfig="@xml/network_security_config"',
+    'android.permission.RECORD_AUDIO',
+    'android.permission.POST_NOTIFICATIONS',
+    'android.permission.FOREGROUND_SERVICE_MICROPHONE',
+    'android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK',
+  ]) {
+    if (!manifest.includes(required)) failures.push(`manifeste Android incomplet: ${required}`);
+  }
+  if (/android:usesCleartextTraffic\s*=\s*"true"/u.test(manifest)) {
+    failures.push('le manifeste Android main autorise le trafic HTTP clair');
+  }
+  if (
+    !/<intent-filter\b[^>]*android:autoVerify="true"[\s\S]*?<data\b[^>]*android:scheme="https"[^>]*android:host="app\.chathouse\.com"[^>]*\/>[\s\S]*?<\/intent-filter>/u.test(
+      manifest,
+    )
+  ) {
+    failures.push('App Links Android autoVerify pour app.chathouse.com absent');
+  }
+  if (
+    /cleartextTrafficPermitted\s*=\s*"true"/u.test(releaseNetworkSecurity) ||
+    !/cleartextTrafficPermitted\s*=\s*"false"/u.test(releaseNetworkSecurity)
+  ) {
+    failures.push('la configuration réseau Android main doit interdire tout HTTP clair');
+  }
+  for (const [variant, variantManifest, networkSecurity] of [
+    ['debug', debugManifest, debugNetworkSecurity],
+    ['debugOptimized', debugOptimizedManifest, debugOptimizedNetworkSecurity],
+  ]) {
+    if (
+      !/android:usesCleartextTraffic\s*=\s*"true"/u.test(variantManifest) ||
+      !/tools:replace\s*=\s*"android:usesCleartextTraffic"/u.test(variantManifest)
+    ) {
+      failures.push(
+        `le manifeste Android ${variant} doit remplacer explicitement usesCleartextTraffic pour Metro`,
+      );
+    }
+    if (!/cleartextTrafficPermitted\s*=\s*"true"/u.test(networkSecurity)) {
+      failures.push(
+        `la configuration réseau Android ${variant} doit conserver le support Metro local`,
+      );
+    }
+  }
+
+  if (failures.length) throw new Error(failures.join('; '));
+  return `SDK 36, ${architectures.join(', ')}, R8/shrink et réseau Release TLS-only`;
+}
+
+export function validateIosNativeConfiguration({
+  project,
+  infoPlist,
+  entitlements,
+  privacyManifest,
+  iconContents,
+  icon,
+  placeholderIcon,
+  bundleScript,
+}) {
+  const failures = [];
+  const releaseBlock = project.match(
+    /\/\* Release \*\/\s*=\s*\{[\s\S]*?buildSettings\s*=\s*\{([\s\S]*?)\};\s*name\s*=\s*Release;/u,
+  )?.[1];
+  if (!releaseBlock) {
+    failures.push('configuration Xcode Release introuvable');
+  } else {
+    for (const [pattern, message] of [
+      [/APS_ENVIRONMENT\s*=\s*production;/u, 'APS_ENVIRONMENT Release doit être production'],
+      [
+        /PRODUCT_BUNDLE_IDENTIFIER\s*=\s*"com\.chathouse\.app";/u,
+        `PRODUCT_BUNDLE_IDENTIFIER doit être ${PACKAGE_ID}`,
+      ],
+      [/TARGETED_DEVICE_FAMILY\s*=\s*"1,2";/u, 'la cible Release doit couvrir iPhone et iPad'],
+      [
+        /CODE_SIGN_ENTITLEMENTS\s*=\s*ChatHouse\/ChatHouse\.entitlements;/u,
+        'les entitlements Release ne sont pas liés',
+      ],
+      [/CODE_SIGN_STYLE\s*=\s*Automatic;/u, 'CODE_SIGN_STYLE Release doit être Automatic'],
+      [
+        /ASSETCATALOG_COMPILER_APPICON_NAME\s*=\s*AppIcon;/u,
+        "le catalogue d'icône Release n'est pas AppIcon",
+      ],
+      [
+        /CURRENT_PROJECT_VERSION\s*=\s*[1-9]\d*;/u,
+        'CURRENT_PROJECT_VERSION Release doit être un entier positif',
+      ],
+      [
+        /MARKETING_VERSION\s*=\s*\d+(?:\.\d+){1,3};/u,
+        'MARKETING_VERSION Release doit être explicite',
+      ],
+      [/SUPPORTED_PLATFORMS\s*=\s*"[^"]*iphoneos[^"]*";/u, 'iphoneos absent de Release'],
+    ]) {
+      if (!pattern.test(releaseBlock)) failures.push(message);
+    }
+  }
+
+  for (const required of [
+    'PrivacyInfo.xcprivacy in Resources',
+    'GoogleService-Info.plist in Resources',
+    'scripts/bundle-react-native.sh',
+  ]) {
+    if (!project.includes(required)) failures.push(`projet Xcode incomplet: ${required}`);
+  }
+  for (const required of [
+    '<key>CFBundleIdentifier</key>',
+    '<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>',
+    '<string>chathouse</string>',
+    '<key>NSLocationWhenInUseUsageDescription</key>',
+    '<key>NSMicrophoneUsageDescription</key>',
+    '<key>NSPhotoLibraryUsageDescription</key>',
+    '<key>NSSpeechRecognitionUsageDescription</key>',
+    '<string>audio</string>',
+    '<string>remote-notification</string>',
+  ]) {
+    if (!infoPlist.includes(required)) failures.push(`Info.plist iOS incomplet: ${required}`);
+  }
+  if (
+    !/<key>NSAllowsArbitraryLoads<\/key>\s*<false\/>/u.test(infoPlist) ||
+    !/<key>ITSAppUsesNonExemptEncryption<\/key>\s*<false\/>/u.test(infoPlist)
+  ) {
+    failures.push('ATS ou déclaration de chiffrement iOS incorrecte');
+  }
+  if (
+    !entitlements.includes('<string>$(APS_ENVIRONMENT)</string>') ||
+    !entitlements.includes('<string>applinks:app.chathouse.com</string>')
+  ) {
+    failures.push('Push ou Associated Domains absent des entitlements iOS');
+  }
+  if (
+    !/<key>NSPrivacyTracking<\/key>\s*<false\/>/u.test(privacyManifest) ||
+    !privacyManifest.includes('<key>NSPrivacyCollectedDataTypes</key>') ||
+    !privacyManifest.includes('<key>NSPrivacyAccessedAPITypes</key>')
+  ) {
+    failures.push('PrivacyInfo.xcprivacy iOS incomplet');
+  }
+  for (const diagnosticsType of [
+    'NSPrivacyCollectedDataTypeCrashData',
+    'NSPrivacyCollectedDataTypePerformanceData',
+  ]) {
+    const declaration = new RegExp(
+      `<string>${diagnosticsType}<\\/string>[\\s\\S]{0,180}<key>NSPrivacyCollectedDataTypeLinked<\\/key>\\s*<true\\/>`,
+      'u',
+    );
+    if (!declaration.test(privacyManifest)) {
+      failures.push(`${diagnosticsType} doit rester déclaré comme lié à l'utilisateur`);
+    }
+  }
+  if (
+    !bundleScript.includes('iOS device Release builds require ENVFILE=.env.production') ||
+    !bundleScript.includes('validate_firebase_plist')
+  ) {
+    failures.push('garde de bundle iOS production incomplète');
+  }
+
+  let iconDefinition;
+  try {
+    iconDefinition = JSON.parse(iconContents);
+  } catch {
+    failures.push("Contents.json de l'AppIcon iOS invalide");
+  }
+  const storeIcon = iconDefinition?.images?.find(
+    image =>
+      image?.filename === 'AppIcon.png' &&
+      image?.idiom === 'universal' &&
+      image?.platform === 'ios' &&
+      image?.size === '1024x1024',
+  );
+  if (!storeIcon) failures.push('définition AppIcon iOS 1024x1024 universelle absente');
+  try {
+    const metadata = pngMetadata(icon);
+    if (metadata.width !== 1024 || metadata.height !== 1024) {
+      failures.push(`AppIcon iOS doit mesurer 1024x1024 (${metadata.width}x${metadata.height})`);
+    }
+    if (metadata.hasAlpha) failures.push('AppIcon iOS contient encore un canal alpha');
+  } catch (error) {
+    failures.push(error instanceof Error ? error.message : String(error));
+  }
+  if (placeholderIcon && icon.equals(placeholderIcon)) {
+    failures.push("AppIcon iOS est encore identique à l'asset explicitement marqué PLACEHOLDER");
+  }
+
+  if (failures.length) throw new Error(failures.join('; '));
+  return 'Release iPhone/iPad, Push, Universal Links, privacy manifest et AppIcon validés';
+}
+
 export function validateBackendReleaseIdentifiers(values, requested = {}) {
-  if (!/^[A-Z0-9]{10}$/u.test(values.APPLE_TEAM_ID ?? '')) {
+  if (
+    !/^[A-Z0-9]{10}$/u.test(values.APPLE_TEAM_ID ?? '') ||
+    /^(?:TESTTEAMID|0{10})$/u.test(values.APPLE_TEAM_ID ?? '')
+  ) {
     throw new Error('APPLE_TEAM_ID backend doit contenir 10 caractères alphanumériques');
   }
   const backendAndroidFingerprint = normalizeFingerprint(values.ANDROID_APP_SIGNING_SHA256);
   if (
     !/^(?:[0-9A-Fa-f]{2}:){31}[0-9A-Fa-f]{2}$/u.test(values.ANDROID_APP_SIGNING_SHA256 ?? '') ||
-    !/^[A-F0-9]{64}$/u.test(backendAndroidFingerprint)
+    !/^[A-F0-9]{64}$/u.test(backendAndroidFingerprint) ||
+    /^0{64}$/u.test(backendAndroidFingerprint)
   ) {
     throw new Error('ANDROID_APP_SIGNING_SHA256 backend doit être colonisé sur 32 octets');
   }
@@ -237,6 +686,570 @@ function requireDirectory(directoryPath, label) {
 
 function readText(filePath, label) {
   return readFileSync(requireFile(filePath, label), 'utf8').replace(/^\uFEFF/u, '');
+}
+
+function validateAndroidNativeFiles(root) {
+  return validateAndroidNativeConfiguration({
+    buildGradle: readText(
+      path.join(root, 'android', 'app', 'build.gradle'),
+      'build.gradle Android',
+    ),
+    gradleProperties: readText(
+      path.join(root, 'android', 'gradle.properties'),
+      'gradle.properties Android',
+    ),
+    manifest: readText(
+      path.join(root, 'android', 'app', 'src', 'main', 'AndroidManifest.xml'),
+      'manifeste Android main',
+    ),
+    debugManifest: readText(
+      path.join(root, 'android', 'app', 'src', 'debug', 'AndroidManifest.xml'),
+      'manifeste Android debug',
+    ),
+    debugOptimizedManifest: readText(
+      path.join(root, 'android', 'app', 'src', 'debugOptimized', 'AndroidManifest.xml'),
+      'manifeste Android debugOptimized',
+    ),
+    releaseNetworkSecurity: readText(
+      path.join(root, 'android', 'app', 'src', 'main', 'res', 'xml', 'network_security_config.xml'),
+      'sécurité réseau Android main',
+    ),
+    debugNetworkSecurity: readText(
+      path.join(
+        root,
+        'android',
+        'app',
+        'src',
+        'debug',
+        'res',
+        'xml',
+        'network_security_config.xml',
+      ),
+      'sécurité réseau Android debug',
+    ),
+    debugOptimizedNetworkSecurity: readText(
+      path.join(
+        root,
+        'android',
+        'app',
+        'src',
+        'debugOptimized',
+        'res',
+        'xml',
+        'network_security_config.xml',
+      ),
+      'sécurité réseau Android debugOptimized',
+    ),
+  });
+}
+
+function validateIosNativeFiles(root) {
+  const iconPath = path.join(
+    root,
+    'ios',
+    'ChatHouse',
+    'Images.xcassets',
+    'AppIcon.appiconset',
+    'AppIcon.png',
+  );
+  const placeholderPath = path.join(root, 'assets', 'icon.png');
+  return validateIosNativeConfiguration({
+    project: readText(
+      path.join(root, 'ios', 'ChatHouse.xcodeproj', 'project.pbxproj'),
+      'projet Xcode',
+    ),
+    infoPlist: readText(path.join(root, 'ios', 'ChatHouse', 'Info.plist'), 'Info.plist iOS'),
+    entitlements: readText(
+      path.join(root, 'ios', 'ChatHouse', 'ChatHouse.entitlements'),
+      'entitlements iOS',
+    ),
+    privacyManifest: readText(
+      path.join(root, 'ios', 'ChatHouse', 'PrivacyInfo.xcprivacy'),
+      'privacy manifest iOS',
+    ),
+    iconContents: readText(
+      path.join(root, 'ios', 'ChatHouse', 'Images.xcassets', 'AppIcon.appiconset', 'Contents.json'),
+      "catalogue d'icône iOS",
+    ),
+    icon: readFileSync(requireFile(iconPath, 'AppIcon iOS')),
+    placeholderIcon: existsSync(placeholderPath) ? readFileSync(placeholderPath) : null,
+    bundleScript: readText(
+      path.join(root, 'ios', 'scripts', 'bundle-react-native.sh'),
+      'garde de bundle iOS',
+    ),
+  });
+}
+
+function readProtoVarint(buffer, offset, label) {
+  let value = 0n;
+  let shift = 0n;
+  let cursor = offset;
+  while (cursor < buffer.length && shift <= 63n) {
+    const byte = buffer[cursor];
+    cursor += 1;
+    value |= BigInt(byte & 0x7f) << shift;
+    if ((byte & 0x80) === 0) return { value, offset: cursor };
+    shift += 7n;
+  }
+  throw new Error(`${label}: varint protobuf tronqué ou trop long`);
+}
+
+function readProtoFields(buffer, label) {
+  if (!Buffer.isBuffer(buffer)) throw new Error(`${label}: contenu protobuf invalide`);
+  const fields = [];
+  let offset = 0;
+  while (offset < buffer.length) {
+    const key = readProtoVarint(buffer, offset, label);
+    offset = key.offset;
+    const number = Number(key.value >> 3n);
+    const wireType = Number(key.value & 7n);
+    if (!Number.isSafeInteger(number) || number <= 0) {
+      throw new Error(`${label}: numéro de champ protobuf invalide`);
+    }
+
+    if (wireType === 0) {
+      const decoded = readProtoVarint(buffer, offset, label);
+      fields.push({ number, wireType, value: decoded.value });
+      offset = decoded.offset;
+      continue;
+    }
+    if (wireType === 1) {
+      if (offset + 8 > buffer.length) throw new Error(`${label}: champ fixed64 tronqué`);
+      fields.push({ number, wireType, value: buffer.subarray(offset, offset + 8) });
+      offset += 8;
+      continue;
+    }
+    if (wireType === 2) {
+      const decodedLength = readProtoVarint(buffer, offset, label);
+      offset = decodedLength.offset;
+      if (decodedLength.value > BigInt(Number.MAX_SAFE_INTEGER)) {
+        throw new Error(`${label}: champ protobuf trop grand`);
+      }
+      const length = Number(decodedLength.value);
+      if (offset + length > buffer.length) {
+        throw new Error(`${label}: champ protobuf tronqué`);
+      }
+      fields.push({ number, wireType, value: buffer.subarray(offset, offset + length) });
+      offset += length;
+      continue;
+    }
+    if (wireType === 5) {
+      if (offset + 4 > buffer.length) throw new Error(`${label}: champ fixed32 tronqué`);
+      fields.push({ number, wireType, value: buffer.subarray(offset, offset + 4) });
+      offset += 4;
+      continue;
+    }
+    throw new Error(`${label}: type protobuf ${wireType} non pris en charge`);
+  }
+  return fields;
+}
+
+function lastProtoField(fields, number, wireType) {
+  return fields.findLast(field => field.number === number && field.wireType === wireType);
+}
+
+function requiredProtoBytes(fields, number, label) {
+  const field = lastProtoField(fields, number, 2);
+  if (!field) throw new Error(`${label}: champ protobuf ${number} absent`);
+  return field.value;
+}
+
+function protoString(fields, number) {
+  const field = lastProtoField(fields, number, 2);
+  return field ? field.value.toString('utf8') : '';
+}
+
+export function validateAndroidBundlePageAlignment(bundleConfig) {
+  const configFields = readProtoFields(bundleConfig, 'BundleConfig.pb');
+  const optimizations = readProtoFields(
+    requiredProtoBytes(configFields, 2, 'BundleConfig.pb/optimizations'),
+    'BundleConfig.pb/optimizations',
+  );
+  const nativeLibraries = readProtoFields(
+    requiredProtoBytes(
+      optimizations,
+      2,
+      'BundleConfig.pb/optimizations/uncompress_native_libraries',
+    ),
+    'BundleConfig.pb/optimizations/uncompress_native_libraries',
+  );
+  const enabled = lastProtoField(nativeLibraries, 1, 0)?.value ?? 0n;
+  const alignment = lastProtoField(nativeLibraries, 2, 0)?.value ?? 0n;
+  const alignmentNames = {
+    0: 'PAGE_ALIGNMENT_UNSPECIFIED',
+    1: 'PAGE_ALIGNMENT_4K',
+    2: 'PAGE_ALIGNMENT_16K',
+    3: 'PAGE_ALIGNMENT_64K',
+  };
+  const alignmentName = alignmentNames[Number(alignment)] ?? `valeur inconnue ${alignment}`;
+
+  if (enabled !== 1n) {
+    throw new Error(
+      'BundleConfig.pb ne demande pas de bibliothèques natives non compressées dans les APK',
+    );
+  }
+  if (alignment !== 2n && alignment !== 3n) {
+    throw new Error(
+      `alignement ZIP/page AAB insuffisant: ${alignmentName}; PAGE_ALIGNMENT_16K minimum requis`,
+    );
+  }
+  return alignmentName;
+}
+
+function xmlElementFromNode(node, label) {
+  const nodeFields = readProtoFields(node, label);
+  const element = lastProtoField(nodeFields, 1, 2);
+  const text = lastProtoField(nodeFields, 2, 2);
+  if (element && text) throw new Error(`${label}: nœud XML protobuf ambigu`);
+  return element?.value ?? null;
+}
+
+function compiledIntegerFromXmlAttribute(attributeFields, label) {
+  const compiledItem = lastProtoField(attributeFields, 6, 2);
+  if (!compiledItem) return null;
+  const itemFields = readProtoFields(compiledItem.value, `${label}/compiled_item`);
+  const primitive = lastProtoField(itemFields, 7, 2);
+  if (!primitive) throw new Error(`${label}: valeur compilée non entière`);
+  const primitiveFields = readProtoFields(primitive.value, `${label}/compiled_item/primitive`);
+  const decimal = lastProtoField(primitiveFields, 6, 0);
+  const hexadecimal = lastProtoField(primitiveFields, 7, 0);
+  const value = decimal?.value ?? hexadecimal?.value;
+  if (value === undefined || value > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new Error(`${label}: entier compilé absent ou trop grand`);
+  }
+  return Number(value);
+}
+
+export function validateAndroidManifestTargetSdk(manifest, expectedTargetSdk = 36) {
+  const rootElementBytes = xmlElementFromNode(manifest, 'base/manifest/AndroidManifest.xml');
+  if (!rootElementBytes) {
+    throw new Error('base/manifest/AndroidManifest.xml: élément racine absent');
+  }
+  const rootFields = readProtoFields(
+    rootElementBytes,
+    'base/manifest/AndroidManifest.xml/manifest',
+  );
+  if (protoString(rootFields, 3) !== 'manifest') {
+    throw new Error("base/manifest/AndroidManifest.xml: racine 'manifest' absente");
+  }
+
+  const usesSdkElements = rootFields
+    .filter(field => field.number === 5 && field.wireType === 2)
+    .map((field, index) =>
+      xmlElementFromNode(
+        field.value,
+        `base/manifest/AndroidManifest.xml/manifest/enfant-${index + 1}`,
+      ),
+    )
+    .filter(Boolean)
+    .map(element => readProtoFields(element, 'base/manifest/AndroidManifest.xml/manifest/uses-sdk'))
+    .filter(fields => protoString(fields, 3) === 'uses-sdk');
+  if (usesSdkElements.length !== 1) {
+    throw new Error(
+      `base/manifest/AndroidManifest.xml: élément uses-sdk ${
+        usesSdkElements.length ? 'dupliqué' : 'absent'
+      }`,
+    );
+  }
+
+  const androidNamespace = 'http://schemas.android.com/apk/res/android';
+  const targetAttributes = usesSdkElements[0]
+    .filter(field => field.number === 4 && field.wireType === 2)
+    .map(field =>
+      readProtoFields(field.value, 'base/manifest/AndroidManifest.xml/uses-sdk/@targetSdkVersion'),
+    )
+    .filter(
+      fields =>
+        protoString(fields, 1) === androidNamespace &&
+        protoString(fields, 2) === 'targetSdkVersion',
+    );
+  if (targetAttributes.length !== 1) {
+    throw new Error(
+      `base/manifest/AndroidManifest.xml: android:targetSdkVersion ${
+        targetAttributes.length ? 'dupliqué' : 'absent'
+      }`,
+    );
+  }
+
+  const rawValue = protoString(targetAttributes[0], 3);
+  const rawTarget = /^\d+$/u.test(rawValue) ? Number(rawValue) : null;
+  const compiledTarget = compiledIntegerFromXmlAttribute(
+    targetAttributes[0],
+    'base/manifest/AndroidManifest.xml/uses-sdk/@targetSdkVersion',
+  );
+  if (rawTarget === null && compiledTarget === null) {
+    throw new Error('base/manifest/AndroidManifest.xml: targetSdkVersion non numérique');
+  }
+  if (rawTarget !== null && compiledTarget !== null && rawTarget !== compiledTarget) {
+    throw new Error(
+      `base/manifest/AndroidManifest.xml: targetSdkVersion incohérent (${rawTarget}/${compiledTarget})`,
+    );
+  }
+  const targetSdk = compiledTarget ?? rawTarget;
+  if (targetSdk !== expectedTargetSdk) {
+    throw new Error(
+      `AAB targetSdkVersion ${targetSdk}; targetSdkVersion ${expectedTargetSdk} requis`,
+    );
+  }
+  return targetSdk;
+}
+
+function readElfUnsigned(buffer, offset, byteLength, littleEndian, label) {
+  if (offset < 0 || offset + byteLength > buffer.length) {
+    throw new Error(`${label}: en-tête ELF tronqué`);
+  }
+  if (byteLength === 2) {
+    return BigInt(littleEndian ? buffer.readUInt16LE(offset) : buffer.readUInt16BE(offset));
+  }
+  if (byteLength === 4) {
+    return BigInt(littleEndian ? buffer.readUInt32LE(offset) : buffer.readUInt32BE(offset));
+  }
+  return littleEndian ? buffer.readBigUInt64LE(offset) : buffer.readBigUInt64BE(offset);
+}
+
+export function validateElfLoadAlignment(elf, label = 'bibliothèque native') {
+  if (
+    !Buffer.isBuffer(elf) ||
+    elf.length < 52 ||
+    elf[0] !== 0x7f ||
+    elf.toString('ascii', 1, 4) !== 'ELF'
+  ) {
+    throw new Error(`${label}: fichier ELF invalide ou tronqué`);
+  }
+  const elfClass = elf[4];
+  const encoding = elf[5];
+  if (elfClass !== 1 && elfClass !== 2) {
+    throw new Error(`${label}: classe ELF inconnue ${elfClass}`);
+  }
+  if (encoding !== 1 && encoding !== 2) {
+    throw new Error(`${label}: encodage ELF inconnu ${encoding}`);
+  }
+  const littleEndian = encoding === 1;
+  const expectedHeaderSize = elfClass === 1 ? 52 : 64;
+  const expectedProgramHeaderSize = elfClass === 1 ? 32 : 56;
+  if (elf.length < expectedHeaderSize) throw new Error(`${label}: en-tête ELF tronqué`);
+  const fileType = readElfUnsigned(elf, 16, 2, littleEndian, label);
+  if (fileType !== 3n) throw new Error(`${label}: ELF n'est pas une bibliothèque partagée ET_DYN`);
+
+  const programOffset = readElfUnsigned(
+    elf,
+    elfClass === 1 ? 28 : 32,
+    elfClass === 1 ? 4 : 8,
+    littleEndian,
+    label,
+  );
+  const programEntrySize = Number(
+    readElfUnsigned(elf, elfClass === 1 ? 42 : 54, 2, littleEndian, label),
+  );
+  const programCount = Number(
+    readElfUnsigned(elf, elfClass === 1 ? 44 : 56, 2, littleEndian, label),
+  );
+  if (programCount === 0 || programCount === 0xffff) {
+    throw new Error(`${label}: table des segments ELF absente ou étendue non prise en charge`);
+  }
+  if (programEntrySize < expectedProgramHeaderSize) {
+    throw new Error(`${label}: entrée de segment ELF trop courte`);
+  }
+  if (programOffset > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new Error(`${label}: offset de segments ELF trop grand`);
+  }
+  const tableEnd = programOffset + BigInt(programEntrySize) * BigInt(programCount);
+  if (tableEnd > BigInt(elf.length)) {
+    throw new Error(`${label}: table des segments ELF tronquée`);
+  }
+
+  const loadAlignments = [];
+  for (let index = 0; index < programCount; index += 1) {
+    const offset = Number(programOffset) + index * programEntrySize;
+    const type = readElfUnsigned(elf, offset, 4, littleEndian, label);
+    if (type !== 1n) continue;
+    const fileOffset = readElfUnsigned(
+      elf,
+      offset + (elfClass === 1 ? 4 : 8),
+      elfClass === 1 ? 4 : 8,
+      littleEndian,
+      label,
+    );
+    const virtualAddress = readElfUnsigned(
+      elf,
+      offset + (elfClass === 1 ? 8 : 16),
+      elfClass === 1 ? 4 : 8,
+      littleEndian,
+      label,
+    );
+    const alignment = readElfUnsigned(
+      elf,
+      offset + (elfClass === 1 ? 28 : 48),
+      elfClass === 1 ? 4 : 8,
+      littleEndian,
+      label,
+    );
+    if (alignment < 16384n) {
+      throw new Error(
+        `${label}: segment ELF LOAD #${index + 1} aligné sur ${alignment} octets (< 16384)`,
+      );
+    }
+    if ((alignment & (alignment - 1n)) !== 0n) {
+      throw new Error(
+        `${label}: segment ELF LOAD #${index + 1} avec alignement non puissance de deux`,
+      );
+    }
+    if (fileOffset % alignment !== virtualAddress % alignment) {
+      throw new Error(`${label}: segment ELF LOAD #${index + 1} avec offsets non congruents`);
+    }
+    loadAlignments.push(alignment);
+  }
+  if (!loadAlignments.length) throw new Error(`${label}: aucun segment ELF LOAD`);
+  return {
+    bits: elfClass === 1 ? 32 : 64,
+    loadSegments: loadAlignments.length,
+    minimumAlignment: loadAlignments.reduce(
+      (minimum, alignment) => (alignment < minimum ? alignment : minimum),
+      loadAlignments[0],
+    ),
+  };
+}
+
+function readZipDirectory(archive) {
+  if (!Buffer.isBuffer(archive) || archive.length < 22) {
+    throw new Error('AAB: archive ZIP invalide ou tronquée');
+  }
+  const minimumOffset = Math.max(0, archive.length - 22 - 0xffff);
+  let endOffset = -1;
+  for (let offset = archive.length - 22; offset >= minimumOffset; offset -= 1) {
+    if (
+      archive.readUInt32LE(offset) === 0x06054b50 &&
+      offset + 22 + archive.readUInt16LE(offset + 20) === archive.length
+    ) {
+      endOffset = offset;
+      break;
+    }
+  }
+  if (endOffset < 0) throw new Error('AAB: fin de répertoire ZIP introuvable');
+
+  const disk = archive.readUInt16LE(endOffset + 4);
+  const directoryDisk = archive.readUInt16LE(endOffset + 6);
+  const entriesOnDisk = archive.readUInt16LE(endOffset + 8);
+  const entryCount = archive.readUInt16LE(endOffset + 10);
+  const directorySize = archive.readUInt32LE(endOffset + 12);
+  const directoryOffset = archive.readUInt32LE(endOffset + 16);
+  if (disk !== 0 || directoryDisk !== 0 || entriesOnDisk !== entryCount) {
+    throw new Error('AAB: archive ZIP multi-volume interdite');
+  }
+  if (entryCount === 0xffff || directorySize === 0xffffffff || directoryOffset === 0xffffffff) {
+    throw new Error('AAB: ZIP64 inattendu pour un artefact mobile');
+  }
+  if (directoryOffset + directorySize > endOffset) {
+    throw new Error('AAB: répertoire ZIP hors limites');
+  }
+
+  const entries = [];
+  const names = new Set();
+  let offset = directoryOffset;
+  for (let index = 0; index < entryCount; index += 1) {
+    if (offset + 46 > archive.length || archive.readUInt32LE(offset) !== 0x02014b50) {
+      throw new Error(`AAB: entrée ZIP centrale #${index + 1} invalide`);
+    }
+    const flags = archive.readUInt16LE(offset + 8);
+    const compression = archive.readUInt16LE(offset + 10);
+    const compressedSize = archive.readUInt32LE(offset + 20);
+    const uncompressedSize = archive.readUInt32LE(offset + 24);
+    const nameLength = archive.readUInt16LE(offset + 28);
+    const extraLength = archive.readUInt16LE(offset + 30);
+    const commentLength = archive.readUInt16LE(offset + 32);
+    const localOffset = archive.readUInt32LE(offset + 42);
+    const nextOffset = offset + 46 + nameLength + extraLength + commentLength;
+    if (nextOffset > archive.length) throw new Error('AAB: entrée ZIP centrale tronquée');
+    const name = archive.toString('utf8', offset + 46, offset + 46 + nameLength);
+    if (!name || name.includes('\0')) throw new Error('AAB: nom d’entrée ZIP invalide');
+    if (names.has(name)) throw new Error(`AAB: entrée ZIP dupliquée: ${name}`);
+    names.add(name);
+    entries.push({
+      name,
+      flags,
+      compression,
+      compressedSize,
+      uncompressedSize,
+      localOffset,
+    });
+    offset = nextOffset;
+  }
+  if (offset > directoryOffset + directorySize) {
+    throw new Error('AAB: taille du répertoire ZIP incohérente');
+  }
+  return entries;
+}
+
+function extractZipEntry(archive, entry) {
+  if (entry.flags & 1) throw new Error(`AAB: entrée chiffrée interdite: ${entry.name}`);
+  const offset = entry.localOffset;
+  if (offset + 30 > archive.length || archive.readUInt32LE(offset) !== 0x04034b50) {
+    throw new Error(`AAB: en-tête ZIP local invalide: ${entry.name}`);
+  }
+  const localFlags = archive.readUInt16LE(offset + 6);
+  const localCompression = archive.readUInt16LE(offset + 8);
+  const nameLength = archive.readUInt16LE(offset + 26);
+  const extraLength = archive.readUInt16LE(offset + 28);
+  const dataOffset = offset + 30 + nameLength + extraLength;
+  const dataEnd = dataOffset + entry.compressedSize;
+  if (
+    localFlags !== entry.flags ||
+    localCompression !== entry.compression ||
+    dataEnd > archive.length
+  ) {
+    throw new Error(`AAB: métadonnées ZIP incohérentes: ${entry.name}`);
+  }
+  const localName = archive.toString('utf8', offset + 30, offset + 30 + nameLength);
+  if (localName !== entry.name) throw new Error(`AAB: noms ZIP incohérents: ${entry.name}`);
+
+  const compressed = archive.subarray(dataOffset, dataEnd);
+  let value;
+  if (entry.compression === 0) value = compressed;
+  else if (entry.compression === 8) {
+    try {
+      value = inflateRawSync(compressed, { maxOutputLength: entry.uncompressedSize });
+    } catch (error) {
+      throw new Error(
+        `AAB: décompression impossible pour ${entry.name} (${
+          error instanceof Error ? error.message : error
+        })`,
+      );
+    }
+  } else {
+    throw new Error(`AAB: compression ZIP ${entry.compression} non prise en charge: ${entry.name}`);
+  }
+  if (value.length !== entry.uncompressedSize) {
+    throw new Error(`AAB: taille décompressée incohérente: ${entry.name}`);
+  }
+  return value;
+}
+
+function requiredZipEntry(entries, name) {
+  const entry = entries.find(candidate => candidate.name === name);
+  if (!entry) throw new Error(`AAB: entrée requise absente: ${name}`);
+  return entry;
+}
+
+export function validateAndroidAab16KbCompatibility(archive, expectedTargetSdk = 36) {
+  const entries = readZipDirectory(archive);
+  const pageAlignment = validateAndroidBundlePageAlignment(
+    extractZipEntry(archive, requiredZipEntry(entries, 'BundleConfig.pb')),
+  );
+  const targetSdk = validateAndroidManifestTargetSdk(
+    extractZipEntry(archive, requiredZipEntry(entries, 'base/manifest/AndroidManifest.xml')),
+    expectedTargetSdk,
+  );
+  const nativeEntries = entries.filter(entry =>
+    /^[^/]+\/lib\/(?:armeabi-v7a|arm64-v8a|x86|x86_64)\/[^/]+\.so$/u.test(entry.name),
+  );
+  for (const entry of nativeEntries) {
+    validateElfLoadAlignment(extractZipEntry(archive, entry), entry.name);
+  }
+  return {
+    targetSdk,
+    pageAlignment,
+    nativeLibraries: nativeEntries.length,
+  };
 }
 
 function run(command, args, options = {}) {
@@ -377,6 +1390,7 @@ function parseArgs(argv) {
           '',
           'Options:',
           `  --scope source,production,android,ios,network,legal,evidence`,
+          '          native             Contrôles statiques Android/iOS sans secrets ni build',
           '  --root PATH             Racine du dépôt',
           '  --report PATH           Rapport JSON (chemin relatif à la racine accepté)',
           '  --timeout-ms NUMBER     Timeout par requête HTTPS',
@@ -391,7 +1405,7 @@ function parseArgs(argv) {
     }
   }
 
-  const invalidScopes = options.scopes.filter(scope => !DEFAULT_SCOPES.includes(scope));
+  const invalidScopes = options.scopes.filter(scope => !ALLOWED_SCOPES.includes(scope));
   if (invalidScopes.length) throw new Error(`périmètre inconnu: ${invalidScopes.join(', ')}`);
   if (!Number.isFinite(options.timeoutMs) || options.timeoutMs < 1000) {
     throw new Error('--timeout-ms doit être supérieur ou égal à 1000');
@@ -432,6 +1446,13 @@ function loadMobileEnv(root) {
   if (!/^AIza[0-9A-Za-z_-]{35}$/u.test(values.GOOGLE_MAPS_API_KEY ?? '')) {
     throw new Error('GOOGLE_MAPS_API_KEY production invalide');
   }
+  const legalControl = readLegalDocumentControl(root);
+  if (values.LEGAL_DOCUMENT_VERSION !== legalControl.version) {
+    throw new Error(
+      `LEGAL_DOCUMENT_VERSION mobile ${values.LEGAL_DOCUMENT_VERSION || 'absente'} différente de ${legalControl.version}`,
+    );
+  }
+  validateLegalPublicationControl(legalControl);
   return values;
 }
 
@@ -446,11 +1467,29 @@ function validateBackendProductionEnv(root) {
     'PUBLIC_URL',
     'LEGAL_ENTITY_NAME',
     'LEGAL_REGISTERED_ADDRESS',
+    'LEGAL_REGISTRATION_NUMBER',
     'LEGAL_JURISDICTION',
+    'LEGAL_DISPUTE_PROCESS',
+    'LEGAL_LIABILITY_TERMS',
     'LEGAL_SUPERVISORY_AUTHORITY',
     'LEGAL_TRANSFER_SAFEGUARDS',
+    'LEGAL_DPO_CONTACT',
+    'LEGAL_EU_REPRESENTATIVE',
+    'LEGAL_DOCUMENT_VERSION',
+    'LEGAL_DOCUMENT_EFFECTIVE_DATE',
+    'LEGAL_SERVICE_PROVIDERS',
+    'LEGAL_PROCESSING_LOCATIONS',
+    'LEGAL_LOG_BACKUP_RETENTION',
+    'LEGAL_SUPPORT_MODERATION_RETENTION',
+    'LEGAL_MODERATION_APPEAL_ROUTE',
+    'LEGAL_ADULT_CONTENT_POLICY',
+    'LEGAL_CHILD_SAFETY_REPORTING_PROCESS',
+    'LEGAL_CONTACT_PHONE',
     'PRIVACY_CONTACT_EMAIL',
     'SUPPORT_CONTACT_EMAIL',
+    'SAFETY_CONTACT_EMAIL',
+    'CHILD_SAFETY_CONTACT_NAME',
+    'CHILD_SAFETY_CONTACT_EMAIL',
     'APPLE_TEAM_ID',
     'ANDROID_APP_SIGNING_SHA256',
     'MEDIA_URL_SIGNING_SECRET',
@@ -471,6 +1510,35 @@ function validateBackendProductionEnv(root) {
   const missing = required.filter(key => hasPlaceholder(values[key]));
   if (missing.length) {
     throw new Error(`valeurs backend absentes/factices: ${missing.join(', ')}`);
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/u.test(values.LEGAL_DOCUMENT_VERSION ?? '')) {
+    throw new Error('LEGAL_DOCUMENT_VERSION doit être une date ISO revue');
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/u.test(values.LEGAL_DOCUMENT_EFFECTIVE_DATE ?? '')) {
+    throw new Error('LEGAL_DOCUMENT_EFFECTIVE_DATE doit être une date ISO revue');
+  }
+  const legalControl = readLegalDocumentControl(root);
+  validateLegalPublicationControl(legalControl);
+  if (values.LEGAL_DOCUMENT_VERSION !== legalControl.version) {
+    throw new Error('LEGAL_DOCUMENT_VERSION backend diffère du contrôle juridique canonique');
+  }
+  if (values.LEGAL_DOCUMENT_EFFECTIVE_DATE !== legalControl.effectiveDate) {
+    throw new Error(
+      'LEGAL_DOCUMENT_EFFECTIVE_DATE backend diffère du contrôle juridique canonique',
+    );
+  }
+  if (!/^\+[1-9]\d{7,14}$/u.test(values.LEGAL_CONTACT_PHONE ?? '')) {
+    throw new Error('LEGAL_CONTACT_PHONE doit être au format E.164');
+  }
+  for (const field of [
+    'PRIVACY_CONTACT_EMAIL',
+    'SUPPORT_CONTACT_EMAIL',
+    'SAFETY_CONTACT_EMAIL',
+    'CHILD_SAFETY_CONTACT_EMAIL',
+  ]) {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(values[field] ?? '')) {
+      throw new Error(`${field} doit être une adresse e-mail publique valide`);
+    }
   }
   validatePublicUrl(values.PUBLIC_URL, ['https:']);
   validatePublicUrl(values.LIVEKIT_URL, ['wss:']);
@@ -623,6 +1691,7 @@ function verifyAndroidArtifact(root, signing, mobileEnv) {
     throw new Error("le signataire de l'AAB ne correspond pas à la clé upload");
   }
 
+  const compatibility = validateAndroidAab16KbCompatibility(readFileSync(aabPath), 36);
   const entries = String(run(resolveCommand('jar'), ['tf', aabPath]));
   const abis = new Set(
     [...entries.matchAll(/(?:^|\/)lib\/(armeabi-v7a|arm64-v8a|x86|x86_64)\//gmu)].map(
@@ -657,7 +1726,12 @@ function verifyAndroidArtifact(root, signing, mobileEnv) {
     rmSync(extractionDir, { recursive: true, force: true });
   }
 
-  return `${path.basename(aabPath)}, arm64-v8a, SHA-256 ${hashFile(aabPath).slice(0, 12)}…`;
+  return `${path.basename(aabPath)}, targetSdk ${compatibility.targetSdk}, ${
+    compatibility.pageAlignment
+  }, ${compatibility.nativeLibraries} ELF 16 KB, arm64-v8a, SHA-256 ${hashFile(aabPath).slice(
+    0,
+    12,
+  )}…`;
 }
 
 function iosTeamId(root) {
@@ -897,6 +1971,11 @@ async function runPreflight(options) {
     iosTeam: null,
   };
 
+  if (selected('native')) {
+    await reporter.check('native', 'android-source', () => validateAndroidNativeFiles(root));
+    await reporter.check('native', 'ios-source', () => validateIosNativeFiles(root));
+  }
+
   if (selected('source')) {
     await reporter.check('source', 'revision', () => {
       const revision = String(run('git', ['rev-parse', 'HEAD'], { cwd: root })).trim();
@@ -938,28 +2017,7 @@ async function runPreflight(options) {
   }
 
   if (selected('android')) {
-    await reporter.check('android', 'release-guards', () => {
-      const gradle = readText(
-        path.join(root, 'android', 'app', 'build.gradle'),
-        'build.gradle Android',
-      );
-      for (const required of [
-        'validateProductionReleaseConfiguration',
-        'CHATHOUSE_ALLOW_DEBUG_RELEASE_SIGNING',
-        "ENVFILE') != '.env.production",
-        "productionEnv['REALTIME_ENABLED'] != 'true'",
-      ]) {
-        if (!gradle.includes(required)) throw new Error(`garde Android absent: ${required}`);
-      }
-      const architectures = readText(
-        path.join(root, 'android', 'gradle.properties'),
-        'gradle.properties Android',
-      );
-      if (!/reactNativeArchitectures=.*arm64-v8a/u.test(architectures)) {
-        throw new Error('arm64-v8a absent des architectures Android par défaut');
-      }
-      return 'garde production et arm64-v8a présents';
-    });
+    await reporter.check('android', 'release-guards', () => validateAndroidNativeFiles(root));
     await reporter.check('android', 'upload-key', () => {
       context.signing = androidSigning(root);
       return `certificat upload SHA-256 ${context.signing.fingerprint.slice(0, 12)}…`;
@@ -973,18 +2031,9 @@ async function runPreflight(options) {
 
   if (selected('ios')) {
     await reporter.check('ios', 'release-config', () => {
+      const sourceConfiguration = validateIosNativeFiles(root);
       context.iosTeam = iosTeamId(root);
-      const bundleScript = readText(
-        path.join(root, 'ios', 'scripts', 'bundle-react-native.sh'),
-        'garde de bundle iOS',
-      );
-      if (
-        !bundleScript.includes('iOS device Release builds require ENVFILE=.env.production') ||
-        !bundleScript.includes('validate_firebase_plist')
-      ) {
-        throw new Error('garde production iOS incomplet');
-      }
-      return `Release production, iPhone/iPad, Team ${context.iosTeam}`;
+      return `${sourceConfiguration}, Team ${context.iosTeam}`;
     });
     await reporter.check('ios', 'signed-archive', () => {
       const mobileEnv = context.mobileEnv ?? loadMobileEnv(root);
@@ -1020,9 +2069,31 @@ async function runPreflight(options) {
     for (const [label, rawUrl] of Object.entries(endpoints)) {
       await reporter.check('network', `https-${label}`, async () => {
         const { response, text } = await fetchText(rawUrl, options.timeoutMs);
-        if (['privacy', 'account_deletion', 'support'].includes(label)) {
+        if (
+          [
+            'privacy',
+            'privacy_fr',
+            'terms',
+            'terms_fr',
+            'community_guidelines',
+            'community_guidelines_fr',
+            'child_safety',
+            'child_safety_fr',
+            'account_deletion',
+            'account_deletion_fr',
+            'support',
+            'support_fr',
+          ].includes(label)
+        ) {
           const reasons = legalDraftReasons(text);
           if (reasons.length) throw new Error(`contenu public non final: ${reasons.join(', ')}`);
+          const expectedLanguage = label.endsWith('_fr') ? 'fr' : 'en';
+          if (
+            !text.includes(`<html lang="${expectedLanguage}">`) ||
+            response.headers.get('content-language') !== expectedLanguage
+          ) {
+            throw new Error(`page juridique non identifiée en ${expectedLanguage}`);
+          }
         }
         return `HTTP ${response.status}, ${text.length} octets`;
       });
@@ -1080,11 +2151,56 @@ async function runPreflight(options) {
   if (selected('legal')) {
     const legalFiles = [
       ['privacy-policy', path.join(root, 'docs', 'legal', 'PRIVACY-POLICY.md')],
+      ['privacy-policy-fr', path.join(root, 'docs', 'legal', 'PRIVACY-POLICY.fr.md')],
       ['eula', path.join(root, 'docs', 'legal', 'EULA.md')],
+      ['eula-fr', path.join(root, 'docs', 'legal', 'EULA.fr.md')],
+      ['community-guidelines', path.join(root, 'docs', 'legal', 'COMMUNITY-GUIDELINES.md')],
+      ['community-guidelines-fr', path.join(root, 'docs', 'legal', 'COMMUNITY-GUIDELINES.fr.md')],
+      ['child-safety', path.join(root, 'docs', 'legal', 'CHILD-SAFETY-STANDARDS.md')],
+      ['child-safety-fr', path.join(root, 'docs', 'legal', 'CHILD-SAFETY-STANDARDS.fr.md')],
       ['store-listing', path.join(root, 'docs', 'store', 'listing.md')],
       ['apple-privacy', path.join(root, 'docs', 'store', 'apple-app-privacy.md')],
       ['google-data-safety', path.join(root, 'docs', 'store', 'google-play-data-safety.md')],
     ];
+    const legalControl = readLegalDocumentControl(root);
+    await reporter.check('legal', 'document-version-alignment', () => {
+      const documentSources = Object.fromEntries(
+        Object.values(legalControl.documents ?? {}).flatMap(descriptor =>
+          Object.values(descriptor?.files ?? {}).map(filePath => [
+            filePath,
+            readText(path.join(root, filePath), filePath),
+          ]),
+        ),
+      );
+      const storeSources = Object.fromEntries(
+        (legalControl.storeInventories ?? []).map(filePath => [
+          filePath,
+          readText(path.join(root, filePath), filePath),
+        ]),
+      );
+      return validateLegalDocumentAlignment({
+        control: legalControl,
+        documentSources,
+        storeSources,
+        backendMetadataSource: readText(
+          path.join(root, 'backend', 'src', 'routes', 'legalDocumentMetadata.ts'),
+          'métadonnées juridiques backend',
+        ),
+        mobileMetadataSource: readText(
+          path.join(root, 'src', 'config', 'env.ts'),
+          'métadonnées juridiques mobile',
+        ),
+      });
+    });
+    await reporter.check('legal', 'document-publication-status', () =>
+      validateLegalPublicationControl(legalControl),
+    );
+    await reporter.check('legal', 'store-metadata-limits', () =>
+      validateStoreListingMetadata(
+        readText(path.join(root, 'docs', 'store', 'listing.md'), 'fiche stores'),
+        legalControl.productName,
+      ),
+    );
     for (const [id, filePath] of legalFiles) {
       await reporter.check('legal', id, () => {
         const text = readText(filePath, id);
@@ -1096,13 +2212,29 @@ async function runPreflight(options) {
     await reporter.check('legal', 'store-urls', () => {
       const listing = readText(path.join(root, 'docs', 'store', 'listing.md'), 'fiche stores');
       const urls = [...listing.matchAll(/https:\/\/[^\s)`]+/gu)].map(match => match[0]);
-      const required = ['/support', '/privacy', '/account-deletion'];
+      const required = [
+        '/support',
+        '/privacy',
+        '/terms',
+        '/community-guidelines',
+        '/child-safety',
+        '/account-deletion',
+      ];
       for (const suffix of required) {
-        const matching = urls.find(url => new URL(url).pathname.endsWith(suffix));
-        if (!matching) throw new Error(`URL ${suffix} absente de la fiche stores`);
-        validatePublicUrl(matching, ['https:']);
+        const english = urls.find(url => {
+          const parsed = new URL(url);
+          return parsed.pathname.endsWith(suffix) && !parsed.searchParams.has('lang');
+        });
+        const french = urls.find(url => {
+          const parsed = new URL(url);
+          return parsed.pathname.endsWith(suffix) && parsed.searchParams.get('lang') === 'fr';
+        });
+        if (!english) throw new Error(`URL anglaise ${suffix} absente de la fiche stores`);
+        if (!french) throw new Error(`URL française ${suffix}?lang=fr absente de la fiche stores`);
+        validatePublicUrl(english, ['https:']);
+        validatePublicUrl(french, ['https:']);
       }
-      return 'support, confidentialité et suppression de compte renseignés';
+      return 'URLs anglaises et françaises renseignées pour les six ressources publiques';
     });
   }
 

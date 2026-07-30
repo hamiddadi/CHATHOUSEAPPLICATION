@@ -291,8 +291,8 @@ export const HouseDetailScreen: React.FC = () => {
         text: t('house.share', 'Share the house'),
         onPress: () => {
           void Share.share({
-            title: 'Chathouse',
-            message: t('house.shareMessage', 'Check out this house on Chathouse — {{url}}', {
+            title: 'ChatHouse',
+            message: t('house.shareMessage', 'Check out this house on ChatHouse — {{url}}', {
               url: shareUrl,
             }),
             url: shareUrl,
