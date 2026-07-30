@@ -55,6 +55,7 @@ import {
   discoverableRoomWhere,
   roomMetadataAccessWhere,
 } from './rooms.access';
+import { getPersonalizedRoomFeed } from './room-feed.service';
 
 const publicUser = {
   id: true,
@@ -67,13 +68,6 @@ const MS_PER_MINUTE = 60_000;
 // Default ban applied on kick when no explicit duration is given — long
 // enough to discourage immediate re-join, short enough to forgive a mistake.
 const DEFAULT_KICK_BAN_MINUTES = 30;
-
-// Hallway feed scoring weights (see `feed()` doc): a followed speaker is
-// worth more than a topic match, which beats raw popularity.
-const FOLLOW_SPEAKER_WEIGHT = 3;
-const TOPIC_MATCH_WEIGHT = 2;
-const POPULARITY_CAP = 5;
-const POPULARITY_BUCKET = 10;
 
 const roomInclude = {
   host: { select: publicUser },
@@ -1210,17 +1204,17 @@ export const roomsService = {
   },
 
   /**
-   * Personalised Hallway feed. Pulls the newest live public rooms
-   * (capped at CANDIDATE_POOL) then scores each one for the viewer:
+   * Personalised Hallway feed. Pulls a bounded window of the newest live
+   * public rooms, growing it as the client paginates, then scores each room:
    *
    *   score = 3 × (follow speakers in the room)
    *         + 2 × (interest tags shared with topic)
    *         + 1 × (listener count, scaled)
    *
-   * Ordered by score desc then createdAt desc. The simple in-memory
+   * Ordered by score desc then createdAt desc. The bounded in-memory
    * scoring is fine at this scale — 200 rooms × ~50 participants ≈ 10k
    * records, well under a millisecond. If we ever approach that ceiling
-   * we'll move the follow/interest joins into a materialised view.
+   * move the follow/interest joins into a materialised view before raising it.
    */
   async feed(
     viewerId: string,
@@ -1228,116 +1222,7 @@ export const roomsService = {
     offset = 0,
     filters: { topic?: string; following?: boolean; clubs?: boolean } = {},
   ) {
-    const CANDIDATE_POOL = 200;
-    const topicLower = filters.topic?.toLowerCase();
-
-    const [viewer, followedIds, blockedIds, candidates] = await Promise.all([
-      prisma.user.findUnique({
-        where: { id: viewerId },
-        select: { interests: true },
-      }),
-      prisma.follow
-        .findMany({
-          where: { followerId: viewerId, status: 'ACCEPTED' },
-          select: { followingId: true },
-        })
-        .then(rows => new Set(rows.map(r => r.followingId))),
-      getBlockedIdSet(viewerId),
-      prisma.room.findMany({
-        where: {
-          AND: [discoverableRoomWhere(viewerId)],
-          isLive: true,
-          endedAt: null,
-          // `clubs` filter narrows the pool to club-attached rooms only.
-          ...(filters.clubs ? { clubId: { not: null } } : {}),
-          ...(topicLower
-            ? {
-                OR: [
-                  { topic: { equals: topicLower, mode: 'insensitive' } },
-                  { topics: { has: topicLower } },
-                  { title: { contains: topicLower, mode: 'insensitive' } },
-                ],
-              }
-            : {}),
-        },
-        include: {
-          host: { select: publicUser },
-          participants: {
-            where: { leftAt: null, user: { deletedAt: null } },
-            include: { user: { select: publicUser } },
-          },
-          club: { select: { id: true, name: true, iconUrl: true } },
-          _count: { select: { rsvps: true } },
-        },
-        orderBy: { createdAt: 'desc' },
-        take: CANDIDATE_POOL,
-      }),
-    ]);
-    const interests = new Set((viewer?.interests ?? []).map(i => i.toLowerCase()));
-
-    // Filter out rooms hosted by or only containing blocked users.
-    // When `following` filter is on, also keep only rooms with at least
-    // one followed speaker (or hosted by a followed user).
-    const filteredCandidates = candidates
-      .filter(room => !blockedIds.has(room.hostId))
-      .map(room => ({
-        ...room,
-        participants: room.participants.filter(participant => !blockedIds.has(participant.userId)),
-      }))
-      .filter(room => {
-        if (filters.following) {
-          if (followedIds.has(room.hostId)) return true;
-          return room.participants.some(
-            participant => participant.role !== 'LISTENER' && followedIds.has(participant.userId),
-          );
-        }
-        return true;
-      });
-
-    const scored = filteredCandidates.map(room => {
-      const speakers = room.participants.filter(p => p.role !== 'LISTENER');
-      const followSpeakerCount = speakers.filter(p => followedIds.has(p.userId)).length;
-
-      // Structured topic match: intersect the room's topics[] with the
-      // viewer's interests. Fall back to soft substring matching on
-      // `topic + title` so rooms created before topics were wired still
-      // score non-zero when the user types something relevant.
-      let topicMatch = 0;
-      const roomTopics = new Set((room.topics ?? []).map(t => t.toLowerCase()));
-      for (const interest of interests) {
-        if (roomTopics.has(interest)) topicMatch += 1;
-      }
-      if (topicMatch === 0) {
-        const roomText = `${room.topic ?? ''} ${room.title}`.toLowerCase();
-        for (const interest of interests) {
-          if (interest.length >= 3 && roomText.includes(interest)) topicMatch += 1;
-        }
-      }
-
-      const listenerCount = room.participants.length;
-      const popularity = Math.min(POPULARITY_CAP, Math.floor(listenerCount / POPULARITY_BUCKET));
-
-      const score =
-        followSpeakerCount * FOLLOW_SPEAKER_WEIGHT + topicMatch * TOPIC_MATCH_WEIGHT + popularity;
-      return { room, score, followSpeakerCount };
-    });
-
-    scored.sort((a, b) => {
-      if (b.score !== a.score) return b.score - a.score;
-      return b.room.createdAt.getTime() - a.room.createdAt.getTime();
-    });
-
-    // Offset paginates the ranked pool (deterministic within a request): the
-    // FE feeds infinite-scroll by advancing offset by `limit` each page.
-    return scored.slice(offset, offset + limit).map(({ room, followSpeakerCount }) => ({
-      ...room,
-      // Surface the reason-for-ranking so the UI can label "Friends inside".
-      knownSpeakers: room.participants
-        .filter(p => followedIds.has(p.userId) && p.role !== 'LISTENER')
-        .slice(0, 3)
-        .map(p => p.user),
-      hasKnownSpeakers: followSpeakerCount > 0,
-    }));
+    return getPersonalizedRoomFeed(viewerId, limit, offset, filters);
   },
 
   // ──────────────────────────── Hand-raise queue ──────────────────────────

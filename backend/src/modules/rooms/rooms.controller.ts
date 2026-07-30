@@ -19,6 +19,7 @@ import {
   updateRoomTitleSchema,
 } from './rooms.schema';
 import { roomsService } from './rooms.service';
+import { MAX_FEED_CANDIDATE_POOL } from './room-feed.service';
 
 const paramId = (req: Request, key: string): string => {
   const raw = req.params[key];
@@ -133,9 +134,13 @@ export const roomsController = {
     // `clubs=true` restricts the feed to rooms attached to a club.
     const clubsQ = req.query['clubs'];
     const clubs = clubsQ === 'true' || clubsQ === '1';
-    // Offset paginates the ranked feed for infinite scroll (clamped to >= 0).
+    // Offset paginates the ranked feed. Clamp it to the service's bounded
+    // ranking window so forged values cannot trigger pointless large scans.
     const offsetQ = req.query['offset'];
-    const offset = typeof offsetQ === 'string' ? Math.max(0, Number.parseInt(offsetQ, 10) || 0) : 0;
+    const offset =
+      typeof offsetQ === 'string'
+        ? Math.min(MAX_FEED_CANDIDATE_POOL - 1, Math.max(0, Number.parseInt(offsetQ, 10) || 0))
+        : 0;
     const rows = await roomsService.feed(requireUserId(req), limit, offset, {
       topic,
       following,

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { prisma } from '../config/database';
+import { prisma, runWriteWithRetry } from '../config/database';
 import { AppError } from '../middlewares/error.middleware';
 import { signAccessToken, signRefreshToken } from './jwt';
 
@@ -16,37 +16,52 @@ export const issueTokenPair = async (
   userId: string,
 ): Promise<{ accessToken: string; refreshToken: string }> => {
   const jti = randomUUID();
-  // AUTH-03: stamp the user's current tokenVersion into the access token so
-  // requireAuth can reject it after a cross-device logout / password reset.
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { tokenVersion: true, deletedAt: true, suspendedUntil: true },
-  });
-  if (!user || user.deletedAt) throw new AppError('AUTH_003');
-  if (user.suspendedUntil && user.suspendedUntil > new Date()) {
-    throw new AppError('AUTH_007');
-  }
-  const accessToken = signAccessToken(userId, user.tokenVersion);
-  const refreshToken = signRefreshToken(userId, jti);
   const expiresAt = new Date(Date.now() + REFRESH_TTL_DAYS * 24 * 60 * 60 * 1000);
 
-  await prisma.refreshToken.create({ data: { token: jti, userId, expiresAt } });
+  const tokenVersion = await runWriteWithRetry(
+    () =>
+      prisma.$transaction(
+        async tx => {
+          // Serialize token issuance per account. Without this row lock,
+          // concurrent logins can all observe the same active-token set and
+          // temporarily exceed MAX_ACTIVE_SESSIONS.
+          const locked = await tx.$queryRaw<{ id: string }[]>`
+            SELECT id FROM "User" WHERE id = ${userId} FOR UPDATE`;
+          if (locked.length === 0) throw new AppError('AUTH_003');
 
-  // Prune surplus active sessions: revoke the oldest beyond the cap so the
-  // total live count stays bounded. The just-created token (newest) is always
-  // retained.
-  const active = await prisma.refreshToken.findMany({
-    where: { userId, revokedAt: null, expiresAt: { gt: new Date() } },
-    orderBy: { createdAt: 'desc' },
-    skip: MAX_ACTIVE_SESSIONS,
-    select: { id: true },
-  });
-  if (active.length > 0) {
-    await prisma.refreshToken.updateMany({
-      where: { id: { in: active.map(t => t.id) } },
-      data: { revokedAt: new Date() },
-    });
-  }
+          // AUTH-03: stamp the current tokenVersion into the access token so
+          // logout-all/password reset invalidates earlier access tokens.
+          const user = await tx.user.findUnique({
+            where: { id: userId },
+            select: { tokenVersion: true, deletedAt: true, suspendedUntil: true },
+          });
+          if (!user || user.deletedAt) throw new AppError('AUTH_003');
+          if (user.suspendedUntil && user.suspendedUntil > new Date()) {
+            throw new AppError('AUTH_007');
+          }
 
-  return { accessToken, refreshToken };
+          await tx.refreshToken.create({ data: { token: jti, userId, expiresAt } });
+          const surplus = await tx.refreshToken.findMany({
+            where: { userId, revokedAt: null, expiresAt: { gt: new Date() } },
+            orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+            skip: MAX_ACTIVE_SESSIONS,
+            select: { id: true },
+          });
+          if (surplus.length > 0) {
+            await tx.refreshToken.updateMany({
+              where: { id: { in: surplus.map(token => token.id) } },
+              data: { revokedAt: new Date() },
+            });
+          }
+          return user.tokenVersion;
+        },
+        { maxWait: 30_000, timeout: 30_000 },
+      ),
+    { attempts: 8, baseDelayMs: 50 },
+  );
+
+  return {
+    accessToken: signAccessToken(userId, tokenVersion),
+    refreshToken: signRefreshToken(userId, jti),
+  };
 };

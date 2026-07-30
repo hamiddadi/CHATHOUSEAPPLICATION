@@ -248,6 +248,7 @@ model User {
   @@index([appRole])
   @@index([suspendedUntil])
   @@index([invitedById])
+  @@index([createdAt, id])
   // Covers getOnlineLocations (map): visible + online + recently-seen.
   @@index([isVisible, isOnline, lastSeenAt])
 }
@@ -411,6 +412,8 @@ model Room {
   @@index([createdAt])
   @@index([roomType])
   @@index([participantCount])
+  @@index([isLive, endedAt, createdAt])
+  @@index([hostId, isLive, endedAt])
 }
 
 // ─── RoomHandRaise (listener queued to speak) ──────────
@@ -543,6 +546,7 @@ model Participant {
   @@index([userId])
   @@index([roomId, leftAt])
   @@index([userId, leftAt])
+  @@index([roomId, leftAt, role])
 }
 
 // Discriminates a text message from an async voice note (Clubhouse-style
@@ -582,6 +586,7 @@ model Message {
   // filtered set.
   @@index([receiverId, createdAt])
   @@index([senderId, createdAt])
+  @@index([senderId, receiverId, createdAt])
 }
 
 // ─── Group DM (Backchannel groups) ─────────────────────
@@ -654,6 +659,7 @@ model Follow {
   @@unique([followerId, followingId])
   @@index([followerId])
   @@index([followingId])
+  @@index([followerId, status])
   // Pending requests TO a user are listed/paginated by (followingId, status).
   @@index([followingId, status])
 }
@@ -677,6 +683,8 @@ model Notification {
 
   @@index([userId, isRead])
   @@index([userId, type])
+  @@index([userId, createdAt])
+  @@index([userId, type, createdAt])
   @@index([createdAt])
   @@index([actorId])
 }
@@ -871,6 +879,7 @@ model Report {
   @@index([reportedRoomId, createdAt])
   @@index([reporterId])
   @@index([contentAuthorId, createdAt])
+  @@index([resolvedAt, createdAt, id])
 }
 
 // ─── AuditLog (Godmode action trail) ───────────────────
