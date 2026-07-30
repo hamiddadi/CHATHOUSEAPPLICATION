@@ -1,4 +1,4 @@
-import { MediaKind, type MessageKind, type Prisma } from '@prisma/client';
+import { MediaKind, Prisma, type MessageKind } from '@prisma/client';
 import { prisma } from '../../config/database';
 import { logger } from '../../config/logger';
 import { AppError } from '../../middlewares/error.middleware';
@@ -39,6 +39,54 @@ const toUser = (u: PublicUser) => ({
 });
 
 const uniq = (xs: string[]): string[] => [...new Set(xs)];
+
+interface UnreadGroupMessageCount {
+  conversationId: string;
+  unreadCount: bigint;
+}
+
+/**
+ * Compute every unread tally in one database round-trip. Each membership has
+ * its own high-water mark, which prevents a regular Prisma groupBy from
+ * expressing the query without first loading all candidate messages.
+ */
+const countUnreadByConversation = async (
+  userId: string,
+  memberships: Array<{ conversationId: string; lastReadAt: Date | null }>,
+): Promise<Map<string, number>> => {
+  if (memberships.length === 0) return new Map();
+
+  const membershipRows = Prisma.join(
+    memberships.map(
+      ({ conversationId, lastReadAt }) => Prisma.sql`(${conversationId}, ${lastReadAt}::timestamp)`,
+    ),
+  );
+  const rows = await prisma.$queryRaw<UnreadGroupMessageCount[]>(Prisma.sql`
+    WITH membership("conversationId", "lastReadAt") AS (
+      VALUES ${membershipRows}
+    )
+    SELECT
+      membership."conversationId",
+      COUNT(message.id) AS "unreadCount"
+    FROM membership
+    LEFT JOIN "GroupMessage" message
+      ON message."conversationId" = membership."conversationId"
+      AND message."senderId" <> ${userId}
+      AND (
+        membership."lastReadAt" IS NULL
+        OR message."createdAt" > membership."lastReadAt"
+      )
+      AND EXISTS (
+        SELECT 1
+        FROM "User" sender
+        WHERE sender.id = message."senderId"
+          AND sender."deletedAt" IS NULL
+      )
+    GROUP BY membership."conversationId"
+  `);
+
+  return new Map(rows.map(row => [row.conversationId, Number(row.unreadCount)]));
+};
 
 /**
  * Groups must honour the Block table the same way DMs do (see
@@ -225,21 +273,12 @@ export const groupsService = {
       },
     });
 
-    const summaries = await Promise.all(
-      memberships.map(async m => {
-        const conv = m.conversation;
-        const unreadCount = await prisma.groupMessage.count({
-          where: {
-            conversationId: conv.id,
-            senderId: { not: userId },
-            sender: { deletedAt: null },
-            ...(m.lastReadAt ? { createdAt: { gt: m.lastReadAt } } : {}),
-          },
-        });
-        const last = conv.messages[0] ?? null;
-        return this.serialize(conv, last, unreadCount);
-      }),
-    );
+    const unreadByConversation = await countUnreadByConversation(userId, memberships);
+    const summaries = memberships.map(m => {
+      const conv = m.conversation;
+      const last = conv.messages[0] ?? null;
+      return this.serialize(conv, last, unreadByConversation.get(conv.id) ?? 0);
+    });
 
     return summaries.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
   },

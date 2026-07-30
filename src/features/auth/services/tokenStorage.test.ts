@@ -53,4 +53,12 @@ describe('tokenStorage', () => {
     });
     expect(await tokenStorage.get()).toBeNull();
   });
+
+  it('returns null when stored JSON does not match the session contract', async () => {
+    (Keychain.getGenericPassword as jest.Mock).mockResolvedValueOnce({
+      username: 'chathouse',
+      password: JSON.stringify({ accessToken: 'at-abc', expiresAt: 'not-a-date' }),
+    });
+    expect(await tokenStorage.get()).toBeNull();
+  });
 });

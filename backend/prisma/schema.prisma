@@ -119,85 +119,85 @@ enum RoomChatVisibility {
 // phone+OTP can exist before completing SetupProfile (which will fill in
 // `username` and optionally `email`/`passwordHash`).
 model User {
-  id                     String    @id @default(cuid())
-  username               String?   @unique
+  id                               String    @id @default(cuid())
+  username                         String?   @unique
   // NOTE(audit): PostgreSQL `text` is case-sensitive, so this @unique does not
   // prevent 'A@x.com' vs 'a@x.com' duplicates. The auth layer now normalises
   // email to lower-case before insert/lookup (auth.schema). For defence in
   // depth, migrate this column to the `citext` type (CREATE EXTENSION citext).
-  email                  String?   @unique
-  passwordHash           String?
-  phoneNumber            String?   @unique
-  displayName            String?
-  firstName              String?   @db.VarChar(50)
-  lastName               String?   @db.VarChar(50)
-  avatarUrl              String?
-  avatarThumb            String? // 200x200 thumbnail
-  bio                    String?
-  twitter                String?   @db.VarChar(50)
-  instagram              String?   @db.VarChar(50)
-  isOnline               Boolean   @default(false)
-  isVisible              Boolean   @default(false) // Ghost Mode ON by default → user must opt-in to map visibility (privacy-safe)
-  allowWaves             Boolean   @default(true)
-  isPrivateAccount       Boolean   @default(false)
+  email                            String?   @unique
+  passwordHash                     String?
+  phoneNumber                      String?   @unique
+  displayName                      String?
+  firstName                        String?   @db.VarChar(50)
+  lastName                         String?   @db.VarChar(50)
+  avatarUrl                        String?
+  avatarThumb                      String? // 200x200 thumbnail
+  bio                              String?
+  twitter                          String?   @db.VarChar(50)
+  instagram                        String?   @db.VarChar(50)
+  isOnline                         Boolean   @default(false)
+  isVisible                        Boolean   @default(false) // Ghost Mode ON by default → user must opt-in to map visibility (privacy-safe)
+  allowWaves                       Boolean   @default(true)
+  isPrivateAccount                 Boolean   @default(false)
   // #114: who may start a DM with this user — 'everyone' | 'followers' |
   // 'mutual' (default, close-friends) | 'nobody'. Enforced in chatService.send.
-  dmPrivacy              String    @default("mutual") @db.VarChar(16)
-  latitude               Float?
-  longitude              Float?
-  lastSeenAt             DateTime?
+  dmPrivacy                        String    @default("mutual") @db.VarChar(16)
+  latitude                         Float?
+  longitude                        Float?
+  lastSeenAt                       DateTime?
   // FK to the room the user is currently in (null = not in any room).
   // Updated on join/leave so the profile can show "In a room" badge.
-  currentRoomId          String?
-  currentRoom            Room?     @relation("UserCurrentRoom", fields: [currentRoomId], references: [id], onDelete: SetNull)
+  currentRoomId                    String?
+  currentRoom                      Room?     @relation("UserCurrentRoom", fields: [currentRoomId], references: [id], onDelete: SetNull)
   // Denormalized counts — updated via service on follow/unfollow.
-  followerCount          Int       @default(0)
-  followingCount         Int       @default(0)
+  followerCount                    Int       @default(0)
+  followingCount                   Int       @default(0)
   // ─── Premium / billing (monetization) ───
   // stripeCustomerId is set on first premium checkout. isPremium + premiumUntil
   // are the SERVER-SIDE entitlement source of truth, synced only by the Stripe
   // webhook (never trusted from the client).
-  stripeCustomerId       String?   @unique
-  stripeConnectAccountId String?   @unique
-  isPremium              Boolean   @default(false)
-  premiumUntil           DateTime?
+  stripeCustomerId                 String?   @unique
+  stripeConnectAccountId           String?   @unique
+  isPremium                        Boolean   @default(false)
+  premiumUntil                     DateTime?
   // ─── Session security (AUTH-03) ─────────
   // Bumped on logout-all / password-reset to invalidate EVERY previously-issued
   // access token cross-device. Embedded in the access JWT (`tv` claim) and
   // compared in requireAuth — a token whose `tv` != the user's is rejected even
   // before its 15-min expiry.
-  tokenVersion           Int       @default(0)
+  tokenVersion                     Int       @default(0)
   // ─── Onboarding ─────────────────────────
-  interests              String[]  @default([])
-  hasCompletedOnboarding Boolean   @default(false)
+  interests                        String[]  @default([])
+  hasCompletedOnboarding           Boolean   @default(false)
   // ─── Referral / invites (Clubhouse-style virality) ───
   // `invitedById` records who brought this user in (set once, at redemption,
   // only while null → idempotent). `invitesRemaining` is the per-user invite
   // quota consumed when someone redeems this user's link. Self-relation
   // "UserInvites": invitedBy (the inviter) ←→ invitedUsers (people I invited).
-  invitedById            String?
-  invitesRemaining       Int       @default(3)
+  invitedById                      String?
+  invitesRemaining                 Int       @default(3)
   // ─── Account deletion ───────────────────
-  deletedAt              DateTime? // Soft delete: non-null = pending deletion
-  ageConfirmedAt         DateTime? // Self-attestation that the user meets the 16+ policy
+  deletedAt                        DateTime? // Soft delete: non-null = pending deletion
+  ageConfirmedAt                   DateTime? // Self-attestation that the user meets the 16+ policy
   // Versioned legal acknowledgement. Terms acceptance is the contractual
   // action; privacyNoticeAcknowledged* only proves that the notice was shown
   // and acknowledged — it is deliberately not named or treated as consent.
-  termsAcceptedVersion                 String?   @db.VarChar(32)
-  termsAcceptedAt                      DateTime?
-  privacyNoticeAcknowledgedVersion     String?   @db.VarChar(32)
-  privacyNoticeAcknowledgedAt          DateTime?
-  legalAcceptanceLocale                String?   @db.VarChar(16)
+  termsAcceptedVersion             String?   @db.VarChar(32)
+  termsAcceptedAt                  DateTime?
+  privacyNoticeAcknowledgedVersion String?   @db.VarChar(32)
+  privacyNoticeAcknowledgedAt      DateTime?
+  legalAcceptanceLocale            String?   @db.VarChar(16)
   // ─── Platform admin role + suspension ───
   // appRole defaults to USER. Only SUPER_ADMIN can grant ADMIN+. The
   // suspendedUntil field is a temporary sanction (null = active, future
   // timestamp = locked out, past timestamp = expired sanction). Hard-bans
   // are modeled as suspendedUntil = year-9999.
-  appRole                AppRole   @default(USER)
-  suspendedUntil         DateTime?
-  suspensionReason       String?   @db.VarChar(500)
-  createdAt              DateTime  @default(now())
-  updatedAt              DateTime  @updatedAt
+  appRole                          AppRole   @default(USER)
+  suspendedUntil                   DateTime?
+  suspensionReason                 String?   @db.VarChar(500)
+  createdAt                        DateTime  @default(now())
+  updatedAt                        DateTime  @updatedAt
 
   hostedRooms             Room[]                  @relation("RoomHost")
   participants            Participant[]
@@ -541,6 +541,8 @@ model Participant {
   @@unique([userId, roomId])
   @@index([roomId])
   @@index([userId])
+  @@index([roomId, leftAt])
+  @@index([userId, leftAt])
 }
 
 // Discriminates a text message from an async voice note (Clubhouse-style
@@ -633,6 +635,7 @@ model GroupMessage {
   sender       User         @relation("GroupMsgSender", fields: [senderId], references: [id], onDelete: Cascade)
 
   @@index([conversationId, createdAt])
+  @@index([conversationId, createdAt, senderId])
   @@index([senderId])
 }
 
@@ -805,6 +808,7 @@ model RefreshToken {
 
   @@index([userId])
   @@index([expiresAt])
+  @@index([userId, revokedAt, expiresAt, createdAt])
 }
 
 // ─── Block (one-way user block) ────────────────────────

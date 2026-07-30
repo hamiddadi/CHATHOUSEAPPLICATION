@@ -4,6 +4,7 @@ import { requireAuth } from '../../middlewares/auth.middleware';
 import { socialController } from '../social/social.controller';
 import { followController } from '../follow/follow.controller';
 import { requireCurrentLegalAcceptance } from '../auth/legal-acceptance';
+import { dataExportLimiter } from '../../middlewares/rateLimit.middleware';
 import { usersController } from './users.controller';
 
 export const usersRouter: Router = Router();
@@ -39,7 +40,7 @@ usersRouter.post('/me/request-deletion', asyncHandler(usersController.requestDel
 usersRouter.post('/me/cancel-deletion', asyncHandler(usersController.cancelDeletion));
 // GDPR Article 20 — data portability. Returns a JSON archive of every
 // piece of user-owned content the platform holds.
-usersRouter.get('/me/export', asyncHandler(usersController.exportData));
+usersRouter.get('/me/export', dataExportLimiter, asyncHandler(usersController.exportData));
 // #76: who viewed my profile (premium-gated in the service).
 usersRouter.get('/me/profile-views', asyncHandler(usersController.profileViews));
 usersRouter.get('/online-locations', asyncHandler(usersController.onlineLocations));

@@ -1,4 +1,5 @@
 import * as Keychain from 'react-native-keychain';
+import { z } from 'zod';
 import type { AuthSession } from '../types/auth.types';
 
 // Auth session stored in the hardware-backed Android Keystore via
@@ -7,12 +8,19 @@ import type { AuthSession } from '../types/auth.types';
 // socketClient need no changes. One-time effect of the migration: existing
 // users are logged out once (the old expo-secure-store entry is not read).
 const SERVICE = 'chathouse.auth.session.v1';
+const authSessionSchema = z.object({
+  accessToken: z.string().min(1),
+  refreshToken: z.string().min(1),
+  expiresAt: z.string().datetime({ offset: true }),
+});
 
 export const tokenStorage = {
   async get(): Promise<AuthSession | null> {
     try {
       const creds = await Keychain.getGenericPassword({ service: SERVICE });
-      return creds ? (JSON.parse(creds.password) as AuthSession) : null;
+      if (!creds) return null;
+      const parsed: unknown = JSON.parse(creds.password);
+      return authSessionSchema.parse(parsed);
     } catch {
       return null;
     }

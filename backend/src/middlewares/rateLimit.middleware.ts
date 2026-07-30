@@ -102,3 +102,13 @@ export const contactMatchLimiter = makeLimiter('rl:contacts:', {
   max: 5,
   keyGenerator: req => req.userId ?? 'unauthenticated',
 });
+
+/**
+ * GDPR exports scan every user-owned domain and can generate a large response.
+ * Keep this quota account-scoped so changing IP addresses cannot multiply the
+ * database and memory cost.
+ */
+export const dataExportLimiter = makeLimiter('rl:data-export:', {
+  max: 2,
+  keyGenerator: req => req.userId ?? 'unauthenticated',
+});
