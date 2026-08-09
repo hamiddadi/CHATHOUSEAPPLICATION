@@ -2,6 +2,7 @@ import type { Server } from 'socket.io';
 import { prisma } from '../config/database';
 import { logger } from '../config/logger';
 import { getBlockedIdSet } from '../modules/social/blocks';
+import { getMutualFollowIds, locationForViewer } from '../modules/users/location-privacy';
 import { scheduleBackgroundTask } from '../utils/backgroundTasks';
 import { HALLWAY_ROOM } from './handlers/hallway.handler';
 import { MAPS_CHANNEL, roomChannel, userChannel } from './channels';
@@ -240,10 +241,26 @@ const emitMapEventToEligibleViewers = async (
   ]);
   if (requireVisibleSource && (!source || source.deletedAt || !source.isVisible)) return;
 
-  for (const viewer of viewers) {
+  const eligibleViewers = viewers.flatMap(viewer => {
     const viewerId = (viewer.data as { userId?: string }).userId;
-    if (!viewerId || viewerId === sourceUserId || blocked.has(viewerId)) continue;
-    io.to(viewer.id).emit(event, payload);
+    return !viewerId || viewerId === sourceUserId || blocked.has(viewerId)
+      ? []
+      : [{ socketId: viewer.id, viewerId }];
+  });
+  const exactViewerIds =
+    event === 'maps:user-moved'
+      ? await getMutualFollowIds(
+          sourceUserId,
+          eligibleViewers.map(viewer => viewer.viewerId),
+        )
+      : new Set<string>();
+
+  for (const viewer of eligibleViewers) {
+    const viewerPayload =
+      event === 'maps:user-moved'
+        ? locationForViewer(payload as MapUserMovedPayload, exactViewerIds.has(viewer.viewerId))
+        : payload;
+    io.to(viewer.socketId).emit(event, viewerPayload);
   }
 };
 

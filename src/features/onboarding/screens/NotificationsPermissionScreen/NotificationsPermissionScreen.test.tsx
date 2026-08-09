@@ -103,6 +103,7 @@ describe('NotificationsPermissionScreen', () => {
 
   it('Enable still advances even when backend registration rejects', async () => {
     jest.spyOn(pushService, 'registerWithBackend').mockRejectedValue(new Error('no native module'));
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
     const { getByText, navigation } = renderScreen(<NotificationsPermissionScreen />, {
       route: { name: 'NotificationsPermission' },
     });
@@ -110,5 +111,25 @@ describe('NotificationsPermissionScreen', () => {
     await waitFor(() => {
       expect(navigation.navigate).toHaveBeenCalledWith('SuggestedFollows');
     });
+    expect(alertSpy).toHaveBeenCalledWith(
+      "Notifications weren't enabled",
+      'ChatHouse could not finish enabling notifications. You can continue; ChatHouse will try again automatically the next time you open the app.',
+    );
+  });
+
+  it('Enable (registration error) advances and explains that activation did not finish', async () => {
+    jest.spyOn(pushService, 'registerWithBackend').mockResolvedValue('error');
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
+    const { getByText, navigation } = renderScreen(<NotificationsPermissionScreen />, {
+      route: { name: 'NotificationsPermission' },
+    });
+    fireEvent.press(getByText('Enable notifications'));
+    await waitFor(() => {
+      expect(alertSpy).toHaveBeenCalledWith(
+        "Notifications weren't enabled",
+        'ChatHouse could not finish enabling notifications. You can continue; ChatHouse will try again automatically the next time you open the app.',
+      );
+    });
+    expect(navigation.navigate).toHaveBeenCalledWith('SuggestedFollows');
   });
 });

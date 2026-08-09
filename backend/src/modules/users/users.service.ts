@@ -20,6 +20,7 @@ import {
 import { exportExtensionData } from '../../extensions/gdpr';
 import { scheduleBackgroundTask } from '../../utils/backgroundTasks';
 import { legalAcceptanceSelect, legalAcceptanceStatus } from '../auth/legal-acceptance';
+import { locationsForViewer } from './location-privacy';
 import type {
   CompleteOnboardingInput,
   InterestsInput,
@@ -451,7 +452,7 @@ export const usersService = {
     // able to locate (or be located by) the viewer. And hide soft-deleted.
     const thirtyMinAgo = new Date(Date.now() - ONLINE_WINDOW_MS);
     const blocked = await getBlockedIdSet(viewerId);
-    return prisma.user.findMany({
+    const rows = await prisma.user.findMany({
       where: {
         isVisible: true,
         isOnline: true,
@@ -474,6 +475,7 @@ export const usersService = {
       },
       take: ONLINE_MAP_LIMIT,
     });
+    return locationsForViewer(viewerId, rows);
   },
 
   /**
@@ -495,7 +497,7 @@ export const usersService = {
     });
     const ids = follows.map(f => f.followingId).filter(id => !blocked.has(id));
     if (ids.length === 0) return [];
-    return prisma.user.findMany({
+    const rows = await prisma.user.findMany({
       where: {
         id: { in: ids },
         isVisible: true,
@@ -519,6 +521,7 @@ export const usersService = {
       },
       take: FOLLOWING_MAP_LIMIT,
     });
+    return locationsForViewer(viewerId, rows);
   },
 
   // ─── Account Deletion (30-day soft delete) ─────────────

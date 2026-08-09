@@ -26,6 +26,7 @@ export interface StripePaymentIntentObject {
 
 export interface StripeSubscriptionObject {
   id: string;
+  created: number;
   status: string;
   customer: string;
   current_period_end?: number;
@@ -45,6 +46,7 @@ export interface StripeCheckoutSessionObject {
 
 export interface StripeEvent {
   id: string;
+  created: number;
   type: string;
   data: { object: Record<string, unknown> };
 }

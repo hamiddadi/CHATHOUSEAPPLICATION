@@ -2,6 +2,7 @@ import jwt from 'jsonwebtoken';
 import {
   decodeTokenTtl,
   signAccessToken,
+  signImpersonationToken,
   signRefreshToken,
   verifyAccessToken,
   verifyRefreshToken,
@@ -13,6 +14,38 @@ describe('jwt utils', () => {
     const claims = verifyAccessToken(token);
     expect(claims.sub).toBe('user-1');
     expect(claims.typ).toBe('access');
+    expect(claims.jti).toEqual(expect.any(String));
+  });
+
+  it('mints a unique jti for every access token, even within one clock tick', () => {
+    const tokens = Array.from({ length: 64 }, () => signAccessToken('user-1'));
+    const jtis = tokens.map(token => verifyAccessToken(token).jti);
+
+    expect(new Set(tokens).size).toBe(tokens.length);
+    expect(jtis.every(jti => typeof jti === 'string')).toBe(true);
+    expect(new Set(jtis).size).toBe(tokens.length);
+  });
+
+  it('mints a unique jti for impersonation access tokens', () => {
+    const first = verifyAccessToken(signImpersonationToken('user-1', 'admin-1'));
+    const second = verifyAccessToken(signImpersonationToken('user-1', 'admin-1'));
+
+    expect(first.jti).toEqual(expect.any(String));
+    expect(second.jti).not.toBe(first.jti);
+  });
+
+  it('still verifies a pre-rollout access token without jti', () => {
+    const legacy = jwt.sign(
+      { sub: 'legacy-user', typ: 'access', tv: 0 },
+      process.env.JWT_ACCESS_SECRET!,
+      { expiresIn: '5m' },
+    );
+
+    expect(verifyAccessToken(legacy)).toMatchObject({
+      sub: 'legacy-user',
+      typ: 'access',
+      tv: 0,
+    });
   });
 
   it('rejects a refresh token passed to the access verifier', () => {

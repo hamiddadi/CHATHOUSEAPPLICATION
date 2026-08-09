@@ -18,6 +18,7 @@ import { EmptyState } from '../../../../shared/components/EmptyState';
 import { ContentReportSheet } from '../../../../shared/components/ContentReportSheet';
 import { useApiErrorToast } from '../../../../shared/hooks/useApiErrorToast';
 import { toAppError } from '../../../../shared/services/api/errorHandler';
+import { formatWeekdayDate } from '../../../../shared/utils/intl';
 import { colors, spacing } from '../../../../shared/constants/theme';
 import type { MessageStackParamList } from '../../../../core/navigation/types';
 import type { Message, UserSummary } from '../../../../shared/types/domain';
@@ -37,6 +38,8 @@ import { useChatSocket } from '../../hooks/useChatSocket';
 import { useTypingIndicator } from '../../hooks/useTypingIndicator';
 import { useVoiceMessage } from '../../hooks/useVoiceMessage';
 import { usePeerPresence } from '../../../extensions/hooks/usePeerPresence';
+import { useCreateRoom } from '../../../rooms/hooks/useRooms';
+import { ROOM_TITLE_MAX } from '../../../rooms/constants';
 import VoiceRecordingBar from '../../components/VoiceRecordingBar';
 import Bubble from './partials/Bubble';
 import DateSeparator from './partials/DateSeparator';
@@ -56,25 +59,14 @@ const sameDay = (a: string, b: string): boolean => {
   );
 };
 
-// Date label is locale-aware: i18n translates "Today"/"Yesterday", and
-// Intl.DateTimeFormat gets the active app language so formatting matches
-// the rest of the UI (not the device locale, which can differ).
-const formatDateLabel = (
-  iso: string,
-  language: string,
-  todayLabel: string,
-  yesterdayLabel: string,
-): string => {
+// Date label is locale-aware: i18n translates "Today"/"Yesterday", while the
+// shared formatter handles older dates consistently even without full ICU.
+const formatDateLabel = (iso: string, todayLabel: string, yesterdayLabel: string): string => {
   const today = new Date();
-  const d = new Date(iso);
   if (sameDay(iso, today.toISOString())) return todayLabel;
   const yesterday = new Date(today.getTime() - 86400000);
   if (sameDay(iso, yesterday.toISOString())) return yesterdayLabel;
-  return new Intl.DateTimeFormat(language, {
-    weekday: 'long',
-    month: 'short',
-    day: 'numeric',
-  }).format(d);
+  return formatWeekdayDate(iso);
 };
 
 interface ChatListItem {
@@ -108,7 +100,7 @@ export const ChatDetailScreen: React.FC = () => {
   const [draft, setDraft] = useState('');
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const reportApiError = useApiErrorToast();
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   // Identify "me" from the authenticated session, not a mock. Fall back to
   // the CURRENT_USER mock id only when there is no live session (tests /
   // unauthenticated render) so the participant resolution stays stable.
@@ -157,8 +149,16 @@ export const ChatDetailScreen: React.FC = () => {
   const markRead = useMarkConversationRead();
   const deleteMessage = useDeleteMessage();
   const reportMessage = useReportMessage();
+  const createRoom = useCreateRoom();
   const [reportMessageId, setReportMessageId] = useState<string | null>(null);
   const { isPeerTyping, notifyTyping } = useTypingIndicator(peerId);
+  // Keep an immediate lock in addition to the mutation state: two taps can
+  // arrive before React has rendered `isPending=true`.
+  const callInFlightRef = useRef(false);
+
+  const other: UserSummary | undefined =
+    conversation?.participants.find(p => p.id !== myId) ?? conversation?.participants[0];
+  const otherAvatar = other?.avatarUrl ?? null;
 
   // Voice notes: record → upload → send, then pin the thread to the bottom.
   const voiceSend = useCallback(
@@ -228,11 +228,9 @@ export const ChatDetailScreen: React.FC = () => {
     }
   }, [draft, reportApiError, route.params.conversationId, scrollToBottom, sendMessage, t]);
 
-  // Features below are not yet implemented end-to-end (no attachment upload
-  // pipeline). Rather than no-op handlers — which make the buttons feel
-  // broken — we surface a single "Coming soon" alert so the user gets
-  // immediate feedback. Replace each handler when the underlying feature ships.
-  // (Voice messages now ship for real — see handleMic/handleVoiceSend above.)
+  // Attachments and conversation options do not yet have an end-to-end
+  // pipeline. Keep explicit feedback for those two actions while calls use the
+  // existing closed-room audio infrastructure below.
   const showComingSoon = useCallback(
     (label: string) => {
       Alert.alert(label, t('chat.comingSoon', 'Cette fonctionnalité arrive bientôt.'));
@@ -240,10 +238,44 @@ export const ChatDetailScreen: React.FC = () => {
     [t],
   );
 
-  const handleCall = useCallback(
-    () => showComingSoon(t('chat.callLabel', 'Appel vocal')),
-    [showComingSoon, t],
-  );
+  const handleCall = useCallback(async () => {
+    if (callInFlightRef.current || createRoom.isPending) return;
+
+    callInFlightRef.current = true;
+    const peerName = other?.displayName?.trim() || other?.username?.trim();
+    const localizedTitle = peerName
+      ? t('chat.privateCallTitle', { name: peerName })
+      : t('chat.privateCallFallbackTitle');
+    // Profile names can be longer than room titles. Apply the same client-side
+    // bound as CreateRoomScreen before sending the localized title.
+    const title = localizedTitle.slice(0, ROOM_TITLE_MAX).trimEnd();
+
+    try {
+      const created = await createRoom.mutateAsync({
+        title,
+        visibility: 'closed',
+        topics: [],
+        coHostIds: [peerId],
+        chatEnabled: false,
+        recordingEnabled: false,
+        maxSpeakers: 2,
+      });
+
+      // ChatDetail belongs to MessagesStack. Route through the root and the
+      // Rooms tab so the newly-created LiveKit room opens in its owning stack.
+      (navigation as unknown as { navigate: (screen: string, params: object) => void }).navigate(
+        'Main',
+        {
+          screen: 'RoomsTab',
+          params: { screen: 'Room', params: { roomId: created.id } },
+        },
+      );
+    } catch (err) {
+      reportApiError(err);
+    } finally {
+      callInFlightRef.current = false;
+    }
+  }, [createRoom, navigation, other?.displayName, other?.username, peerId, reportApiError, t]);
   const handleMore = useCallback(
     () => showComingSoon(t('chat.moreLabel', 'Options de la conversation')),
     [showComingSoon, t],
@@ -253,10 +285,6 @@ export const ChatDetailScreen: React.FC = () => {
     [showComingSoon, t],
   );
 
-  const other: UserSummary | undefined =
-    conversation?.participants.find(p => p.id !== myId) ?? conversation?.participants[0];
-  const otherAvatar = other?.avatarUrl ?? null;
-
   // Chronological items, then reversed for the `inverted` FlatList: index 0 is
   // the newest (rendered at the visual bottom), which keeps the thread pinned
   // to the latest message with no onContentSizeChange→scrollToEnd hack.
@@ -264,7 +292,6 @@ export const ChatDetailScreen: React.FC = () => {
 
   const todayLabel = t('chat.dateToday');
   const yesterdayLabel = t('chat.dateYesterday');
-  const language = i18n.language;
 
   // Long press keeps sender-only deletion for your messages and exposes the
   // required per-item report action for content received from the peer.
@@ -319,9 +346,7 @@ export const ChatDetailScreen: React.FC = () => {
   const renderItem = useCallback(
     ({ item }: { item: ChatListItem }) => {
       if (item.kind === 'date' && item.date) {
-        return (
-          <DateSeparator label={formatDateLabel(item.date, language, todayLabel, yesterdayLabel)} />
-        );
+        return <DateSeparator label={formatDateLabel(item.date, todayLabel, yesterdayLabel)} />;
       }
       if (item.message) {
         return (
@@ -335,7 +360,7 @@ export const ChatDetailScreen: React.FC = () => {
       }
       return null;
     },
-    [language, otherAvatar, todayLabel, yesterdayLabel, handleMessageLongPress],
+    [otherAvatar, todayLabel, yesterdayLabel, handleMessageLongPress],
   );
 
   const keyExtractor = useCallback((item: ChatListItem) => item.id, []);
@@ -375,6 +400,7 @@ export const ChatDetailScreen: React.FC = () => {
         username={other?.username}
         onBack={handleBack}
         onCall={handleCall}
+        callPending={createRoom.isPending}
         onMore={handleMore}
       />
 

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
   sign,
   verify,
@@ -11,6 +12,12 @@ import { env } from '../config/env';
 export interface AccessTokenClaims extends JwtPayload {
   sub: string;
   typ: 'access';
+  /**
+   * Unique access-token identifier used for immediate Redis revocation.
+   * Optional only for rolling compatibility with tokens minted before jti was
+   * introduced; every newly-issued access/impersonation token carries one.
+   */
+  jti?: string;
   /**
    * AUTH-03: the user's `tokenVersion` at mint time. requireAuth rejects the
    * token when it no longer matches the user's current version (bumped on
@@ -37,7 +44,10 @@ const accessSignOpts: SignOptions = { expiresIn: env.JWT_ACCESS_TTL as SignOptio
 const refreshSignOpts: SignOptions = { expiresIn: env.JWT_REFRESH_TTL as SignOptions['expiresIn'] };
 
 export const signAccessToken = (userId: string, tokenVersion = 0): string =>
-  sign({ sub: userId, typ: 'access', tv: tokenVersion }, env.JWT_ACCESS_SECRET, accessSignOpts);
+  sign({ sub: userId, typ: 'access', tv: tokenVersion }, env.JWT_ACCESS_SECRET, {
+    ...accessSignOpts,
+    jwtid: randomUUID(),
+  });
 
 /**
  * Issue a short-lived access token for an admin impersonating a user.
@@ -53,7 +63,7 @@ export const signImpersonationToken = (
   sign(
     { sub: impersonatedUserId, typ: 'access', act: { sub: actorUserId } },
     env.JWT_ACCESS_SECRET,
-    { expiresIn: ttlSeconds },
+    { expiresIn: ttlSeconds, jwtid: randomUUID() },
   );
 
 export const signRefreshToken = (userId: string, jti: string): string =>
@@ -61,7 +71,13 @@ export const signRefreshToken = (userId: string, jti: string): string =>
 
 export const verifyAccessToken = (token: string): AccessTokenClaims => {
   const decoded = verify(token, env.JWT_ACCESS_SECRET);
-  if (typeof decoded === 'string' || decoded.typ !== 'access' || typeof decoded.sub !== 'string') {
+  if (
+    typeof decoded === 'string' ||
+    decoded.typ !== 'access' ||
+    typeof decoded.sub !== 'string' ||
+    (decoded.jti !== undefined &&
+      (typeof decoded.jti !== 'string' || decoded.jti.length === 0 || decoded.jti.length > 128))
+  ) {
     throw new JsonWebTokenError('Invalid access token');
   }
   return decoded as AccessTokenClaims;

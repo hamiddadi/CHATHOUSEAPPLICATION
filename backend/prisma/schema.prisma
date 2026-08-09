@@ -342,14 +342,17 @@ model Tip {
 // by the webhook. Both this row and the User flags are written ONLY by the
 // webhook handler.
 model Subscription {
-  id                   String    @id @default(cuid())
-  userId               String    @unique
-  stripeSubscriptionId String    @unique
-  stripeCustomerId     String
-  status               String    @db.VarChar(32) // active | trialing | past_due | canceled | ...
-  currentPeriodEnd     DateTime?
-  createdAt            DateTime  @default(now())
-  updatedAt            DateTime  @updatedAt
+  id                          String    @id @default(cuid())
+  userId                      String    @unique
+  stripeSubscriptionId        String    @unique
+  stripeCustomerId            String
+  stripeSubscriptionCreatedAt DateTime?
+  lastStripeEventCreatedAt    DateTime?
+  lastStripeEventId           String?   @db.VarChar(255)
+  status                      String    @db.VarChar(32) // active | trialing | past_due | canceled | ...
+  currentPeriodEnd            DateTime?
+  createdAt                   DateTime  @default(now())
+  updatedAt                   DateTime  @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 

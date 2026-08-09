@@ -24,6 +24,7 @@ import { useApiErrorToast } from '../../../../shared/hooks/useApiErrorToast';
 import type { MessageStackParamList } from '../../../../core/navigation/types';
 import { useAuthStore } from '../../../auth/store/authStore';
 import type { ContentReportReason } from '../../../../shared/types/moderation';
+import { formatTime } from '../../../../shared/utils/intl';
 import {
   useGroup,
   useGroupMessages,
@@ -45,15 +46,11 @@ type Route = RouteProp<MessageStackParamList, 'GroupChat'>;
 const MAX_MESSAGE_LEN = 2000;
 const COUNTER_THRESHOLD = 1900;
 
-// Locale-aware wall-clock, mirroring the 1:1 Bubble's meta line.
-const formatTime = (iso: string, language: string): string =>
-  new Intl.DateTimeFormat(language, { hour: 'numeric', minute: '2-digit' }).format(new Date(iso));
-
 export const GroupChatScreen: React.FC = () => {
   const navigation = useNavigation<Nav>();
   const route = useRoute<Route>();
   const insets = useSafeAreaInsets();
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const conversationId = route.params.conversationId;
   const myId = useAuthStore(s => s.user?.id ?? null);
 
@@ -235,12 +232,12 @@ export const GroupChatScreen: React.FC = () => {
                 : 'text-[10px] text-ink-muted ml-xs mt-xxs'
             }
           >
-            {formatTime(item.createdAt, i18n.language)}
+            {formatTime(item.createdAt)}
           </Text>
         </Pressable>
       );
     },
-    [myId, nameById, i18n.language, t],
+    [myId, nameById, t],
   );
 
   // Inverted list: "end" = the visual TOP = the oldest loaded message. Reaching

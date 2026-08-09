@@ -68,6 +68,8 @@
     "emptyHint": "Send a message to start the conversation.",
     "comingSoon": "This feature is coming soon.",
     "callLabel": "Voice call",
+    "privateCallTitle": "Private call with {{name}}",
+    "privateCallFallbackTitle": "Private voice call",
     "moreLabel": "Conversation options",
     "attachLabel": "Attachment",
     "deleteTitle": "Delete message",
@@ -210,6 +212,7 @@
     "timeHours": "{{count}}h",
     "timeDays": "{{count}}d",
     "openChatA11y": "Open chat with {{name}}",
+    "onlineChatHint": "This person is currently available to chat.",
     "openGroupA11y": "Open group {{name}}"
   },
   "settings": {
@@ -354,6 +357,8 @@
       "roleSpeaker": "You can speak — tap Mute to toggle your microphone.",
       "confirmEndTitle": "End Room",
       "confirmEndBody": "\"{{title}}\" will be closed for all participants. Continue?",
+      "endFailedTitle": "Couldn't end the room",
+      "endFailedBody": "The room is still active. Check your connection and try again.",
       "reportTitle": "Report this room",
       "reportReason": "What is the reason?"
     }
@@ -783,6 +788,8 @@
       "deniedTitle": "Notifications are off",
       "deniedBody": "No problem — you can turn them on anytime from your profile settings.",
       "blockedBody": "Notifications are blocked for ChatHouse. Enable them in your phone settings to get notified.",
+      "errorTitle": "Notifications weren't enabled",
+      "errorBody": "ChatHouse could not finish enabling notifications. You can continue; ChatHouse will try again automatically the next time you open the app.",
       "openSettings": "Open settings"
     }
   },

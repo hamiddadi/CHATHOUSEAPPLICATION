@@ -162,4 +162,84 @@ describe('production push environment', () => {
     expect(env.FIREBASE_SERVICE_ACCOUNT).toBeUndefined();
     expect(env.FIREBASE_USE_ADC).toBe(true);
   });
+
+  it('requires a public TLS LiveKit endpoint and strong distinct credentials', async () => {
+    process.env = {
+      ...validProductionEnv(),
+      FIREBASE_USE_ADC: 'true',
+      LIVEKIT_URL: 'ws://127.0.0.1:7880',
+      LIVEKIT_API_KEY: 'short',
+      LIVEKIT_API_SECRET: 'too-short',
+    };
+
+    const output = await expectBootRejection();
+
+    expect(output).toContain('LIVEKIT_URL must use wss');
+    expect(output).toContain('LIVEKIT_API_KEY must be at least 8 characters');
+    expect(output).toContain('LIVEKIT_API_SECRET must be at least 32 characters');
+  });
+
+  it('rejects reused production signing secrets', async () => {
+    const sharedSecret = 'shared-production-secret-that-is-at-least-32-chars';
+    process.env = {
+      ...validProductionEnv(),
+      FIREBASE_USE_ADC: 'true',
+      JWT_ACCESS_SECRET: sharedSecret,
+      LIVEKIT_API_SECRET: sharedSecret,
+    };
+
+    const output = await expectBootRejection();
+
+    expect(output).toContain('JWT_ACCESS_SECRET and LIVEKIT_API_SECRET must use distinct secrets');
+  });
+
+  it('keeps Stripe optional when Compose supplies all Stripe values empty', async () => {
+    process.env = {
+      ...validProductionEnv(),
+      FIREBASE_USE_ADC: 'true',
+      STRIPE_SECRET_KEY: '',
+      STRIPE_WEBHOOK_SECRET: '',
+      STRIPE_RETURN_URL: '',
+      STRIPE_REFRESH_URL: '',
+    };
+
+    const { env } = await import('../src/config/env');
+
+    expect(env.EXTENSIONS_ENABLED).toBe(true);
+    expect(env.STRIPE_SECRET_KEY).toBeUndefined();
+    expect(env.STRIPE_WEBHOOK_SECRET).toBeUndefined();
+  });
+
+  it('accepts a complete live-mode Stripe configuration', async () => {
+    process.env = {
+      ...validProductionEnv(),
+      FIREBASE_USE_ADC: 'true',
+      STRIPE_SECRET_KEY: `sk_live_${'A'.repeat(24)}`,
+      STRIPE_WEBHOOK_SECRET: `whsec_${'B'.repeat(24)}`,
+      STRIPE_RETURN_URL: 'https://app.chathouse.com/payments/return',
+      STRIPE_REFRESH_URL: 'https://app.chathouse.com/payments/refresh',
+    };
+
+    const { env } = await import('../src/config/env');
+
+    expect(env.STRIPE_SECRET_KEY).toMatch(/^sk_live_/);
+  });
+
+  it('rejects partial, non-live or extension-disabled Stripe configuration', async () => {
+    process.env = {
+      ...validProductionEnv(),
+      FIREBASE_USE_ADC: 'true',
+      EXTENSIONS_ENABLED: 'false',
+      STRIPE_SECRET_KEY: `sk_test_${'A'.repeat(24)}`,
+      STRIPE_RETURN_URL: 'http://localhost/payments/return',
+    };
+
+    const output = await expectBootRejection();
+
+    expect(output).toContain('EXTENSIONS_ENABLED must be true');
+    expect(output).toContain('STRIPE_WEBHOOK_SECRET is required');
+    expect(output).toContain('STRIPE_REFRESH_URL is required');
+    expect(output).toContain('STRIPE_SECRET_KEY must be a production sk_live_ key');
+    expect(output).toContain('STRIPE_RETURN_URL must use https');
+  });
 });

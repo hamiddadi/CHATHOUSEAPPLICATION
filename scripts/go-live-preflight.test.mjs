@@ -25,6 +25,7 @@ import {
   validateIosFirebaseText,
   validateIosNativeConfiguration,
   validatePublicUrl,
+  validateProductionLiveKitAndStripe,
 } from './go-live-preflight.mjs';
 
 function git(cwd, args) {
@@ -84,6 +85,82 @@ test('public legal endpoint defaults stay on the production API host', () => {
   assert.equal(endpoints.support_fr, 'https://api.chathouse.app/support?lang=fr');
   assert.equal(endpoints.terms, 'https://api.chathouse.app/terms');
   assert.equal(endpoints.terms_fr, 'https://api.chathouse.app/terms?lang=fr');
+});
+
+test('production LiveKit/Stripe contract keeps Stripe optional but atomic', () => {
+  const livekitOnly = {
+    EXTENSIONS_ENABLED: 'true',
+    JWT_ACCESS_SECRET: 'access-secret-that-is-at-least-32-chars',
+    JWT_REFRESH_SECRET: 'refresh-secret-that-is-at-least-32-chars',
+    MEDIA_URL_SIGNING_SECRET: 'media-secret-that-is-at-least-32-chars',
+    LIVEKIT_URL: 'wss://audio.chathouse.app',
+    LIVEKIT_INTERNAL_URL: 'http://livekit:7880',
+    LIVEKIT_API_KEY: 'APIproduction123',
+    LIVEKIT_API_SECRET: 'livekit-secret-that-is-at-least-32-characters',
+  };
+
+  assert.match(validateProductionLiveKitAndStripe(livekitOnly), /Stripe désactivé/u);
+  assert.throws(
+    () =>
+      validateProductionLiveKitAndStripe({
+        ...livekitOnly,
+        LIVEKIT_URL: 'ws://127.0.0.1:7880',
+      }),
+    /protocole requis: wss/u,
+  );
+  assert.throws(
+    () =>
+      validateProductionLiveKitAndStripe({
+        ...livekitOnly,
+        LIVEKIT_API_SECRET: 'too-short',
+      }),
+    /au moins 32/u,
+  );
+  assert.throws(
+    () =>
+      validateProductionLiveKitAndStripe({
+        ...livekitOnly,
+        LIVEKIT_API_SECRET: livekitOnly.JWT_ACCESS_SECRET,
+      }),
+    /secrets distincts/u,
+  );
+
+  const stripeEnabled = {
+    ...livekitOnly,
+    STRIPE_SECRET_KEY: `sk_live_${'A'.repeat(24)}`,
+    STRIPE_WEBHOOK_SECRET: `whsec_${'B'.repeat(24)}`,
+    STRIPE_RETURN_URL: 'https://app.chathouse.com/payments/return',
+    STRIPE_REFRESH_URL: 'https://app.chathouse.com/payments/refresh',
+  };
+  assert.match(validateProductionLiveKitAndStripe(stripeEnabled), /Stripe activé et complet/u);
+  assert.throws(
+    () =>
+      validateProductionLiveKitAndStripe({
+        ...livekitOnly,
+        STRIPE_SECRET_KEY: stripeEnabled.STRIPE_SECRET_KEY,
+      }),
+    /configuration Stripe partielle/u,
+  );
+  assert.throws(
+    () => validateProductionLiveKitAndStripe({ ...stripeEnabled, EXTENSIONS_ENABLED: 'false' }),
+    /EXTENSIONS_ENABLED doit être true/u,
+  );
+  assert.throws(
+    () =>
+      validateProductionLiveKitAndStripe({
+        ...stripeEnabled,
+        STRIPE_SECRET_KEY: `sk_test_${'A'.repeat(24)}`,
+      }),
+    /sk_live_/u,
+  );
+  assert.throws(
+    () =>
+      validateProductionLiveKitAndStripe({
+        ...stripeEnabled,
+        STRIPE_RETURN_URL: 'https://payments.local/return',
+      }),
+    /hôte local ou privé interdit/u,
+  );
 });
 
 test('parseEnv handles comments, quotes, BOM and last-value-wins', () => {

@@ -112,8 +112,8 @@ describe('MessagesScreen', () => {
     expect(navigation.navigate).toHaveBeenCalledWith('GroupChat', { conversationId: 'group-1' });
   });
 
-  it('renders the "online now" strip and opens a DM with the real peer id', async () => {
-    const { navigation, getByLabelText } = renderScreen(<MessagesScreen />, {
+  it('renders the "online now" strip and opens a DM with the exact backend peer id', async () => {
+    const { navigation, getByLabelText, queryByLabelText } = renderScreen(<MessagesScreen />, {
       route: { name: 'MessagesList' },
       seedQueryData: [
         { key: [...messageKeys.conversations()], data: [] },
@@ -122,9 +122,27 @@ describe('MessagesScreen', () => {
           key: [...presenceAvailableKey(20)],
           data: [
             {
-              id: 'peer-9',
+              id: 'usr_backend_9',
               username: 'nina',
               displayName: 'Nina',
+              avatarUrl: null,
+              lastSeenAt: null,
+              isOnline: true,
+            },
+            // Duplicate and malformed API rows must not create ambiguous or
+            // broken navigation targets.
+            {
+              id: 'usr_backend_9',
+              username: 'duplicate',
+              displayName: 'Duplicate Nina',
+              avatarUrl: null,
+              lastSeenAt: null,
+              isOnline: true,
+            },
+            {
+              id: '   ',
+              username: 'invalid',
+              displayName: 'Invalid Peer',
               avatarUrl: null,
               lastSeenAt: null,
               isOnline: true,
@@ -134,7 +152,12 @@ describe('MessagesScreen', () => {
       ],
     });
     const online = await waitFor(() => getByLabelText('Open chat with Nina'));
+    expect(online.props.accessibilityHint).toBe('This person is currently available to chat.');
+    expect(queryByLabelText('Open chat with Duplicate Nina')).toBeNull();
+    expect(queryByLabelText('Open chat with Invalid Peer')).toBeNull();
     fireEvent.press(online);
-    expect(navigation.navigate).toHaveBeenCalledWith('ChatDetail', { conversationId: 'peer-9' });
+    expect(navigation.navigate).toHaveBeenCalledWith('ChatDetail', {
+      conversationId: 'usr_backend_9',
+    });
   });
 });

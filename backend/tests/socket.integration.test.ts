@@ -182,8 +182,8 @@ describe('Socket.IO integration', () => {
     expect(await moved).toEqual(
       expect.objectContaining({
         userId: subject.id,
-        latitude: 48.8566,
-        longitude: 2.3522,
+        latitude: 48.85,
+        longitude: 2.35,
         username: expect.any(String),
         lastSeenAt: expect.any(String),
       }),
@@ -215,6 +215,68 @@ describe('Socket.IO integration', () => {
     ).toEqual({ isOnline: false });
 
     viewerSocket.disconnect();
+  }, 20_000);
+
+  it('streams exact GPS only to mutually accepted follows and coarse GPS to strangers', async () => {
+    const stranger = await register(app);
+    const trusted = await register(app);
+    const subject = await register(app);
+    createdIds.push(stranger.id, trusted.id, subject.id);
+    await prisma.user.update({
+      where: { id: subject.id },
+      data: { isVisible: true },
+    });
+
+    await request(app)
+      .post(`/api/follow/${subject.id}`)
+      .set('Authorization', `Bearer ${trusted.token}`);
+    await request(app)
+      .post(`/api/follow/${trusted.id}`)
+      .set('Authorization', `Bearer ${subject.token}`);
+
+    const strangerSocket = await connectWith(stranger.token);
+    const trustedSocket = await connectWith(trusted.token);
+    const subjectSocket = await connectWith(subject.token);
+
+    const subscribe = (socket: ClientSocket) =>
+      new Promise<void>((resolve, reject) => {
+        socket.emit('maps:subscribe', (ok: boolean) =>
+          ok ? resolve() : reject(new Error('maps:subscribe rejected')),
+        );
+      });
+    await Promise.all([subscribe(strangerSocket), subscribe(trustedSocket)]);
+
+    const nextSubjectMove = (socket: ClientSocket) =>
+      new Promise<Record<string, unknown>>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('maps:user-moved timeout')), 5_000);
+        socket.on('maps:user-moved', payload => {
+          const row = payload as { userId?: string };
+          if (row.userId !== subject.id) return;
+          clearTimeout(timer);
+          resolve(payload as Record<string, unknown>);
+        });
+      });
+    const strangerMoved = nextSubjectMove(strangerSocket);
+    const trustedMoved = nextSubjectMove(trustedSocket);
+
+    await new Promise<void>((resolve, reject) => {
+      subjectSocket.emit(
+        'maps:update-location',
+        { latitude: 48.8566, longitude: 2.3522 },
+        (ok: boolean) => (ok ? resolve() : reject(new Error('maps:update-location rejected'))),
+      );
+    });
+
+    expect(await strangerMoved).toEqual(
+      expect.objectContaining({ latitude: 48.85, longitude: 2.35 }),
+    );
+    expect(await trustedMoved).toEqual(
+      expect.objectContaining({ latitude: 48.8566, longitude: 2.3522 }),
+    );
+
+    strangerSocket.disconnect();
+    trustedSocket.disconnect();
+    subjectSocket.disconnect();
   }, 20_000);
 
   it('chat:send delivers the message to the receiver in real-time', async () => {

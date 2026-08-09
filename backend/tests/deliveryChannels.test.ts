@@ -48,6 +48,15 @@ const legalProductionEnv: NodeJS.ProcessEnv = {
   ANDROID_APP_SIGNING_SHA256: Array.from({ length: 32 }, () => 'AB').join(':'),
 };
 
+// These boot tests isolate the SMS/email contract. Keep every unrelated core
+// production integration valid so a newly-added guard cannot mask the delivery
+// error each test is intended to assert.
+const liveKitProductionEnv: NodeJS.ProcessEnv = {
+  LIVEKIT_URL: 'wss://chathouse-test.livekit.cloud',
+  LIVEKIT_API_KEY: 'production-livekit-key',
+  LIVEKIT_API_SECRET: 'production-livekit-secret-that-is-long-enough',
+};
+
 const loadMailer = (mockEnv: DeliveryEnv) => {
   jest.resetModules();
   const info = jest.fn();
@@ -254,6 +263,7 @@ describe('production delivery configuration at boot', () => {
     process.env = {
       ...originalEnv,
       ...legalProductionEnv,
+      ...liveKitProductionEnv,
       NODE_ENV: 'production',
       DATABASE_URL: 'postgresql://user:password@db.example.com:5432/chathouse',
       REDIS_URL: 'redis://redis.example.com:6379',
@@ -289,6 +299,7 @@ describe('production delivery configuration at boot', () => {
     process.env = {
       ...originalEnv,
       ...legalProductionEnv,
+      ...liveKitProductionEnv,
       NODE_ENV: 'production',
       DATABASE_URL: 'postgresql://user:password@db.example.com:5432/chathouse',
       REDIS_URL: 'redis://redis.example.com:6379',
@@ -298,8 +309,6 @@ describe('production delivery configuration at boot', () => {
       MEDIA_STORAGE_DRIVER: 's3',
       MEDIA_URL_SIGNING_SECRET: 'production-media-secret-that-is-long-enough',
       MEDIA_S3_BUCKET: 'private-media',
-      LIVEKIT_API_KEY: 'production-livekit-key',
-      LIVEKIT_API_SECRET: 'production-livekit-secret-that-is-long-enough',
       TWILIO_ACCOUNT_SID: `AC${'a'.repeat(32)}`,
       TWILIO_AUTH_TOKEN: 'production-twilio-auth-token',
       TWILIO_FROM_NUMBER: '+15551234567',

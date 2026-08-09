@@ -18,23 +18,18 @@ declare module 'express-serve-static-core' {
     /**
      * Platform role resolved during requireAuth. requireRole reuses it to
      * avoid a second identical DB read on the admin surface.
-     * TODO(audit): once access tokens carry a jti, this can move into the
-     * token instead of a per-request DB lookup.
      */
     appRole?: AppRole;
   }
 }
 
-// Index the blacklist by a SHA-256 digest of the token rather than the raw
-// JWT. The access token has no jti to key on (only refresh tokens do, see
-// jwt.ts), so hashing keeps Redis keys fixed-size and avoids persisting a
-// replayable bearer token verbatim in Redis.
-// TODO(audit): add a `jti` claim to signAccessToken (jwt.ts/auth.service.ts)
-// and blacklist by jti to drop the per-request hashing entirely.
+// New tokens use their non-secret jti as the blacklist identifier. Tokens
+// minted before the jti rollout keep the prior SHA-256 fallback, so existing
+// sessions remain valid and already-revoked legacy tokens stay revoked.
 // Exported so the socket auth layer keys the blacklist identically — otherwise
 // a token revoked on HTTP logout would still be accepted over the socket.
-export const blacklistKey = (token: string): string =>
-  `blacklist:${createHash('sha256').update(token).digest('hex')}`;
+export const blacklistKey = (token: string, jti?: string): string =>
+  jti ? `blacklist:jti:${jti}` : `blacklist:${createHash('sha256').update(token).digest('hex')}`;
 
 // Lockout-propagation window for the suspension cache: how long a cached
 // suspended/clear verdict is trusted before requireAuth re-reads the DB.
@@ -56,10 +51,9 @@ export const requireAuth: RequestHandler = async (req, _res, next) => {
     const token = header.slice('Bearer '.length).trim();
     if (token.length === 0) return next(new AppError('AUTH_003'));
 
-    const isRevoked = await redis.get(blacklistKey(token));
-    if (isRevoked) return next(new AppError('AUTH_004'));
-
     const claims = verifyAccessToken(token);
+    const isRevoked = await redis.get(blacklistKey(token, claims.jti));
+    if (isRevoked) return next(new AppError('AUTH_004'));
 
     // Suspension check — locked users keep a valid JWT but can't transact.
     // Cached briefly in Redis to avoid a DB round-trip on every request;
@@ -137,8 +131,15 @@ export const requireAuth: RequestHandler = async (req, _res, next) => {
 };
 
 export const revokeAccessToken = async (token: string, ttlSeconds: number): Promise<void> => {
-  if (ttlSeconds <= 0) return;
-  await redis.setEx(blacklistKey(token), ttlSeconds, '1');
+  if (!Number.isFinite(ttlSeconds) || ttlSeconds <= 0) return;
+  const claims = verifyAccessToken(token);
+  // Never retain a revocation key past the signed token lifetime, even if a
+  // future caller accidentally supplies an excessive TTL.
+  const signedTtl =
+    typeof claims.exp === 'number' ? Math.max(0, claims.exp - Math.floor(Date.now() / 1000)) : 0;
+  const boundedTtl = Math.min(Math.floor(ttlSeconds), signedTtl);
+  if (boundedTtl <= 0) return;
+  await redis.setEx(blacklistKey(token, claims.jti), boundedTtl, '1');
 };
 
 // AUTH-03: drop the cached suspension/tokenVersion verdict so the next

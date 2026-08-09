@@ -76,6 +76,9 @@ services:
         condition: service_healthy
     environment:
       NODE_ENV: production
+      # Extension routers remain enabled by default. Stripe is a separately
+      # optional sub-feature controlled by its complete credential set below.
+      EXTENSIONS_ENABLED: ${EXTENSIONS_ENABLED:-true}
       PORT: 4000
       HOST: 0.0.0.0
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-chathouse}?schema=public
@@ -163,11 +166,14 @@ services:
       FIREBASE_USE_ADC: ${FIREBASE_USE_ADC:-false}
       GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-}
       PUSH_DISPATCH_ENABLED: 'true'
-      # Stripe remains enabled while the public app release is frozen.
-      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:?STRIPE_SECRET_KEY is required}
-      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:?STRIPE_WEBHOOK_SECRET is required}
-      STRIPE_RETURN_URL: ${STRIPE_RETURN_URL:?STRIPE_RETURN_URL is required}
-      STRIPE_REFRESH_URL: ${STRIPE_REFRESH_URL:?STRIPE_REFRESH_URL is required}
+      # Stripe is optional. Leave ALL four values empty to disable payments;
+      # setting any one makes the complete live-mode/HTTPS set mandatory at
+      # backend boot and in go-live-preflight.mjs. Stripe also requires
+      # EXTENSIONS_ENABLED=true.
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      STRIPE_RETURN_URL: ${STRIPE_RETURN_URL:-}
+      STRIPE_REFRESH_URL: ${STRIPE_REFRESH_URL:-}
       # mediasoup is the abandoned legacy SFU — keep it OFF in production.
       MEDIASOUP_ENABLED: 'false'
       # Observability. The metrics credential is mounted as a Compose secret;

@@ -8,6 +8,7 @@ export {};
 const { prisma } = require('../src/config/database') as typeof import('../src/config/database');
 const { issueTokenPair } =
   require('../src/utils/issueTokenPair') as typeof import('../src/utils/issueTokenPair');
+const { verifyAccessToken } = require('../src/utils/jwt') as typeof import('../src/utils/jwt');
 /* eslint-enable @typescript-eslint/no-require-imports */
 
 describe('issueTokenPair concurrency', () => {
@@ -33,8 +34,12 @@ describe('issueTokenPair concurrency', () => {
 
   it('keeps at most ten active sessions under concurrent issuance', async () => {
     const pairs = await Promise.all(Array.from({ length: 16 }, () => issueTokenPair(userId)));
+    const accessJtis = pairs.map(pair => verifyAccessToken(pair.accessToken).jti);
 
     expect(new Set(pairs.map(pair => pair.refreshToken)).size).toBe(16);
+    expect(new Set(pairs.map(pair => pair.accessToken)).size).toBe(16);
+    expect(accessJtis.every(jti => typeof jti === 'string')).toBe(true);
+    expect(new Set(accessJtis).size).toBe(16);
     const active = await prisma.refreshToken.count({
       where: {
         userId,

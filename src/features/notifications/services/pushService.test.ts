@@ -102,10 +102,24 @@ describe('pushService permission status', () => {
     expect(postSpy).not.toHaveBeenCalled();
   });
 
-  it('registerWithBackend stays best-effort when the backend POST rejects', async () => {
+  it("registerWithBackend reports 'error' when the backend POST rejects", async () => {
     requestPermissionMock.mockResolvedValueOnce(AuthorizationStatus.AUTHORIZED);
     jest.spyOn(apiClient, 'post').mockRejectedValue(new Error('network down'));
-    await expect(pushService.registerWithBackend()).resolves.toBe('granted');
+    await expect(pushService.registerWithBackend()).resolves.toBe('error');
+  });
+
+  it("registerWithBackend reports 'error' when conflict recovery cannot register a replacement", async () => {
+    requestPermissionMock.mockResolvedValueOnce(AuthorizationStatus.AUTHORIZED);
+    getTokenMock.mockResolvedValueOnce('old-fcm-token').mockResolvedValueOnce('old-fcm-token');
+    jest.spyOn(apiClient, 'post').mockRejectedValueOnce({
+      kind: 'conflict',
+      status: 409,
+      code: 'PUSH_001',
+      message: 'already bound',
+    });
+
+    await expect(pushService.registerWithBackend()).resolves.toBe('error');
+    expect(deleteTokenMock).toHaveBeenCalledTimes(1);
   });
 
   it('rotates a token that is still bound to another account, then registers the replacement', async () => {

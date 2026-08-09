@@ -539,6 +539,8 @@ jobs:
           cache: 'npm'
           cache-dependency-path: backend/package-lock.json
       - run: npm ci
+      - name: Validate load tooling without sending traffic
+        run: npm run load:check
       - run: npx prisma generate
       - run: npx prisma migrate deploy
       - run: npm run build
@@ -559,7 +561,7 @@ jobs:
           docker run --rm --network host \
             -v "$PWD:/work" \
             -w /work \
-            -e BASE_URL=http://127.0.0.1:4000 \
+            -e LOAD_TEST_API_URL=http://127.0.0.1:4000 \
             grafana/k6:1.7.0 run \
             --summary-export=load-summary.json \
             tests/load/k6-smoke.js

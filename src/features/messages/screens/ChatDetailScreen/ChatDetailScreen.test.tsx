@@ -1,19 +1,22 @@
 /**
  * Render test for ChatDetailScreen (a 1:1 thread). Mounts with a conversation +
  * messages seeded so the thread renders (not the loader), then exercises the
- * header back button (→ goBack), the call/more buttons (→ "coming soon" Alert,
- * not a crash), the emoji quick-insert (mutates the draft → reveals send), and
- * the send button after typing.
+ * header back button (→ goBack), a private call (→ closed two-person Room),
+ * the remaining "coming soon" actions, the emoji quick-insert (mutates the
+ * draft → reveals send), and the send button after typing.
  */
 import React from 'react';
 import { Alert } from 'react-native';
-import { fireEvent, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, waitFor } from '@testing-library/react-native';
 import { messageKeys, MESSAGES_PAGE_SIZE } from '../../hooks/useMessages';
 import { renderScreen, mockAuthenticated, resetAuth } from '../../../../test-utils/renderScreen';
 import { messageService } from '../../services/messageService';
+import { roomService } from '../../../rooms/services/roomService';
+import { ROOM_TITLE_MAX } from '../../../rooms/constants';
+import { toast } from '../../../../shared/components/Toast';
 import * as socketClient from '../../../../shared/services/realtime/socketClient';
 import { peerPresenceKey } from '../../../extensions/hooks/usePeerPresence';
-import type { Conversation, Message } from '../../../../shared/types/domain';
+import type { Conversation, Message, Room } from '../../../../shared/types/domain';
 import { ChatDetailScreen } from './ChatDetailScreen';
 
 const PEER_ID = 'peer-9';
@@ -50,11 +53,11 @@ const seededThread = (msgs: Message[]) => ({
   pageParams: [undefined],
 });
 
-const renderChat = () =>
+const renderChat = (conversationData: Conversation = conversation()) =>
   renderScreen(<ChatDetailScreen />, {
     route: { name: 'ChatDetail', params: { conversationId: PEER_ID } },
     seedQueryData: [
-      { key: [...messageKeys.conversation(PEER_ID)], data: conversation() },
+      { key: [...messageKeys.conversation(PEER_ID)], data: conversationData },
       { key: [...messageKeys.messages(PEER_ID)], data: seededThread(messages()) },
       {
         key: [...peerPresenceKey(PEER_ID)],
@@ -87,12 +90,97 @@ describe('ChatDetailScreen', () => {
     expect(navigation.goBack).toHaveBeenCalledTimes(1);
   });
 
-  it('call + more header buttons surface a "coming soon" Alert (no crash)', () => {
+  it('creates one closed two-person room and opens it when starting a private call', async () => {
+    let resolveRoom: ((room: Room) => void) | undefined;
+    const pendingRoom = new Promise<Room>(resolve => {
+      resolveRoom = resolve;
+    });
+    const createSpy = jest.spyOn(roomService, 'create').mockReturnValue(pendingRoom);
+    const { navigation, getByLabelText } = renderChat();
+
+    fireEvent.press(getByLabelText('Call'));
+
+    await waitFor(() => {
+      expect(createSpy).toHaveBeenCalledWith({
+        title: 'Private call with Alice',
+        visibility: 'closed',
+        topics: [],
+        coHostIds: [PEER_ID],
+        chatEnabled: false,
+        recordingEnabled: false,
+        maxSpeakers: 2,
+      });
+    });
+
+    const busyCallButton = getByLabelText('Call');
+    expect(busyCallButton.props.accessibilityState).toEqual({ busy: true, disabled: true });
+    fireEvent.press(busyCallButton);
+    expect(createSpy).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveRoom?.({ id: 'private-call-room-1' } as Room);
+      await pendingRoom;
+    });
+
+    expect(navigation.navigate).toHaveBeenCalledWith('Main', {
+      screen: 'RoomsTab',
+      params: { screen: 'Room', params: { roomId: 'private-call-room-1' } },
+    });
+  });
+
+  it('caps a private-call title built from a long profile name at the room limit', async () => {
+    const longNameConversation = conversation();
+    longNameConversation.participants[0] = {
+      ...longNameConversation.participants[0]!,
+      displayName: 'A'.repeat(ROOM_TITLE_MAX * 2),
+    };
+    const createSpy = jest
+      .spyOn(roomService, 'create')
+      .mockResolvedValue({ id: 'long-name-room' } as Room);
+    const { getByLabelText } = renderChat(longNameConversation);
+
+    fireEvent.press(getByLabelText('Call'));
+
+    await waitFor(() => expect(createSpy).toHaveBeenCalledTimes(1));
+    expect(createSpy.mock.calls[0]![0].title).toHaveLength(ROOM_TITLE_MAX);
+    expect(createSpy.mock.calls[0]![0].title).toMatch(/^Private call with /);
+  });
+
+  it('reports call creation failures, unlocks the action and allows a retry', async () => {
+    const createSpy = jest
+      .spyOn(roomService, 'create')
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValueOnce({ id: 'retry-call-room' } as Room);
+    const toastSpy = jest.spyOn(toast, 'error').mockReturnValue('call-error-toast');
+    const { navigation, getByLabelText } = renderChat();
+
+    fireEvent.press(getByLabelText('Call'));
+
+    await waitFor(() => expect(toastSpy).toHaveBeenCalledTimes(1));
+    expect(navigation.navigate).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(getByLabelText('Call').props.accessibilityState).toEqual({
+        busy: false,
+        disabled: false,
+      });
+    });
+
+    fireEvent.press(getByLabelText('Call'));
+
+    await waitFor(() => expect(createSpy).toHaveBeenCalledTimes(2));
+    await waitFor(() => {
+      expect(navigation.navigate).toHaveBeenCalledWith('Main', {
+        screen: 'RoomsTab',
+        params: { screen: 'Room', params: { roomId: 'retry-call-room' } },
+      });
+    });
+  });
+
+  it('more header button surfaces a "coming soon" Alert (no crash)', () => {
     const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
     const { getByLabelText } = renderChat();
-    fireEvent.press(getByLabelText('Call'));
     fireEvent.press(getByLabelText('More options'));
-    expect(alertSpy).toHaveBeenCalledTimes(2);
+    expect(alertSpy).toHaveBeenCalledTimes(1);
   });
 
   it('emoji button opens the palette; picking an emoji reveals the send button', async () => {

@@ -32,7 +32,12 @@ jest.mock(
         sessions: { create: async () => ({ url: 'https://billing.stripe.com/p/test' }) },
       },
       subscriptions: {
-        retrieve: async () => ({ id: 'sub_test', status: 'active', customer: 'cus_test' }),
+        retrieve: async () => ({
+          id: 'sub_test',
+          created: 100,
+          status: 'active',
+          customer: 'cus_test',
+        }),
       },
       accounts: {
         create: async () => ({ id: 'acct_test' }),
@@ -87,6 +92,8 @@ const { paymentsService } =
 const { premiumService } =
   require('../src/extensions/modules/premium/premium.service') as typeof import('../src/extensions/modules/premium/premium.service');
 const { assertCurrency } =
+  require('../src/extensions/modules/payments/stripe.client') as typeof import('../src/extensions/modules/payments/stripe.client');
+const { requireStripe } =
   require('../src/extensions/modules/payments/stripe.client') as typeof import('../src/extensions/modules/payments/stripe.client');
 /* eslint-enable @typescript-eslint/no-require-imports */
 
@@ -271,13 +278,17 @@ describe('premiumService — entitlement sync', () => {
     const userId = await seedUser();
     const periodEnd = Math.floor(Date.now() / 1000) + 30 * 24 * 3600;
 
-    await premiumService.syncSubscription({
-      id: 'sub_a',
-      status: 'active',
-      customer: 'cus_a',
-      current_period_end: periodEnd,
-      metadata: { chathouseUserId: userId },
-    });
+    await premiumService.syncSubscription(
+      {
+        id: 'sub_a',
+        created: 100,
+        status: 'active',
+        customer: 'cus_a',
+        current_period_end: periodEnd,
+        metadata: { chathouseUserId: userId },
+      },
+      { id: 'evt_sub_a_active', created: 100 },
+    );
     let user = await prisma.user.findUnique({
       where: { id: userId },
       select: { isPremium: true, premiumUntil: true },
@@ -288,12 +299,16 @@ describe('premiumService — entitlement sync', () => {
     await expect(premiumService.requirePremium(userId)).resolves.toBeUndefined();
 
     // Cancel → entitlement revoked, subscription row updated (not duplicated).
-    await premiumService.syncSubscription({
-      id: 'sub_a',
-      status: 'canceled',
-      customer: 'cus_a',
-      metadata: { chathouseUserId: userId },
-    });
+    await premiumService.syncSubscription(
+      {
+        id: 'sub_a',
+        created: 100,
+        status: 'canceled',
+        customer: 'cus_a',
+        metadata: { chathouseUserId: userId },
+      },
+      { id: 'evt_sub_a_canceled', created: 200 },
+    );
     user = await prisma.user.findUnique({
       where: { id: userId },
       select: { isPremium: true, premiumUntil: true },
@@ -308,6 +323,286 @@ describe('premiumService — entitlement sync', () => {
     const subs = await prisma.subscription.findMany({ where: { userId } });
     expect(subs).toHaveLength(1);
     expect(subs[0]?.status).toBe('canceled');
+  });
+
+  it('does not reactivate premium when an older event arrives after cancellation', async () => {
+    const userId = await seedUser();
+    const subscriptionId = `sub_order_${rand()}`;
+    const customerId = `cus_order_${rand()}`;
+    const periodEnd = Math.floor(Date.now() / 1000) + 30 * 24 * 3600;
+    const active = {
+      id: subscriptionId,
+      created: 50,
+      status: 'active',
+      customer: customerId,
+      current_period_end: periodEnd,
+      metadata: { chathouseUserId: userId },
+    };
+
+    await premiumService.syncSubscription(active, { id: `evt_${rand()}`, created: 100 });
+    await premiumService.syncSubscription(
+      { ...active, status: 'canceled', current_period_end: undefined },
+      { id: `evt_${rand()}`, created: 200 },
+    );
+    await premiumService.syncSubscription(active, { id: `evt_${rand()}`, created: 100 });
+
+    await expect(
+      prisma.user.findUniqueOrThrow({
+        where: { id: userId },
+        select: { isPremium: true, premiumUntil: true },
+      }),
+    ).resolves.toEqual({ isPremium: false, premiumUntil: null });
+    await expect(
+      prisma.subscription.findUniqueOrThrow({
+        where: { userId },
+        select: { status: true, lastStripeEventCreatedAt: true },
+      }),
+    ).resolves.toEqual({
+      status: 'canceled',
+      lastStripeEventCreatedAt: new Date(200 * 1000),
+    });
+  });
+
+  it('never lets a superseded subscription id overwrite the newer subscription', async () => {
+    const userId = await seedUser();
+    const oldId = `sub_old_${rand()}`;
+    const newId = `sub_new_${rand()}`;
+    const metadata = { chathouseUserId: userId };
+    const periodEnd = Math.floor(Date.now() / 1000) + 30 * 24 * 3600;
+
+    await premiumService.syncSubscription(
+      {
+        id: oldId,
+        created: 100,
+        status: 'active',
+        customer: `cus_${rand()}`,
+        current_period_end: periodEnd,
+        metadata,
+      },
+      { id: `evt_${rand()}`, created: 100 },
+    );
+    await premiumService.syncSubscription(
+      {
+        id: newId,
+        created: 200,
+        status: 'active',
+        customer: `cus_${rand()}`,
+        current_period_end: periodEnd,
+        metadata,
+      },
+      { id: `evt_${rand()}`, created: 200 },
+    );
+
+    // Even though this deletion event was emitted later, it belongs to the
+    // older subscription and must not revoke the current entitlement.
+    await premiumService.syncSubscription(
+      {
+        id: oldId,
+        created: 100,
+        status: 'canceled',
+        customer: `cus_${rand()}`,
+        metadata,
+      },
+      { id: `evt_${rand()}`, created: 300 },
+    );
+
+    await expect(
+      prisma.subscription.findUniqueOrThrow({
+        where: { userId },
+        select: { stripeSubscriptionId: true, status: true },
+      }),
+    ).resolves.toEqual({ stripeSubscriptionId: newId, status: 'active' });
+    await expect(
+      prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { isPremium: true } }),
+    ).resolves.toEqual({ isPremium: true });
+  });
+
+  it('fails closed when two different subscription ids have the same creation second', async () => {
+    const userId = await seedUser();
+    const metadata = { chathouseUserId: userId };
+    const created = 300;
+    const currentId = `sub_same_second_current_${rand()}`;
+
+    await premiumService.syncSubscription(
+      {
+        id: currentId,
+        created,
+        status: 'canceled',
+        customer: `cus_${rand()}`,
+        metadata,
+      },
+      { id: `evt_${rand()}`, created: 400 },
+    );
+    await premiumService.syncSubscription(
+      {
+        id: `sub_same_second_active_${rand()}`,
+        created,
+        status: 'active',
+        customer: `cus_${rand()}`,
+        current_period_end: 500,
+        metadata,
+      },
+      { id: `evt_${rand()}`, created: 500 },
+    );
+
+    await expect(
+      prisma.subscription.findUniqueOrThrow({
+        where: { userId },
+        select: { stripeSubscriptionId: true, status: true },
+      }),
+    ).resolves.toEqual({ stripeSubscriptionId: currentId, status: 'canceled' });
+    await expect(
+      prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { isPremium: true } }),
+    ).resolves.toEqual({ isPremium: false });
+  });
+
+  it('is durably idempotent when the same Stripe event is replayed', async () => {
+    const userId = await seedUser();
+    const event = { id: `evt_replay_${rand()}`, created: 400 };
+    const subscription = {
+      id: `sub_replay_${rand()}`,
+      created: 350,
+      status: 'active',
+      customer: `cus_replay_${rand()}`,
+      current_period_end: Math.floor(Date.now() / 1000) + 30 * 24 * 3600,
+      metadata: { chathouseUserId: userId },
+    };
+
+    await premiumService.syncSubscription(subscription, event);
+    const first = await prisma.subscription.findUniqueOrThrow({ where: { userId } });
+    await premiumService.syncSubscription(subscription, event);
+    const replayed = await prisma.subscription.findUniqueOrThrow({ where: { userId } });
+
+    expect(replayed.id).toBe(first.id);
+    expect(replayed.updatedAt).toEqual(first.updatedAt);
+    expect(replayed.lastStripeEventId).toBe(event.id);
+    await expect(prisma.subscription.count({ where: { userId } })).resolves.toBe(1);
+  });
+
+  it('hydrates a legacy same-id row before accepting its first post-migration event', async () => {
+    const userId = await seedUser();
+    const now = 1_800_000_000;
+    const subscriptionId = `sub_legacy_${rand()}`;
+    const customerId = `cus_legacy_${rand()}`;
+    await prisma.subscription.create({
+      data: {
+        userId,
+        stripeSubscriptionId: subscriptionId,
+        stripeCustomerId: customerId,
+        status: 'canceled',
+      },
+    });
+
+    const stripe = await requireStripe();
+    const retrieve = jest.spyOn(stripe.subscriptions, 'retrieve').mockResolvedValueOnce({
+      id: subscriptionId,
+      created: now - 1000,
+      status: 'canceled',
+      customer: customerId,
+      metadata: { chathouseUserId: userId },
+    });
+    const clock = jest.spyOn(Date, 'now').mockReturnValue(now * 1000);
+
+    try {
+      // This is a replay from before deployment. The current Stripe snapshot is
+      // canceled, so bootstrap must not trust the historical active payload.
+      await premiumService.syncSubscription(
+        {
+          id: subscriptionId,
+          created: now - 1000,
+          status: 'active',
+          customer: customerId,
+          current_period_end: now + 30 * 24 * 3600,
+          metadata: { chathouseUserId: userId },
+        },
+        { id: `evt_legacy_active_${rand()}`, created: now - 500 },
+      );
+    } finally {
+      clock.mockRestore();
+      retrieve.mockRestore();
+    }
+
+    await expect(
+      prisma.user.findUniqueOrThrow({
+        where: { id: userId },
+        select: { isPremium: true, premiumUntil: true },
+      }),
+    ).resolves.toEqual({ isPremium: false, premiumUntil: null });
+    await expect(
+      prisma.subscription.findUniqueOrThrow({
+        where: { userId },
+        select: {
+          status: true,
+          stripeSubscriptionCreatedAt: true,
+          lastStripeEventCreatedAt: true,
+        },
+      }),
+    ).resolves.toEqual({
+      status: 'canceled',
+      stripeSubscriptionCreatedAt: new Date((now - 1000) * 1000),
+      lastStripeEventCreatedAt: new Date(now * 1000),
+    });
+  });
+
+  it('timestamps a checkout-retrieved snapshot when observed, not when checkout occurred', async () => {
+    const userId = await seedUser();
+    const now = 1_800_000_000;
+    const subscriptionId = `sub_checkout_snapshot_${rand()}`;
+    const customerId = `cus_checkout_snapshot_${rand()}`;
+    const stripe = await requireStripe();
+    const retrieve = jest.spyOn(stripe.subscriptions, 'retrieve').mockResolvedValueOnce({
+      id: subscriptionId,
+      created: now - 500,
+      status: 'canceled',
+      customer: customerId,
+      metadata: { chathouseUserId: userId },
+    });
+    const clock = jest.spyOn(Date, 'now').mockReturnValue(now * 1000);
+
+    try {
+      await premiumService.syncFromCheckout(
+        {
+          id: `cs_${rand()}`,
+          url: null,
+          mode: 'subscription',
+          subscription: subscriptionId,
+        },
+        { id: `evt_checkout_${rand()}`, created: now - 300 },
+      );
+
+      // This payload was created after checkout but before the authoritative
+      // canceled snapshot was retrieved. It must not reactivate premium.
+      await premiumService.syncSubscription(
+        {
+          id: subscriptionId,
+          created: now - 500,
+          status: 'active',
+          customer: customerId,
+          current_period_end: now + 30 * 24 * 3600,
+          metadata: { chathouseUserId: userId },
+        },
+        { id: `evt_active_${rand()}`, created: now - 100 },
+      );
+    } finally {
+      clock.mockRestore();
+      retrieve.mockRestore();
+    }
+
+    await expect(
+      prisma.user.findUniqueOrThrow({
+        where: { id: userId },
+        select: { isPremium: true, premiumUntil: true },
+      }),
+    ).resolves.toEqual({ isPremium: false, premiumUntil: null });
+    await expect(
+      prisma.subscription.findUniqueOrThrow({
+        where: { userId },
+        select: { status: true, lastStripeEventCreatedAt: true },
+      }),
+    ).resolves.toEqual({
+      status: 'canceled',
+      lastStripeEventCreatedAt: new Date(now * 1000),
+    });
   });
 });
 

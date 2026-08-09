@@ -53,4 +53,20 @@ describe('self-hosted LiveKit configuration', () => {
   it('exposes the optional internal endpoint in production compose', () => {
     expect(productionCompose).toContain('LIVEKIT_INTERNAL_URL: ${LIVEKIT_INTERNAL_URL:-}');
   });
+
+  it('keeps LiveKit mandatory and Stripe atomically optional in production compose', () => {
+    for (const field of ['LIVEKIT_URL', 'LIVEKIT_API_KEY', 'LIVEKIT_API_SECRET']) {
+      expect(productionCompose).toContain(`${field}: \${${field}:?`);
+    }
+    expect(productionCompose).toContain('EXTENSIONS_ENABLED: ${EXTENSIONS_ENABLED:-true}');
+    for (const field of [
+      'STRIPE_SECRET_KEY',
+      'STRIPE_WEBHOOK_SECRET',
+      'STRIPE_RETURN_URL',
+      'STRIPE_REFRESH_URL',
+    ]) {
+      expect(productionCompose).toContain(`${field}: \${${field}:-}`);
+      expect(productionCompose).not.toContain(`${field}: \${${field}:?`);
+    }
+  });
 });

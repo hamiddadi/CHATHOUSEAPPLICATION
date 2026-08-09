@@ -24,7 +24,7 @@ const PULSE_SCALE_PEAK = 1.15;
 const PULSE_OPACITY_TROUGH = 0.3;
 
 export interface PulsingAvatarProps {
-  avatar: string;
+  avatar?: string | null;
   /** Diameter of the avatar in pixels. Defaults to 60. */
   size?: number;
   /** Set to false to freeze the pulse (e.g. for screenshots). */
@@ -73,6 +73,7 @@ export const PulsingAvatar: React.FC<PulsingAvatarProps> = memo(
     }));
 
     const ringSize = size + RING_THICKNESS * 2;
+    const avatarUri = !avatar?.trim() || failed ? DEFAULTS.avatar : avatar;
 
     return (
       <View style={[styles.container, { width: ringSize, height: ringSize }]}>
@@ -90,7 +91,7 @@ export const PulsingAvatar: React.FC<PulsingAvatarProps> = memo(
           ]}
         />
         <Image
-          source={{ uri: failed ? DEFAULTS.avatar : avatar }}
+          source={{ uri: avatarUri }}
           onError={handleError}
           style={{ width: size, height: size, borderRadius: size / 2 }}
           resizeMode="cover"

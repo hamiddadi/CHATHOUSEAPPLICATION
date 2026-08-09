@@ -37,7 +37,9 @@ const makeStore = (prefix: string): Store | undefined => {
 
 // All limiters share the same window/header/message policy; only `max`,
 // `skip`, `skipSuccessfulRequests` and the store prefix vary per limiter.
-const makeLimiter = (prefix: string, opts: Partial<Parameters<typeof rateLimit>[0]>) =>
+// Export the factory so tests can use an isolated MemoryStore-backed instance
+// instead of consuming a process-wide route quota and becoming order-dependent.
+export const createRateLimiter = (prefix: string, opts: Partial<Parameters<typeof rateLimit>[0]>) =>
   rateLimit({
     windowMs: env.RATE_LIMIT_WINDOW_MS,
     standardHeaders: true,
@@ -55,7 +57,7 @@ const makeLimiter = (prefix: string, opts: Partial<Parameters<typeof rateLimit>[
  * Global limiter — blanket protection for every `/api/*` route.
  * Tune per-route via `authLimiter` for high-risk endpoints.
  */
-export const globalLimiter = makeLimiter('rl:global:', {
+export const globalLimiter = createRateLimiter('rl:global:', {
   max: env.RATE_LIMIT_MAX,
   // Exempt /auth/dev-login in non-prod — it's a QA shortcut and rapid
   // reloads during Expo development shouldn't trip the limiter.
@@ -67,7 +69,7 @@ export const globalLimiter = makeLimiter('rl:global:', {
  * without hurting the normal user flow. `skipSuccessfulRequests` is fine
  * here because a *successful* login is not abuse.
  */
-export const authLimiter = makeLimiter('rl:auth:', {
+export const authLimiter = createRateLimiter('rl:auth:', {
   max: env.AUTH_RATE_LIMIT_MAX,
   skipSuccessfulRequests: true,
 });
@@ -79,7 +81,7 @@ export const authLimiter = makeLimiter('rl:auth:', {
  * the thing we must cap, otherwise an attacker rotating phone numbers can
  * run up the Twilio/SMTP bill with zero HTTP throttling.
  */
-export const sendLimiter = makeLimiter('rl:send:', {
+export const sendLimiter = createRateLimiter('rl:send:', {
   max: env.AUTH_RATE_LIMIT_MAX,
 });
 
@@ -88,7 +90,7 @@ export const sendLimiter = makeLimiter('rl:send:', {
  * A per-user ceiling protects memory, object-storage cost and abuse while
  * still allowing normal avatar retries and batches of voice notes.
  */
-export const uploadLimiter = makeLimiter('rl:upload:', {
+export const uploadLimiter = createRateLimiter('rl:upload:', {
   max: 30,
   keyGenerator: req => req.userId ?? 'unauthenticated',
 });
@@ -98,7 +100,7 @@ export const uploadLimiter = makeLimiter('rl:upload:', {
  * per-account request ceiling permits normal initial sync/retries while
  * making phone-space enumeration materially more expensive.
  */
-export const contactMatchLimiter = makeLimiter('rl:contacts:', {
+export const contactMatchLimiter = createRateLimiter('rl:contacts:', {
   max: 5,
   keyGenerator: req => req.userId ?? 'unauthenticated',
 });
@@ -108,7 +110,7 @@ export const contactMatchLimiter = makeLimiter('rl:contacts:', {
  * Keep this quota account-scoped so changing IP addresses cannot multiply the
  * database and memory cost.
  */
-export const dataExportLimiter = makeLimiter('rl:data-export:', {
+export const dataExportLimiter = createRateLimiter('rl:data-export:', {
   max: 2,
   keyGenerator: req => req.userId ?? 'unauthenticated',
 });

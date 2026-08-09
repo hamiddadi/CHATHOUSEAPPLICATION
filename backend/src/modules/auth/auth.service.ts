@@ -174,11 +174,9 @@ export const authService = {
   },
 
   async logout(userId: string, accessToken: string) {
-    // 1. Blacklist the caller's still-valid access token in Redis until exp.
     const ttl = decodeTokenTtl(accessToken);
-    await revokeAccessToken(accessToken, ttl);
 
-    // 2. Revoke every refresh token (cross-device logout) AND bump tokenVersion
+    // Revoke every refresh token (cross-device logout) AND bump tokenVersion
     //    so every OTHER device's still-valid access token is rejected at once
     //    (AUTH-03) — not just the caller's blacklisted one. Drop the auth cache
     //    so the next request re-reads the bumped version immediately.
@@ -193,8 +191,12 @@ export const authService = {
         data: { revokedAt },
       }),
     ]);
-    await invalidateUserAuthCache(userId);
+    // Commit the durable fallback first. If Redis is unavailable, protected
+    // requests fail closed while it is down and tokenVersion remains the source
+    // of truth after recovery. Disconnect sockets before cache I/O so a failed
+    // Redis write cannot leave an already-revoked realtime session connected.
     disconnectUserSockets(userId, 'logout');
+    await Promise.all([revokeAccessToken(accessToken, ttl), invalidateUserAuthCache(userId)]);
   },
 
   /**

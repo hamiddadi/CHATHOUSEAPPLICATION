@@ -1,10 +1,12 @@
-import React, { memo, useCallback } from 'react';
+import React, { memo, useCallback, useRef } from 'react';
 import { Alert, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import MaterialIcons from '@react-native-vector-icons/material-icons';
 import { useMutation } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
 import { Avatar } from '../../../../shared/components/Avatar';
 import { colors, spacing } from '../../../../shared/constants/theme';
 import type { RoomParticipant } from '../../../../shared/types/domain';
+import { errorMessage } from '../../../../shared/utils/errorMessage';
 import { useKickFromRoom, useSetMute, useSetRole } from '../../hooks/useRooms';
 import { speakInviteApi } from '../../../extensions';
 
@@ -25,6 +27,7 @@ interface HostActionsSheetProps {
  */
 export const HostActionsSheet: React.FC<HostActionsSheetProps> = memo(
   ({ target, roomId, viewerIsHost, onClose }) => {
+    const { t } = useTranslation();
     const setMute = useSetMute();
     const setRole = useSetRole();
     const kick = useKickFromRoom();
@@ -33,35 +36,70 @@ export const HostActionsSheet: React.FC<HostActionsSheetProps> = memo(
     const nominate = useMutation({
       mutationFn: (userId: string) => speakInviteApi.invite(roomId, userId),
     });
+    const actionInFlight = useRef(false);
+    const isPending =
+      setMute.isPending || setRole.isPending || kick.isPending || nominate.isPending;
+
+    // TanStack updates `isPending` on the next render. The ref closes the small
+    // window in which a fast double-tap could otherwise dispatch twice.
+    const beginAction = useCallback(() => {
+      if (actionInFlight.current || isPending) return false;
+      actionInFlight.current = true;
+      return true;
+    }, [isPending]);
+
+    const closeAfterSuccess = useCallback(() => {
+      actionInFlight.current = false;
+      onClose();
+    }, [onClose]);
+
+    const handleActionError = useCallback(
+      (error: unknown) => {
+        actionInFlight.current = false;
+        Alert.alert(
+          t('common.error', 'Something went wrong'),
+          errorMessage(error, t('common.actionFailed', 'Action failed. Please try again.')),
+        );
+      },
+      [t],
+    );
+
+    const handleClose = useCallback(() => {
+      if (!actionInFlight.current && !isPending) onClose();
+    }, [isPending, onClose]);
 
     const handleNominate = useCallback(() => {
-      if (!target) return;
+      if (!target || !beginAction()) return;
       nominate.mutate(target.id, {
-        onSuccess: () =>
-          Alert.alert('Invitation envoyée', `@${target.username} est invité·e à parler.`),
-        onError: () => Alert.alert('Erreur', "Échec de l'invitation."),
-        onSettled: onClose,
+        onSuccess: () => {
+          closeAfterSuccess();
+          Alert.alert('Invitation envoyée', `@${target.username} est invité·e à parler.`);
+        },
+        onError: handleActionError,
       });
-    }, [nominate, onClose, target]);
+    }, [beginAction, closeAfterSuccess, handleActionError, nominate, target]);
 
     const handleMute = useCallback(() => {
-      if (!target) return;
+      if (!target || !beginAction()) return;
       setMute.mutate(
         { roomId, isMuted: target.audio !== 'muted', userId: target.id },
-        { onSettled: onClose },
+        { onSuccess: closeAfterSuccess, onError: handleActionError },
       );
-    }, [onClose, roomId, setMute, target]);
+    }, [beginAction, closeAfterSuccess, handleActionError, roomId, setMute, target]);
 
     const handlePromote = useCallback(
       (role: 'SPEAKER' | 'MODERATOR' | 'LISTENER') => {
-        if (!target) return;
-        setRole.mutate({ roomId, userId: target.id, role }, { onSettled: onClose });
+        if (!target || !beginAction()) return;
+        setRole.mutate(
+          { roomId, userId: target.id, role },
+          { onSuccess: closeAfterSuccess, onError: handleActionError },
+        );
       },
-      [onClose, roomId, setRole, target],
+      [beginAction, closeAfterSuccess, handleActionError, roomId, setRole, target],
     );
 
     const handleTransferHost = useCallback(() => {
-      if (!target) return;
+      if (!target || actionInFlight.current || isPending) return;
       Alert.alert(
         'Transférer la room',
         `Donner le rôle d'hôte à @${target.username} ? Vous deviendrez speaker.`,
@@ -70,15 +108,20 @@ export const HostActionsSheet: React.FC<HostActionsSheetProps> = memo(
           {
             text: 'Transférer',
             style: 'destructive',
-            onPress: () =>
-              setRole.mutate({ roomId, userId: target.id, role: 'HOST' }, { onSettled: onClose }),
+            onPress: () => {
+              if (!beginAction()) return;
+              setRole.mutate(
+                { roomId, userId: target.id, role: 'HOST' },
+                { onSuccess: closeAfterSuccess, onError: handleActionError },
+              );
+            },
           },
         ],
       );
-    }, [onClose, roomId, setRole, target]);
+    }, [beginAction, closeAfterSuccess, handleActionError, isPending, roomId, setRole, target]);
 
     const handleKick = useCallback(() => {
-      if (!target) return;
+      if (!target || actionInFlight.current || isPending) return;
       Alert.alert(
         'Expulser cet utilisateur',
         `@${target.username} sera retiré de la room et banni 30 minutes.`,
@@ -87,12 +130,17 @@ export const HostActionsSheet: React.FC<HostActionsSheetProps> = memo(
           {
             text: 'Expulser',
             style: 'destructive',
-            onPress: () =>
-              kick.mutate({ roomId, userId: target.id, banMinutes: 30 }, { onSettled: onClose }),
+            onPress: () => {
+              if (!beginAction()) return;
+              kick.mutate(
+                { roomId, userId: target.id, banMinutes: 30 },
+                { onSuccess: closeAfterSuccess, onError: handleActionError },
+              );
+            },
           },
         ],
       );
-    }, [kick, onClose, roomId, target]);
+    }, [beginAction, closeAfterSuccess, handleActionError, isPending, kick, roomId, target]);
 
     if (!target) return null;
 
@@ -100,8 +148,8 @@ export const HostActionsSheet: React.FC<HostActionsSheetProps> = memo(
     const muted = target.audio === 'muted';
 
     return (
-      <Modal visible transparent animationType="slide" onRequestClose={onClose}>
-        <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="Fermer">
+      <Modal visible transparent animationType="slide" onRequestClose={handleClose}>
+        <Pressable style={styles.backdrop} onPress={handleClose} accessibilityLabel="Fermer">
           <Pressable style={styles.sheet} onPress={() => undefined}>
             <View style={styles.handle} />
             <View style={styles.header}>
@@ -121,6 +169,7 @@ export const HostActionsSheet: React.FC<HostActionsSheetProps> = memo(
                 icon={muted ? 'mic' : 'mic-off'}
                 label={muted ? 'Réactiver son micro' : 'Couper son micro'}
                 onPress={handleMute}
+                disabled={isPending}
               />
             )}
             {!isOnStage && (
@@ -128,6 +177,7 @@ export const HostActionsSheet: React.FC<HostActionsSheetProps> = memo(
                 icon="mic"
                 label="Inviter à parler"
                 onPress={() => handlePromote('SPEAKER')}
+                disabled={isPending}
               />
             )}
             {!isOnStage && (
@@ -135,6 +185,7 @@ export const HostActionsSheet: React.FC<HostActionsSheetProps> = memo(
                 icon="record-voice-over"
                 label="Nominer pour parler (demande)"
                 onPress={handleNominate}
+                disabled={isPending}
               />
             )}
             {isOnStage && (
@@ -142,18 +193,21 @@ export const HostActionsSheet: React.FC<HostActionsSheetProps> = memo(
                 icon="mic-off"
                 label="Renvoyer dans le public"
                 onPress={() => handlePromote('LISTENER')}
+                disabled={isPending}
               />
             )}
             <ActionRow
               icon="shield"
               label="Nommer modérateur"
               onPress={() => handlePromote('MODERATOR')}
+              disabled={isPending}
             />
             {viewerIsHost && (
               <ActionRow
                 icon="star"
                 label="Transférer le rôle d'hôte"
                 onPress={handleTransferHost}
+                disabled={isPending}
               />
             )}
             <ActionRow
@@ -161,12 +215,15 @@ export const HostActionsSheet: React.FC<HostActionsSheetProps> = memo(
               label="Expulser (ban 30 min)"
               onPress={handleKick}
               destructive
+              disabled={isPending}
             />
             <Pressable
-              onPress={onClose}
-              style={styles.cancel}
+              onPress={handleClose}
+              style={[styles.cancel, isPending ? styles.disabled : null]}
               accessibilityRole="button"
               accessibilityLabel="Annuler"
+              accessibilityState={{ disabled: isPending }}
+              disabled={isPending}
             >
               <Text style={styles.cancelLabel}>Annuler</Text>
             </Pressable>
@@ -183,15 +240,18 @@ interface ActionRowProps {
   label: string;
   onPress: () => void;
   destructive?: boolean;
+  disabled?: boolean;
 }
 
 const ActionRow: React.FC<ActionRowProps> = memo(
-  ({ icon, label, onPress, destructive = false }) => (
+  ({ icon, label, onPress, destructive = false, disabled = false }) => (
     <Pressable
       onPress={onPress}
-      style={styles.row}
+      style={[styles.row, disabled ? styles.disabled : null]}
       accessibilityRole="button"
       accessibilityLabel={label}
+      accessibilityState={{ disabled }}
+      disabled={disabled}
     >
       <MaterialIcons name={icon} size={22} color={destructive ? colors.danger : colors.text} />
       <Text style={[styles.rowLabel, destructive ? styles.rowLabelDanger : null]}>{label}</Text>
@@ -241,6 +301,7 @@ const styles = StyleSheet.create({
   },
   rowLabel: { color: colors.text, fontSize: 15, fontWeight: '500' },
   rowLabelDanger: { color: colors.danger },
+  disabled: { opacity: 0.45 },
   cancel: {
     marginTop: spacing.md,
     alignItems: 'center',

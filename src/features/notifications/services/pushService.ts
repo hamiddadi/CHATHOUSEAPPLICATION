@@ -55,7 +55,7 @@ const registerToken = async (token: string, allowRotation = true): Promise<boole
  * - 'denied'   user refused, the OS may re-prompt later
  * - 'blocked'  user refused permanently ("never ask again" / iOS denial) —
  *              only the system settings screen can re-enable it
- * - 'error'    native module/token unavailable (emulator, tests, web)
+ * - 'error'    native module/token unavailable or backend registration failed
  */
 export type PushPermissionStatus = 'granted' | 'denied' | 'blocked' | 'error';
 
@@ -138,8 +138,8 @@ export const pushService = {
   async registerWithBackend(): Promise<PushPermissionStatus> {
     const { token, status } = await this.getOrRequestToken();
     if (!token) return status;
-    await registerToken(token);
-    return status;
+    const registered = await registerToken(token);
+    return registered ? 'granted' : 'error';
   },
 
   async registerTokenWithBackend(token: string): Promise<boolean> {

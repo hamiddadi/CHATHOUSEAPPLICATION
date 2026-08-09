@@ -6,11 +6,11 @@ import { getUserId } from '../socket.middleware';
 import { MAPS_CHANNEL } from '../channels';
 
 /**
- * All sockets that open the map join the `maps:presence` channel so every
- * location update fans out to every viewer. Backend-driven filtering (Ghost
- * Mode) happens in usersService.getOnlineLocations on REST reads — for
- * real-time updates we still emit, but an isVisible=false user's update is
- * suppressed at source here (we simply don't broadcast it).
+ * All sockets that open the map join the `maps:presence` channel so location
+ * updates can fan out to eligible viewers. Privacy filtering applies on both
+ * transports: Ghost Mode and blocks suppress the source, while realtime.ts
+ * shares exact GPS only with mutually accepted follows and quantises it for
+ * everyone else.
  */
 export const registerMapsHandlers = (_io: Server, socket: Socket): void => {
   const me = (): string => getUserId(socket);

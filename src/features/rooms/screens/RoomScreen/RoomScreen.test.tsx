@@ -20,6 +20,7 @@ import { Alert } from 'react-native';
 import { act, fireEvent, waitFor } from '@testing-library/react-native';
 import { roomKeys } from '../../hooks/useRooms';
 import { roomService } from '../../services/roomService';
+import { roomAudioSession } from '../../services/roomAudioSession';
 import { useCurrentRoomStore } from '../../store/currentRoomStore';
 import type { Room, RoomParticipant } from '../../../../shared/types/domain';
 import {
@@ -240,6 +241,54 @@ describe('RoomScreen', () => {
       const { getByLabelText } = mountRoom(hostRoom());
       fireEvent.press(getByLabelText('End Room'));
       expect(Alert.alert).toHaveBeenCalled();
+    });
+
+    it('keeps the room active and lets the host retry when ending fails', async () => {
+      const endSpy = jest.spyOn(roomService, 'end').mockRejectedValue(new Error('Network lost'));
+      const stopSpy = jest.spyOn(roomAudioSession, 'stop').mockResolvedValue(undefined);
+      const { navigation, getByLabelText } = mountRoom(hostRoom());
+
+      fireEvent.press(getByLabelText('End Room'));
+      const confirmCall = (Alert.alert as jest.Mock).mock.calls[0];
+      const buttons = confirmCall[2] as Array<{
+        style?: string;
+        onPress?: () => void;
+      }>;
+      act(() => buttons.find(button => button.style === 'destructive')?.onPress?.());
+
+      await waitFor(() => {
+        expect(endSpy).toHaveBeenCalledWith(ROOM_ID);
+        expect(Alert.alert).toHaveBeenCalledTimes(2);
+      });
+      expect((Alert.alert as jest.Mock).mock.calls[1][0]).toBe("Couldn't end the room");
+      expect(navigation.goBack).not.toHaveBeenCalled();
+      expect(stopSpy).not.toHaveBeenCalled();
+      expect(useCurrentRoomStore.getState().room?.id).toBe(ROOM_ID);
+      expect(getByLabelText('End Room').props.accessibilityState).toEqual({
+        disabled: false,
+        busy: false,
+      });
+    });
+
+    it('clears local audio and leaves exactly once after ending succeeds', async () => {
+      const endSpy = jest.spyOn(roomService, 'end').mockResolvedValue({ ended: true });
+      const stopSpy = jest.spyOn(roomAudioSession, 'stop').mockResolvedValue(undefined);
+      const { navigation, getByLabelText } = mountRoom(hostRoom());
+
+      fireEvent.press(getByLabelText('End Room'));
+      const confirmCall = (Alert.alert as jest.Mock).mock.calls[0];
+      const buttons = confirmCall[2] as Array<{
+        style?: string;
+        onPress?: () => void;
+      }>;
+      act(() => buttons.find(button => button.style === 'destructive')?.onPress?.());
+
+      await waitFor(() => {
+        expect(endSpy).toHaveBeenCalledWith(ROOM_ID);
+        expect(navigation.goBack).toHaveBeenCalledTimes(1);
+        expect(stopSpy).toHaveBeenCalledTimes(1);
+      });
+      expect(useCurrentRoomStore.getState().room).toBeNull();
     });
 
     it('opens room controls (tune) without crashing', () => {

@@ -75,6 +75,55 @@ const optionalUrlFromString = z.preprocess(
   z.string().trim().url().optional(),
 );
 
+const optionalTrimmedString = z.preprocess(
+  value => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+  z.string().trim().min(1).optional(),
+);
+
+const isPrivateIpv4 = (hostname: string): boolean => {
+  const octets = hostname.split('.').map(Number);
+  if (octets.length !== 4 || octets.some(octet => !Number.isInteger(octet))) return false;
+  const first = octets[0];
+  const second = octets[1];
+  if (first === undefined || second === undefined) return false;
+  return (
+    first === 10 ||
+    first === 127 ||
+    (first === 169 && second === 254) ||
+    (first === 172 && second >= 16 && second <= 31) ||
+    (first === 192 && second === 168) ||
+    octets.every(octet => octet === 0)
+  );
+};
+
+const publicTlsUrlError = (rawValue: string, protocol: 'https:' | 'wss:'): string | null => {
+  const url = new URL(rawValue);
+  if (url.protocol !== protocol) return `must use ${protocol.slice(0, -1)}`;
+  if (url.username || url.password) return 'must not contain credentials';
+
+  const hostname = url.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  if (!hostname || (!hostname.includes('.') && !hostname.includes(':'))) {
+    return 'must use a fully-qualified public host';
+  }
+  if (
+    hostname === 'localhost' ||
+    hostname.endsWith('.localhost') ||
+    hostname.endsWith('.local') ||
+    hostname.endsWith('.internal') ||
+    hostname.endsWith('.lan') ||
+    hostname.endsWith('.test') ||
+    hostname.endsWith('.invalid') ||
+    hostname.endsWith('.example') ||
+    hostname === '::1' ||
+    hostname === '0:0:0:0:0:0:0:1' ||
+    /^(?:fc|fd|fe[89ab])/i.test(hostname) ||
+    isPrivateIpv4(hostname)
+  ) {
+    return 'must not use a local or private host';
+  }
+  return null;
+};
+
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().positive().default(4000),
@@ -208,14 +257,14 @@ const envSchema = z.object({
   // API_KEY and API_SECRET are used to sign per-room JWT tokens — the
   // secret must NEVER leak to the bundle.
   // When unset, /rooms/:id/livekit-token returns 503.
-  LIVEKIT_URL: z.string().min(1).optional(),
+  LIVEKIT_URL: optionalUrlFromString,
   // Optional server-to-server endpoint for RoomService/Egress calls. This is
   // distinct from LIVEKIT_URL because a public/mobile URL such as
   // ws://127.0.0.1:7880 is not routable from inside the API container.
   // When absent, admin clients safely fall back to LIVEKIT_URL.
   LIVEKIT_INTERNAL_URL: optionalUrlFromString,
-  LIVEKIT_API_KEY: z.string().min(1).optional(),
-  LIVEKIT_API_SECRET: z.string().min(1).optional(),
+  LIVEKIT_API_KEY: optionalTrimmedString,
+  LIVEKIT_API_SECRET: optionalTrimmedString,
   // Token TTL — clients renew ~30s before expiry so even short windows
   // are stable. The operational value is capped at five minutes to bound
   // stale audio access after a role change, kick, or room closure.
@@ -242,17 +291,17 @@ const envSchema = z.object({
   RECORDING_PUBLIC_BASE_URL: z.string().optional(),
 
   // ─── Monetization (Stripe tips + premium) ───────────────────────────
-  // Payments + premium stay available when their server-side Stripe secrets
-  // are configured. The pinned Stripe SDK is a production dependency; missing
-  // credentials still fail closed instead of creating a partial payment flow.
-  STRIPE_SECRET_KEY: z.string().optional(),
+  // Stripe is an optional sub-feature of the extensions bundle. It is enabled
+  // only when STRIPE_SECRET_KEY is configured; production accepts all four
+  // values absent, but rejects every partial Stripe configuration.
+  STRIPE_SECRET_KEY: optionalTrimmedString,
   // Verifies incoming webhook signatures. Without it the webhook endpoint
   // rejects every event (fail closed) rather than trusting forged ones.
-  STRIPE_WEBHOOK_SECRET: z.string().optional(),
+  STRIPE_WEBHOOK_SECRET: optionalTrimmedString,
   // Hosted-page return URLs (Connect onboarding + Checkout success/cancel +
   // billing portal). No placeholder fallback — flows fail closed when unset.
-  STRIPE_RETURN_URL: z.string().url().optional(),
-  STRIPE_REFRESH_URL: z.string().url().optional(),
+  STRIPE_RETURN_URL: optionalUrlFromString,
+  STRIPE_REFRESH_URL: optionalUrlFromString,
   // Premium plan: monthly price in minor units + the product label shown on
   // the Stripe-hosted Checkout page.
   PREMIUM_PRICE_CENTS: z.coerce.number().int().positive().default(499),
@@ -401,6 +450,112 @@ if (!parsed.success) {
 
 export const env = parsed.data;
 export type Env = typeof env;
+
+if (env.NODE_ENV === 'production') {
+  const serviceConfigErrors: string[] = [];
+  const requiredLiveKitFields = ['LIVEKIT_URL', 'LIVEKIT_API_KEY', 'LIVEKIT_API_SECRET'] as const;
+  for (const field of requiredLiveKitFields) {
+    if (!env[field]) serviceConfigErrors.push(`${field} is required in production`);
+  }
+
+  if (env.LIVEKIT_URL) {
+    const error = publicTlsUrlError(env.LIVEKIT_URL, 'wss:');
+    if (error) serviceConfigErrors.push(`LIVEKIT_URL ${error}`);
+  }
+  if (env.LIVEKIT_INTERNAL_URL) {
+    const internalUrl = new URL(env.LIVEKIT_INTERNAL_URL);
+    if (!['http:', 'https:'].includes(internalUrl.protocol)) {
+      serviceConfigErrors.push('LIVEKIT_INTERNAL_URL must use http or https');
+    }
+    if (internalUrl.username || internalUrl.password) {
+      serviceConfigErrors.push('LIVEKIT_INTERNAL_URL must not contain credentials');
+    }
+  }
+  if (env.LIVEKIT_API_KEY && env.LIVEKIT_API_KEY.length < 8) {
+    serviceConfigErrors.push('LIVEKIT_API_KEY must be at least 8 characters in production');
+  }
+  if (env.LIVEKIT_API_KEY && /\s/.test(env.LIVEKIT_API_KEY)) {
+    serviceConfigErrors.push('LIVEKIT_API_KEY must not contain whitespace');
+  }
+  if (env.LIVEKIT_API_SECRET && env.LIVEKIT_API_SECRET.length < 32) {
+    serviceConfigErrors.push('LIVEKIT_API_SECRET must be at least 32 characters in production');
+  }
+  if (env.LIVEKIT_API_SECRET && /\s/.test(env.LIVEKIT_API_SECRET)) {
+    serviceConfigErrors.push('LIVEKIT_API_SECRET must not contain whitespace');
+  }
+  if (
+    env.LIVEKIT_API_KEY &&
+    env.LIVEKIT_API_SECRET &&
+    env.LIVEKIT_API_KEY === env.LIVEKIT_API_SECRET
+  ) {
+    serviceConfigErrors.push('LIVEKIT_API_KEY and LIVEKIT_API_SECRET must be distinct');
+  }
+
+  const stripeFields = [
+    'STRIPE_SECRET_KEY',
+    'STRIPE_WEBHOOK_SECRET',
+    'STRIPE_RETURN_URL',
+    'STRIPE_REFRESH_URL',
+  ] as const;
+  const stripeRequested = stripeFields.some(field => Boolean(env[field]));
+  if (stripeRequested) {
+    if (!env.EXTENSIONS_ENABLED) {
+      serviceConfigErrors.push(
+        'EXTENSIONS_ENABLED must be true when the optional Stripe feature is configured',
+      );
+    }
+    for (const field of stripeFields) {
+      if (!env[field]) {
+        serviceConfigErrors.push(`${field} is required when any Stripe configuration is provided`);
+      }
+    }
+
+    if (env.STRIPE_SECRET_KEY && !/^sk_live_[A-Za-z0-9]{24,}$/.test(env.STRIPE_SECRET_KEY)) {
+      serviceConfigErrors.push('STRIPE_SECRET_KEY must be a production sk_live_ key');
+    }
+    if (env.STRIPE_WEBHOOK_SECRET && !/^whsec_[A-Za-z0-9]{24,}$/.test(env.STRIPE_WEBHOOK_SECRET)) {
+      serviceConfigErrors.push('STRIPE_WEBHOOK_SECRET must be a production whsec_ signing secret');
+    }
+    for (const field of ['STRIPE_RETURN_URL', 'STRIPE_REFRESH_URL'] as const) {
+      const value = env[field];
+      if (!value) continue;
+      const error = publicTlsUrlError(value, 'https:');
+      if (error) serviceConfigErrors.push(`${field} ${error}`);
+    }
+    if (
+      env.STRIPE_SECRET_KEY &&
+      env.STRIPE_WEBHOOK_SECRET &&
+      env.STRIPE_SECRET_KEY === env.STRIPE_WEBHOOK_SECRET
+    ) {
+      serviceConfigErrors.push('STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET must be distinct');
+    }
+  }
+
+  const reusableSecrets = [
+    ['JWT_ACCESS_SECRET', env.JWT_ACCESS_SECRET],
+    ['JWT_REFRESH_SECRET', env.JWT_REFRESH_SECRET],
+    ['MEDIA_URL_SIGNING_SECRET', env.MEDIA_URL_SIGNING_SECRET],
+    ['LIVEKIT_API_SECRET', env.LIVEKIT_API_SECRET],
+  ] as const;
+  for (let index = 0; index < reusableSecrets.length; index += 1) {
+    const [field, value] = reusableSecrets[index] as (typeof reusableSecrets)[number];
+    if (!value) continue;
+    const duplicate = reusableSecrets
+      .slice(index + 1)
+      .find(([, candidate]) => candidate && candidate === value);
+    if (duplicate) {
+      serviceConfigErrors.push(`${field} and ${duplicate[0]} must use distinct secrets`);
+    }
+  }
+
+  if (serviceConfigErrors.length > 0) {
+    // eslint-disable-next-line no-console
+    console.error(
+      `❌ Invalid production LiveKit/Stripe configuration:\n- ${serviceConfigErrors.join('\n- ')}`,
+    );
+    process.exit(1);
+  }
+}
 
 if (env.NODE_ENV === 'production') {
   const requiredDeliveryFields = [

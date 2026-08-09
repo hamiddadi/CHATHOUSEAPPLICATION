@@ -68,6 +68,8 @@
     "emptyHint": "Envoyez un message pour démarrer la conversation.",
     "comingSoon": "Cette fonctionnalité arrive bientôt.",
     "callLabel": "Appel vocal",
+    "privateCallTitle": "Appel privé avec {{name}}",
+    "privateCallFallbackTitle": "Appel vocal privé",
     "moreLabel": "Options de la conversation",
     "attachLabel": "Pièce jointe",
     "deleteTitle": "Supprimer le message",
@@ -210,6 +212,7 @@
     "timeHours": "{{count}} h",
     "timeDays": "{{count}} j",
     "openChatA11y": "Ouvrir la conversation avec {{name}}",
+    "onlineChatHint": "Cette personne est actuellement disponible pour discuter.",
     "openGroupA11y": "Ouvrir le groupe {{name}}"
   },
   "settings": {
@@ -354,6 +357,8 @@
       "roleSpeaker": "Vous pouvez parler — appuyez sur Mute pour activer votre micro.",
       "confirmEndTitle": "Fermer la room",
       "confirmEndBody": "\"{{title}}\" sera fermée pour tous les participants. Continuer ?",
+      "endFailedTitle": "Impossible de fermer la room",
+      "endFailedBody": "La room est toujours active. Vérifiez votre connexion et réessayez.",
       "reportTitle": "Signaler cette room",
       "reportReason": "Quelle est la raison ?"
     }
@@ -783,6 +788,8 @@
       "deniedTitle": "Notifications désactivées",
       "deniedBody": "Pas de souci — tu peux les activer à tout moment depuis les réglages de ton profil.",
       "blockedBody": "Les notifications sont bloquées pour ChatHouse. Active-les dans les réglages de ton téléphone pour être notifié.",
+      "errorTitle": "Notifications non activées",
+      "errorBody": "ChatHouse n'a pas pu terminer l'activation des notifications. Tu peux continuer ; ChatHouse réessaiera automatiquement à la prochaine ouverture de l'application.",
       "openSettings": "Ouvrir les réglages"
     }
   },

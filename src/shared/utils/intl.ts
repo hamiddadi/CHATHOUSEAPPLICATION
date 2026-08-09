@@ -46,6 +46,8 @@ const intlIsLocaleAware = ((): boolean => {
 const EMPTY_PLACEHOLDER = '—';
 const DATETIME_OPTS = { dateStyle: 'medium', timeStyle: 'short' } as const;
 const DATE_OPTS = { dateStyle: 'medium' } as const;
+const TIME_OPTS = { hour: 'numeric', minute: '2-digit' } as const;
+const WEEKDAY_DATE_OPTS = { weekday: 'long', month: 'short', day: 'numeric' } as const;
 
 /** Parse an ISO string to a valid Date, or null for empty/invalid input. */
 const parseIso = (iso?: string | null): Date | null => {
@@ -68,6 +70,15 @@ const fallbackDate = (date: Date, locale: string): string => {
 
 const fallbackDateTime = (date: Date, locale: string): string =>
   `${fallbackDate(date, locale)} ${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+
+const fallbackTime = (date: Date, locale: string): string => {
+  const hours = date.getHours();
+  const minutes = pad2(date.getMinutes());
+  if (!locale.startsWith('en')) return `${pad2(hours)}:${minutes}`;
+  const suffix = hours >= 12 ? 'PM' : 'AM';
+  const twelveHour = ((hours + 11) % 12) + 1;
+  return `${twelveHour}:${minutes} ${suffix}`;
+};
 
 /**
  * Format an ISO timestamp as a locale-aware "date + time" string —
@@ -93,4 +104,22 @@ export const formatDate = (iso: string | null | undefined): string => {
   const locale = resolveLocale();
   if (!intlIsLocaleAware) return fallbackDate(date, locale);
   return new Intl.DateTimeFormat(locale, DATE_OPTS).format(date);
+};
+
+/** Locale-aware wall-clock used by every chat surface. */
+export const formatTime = (iso: string | null | undefined): string => {
+  const date = parseIso(iso);
+  if (!date) return EMPTY_PLACEHOLDER;
+  const locale = resolveLocale();
+  if (!intlIsLocaleAware) return fallbackTime(date, locale);
+  return new Intl.DateTimeFormat(locale, TIME_OPTS).format(date);
+};
+
+/** Long day label used by message date separators. */
+export const formatWeekdayDate = (iso: string | null | undefined): string => {
+  const date = parseIso(iso);
+  if (!date) return EMPTY_PLACEHOLDER;
+  const locale = resolveLocale();
+  if (!intlIsLocaleAware) return fallbackDate(date, locale);
+  return new Intl.DateTimeFormat(locale, WEEKDAY_DATE_OPTS).format(date);
 };

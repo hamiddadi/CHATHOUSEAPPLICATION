@@ -43,7 +43,9 @@ export const NotificationsPermissionScreen: React.FC = () => {
       // Idempotent and safe to call even if already granted.
       status = await pushService.registerWithBackend();
     } catch {
-      /* ignore — never block onboarding on a permission/registration failure */
+      // An unexpected native/API failure is still non-blocking, but it must
+      // not look like notifications were successfully enabled.
+      status = 'error';
     } finally {
       setRequesting(false);
       // Always advance first — a refusal must never block the flow. The
@@ -74,6 +76,14 @@ export const NotificationsPermissionScreen: React.FC = () => {
             },
           },
         ],
+      );
+    } else if (status === 'error') {
+      Alert.alert(
+        t('onboarding.notifications.errorTitle', "Notifications weren't enabled"),
+        t(
+          'onboarding.notifications.errorBody',
+          'ChatHouse could not finish enabling notifications. You can continue; ChatHouse will try again automatically the next time you open the app.',
+        ),
       );
     }
   }, [goNext, t]);

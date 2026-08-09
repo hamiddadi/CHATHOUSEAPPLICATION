@@ -185,18 +185,28 @@ export const MessagesScreen: React.FC = () => {
   const { data: conversations, isLoading, isError, refetch, isRefetching } = useConversations();
   const { data: groups, refetch: refetchGroups, isRefetching: isRefetchingGroups } = useGroups();
   // "Online now" strip: people I follow who are currently online / recently-seen
-  // and free to chat (GET /api/ext/presence/available). Each carries a real peer
-  // id, so tapping opens a valid DM (OnlineUsersList uses the id as the conv id).
+  // and free to chat (GET /api/ext/presence/available). Copy the backend id
+  // verbatim into a semantically named `peerId`; never derive a conversation id.
   const { data: availablePeers } = usePresenceAvailable();
-  const onlineUsers = useMemo<OnlineUser[]>(
-    () =>
-      (availablePeers ?? []).map(p => ({
-        id: p.id,
-        name: p.displayName ?? p.username ?? '',
-        avatar: p.avatarUrl ?? '',
-      })),
-    [availablePeers],
-  );
+  const onlineUsers = useMemo<OnlineUser[]>(() => {
+    const seenPeerIds = new Set<string>();
+    const users: OnlineUser[] = [];
+    for (const peer of availablePeers ?? []) {
+      const displayName = peer.displayName?.trim() || peer.username?.trim();
+      // Runtime validation protects navigation from malformed/duplicate API
+      // rows while preserving every valid id byte-for-byte.
+      if (!peer.id || peer.id.trim() !== peer.id || !displayName || seenPeerIds.has(peer.id)) {
+        continue;
+      }
+      seenPeerIds.add(peer.id);
+      users.push({
+        peerId: peer.id,
+        displayName,
+        avatarUrl: peer.avatarUrl,
+      });
+    }
+    return users;
+  }, [availablePeers]);
 
   // Pull-to-refresh (and the error retry) must resync BOTH sources rendered on
   // this screen: the 1:1 conversations and the group threads in the header.
@@ -205,8 +215,8 @@ export const MessagesScreen: React.FC = () => {
     void refetchGroups();
   }, [refetch, refetchGroups]);
 
-  const handleOpen = useCallback(
-    (conversationId: string) => navigation.navigate('ChatDetail', { conversationId }),
+  const handleOpenDirectMessage = useCallback(
+    (peerId: string) => navigation.navigate('ChatDetail', { conversationId: peerId }),
     [navigation],
   );
   const handleOpenGroup = useCallback(
@@ -221,9 +231,9 @@ export const MessagesScreen: React.FC = () => {
 
   const renderItem = useCallback(
     ({ item }: { item: Conversation }) => (
-      <ConvoRow convo={item} myId={myId} onPress={handleOpen} />
+      <ConvoRow convo={item} myId={myId} onPress={handleOpenDirectMessage} />
     ),
-    [handleOpen, myId],
+    [handleOpenDirectMessage, myId],
   );
   const keyExtractor = useCallback((item: Conversation) => item.id, []);
   const renderSeparator = useCallback(
@@ -235,7 +245,7 @@ export const MessagesScreen: React.FC = () => {
   // own backend tables, so they're rendered above the 1:1 conversation list).
   const ListHeader = (
     <View>
-      <OnlineUsersList users={onlineUsers} />
+      <OnlineUsersList users={onlineUsers} onOpenChat={handleOpenDirectMessage} />
       {groups && groups.length > 0 ? (
         <View className="pt-sm">
           <Text className="px-xxl pb-xs text-xs font-body-bold uppercase tracking-widest text-ink-muted">

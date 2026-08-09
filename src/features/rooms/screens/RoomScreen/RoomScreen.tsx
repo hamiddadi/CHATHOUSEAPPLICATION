@@ -51,6 +51,7 @@ import {
 } from '../../../extensions';
 import { getSocket } from '../../../../shared/services/realtime/socketClient';
 import { formatScheduled } from '../../../../shared/utils/formatScheduled';
+import { errorMessage } from '../../../../shared/utils/errorMessage';
 import StageGrid from './partials/StageGrid';
 import HandRaiseQueue from './partials/HandRaiseQueue';
 import FollowedByListeners from './partials/FollowedByListeners';
@@ -93,6 +94,9 @@ export const RoomScreen: React.FC = () => {
   // `room:ended` broadcast echo, which would otherwise pop the screen a second
   // time and show the "Room ended" alert to the very host who closed it.
   const selfEndedRef = useRef(false);
+  // REST and realtime can confirm the close in either order. This guard makes
+  // the local teardown idempotent so the screen is never popped twice.
+  const selfEndExitHandledRef = useRef(false);
 
   const membership = useRoomMembership(route.params.roomId);
   // Do not race a public detail GET against the authoritative POST /join
@@ -142,6 +146,14 @@ export const RoomScreen: React.FC = () => {
   const viewerCanSpeak = Boolean(
     viewerRole && (viewerRole === 'host' || viewerRole === 'moderator' || viewerRole === 'speaker'),
   );
+
+  const finishSelfEnd = useCallback((): void => {
+    if (selfEndExitHandledRef.current) return;
+    selfEndExitHandledRef.current = true;
+    useCurrentRoomStore.getState().clear();
+    void roomAudioSession.stop();
+    navigation.goBack();
+  }, [navigation]);
 
   // Back out cleanly if the server GATES our join (private / CLOSED invite-only
   // / RoomBan / ended room) instead of leaving the user stranded on the screen
@@ -305,10 +317,13 @@ export const RoomScreen: React.FC = () => {
       // we're viewing. Pop the screen and tell the user it's over.
       const endedHandler = (payload: { roomId?: string; endedByName?: string | null }): void => {
         if (payload.roomId && payload.roomId !== roomId) return;
-        // We ARE the actor (host pressed "End Room"): handleEndRoom already
-        // pops the screen in onSettled — swallowing the broadcast echo avoids
-        // a double goBack and a nonsensical "Room ended" alert to the host.
-        if (selfEndedRef.current) return;
+        // The host who initiated the close should still leave immediately when
+        // realtime confirms it, but should not see the third-person alert. The
+        // idempotent helper also handles a later REST success safely.
+        if (selfEndedRef.current) {
+          finishSelfEnd();
+          return;
+        }
         useCurrentRoomStore.getState().clear();
         void roomAudioSession.stop();
         navigation.goBack();
@@ -358,7 +373,7 @@ export const RoomScreen: React.FC = () => {
       cancelled = true;
       cleanup?.();
     };
-  }, [navigation, roomId, viewerId, t]);
+  }, [finishSelfEnd, navigation, roomId, viewerId, t]);
 
   const handleToggleMute = useCallback(async () => {
     if (!room) return;
@@ -405,7 +420,7 @@ export const RoomScreen: React.FC = () => {
   }, [leaveRoom, navigation, room]);
 
   const handleEndRoom = useCallback(() => {
-    if (!room) return;
+    if (!room || endRoom.isPending) return;
     Alert.alert(
       t('room.alert.confirmEndTitle', 'End Room'),
       t('room.alert.confirmEndBody', '"{{title}}" will be closed for all participants. Continue?', {
@@ -417,22 +432,36 @@ export const RoomScreen: React.FC = () => {
           text: t('room.closeRoom', 'End Room'),
           style: 'destructive',
           onPress: () => {
+            if (endRoom.isPending || selfEndedRef.current) return;
             // Mark ourselves as the actor BEFORE the mutation: the server's
-            // `room:ended` broadcast can land before onSettled, and the
-            // screen-level listener must ignore it (see endedHandler).
+            // `room:ended` broadcast can land before the REST response, and the
+            // screen-level listener must suppress the third-person alert.
             selfEndedRef.current = true;
             endRoom.mutate(room.id, {
-              onSettled: () => {
-                useCurrentRoomStore.getState().clear();
-                void roomAudioSession.stop();
-                navigation.goBack();
+              onSuccess: finishSelfEnd,
+              onError: err => {
+                // A realtime confirmation is authoritative even if the HTTP
+                // response was lost. Otherwise retain the room and let the host
+                // retry instead of presenting a false success.
+                if (selfEndExitHandledRef.current) return;
+                selfEndedRef.current = false;
+                Alert.alert(
+                  t('room.alert.endFailedTitle', "Couldn't end the room"),
+                  errorMessage(
+                    err,
+                    t(
+                      'room.alert.endFailedBody',
+                      'The room is still active. Check your connection and try again.',
+                    ),
+                  ),
+                );
               },
             });
           },
         },
       ],
     );
-  }, [endRoom, navigation, room, t]);
+  }, [endRoom, finishSelfEnd, room, t]);
 
   const handleReportRoom = useCallback(() => {
     if (!room) return;
@@ -699,10 +728,14 @@ export const RoomScreen: React.FC = () => {
           {viewerIsHost && (
             <Pressable
               onPress={handleEndRoom}
+              disabled={endRoom.isPending}
               accessibilityRole="button"
               accessibilityLabel={t('room.closeRoom', 'End Room')}
+              accessibilityState={{ disabled: endRoom.isPending, busy: endRoom.isPending }}
               hitSlop={8}
-              className="bg-danger/15 border border-danger/30 px-lg py-xs rounded-pill"
+              className={`bg-danger/15 border border-danger/30 px-lg py-xs rounded-pill ${
+                endRoom.isPending ? 'opacity-50' : ''
+              }`}
             >
               <Text className="text-sm font-body-bold text-danger">
                 {t('room.closeRoom', 'End Room')}

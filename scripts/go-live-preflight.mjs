@@ -99,6 +99,12 @@ export function validatePublicUrl(rawValue, allowedProtocols = ['https:']) {
   if (
     hostname === 'localhost' ||
     hostname.endsWith('.localhost') ||
+    hostname.endsWith('.local') ||
+    hostname.endsWith('.internal') ||
+    hostname.endsWith('.lan') ||
+    hostname.endsWith('.test') ||
+    hostname.endsWith('.invalid') ||
+    hostname.endsWith('.example') ||
     hostname === '::1' ||
     hostname === '0:0:0:0:0:0:0:1' ||
     /^(?:fc|fd|fe[89ab])/iu.test(hostname) ||
@@ -108,6 +114,97 @@ export function validatePublicUrl(rawValue, allowedProtocols = ['https:']) {
   }
 
   return url;
+}
+
+/**
+ * Shared go-live contract for the production realtime/payment integrations.
+ * LiveKit is core and therefore mandatory. Stripe is an optional extension:
+ * leaving all four values empty disables it; setting any one requires the
+ * complete live-mode, HTTPS-only configuration.
+ */
+export function validateProductionLiveKitAndStripe(values = {}) {
+  const livekitFields = ['LIVEKIT_URL', 'LIVEKIT_API_KEY', 'LIVEKIT_API_SECRET'];
+  const missingLivekit = livekitFields.filter(field => hasPlaceholder(values[field]));
+  if (missingLivekit.length) {
+    throw new Error(`configuration LiveKit absente/factice: ${missingLivekit.join(', ')}`);
+  }
+
+  validatePublicUrl(values.LIVEKIT_URL, ['wss:']);
+  if (!/^\S{8,}$/u.test(values.LIVEKIT_API_KEY ?? '')) {
+    throw new Error('LIVEKIT_API_KEY doit contenir au moins 8 caractères sans espace');
+  }
+  if (!/^\S{32,}$/u.test(values.LIVEKIT_API_SECRET ?? '')) {
+    throw new Error('LIVEKIT_API_SECRET doit contenir au moins 32 caractères sans espace');
+  }
+  if (values.LIVEKIT_API_KEY === values.LIVEKIT_API_SECRET) {
+    throw new Error('LIVEKIT_API_KEY et LIVEKIT_API_SECRET doivent être distincts');
+  }
+
+  if (values.LIVEKIT_INTERNAL_URL) {
+    let internalUrl;
+    try {
+      internalUrl = new URL(values.LIVEKIT_INTERNAL_URL);
+    } catch {
+      throw new Error('LIVEKIT_INTERNAL_URL invalide');
+    }
+    if (!['http:', 'https:'].includes(internalUrl.protocol)) {
+      throw new Error('LIVEKIT_INTERNAL_URL doit utiliser http ou https');
+    }
+    if (internalUrl.username || internalUrl.password) {
+      throw new Error("LIVEKIT_INTERNAL_URL ne doit pas contenir d'identifiants");
+    }
+  }
+
+  const stripeFields = [
+    'STRIPE_SECRET_KEY',
+    'STRIPE_WEBHOOK_SECRET',
+    'STRIPE_RETURN_URL',
+    'STRIPE_REFRESH_URL',
+  ];
+  const stripeRequested = stripeFields.some(field => String(values[field] ?? '').trim());
+  if (stripeRequested) {
+    const extensionsEnabled = !values.EXTENSIONS_ENABLED
+      ? true
+      : ['true', '1'].includes(String(values.EXTENSIONS_ENABLED).trim().toLowerCase());
+    if (!extensionsEnabled) {
+      throw new Error('EXTENSIONS_ENABLED doit être true lorsque Stripe est configuré');
+    }
+
+    const missingStripe = stripeFields.filter(field => hasPlaceholder(values[field]));
+    if (missingStripe.length) {
+      throw new Error(
+        `configuration Stripe partielle/absente: ${missingStripe.join(', ')}; ` +
+          'laisser les quatre valeurs vides pour désactiver Stripe',
+      );
+    }
+    if (!/^sk_live_[A-Za-z0-9]{24,}$/u.test(values.STRIPE_SECRET_KEY ?? '')) {
+      throw new Error('STRIPE_SECRET_KEY doit être une clé de production sk_live_');
+    }
+    if (!/^whsec_[A-Za-z0-9]{24,}$/u.test(values.STRIPE_WEBHOOK_SECRET ?? '')) {
+      throw new Error('STRIPE_WEBHOOK_SECRET doit être un secret de signature whsec_');
+    }
+    validatePublicUrl(values.STRIPE_RETURN_URL, ['https:']);
+    validatePublicUrl(values.STRIPE_REFRESH_URL, ['https:']);
+    if (values.STRIPE_SECRET_KEY === values.STRIPE_WEBHOOK_SECRET) {
+      throw new Error('les secrets Stripe API et webhook doivent être distincts');
+    }
+  }
+
+  const reusableSecrets = [
+    ['JWT_ACCESS_SECRET', values.JWT_ACCESS_SECRET],
+    ['JWT_REFRESH_SECRET', values.JWT_REFRESH_SECRET],
+    ['MEDIA_URL_SIGNING_SECRET', values.MEDIA_URL_SIGNING_SECRET],
+    ['LIVEKIT_API_SECRET', values.LIVEKIT_API_SECRET],
+  ].filter(([, value]) => Boolean(value));
+  for (let index = 0; index < reusableSecrets.length; index += 1) {
+    const [field, value] = reusableSecrets[index];
+    const duplicate = reusableSecrets.slice(index + 1).find(([, candidate]) => candidate === value);
+    if (duplicate) {
+      throw new Error(`${field} et ${duplicate[0]} doivent utiliser des secrets distincts`);
+    }
+  }
+
+  return `LiveKit public/TLS validé; Stripe ${stripeRequested ? 'activé et complet' : 'désactivé'}`;
 }
 
 export function buildPublicEndpoints(mobileEnv = {}, overrides = {}) {
@@ -1459,6 +1556,7 @@ function loadMobileEnv(root) {
 function validateBackendProductionEnv(root) {
   const envPath = productionPaths(root).backendEnv;
   const values = parseEnv(readText(envPath, 'environnement backend production'));
+  validateProductionLiveKitAndStripe(values);
   const required = [
     'POSTGRES_PASSWORD',
     'REDIS_PASSWORD',

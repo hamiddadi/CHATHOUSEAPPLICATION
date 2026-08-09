@@ -5,6 +5,7 @@ import { GradientView } from '../../../../../shared/components/GradientView';
 import { colors, spacing } from '../../../../../shared/constants/theme';
 import { DEFAULTS } from '../../../../../shared/constants/images';
 import type { Message } from '../../../../../shared/types/domain';
+import { formatTime } from '../../../../../shared/utils/intl';
 import { ExtLinkifiedText } from '../../../../extensions/components/ExtLinkifiedText';
 import VoiceMessageBubble from '../../../components/VoiceMessageBubble';
 
@@ -13,15 +14,6 @@ const BUBBLE_CORNER = 20;
 
 const GLASS_BG = 'rgba(255,255,255,0.05)';
 const SENT_GRADIENT = ['rgba(176,198,255,0.2)', 'rgba(85,141,255,0.3)'] as const;
-
-const formatTime = (iso: string): string => {
-  const d = new Date(iso);
-  const h = d.getHours();
-  const m = d.getMinutes();
-  const suffix = h >= 12 ? 'PM' : 'AM';
-  const hh = ((h + 11) % 12) + 1;
-  return `${hh}:${m.toString().padStart(2, '0')} ${suffix}`;
-};
 
 interface BubbleProps {
   message: Message;

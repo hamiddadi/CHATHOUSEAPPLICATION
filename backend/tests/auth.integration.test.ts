@@ -1,5 +1,6 @@
 import request from 'supertest';
 import type { Express } from 'express';
+import jwt from 'jsonwebtoken';
 
 // Point the test process at the running docker-compose stack.
 // docker-compose maps Postgres on 5433 (host) → 5432 (container) to avoid a
@@ -15,6 +16,10 @@ const { createApp } = require('../src/app') as typeof import('../src/app');
 const { prisma } = require('../src/config/database') as typeof import('../src/config/database');
 const { connectRedis, disconnectRedis, redis } =
   require('../src/config/redis') as typeof import('../src/config/redis');
+const { blacklistKey, revokeAccessToken } =
+  require('../src/middlewares/auth.middleware') as typeof import('../src/middlewares/auth.middleware');
+const { decodeTokenTtl, signAccessToken, verifyAccessToken } =
+  require('../src/utils/jwt') as typeof import('../src/utils/jwt');
 const { getRemindersQueue, shutdownReminders } =
   require('../src/queues/eventReminders') as typeof import('../src/queues/eventReminders');
 const { shutdownReminder15 } =
@@ -128,14 +133,76 @@ describe('Auth + Users integration', () => {
       .set('Authorization', `Bearer ${accessToken}`);
     expect(logout.status).toBe(200);
 
+    const claims = verifyAccessToken(accessToken);
+    const revocationKey = blacklistKey(accessToken, claims.jti);
+    expect(revocationKey).toBe(`blacklist:jti:${claims.jti}`);
+    expect(revocationKey).not.toContain(accessToken);
+    const blacklistTtl = await redis.ttl(revocationKey);
+    expect(blacklistTtl).toBeGreaterThan(0);
+    expect(blacklistTtl).toBeLessThanOrEqual(15 * 60);
+
     const me = await request(app)
       .get('/api/users/me')
       .set('Authorization', `Bearer ${accessToken}`);
     expect(me.status).toBe(401);
     expect(me.body.error.code).toBe('AUTH_004');
 
+    // A replay cannot execute logout a second time or mutate session state.
+    const currentUser = await prisma.user.findUniqueOrThrow({
+      where: { email },
+      select: { tokenVersion: true },
+    });
+    const replay = await request(app)
+      .post('/api/auth/logout')
+      .set('Authorization', `Bearer ${accessToken}`);
+    expect(replay.status).toBe(401);
+    expect(replay.body.error.code).toBe('AUTH_004');
+    await expect(
+      prisma.user.findUniqueOrThrow({ where: { email }, select: { tokenVersion: true } }),
+    ).resolves.toEqual(currentUser);
+
     // Clean up the residual blacklist entry so we don't leak keys across runs
-    await redis.del(`blacklist:${accessToken}`);
+    await redis.del(revocationKey);
+  });
+
+  it('bounds an access-token revocation key by the signed token expiry', async () => {
+    const token = signAccessToken('ttl-test-user');
+    const claims = verifyAccessToken(token);
+    const key = blacklistKey(token, claims.jti);
+    const signedTtl = decodeTokenTtl(token);
+
+    await revokeAccessToken(token, Number.MAX_SAFE_INTEGER);
+    const ttl = await redis.ttl(key);
+    expect(ttl).toBeGreaterThan(0);
+    expect(ttl).toBeLessThanOrEqual(signedTtl);
+    await redis.del(key);
+  });
+
+  it('keeps revocation compatible with pre-rollout access tokens without jti', async () => {
+    const user = await prisma.user.findUniqueOrThrow({
+      where: { email },
+      select: { id: true, tokenVersion: true },
+    });
+    const legacyToken = jwt.sign(
+      { sub: user.id, typ: 'access', tv: user.tokenVersion },
+      process.env.JWT_ACCESS_SECRET!,
+      { expiresIn: '5m' },
+    );
+    const key = blacklistKey(legacyToken);
+    expect(key).toMatch(/^blacklist:[a-f0-9]{64}$/);
+
+    const before = await request(app)
+      .get('/api/users/me')
+      .set('Authorization', `Bearer ${legacyToken}`);
+    expect(before.status).toBe(200);
+
+    await revokeAccessToken(legacyToken, decodeTokenTtl(legacyToken));
+    const replay = await request(app)
+      .get('/api/users/me')
+      .set('Authorization', `Bearer ${legacyToken}`);
+    expect(replay.status).toBe(401);
+    expect(replay.body.error.code).toBe('AUTH_004');
+    await redis.del(key);
   });
 
   it('restores a self-deleted account when credentials are proven within 30 days', async () => {

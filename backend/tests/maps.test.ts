@@ -85,6 +85,50 @@ describe('Maps — Ghost Mode + online-locations filtering', () => {
     expect(ids).not.toContain(viewer.id);
   });
 
+  it('shares exact REST coordinates only with mutually accepted follows', async () => {
+    const viewer = await register(app);
+    const oneWayFollow = await register(app);
+    const mutualFollow = await register(app);
+    createdIds.push(viewer.id, oneWayFollow.id, mutualFollow.id);
+
+    await makeLiveOnMap(oneWayFollow.token, oneWayFollow.id, {
+      latitude: 48.8566,
+      longitude: 2.3522,
+    });
+    await makeLiveOnMap(mutualFollow.token, mutualFollow.id, {
+      latitude: 40.7128,
+      longitude: -74.006,
+    });
+
+    // A one-way accepted follow is not enough to reveal precise GPS.
+    await request(app)
+      .post(`/api/follow/${oneWayFollow.id}`)
+      .set('Authorization', `Bearer ${viewer.token}`);
+    await request(app)
+      .post(`/api/follow/${mutualFollow.id}`)
+      .set('Authorization', `Bearer ${viewer.token}`);
+    await request(app)
+      .post(`/api/follow/${viewer.id}`)
+      .set('Authorization', `Bearer ${mutualFollow.token}`);
+
+    const res = await request(app)
+      .get('/api/users/online-locations')
+      .set('Authorization', `Bearer ${viewer.token}`);
+    expect(res.status).toBe(200);
+
+    const rows = res.body.data as {
+      id: string;
+      latitude: number;
+      longitude: number;
+    }[];
+    expect(rows.find(row => row.id === oneWayFollow.id)).toEqual(
+      expect.objectContaining({ latitude: 48.85, longitude: 2.35 }),
+    );
+    expect(rows.find(row => row.id === mutualFollow.id)).toEqual(
+      expect.objectContaining({ latitude: 40.7128, longitude: -74.006 }),
+    );
+  });
+
   // 6.2 — Ghost Mode ON → user absent de la carte
   it('excludes users who toggled isVisible=false (Ghost Mode)', async () => {
     const viewer = await register(app);

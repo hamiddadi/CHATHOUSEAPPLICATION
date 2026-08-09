@@ -36,12 +36,10 @@ export const socketAuth = async (socket: Socket, next: (err?: Error) => void): P
     const token = extractToken(socket);
     if (!token) return next(new Error('UNAUTHORIZED'));
 
-    // Use the SAME hashed key the HTTP layer writes on logout — keying by the
-    // raw token here never matched, so socket revocation was a no-op.
-    const revoked = await redis.get(blacklistKey(token));
-    if (revoked) return next(new Error('TOKEN_REVOKED'));
-
+    // Use the SAME jti (or legacy hash) key as HTTP logout.
     const claims = verifyAccessToken(token);
+    const revoked = await redis.get(blacklistKey(token, claims.jti));
+    if (revoked) return next(new Error('TOKEN_REVOKED'));
 
     // Mirror HTTP requireAuth (auth.middleware.ts) exactly: enforce suspension
     // AND AUTH-03 token revocation (tokenVersion) over realtime too, sharing the

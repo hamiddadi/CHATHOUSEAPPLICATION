@@ -1,5 +1,5 @@
 import React, { memo } from 'react';
-import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import MaterialIcons from '@react-native-vector-icons/material-icons';
 import { useTranslation } from 'react-i18next';
 import { colors, spacing } from '../../../../../shared/constants/theme';
@@ -20,6 +20,7 @@ interface ChatHeaderProps {
   username?: string;
   onBack: () => void;
   onCall: () => void;
+  callPending?: boolean;
   onMore: () => void;
 }
 
@@ -33,6 +34,7 @@ const ChatHeader: React.FC<ChatHeaderProps> = memo(
     username,
     onBack,
     onCall,
+    callPending = false,
     onMore,
   }) => {
     const { t } = useTranslation();
@@ -71,12 +73,18 @@ const ChatHeader: React.FC<ChatHeaderProps> = memo(
         <View style={styles.headerActions}>
           <Pressable
             onPress={onCall}
+            disabled={callPending}
             accessibilityRole="button"
             accessibilityLabel={t('chat.callA11y')}
+            accessibilityState={{ busy: callPending, disabled: callPending }}
             hitSlop={8}
             className="p-sm rounded-pill active:bg-overlay-white-5"
           >
-            <MaterialIcons name="call" size={HEADER_ICON_SIZE} color={colors.primary} />
+            {callPending ? (
+              <ActivityIndicator size="small" color={colors.primary} />
+            ) : (
+              <MaterialIcons name="call" size={HEADER_ICON_SIZE} color={colors.primary} />
+            )}
           </Pressable>
           <Pressable
             onPress={onMore}
