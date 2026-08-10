@@ -40,6 +40,9 @@ import { useVoiceMessage } from '../../hooks/useVoiceMessage';
 import { usePeerPresence } from '../../../extensions/hooks/usePeerPresence';
 import { useCreateRoom } from '../../../rooms/hooks/useRooms';
 import { ROOM_TITLE_MAX } from '../../../rooms/constants';
+import { useBlock, useReport } from '../../../social/hooks/useSocial';
+import type { ReportReason } from '../../../social/services/socialService';
+import { ProfileReportSheet } from '../../../social/components/ProfileReportSheet';
 import VoiceRecordingBar from '../../components/VoiceRecordingBar';
 import Bubble from './partials/Bubble';
 import DateSeparator from './partials/DateSeparator';
@@ -150,7 +153,10 @@ export const ChatDetailScreen: React.FC = () => {
   const deleteMessage = useDeleteMessage();
   const reportMessage = useReportMessage();
   const createRoom = useCreateRoom();
+  const blockUser = useBlock();
+  const reportUser = useReport();
   const [reportMessageId, setReportMessageId] = useState<string | null>(null);
+  const [reportUserVisible, setReportUserVisible] = useState(false);
   const { isPeerTyping, notifyTyping } = useTypingIndicator(peerId);
   // Keep an immediate lock in addition to the mutation state: two taps can
   // arrive before React has rendered `isPending=true`.
@@ -228,16 +234,6 @@ export const ChatDetailScreen: React.FC = () => {
     }
   }, [draft, reportApiError, route.params.conversationId, scrollToBottom, sendMessage, t]);
 
-  // Attachments and conversation options do not yet have an end-to-end
-  // pipeline. Keep explicit feedback for those two actions while calls use the
-  // existing closed-room audio infrastructure below.
-  const showComingSoon = useCallback(
-    (label: string) => {
-      Alert.alert(label, t('chat.comingSoon', 'Cette fonctionnalité arrive bientôt.'));
-    },
-    [t],
-  );
-
   const handleCall = useCallback(async () => {
     if (callInFlightRef.current || createRoom.isPending) return;
 
@@ -276,15 +272,63 @@ export const ChatDetailScreen: React.FC = () => {
       callInFlightRef.current = false;
     }
   }, [createRoom, navigation, other?.displayName, other?.username, peerId, reportApiError, t]);
-  const handleMore = useCallback(
-    () => showComingSoon(t('chat.moreLabel', 'Options de la conversation')),
-    [showComingSoon, t],
-  );
-  const handleAttach = useCallback(
-    () => showComingSoon(t('chat.attachLabel', 'Pièce jointe')),
-    [showComingSoon, t],
+  const submitUserReport = useCallback(
+    (reason: ReportReason) => {
+      if (reportUser.isPending) return;
+      reportUser.mutate(
+        { userId: peerId, input: { reason } },
+        {
+          onSuccess: () => {
+            setReportUserVisible(false);
+            Alert.alert(t('profile.reportThanks'));
+          },
+          onError: reportApiError,
+        },
+      );
+    },
+    [peerId, reportApiError, reportUser, t],
   );
 
+  const handleReportUser = useCallback(() => setReportUserVisible(true), []);
+
+  const handleBlockUser = useCallback(() => {
+    const peerHandle = other?.username?.trim() || other?.displayName?.trim() || peerId;
+    Alert.alert(
+      t('profile.blockConfirmTitle', { handle: peerHandle }),
+      t('profile.blockConfirmBody'),
+      [
+        { text: t('common.cancel'), style: 'cancel' },
+        {
+          text: t('profile.blockConfirm'),
+          style: 'destructive',
+          onPress: () => {
+            if (blockUser.isPending) return;
+            blockUser.mutate(peerId, {
+              onSuccess: () => navigation.goBack(),
+              onError: reportApiError,
+            });
+          },
+        },
+      ],
+      { cancelable: true },
+    );
+  }, [blockUser, navigation, other?.displayName, other?.username, peerId, reportApiError, t]);
+
+  const handleMore = useCallback(() => {
+    const peerHandle = other?.username?.trim()
+      ? `@${other.username.trim()}`
+      : other?.displayName?.trim();
+    Alert.alert(
+      t('chat.moreLabel', 'Options de la conversation'),
+      peerHandle,
+      [
+        { text: t('profile.report'), onPress: handleReportUser },
+        { text: t('profile.block'), style: 'destructive', onPress: handleBlockUser },
+        { text: t('common.cancel'), style: 'cancel' },
+      ],
+      { cancelable: true },
+    );
+  }, [handleBlockUser, handleReportUser, other?.displayName, other?.username, t]);
   // Chronological items, then reversed for the `inverted` FlatList: index 0 is
   // the newest (rendered at the visual bottom), which keeps the thread pinned
   // to the latest message with no onContentSizeChange→scrollToEnd hack.
@@ -457,7 +501,6 @@ export const ChatDetailScreen: React.FC = () => {
           canSend={canSend}
           bottomInset={insets.bottom}
           keyboardVisible={keyboardVisible}
-          onAttach={handleAttach}
           onMic={handleMic}
           onInputFocus={scrollToBottom}
         />
@@ -467,6 +510,13 @@ export const ChatDetailScreen: React.FC = () => {
         submitting={reportMessage.isPending}
         onClose={() => setReportMessageId(null)}
         onSelect={handleReportReason}
+      />
+      <ProfileReportSheet
+        visible={reportUserVisible}
+        targetLabel={other?.username?.trim() || other?.displayName?.trim() || peerId}
+        submitting={reportUser.isPending}
+        onClose={() => setReportUserVisible(false)}
+        onSelect={submitUserReport}
       />
     </KeyboardAvoidingView>
   );

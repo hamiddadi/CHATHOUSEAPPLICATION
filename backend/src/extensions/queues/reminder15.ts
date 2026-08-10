@@ -30,7 +30,7 @@ let queue: Queue<Reminder15JobData> | null = null;
 let worker: Worker<Reminder15JobData> | null = null;
 let scanTimer: NodeJS.Timeout | null = null;
 
-const getQueue = (): Queue<Reminder15JobData> => {
+export const getReminder15Queue = (): Queue<Reminder15JobData> => {
   if (!queue) {
     queue = new Queue<Reminder15JobData>(QUEUE_NAME, { connection: bullConnection() });
   }
@@ -42,7 +42,7 @@ const jobIdForRoom = (roomId: string) => `ext-room-reminder15-${roomId}`;
 export const scheduleReminder15 = async (roomId: string, scheduledFor: Date): Promise<void> => {
   const delay = scheduledFor.getTime() - Date.now() - LEAD_TIME_MS;
   if (delay <= 0) return;
-  const q = getQueue();
+  const q = getReminder15Queue();
   await q.add(
     'remind15',
     { roomId },
@@ -56,7 +56,7 @@ export const scheduleReminder15 = async (roomId: string, scheduledFor: Date): Pr
 };
 
 export const cancelReminder15 = async (roomId: string): Promise<void> => {
-  const q = getQueue();
+  const q = getReminder15Queue();
   const job = await q.getJob(jobIdForRoom(roomId));
   if (job) await job.remove();
 };

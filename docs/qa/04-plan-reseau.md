@@ -1,7 +1,7 @@
 # Plan de test réseau — Conditions dégradées (ChatHouse)
 
 > Application : ChatHouse — audio live façon Clubhouse. React Native / Expo, WebSocket (Socket.IO) temps réel, audio LiveKit (`@livekit/react-native`, build EAS dev-client requis), push, i18n FR/EN, rôles guest/standard/admin, Android + iOS.
-> Périmètre testé : 50 écrans, 381 boutons, 991 cas existants. Ce document couvre **uniquement la robustesse réseau** (conditions dégradées, coupures, idempotence, reconnexion).
+> Périmètre testé : 50 écrans, 385 boutons, 991 cas existants (inventaire actualisé le 10 août 2026). Ce document couvre **uniquement la robustesse réseau** (conditions dégradées, coupures, idempotence, reconnexion).
 
 ## 0. Comment utiliser ce document
 

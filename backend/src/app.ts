@@ -39,15 +39,25 @@ import {
 } from './extensions/mount';
 import { setRealtimeAliasServer } from './extensions/realtime/aliases';
 import { initMediasoup, shutdownMediasoup } from './webrtc/mediasoup.manager';
-import { startReminderWorker, shutdownReminders } from './queues/eventReminders';
-import { startLocationPurgeWorker, shutdownLocationPurge } from './queues/locationPurge';
+import { getRemindersQueue, startReminderWorker, shutdownReminders } from './queues/eventReminders';
+import {
+  getLocationPurgeQueue,
+  startLocationPurgeWorker,
+  shutdownLocationPurge,
+} from './queues/locationPurge';
 import { registerGdprPurgeWorker, shutdownGdprPurge } from './workers/gdpr-purge.worker';
+import { getGdprPurgeQueue } from './workers/gdpr-purge.queue';
 import { ensureSearchIndexes } from './config/searchIndexes';
 import { initSentry } from './monitoring/sentry';
 import { httpMetricsMiddleware, metricsHandler } from './monitoring/metrics';
+import {
+  startBullMqMetricsCollector,
+  stopBullMqMetricsCollector,
+} from './monitoring/bullmqMetrics';
 import { createMetricsAuthMiddleware } from './monitoring/metricsAuth';
 import { drainBackgroundTasks } from './utils/backgroundTasks';
 import { initializePush } from './modules/push/push.service';
+import { getReminder15Queue } from './extensions/queues/reminder15';
 
 // Grace period before a hung Socket.IO/HTTP shutdown is hard-killed.
 const SHUTDOWN_GRACE_MS = 10_000;
@@ -205,6 +215,12 @@ export const startServer = async (): Promise<void> => {
   if (env.EXTENSIONS_ENABLED) {
     startExtensionWorkers();
   }
+  startBullMqMetricsCollector([
+    getRemindersQueue(),
+    getLocationPurgeQueue(),
+    getGdprPurgeQueue(),
+    ...(env.EXTENSIONS_ENABLED ? [getReminder15Queue()] : []),
+  ]);
   const server = http.createServer(app);
   const io = await createSocketServer(server);
   // Bind the alias emitter so extension realtime events publish under their
@@ -235,6 +251,7 @@ export const startServer = async (): Promise<void> => {
       await io.close();
       await drainRoomDisconnectCleanups();
       await shutdownMediasoup();
+      stopBullMqMetricsCollector();
       await shutdownReminders();
       await shutdownLocationPurge();
       await shutdownGdprPurge();

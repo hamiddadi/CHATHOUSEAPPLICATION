@@ -2,9 +2,9 @@
 
 Document de pilotage QA pour **ChatHouse** (app audio live facon Clubhouse — React Native / Expo, temps reel WebSocket + audio LiveKit, push, i18n FR/EN, roles guest/standard/admin, Android + iOS, reseaux variables 3G/4G/5G/Wi-Fi).
 
-**Perimetre du parc** : **50 ecrans** · **381 boutons / controles interactifs** · **991 cas de test deja rediges** (un fichier par ecran sous `docs/qa/screens/`).
+**Perimetre du parc** : **50 ecrans** · **385 boutons / controles interactifs** · **991 cas de test deja rediges** (inventaire actualise le 10 aout 2026 ; un fichier par ecran sous `docs/qa/screens/`).
 
-Repartition de priorite (cf. `02-priorisation.md`) : **P0 = 89 controles (23 %)** · **P1 = 220 (58 %)** · **P2 = 72 (19 %)**.
+Repartition de priorite (cf. `02-priorisation.md`) : **P0 = 89 controles (23 %)** · **P1 = 226 (59 %)** · **P2 = 70 (18 %)**.
 
 > Ce document repond a quatre questions : (1) **ou en est la couverture** par feature (manuel + automatise) ; (2) **quelle cible d'automatisation** retenir ; (3) **quel pourcentage de boutons** est couvert au global ; (4) **combien de temps** coute chaque campagne (manuelle complete, smoke P0, run automatise, matrice 4 devices), en fourchettes h / j realistes avec hypotheses explicites.
 
@@ -16,11 +16,11 @@ Toutes les estimations decoulent des hypotheses ci-dessous. Si l'une change (dur
 
 | #   | Hypothese                              | Valeur retenue                                                                                                                                                                                                     | Source / justification                                                                                                                                                                                                                                        |
 | --- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| H1  | **Minimum de cas par bouton**          | **>= 3 cas / bouton** (positif + erreur/limite + a11y, et un 4e temps-reel sur les boutons concernes)                                                                                                              | Les 4 axes du plan global (`00-plan-overview.md` §1.3). 3 x 381 = **1143 cas-cibles theoriques** ; les 991 cas ecrits couvrent **2,60 cas/bouton en moyenne** (sous la cible : voir §6 lacunes).                                                              |
+| H1  | **Minimum de cas par bouton**          | **>= 3 cas / bouton** (positif + erreur/limite + a11y, et un 4e temps-reel sur les boutons concernes)                                                                                                              | Les 4 axes du plan global (`00-plan-overview.md` §1.3). 3 x 385 = **1155 cas-cibles theoriques** ; les 991 cas ecrits couvrent **2,57 cas/bouton en moyenne** (sous la cible : voir §6 lacunes).                                                              |
 | H2  | **Duree moyenne d'un cas manuel**      | **4 a 6 min/cas** (incl. mise en place du pre-requis, execution, observation, journalisation du verdict)                                                                                                           | Plage 2-6 min/cas annoncee dans les fiches ecran ; on prend 4 min en borne basse (cas simples REST/nav) et 6 min en borne haute (cas temps-reel, rollback, a11y).                                                                                             |
 | H3  | **Cas multi-device / audio natif**     | comptes dans la borne haute (6 min) ; necessitent **2-3 devices + build EAS dev-client**                                                                                                                           | Rooms, messages, notifs, houses, admin temps-reel ; la voix LiveKit n'existe **pas** en Expo Go.                                                                                                                                                              |
 | H4  | **Smoke P0**                           | **1 a 2 cas par controle P0** => **~120 a 150 cas** ; 5-7 min/cas (chemins critiques, setup plus lourd, multi-device)                                                                                              | `02-priorisation.md` §5.                                                                                                                                                                                                                                      |
-| H5  | **Cible d'automatisation**             | **263 boutons / 381 = 69 %** couverts par tests automatises (unitaire/composant + integration front Jest)                                                                                                          | Modele §3 : les boutons **purement natifs** (voix LiveKit reelle, share sheet OS, permission OS, geoloc reelle, multi-device WebSocket bout-en-bout) restent **manuels**.                                                                                     |
+| H5  | **Cible d'automatisation**             | **267 boutons / 385 = 69 %** couverts par tests automatises (unitaire/composant + integration front Jest)                                                                                                          | Modele §3 : les boutons **purement natifs** (voix LiveKit reelle, share sheet OS, permission OS, geoloc reelle, multi-device WebSocket bout-en-bout) restent **manuels**.                                                                                     |
 | H6  | **Priorite d'automatisation**          | **P0 d'abord**, puis P1 frequents ; P2 = couverture opportuniste (souvent contenu statique / a11y manuelle)                                                                                                        | Les 89 P0 sont la cible #1 de l'automatisation de regression (CI a chaque PR).                                                                                                                                                                                |
 | H7  | **Journee de travail QA**              | **7 h utiles/jour** (1 testeur)                                                                                                                                                                                    | Net des reunions/pauses ; conversions h -> j faites a 7 h.                                                                                                                                                                                                    |
 | H8  | **Matrice devices**                    | **4 devices** : Android low-end, Android high-end, iOS ancien, iOS recent (bornes OS Android 10/15, iOS 15/18)                                                                                                     | `00-plan-overview.md` §6.2. Le rejeu sur N devices **n'est pas lineaire** (x N) : le 1er device coute plein tarif, les rejeux sont plus rapides mais les anomalies specifiques device ajoutent du temps -> **facteur 2,6 a 3,2x** pour 4 devices (et non 4x). |
@@ -46,9 +46,9 @@ Agregation des 50 fiches ecran par feature (14 features = `src/features/*`).
 | `auth`          |   6    |     25     |     83      |    3,32    |           100 %            |     21      |     84 %     |
 | `events`        |   1    |     5      |     14      |    2,80    |            93 %            |      4      |     80 %     |
 | `extensions`    |   5    |     62     |     104     |    1,68    |            56 %            |     34      |     55 %     |
-| `houses`        |   5    |     32     |     102     |    3,19    |           100 %            |     26      |     81 %     |
+| `houses`        |   5    |     35     |     102     |    2,91    |            97 %            |     29      |     83 %     |
 | `maps`          |   1    |     9      |     28      |    3,11    |           100 %            |      4      |     44 %     |
-| `messages`      |   6    |     41     |     139     |    3,39    |           100 %            |     27      |     66 %     |
+| `messages`      |   6    |     42     |     139     |    3,31    |           100 %            |     28      |     67 %     |
 | `notifications` |   1    |     9      |     24      |    2,67    |            89 %            |      6      |     67 %     |
 | `onboarding`    |   4    |     18     |     42      |    2,33    |            78 %            |     15      |     83 %     |
 | `privacy`       |   4    |     13     |     34      |    2,62    |            87 %            |     10      |     77 %     |
@@ -56,13 +56,13 @@ Agregation des 50 fiches ecran par feature (14 features = `src/features/*`).
 | `rooms`         |   5    |     57     |     138     |    2,42    |            81 %            |     26      |     46 %     |
 | `search`        |   1    |     6      |     20      |    3,33    |           100 %            |      5      |     83 %     |
 | `settings`      |   2    |     31     |     71      |    2,29    |            76 %            |     25      |     81 %     |
-| **TOTAL**       | **50** |  **381**   |   **991**   |  **2,60**  |  **87 %** (densite moy.)   |   **263**   |   **69 %**   |
+| **TOTAL**       | **50** |  **385**   |   **991**   |  **2,57**  |  **86 %** (densite moy.)   |   **267**   |   **69 %**   |
 
 > Lecture rapide :
 >
 > - **`extensions`** est la feature la **moins dense** (1,68 cas/bouton) : le Playground porte 34 boutons pour 37 cas — beaucoup de variantes de reactions/partage P2 a 1 cas. C'est la **priorite #1 de complement** pour atteindre 3 cas/bouton.
 > - **`rooms`** et **`maps`** ont la **plus faible automatisation cible** (46 % / 44 %) car ce sont les surfaces les plus **natives & multi-device** (audio LiveKit, geoloc, WebSocket bout-en-bout) — leur couverture reste majoritairement **manuelle sur build EAS**.
-> - **`auth`, `houses`, `messages`, `search`, `maps`** atteignent deja **>= 3 cas/bouton**.
+> - **`auth`, `messages`, `search`, `maps`** atteignent deja **>= 3 cas/bouton** ; `houses` reste proche de la cible (2,91) apres l'ajout des controles de recherche et d'etats.
 
 ---
 
@@ -88,9 +88,9 @@ Le **taux d'automatisation** par feature reflete sa densite native/temps-reel : 
 | `auth`          |   25    |      84 %      |     21      |                   4                    |
 | `events`        |    5    |      80 %      |      4      |                   1                    |
 | `extensions`    |   62    |      55 %      |     34      |                   28                   |
-| `houses`        |   32    |      81 %      |     26      |                   6                    |
+| `houses`        |   35    |      83 %      |     29      |                   6                    |
 | `maps`          |    9    |      44 %      |      4      |                   5                    |
-| `messages`      |   41    |      66 %      |     27      |                   14                   |
+| `messages`      |   42    |      67 %      |     28      |                   14                   |
 | `notifications` |    9    |      67 %      |      6      |                   3                    |
 | `onboarding`    |   18    |      83 %      |     15      |                   3                    |
 | `privacy`       |   13    |      77 %      |     10      |                   3                    |
@@ -98,7 +98,7 @@ Le **taux d'automatisation** par feature reflete sa densite native/temps-reel : 
 | `rooms`         |   57    |      46 %      |     26      |                   31                   |
 | `search`        |    6    |      83 %      |      5      |                   1                    |
 | `settings`      |   31    |      81 %      |     25      |                   6                    |
-| **TOTAL**       | **381** |    **69 %**    |   **263**   |                **118**                 |
+| **TOTAL**       | **385** |    **69 %**    |   **267**   |                **118**                 |
 
 ### 3.3 Ordre d'implementation de l'automatisation (P0 d'abord — H6)
 
@@ -110,15 +110,15 @@ Le **taux d'automatisation** par feature reflete sa densite native/temps-reel : 
 
 ## 4. Pourcentage global de boutons couverts
 
-| Mode                                                                 |      Boutons couverts       |                       % du parc (381)                        |
+| Mode                                                                 |      Boutons couverts       |                       % du parc (385)                        |
 | -------------------------------------------------------------------- | :-------------------------: | :----------------------------------------------------------: |
-| **Manuel** (au moins 1 cas redige par bouton)                        |        **381 / 381**        |                          **100 %**                           |
-| **Manuel a la cible H1 (>= 3 cas/bouton)**                           | densite moyenne 2,60 / 3,00 | **~87 %** de la cible atteinte (lacune surtout `extensions`) |
-| **Automatise** (cibles §3)                                           |        **263 / 381**        |                           **69 %**                           |
+| **Manuel** (au moins 1 cas redige par bouton)                        |        **385 / 385**        |                          **100 %**                           |
+| **Manuel a la cible H1 (>= 3 cas/bouton)**                           | densite moyenne 2,57 / 3,00 | **~86 %** de la cible atteinte (lacune surtout `extensions`) |
+| **Automatise** (cibles §3)                                           |        **267 / 385**        |                           **69 %**                           |
 | dont **P0 automatisables** (cible CI prioritaire)                    |          ~70 / 89           |                       **~79 % des P0**                       |
-| **Manuel obligatoire** (non automatisable : natif/multi-device/a11y) |        **118 / 381**        |                           **31 %**                           |
+| **Manuel obligatoire** (non automatisable : natif/multi-device/a11y) |        **118 / 385**        |                           **31 %**                           |
 
-> **Synthese :** 100 % des boutons ont une couverture manuelle redigee, mais seulement **~87 %** atteignent la profondeur cible de 3 cas/bouton ; **69 %** des boutons sont visables par l'automatisation, le **31 %** restant (rooms/maps natif, multi-device, accessibilite) demeurant **manuel par nature**.
+> **Synthese :** 100 % des boutons ont une couverture manuelle redigee, mais seulement **~86 %** atteignent la profondeur cible de 3 cas/bouton ; **69 %** des boutons sont visables par l'automatisation, le **31 %** restant (rooms/maps natif, multi-device, accessibilite) demeurant **manuel par nature**.
 
 ---
 
@@ -156,7 +156,7 @@ Base : ~120 a 150 cas (1-2 cas par controle P0, H4), 5-7 min/cas.
 | **Jest sur runner CI propre** (parallele, RAM suffisante)         | meme suite                                                       |                   **~6 a 12 min**                   | a chaque PR / commit      |
 | **E2E device (Maestro/Detox)** — happy-paths P0+P1 automatisables | build + scenarios                                                | **build 20-45 min (1x)** + **run 25-45 min/device** | avant livraison           |
 
-> **Run automatise "complet" (Jest CI + 1 passe E2E sur 1 device) : ~1 a 1,5 h** une fois le build pret. La force de l'automatisation : ce run rejoue les **263 cibles** a chaque PR pour un cout marginal quasi nul, **liberant le manuel** pour le natif/multi-device.
+> **Run automatise "complet" (Jest CI + 1 passe E2E sur 1 device) : ~1 a 1,5 h** une fois le build pret. La force de l'automatisation : ce run rejoue les **267 cibles** a chaque PR pour un cout marginal quasi nul, **liberant le manuel** pour le natif/multi-device.
 
 ### 5.4 Matrice 4 devices (Android low/high, iOS ancien/recent)
 
@@ -183,7 +183,7 @@ Le rejeu sur 4 devices **n'est pas x4** : 1er device plein tarif, rejeux ~0,55x,
 | 1 device      | ~10 a 17,5 h |                   —                   |
 | **4 devices** | x 2,6 a 3,2  | **~26 a 56 h** = **~4 a 8 j-testeur** |
 
-> **Recommandation de calibrage release** (cf. criteres de sortie §8.2 du plan) : **100 % P0 + P1 sur la matrice 4 devices** (option a, ~20-37 j-testeur, soit **~1 a 2 semaines calendaires** a 3-4 testeurs), **P2 sur >= 1 device de reference par OS** (compris dans la borne haute de (a)), et l'**automatisation absorbe les 263 cibles de regression** a chaque PR pour eviter de rejouer manuellement le fonctionnel repetitif.
+> **Recommandation de calibrage release** (cf. criteres de sortie §8.2 du plan) : **100 % P0 + P1 sur la matrice 4 devices** (option a, ~20-37 j-testeur, soit **~1 a 2 semaines calendaires** a 3-4 testeurs), **P2 sur >= 1 device de reference par OS** (compris dans la borne haute de (a)), et l'**automatisation absorbe les 267 cibles de regression** a chaque PR pour eviter de rejouer manuellement le fonctionnel repetitif.
 
 ---
 
@@ -191,10 +191,10 @@ Le rejeu sur 4 devices **n'est pas x4** : 1er device plein tarif, rejeux ~0,55x,
 
 | Indicateur                                      |                                            Valeur                                             |
 | ----------------------------------------------- | :-------------------------------------------------------------------------------------------: |
-| Boutons couverts (manuel, >= 1 cas)             |                                      **100 %** (381/381)                                      |
-| Profondeur vs cible 3 cas/bouton                |                              **~87 %** (2,60 / 3,00 cas/bouton)                               |
-| Boutons couverts (automatisation cible)         |                                      **69 %** (263/381)                                       |
-| Cas a ajouter pour atteindre 3/bouton           | **1143 - 991 = ~152 cas** (priorite `extensions`, `settings`, `onboarding`, `rooms`, `admin`) |
+| Boutons couverts (manuel, >= 1 cas)             |                                      **100 %** (385/385)                                      |
+| Profondeur vs cible 3 cas/bouton                |                              **~86 %** (2,57 / 3,00 cas/bouton)                               |
+| Boutons couverts (automatisation cible)         |                                      **69 %** (267/385)                                       |
+| Cas a ajouter pour atteindre 3/bouton           | **1155 - 991 = ~164 cas** (priorite `extensions`, `settings`, `onboarding`, `rooms`, `admin`) |
 | Smoke P0 (1 device, env compris)                |                                        **~1,5 a 3 j**                                         |
 | Manuel complet (1 device)                       |                                        **~9,5 a 14 j**                                        |
 | Manuel P0+P1 sur 4 devices                      |                                        **~20 a 37 j**                                         |

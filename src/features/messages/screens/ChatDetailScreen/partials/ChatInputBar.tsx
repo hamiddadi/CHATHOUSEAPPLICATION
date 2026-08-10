@@ -46,23 +46,12 @@ interface ChatInputBarProps {
   /** Bottom safe-area inset; applied only when the keyboard is hidden. */
   bottomInset: number;
   keyboardVisible: boolean;
-  onAttach: () => void;
   onMic: () => void;
   onInputFocus: () => void;
 }
 
 const ChatInputBar: React.FC<ChatInputBarProps> = memo(
-  ({
-    value,
-    onChangeText,
-    onSend,
-    canSend,
-    bottomInset,
-    keyboardVisible,
-    onAttach,
-    onMic,
-    onInputFocus,
-  }) => {
+  ({ value, onChangeText, onSend, canSend, bottomInset, keyboardVisible, onMic, onInputFocus }) => {
     const { t } = useTranslation();
     const [showEmoji, setShowEmoji] = useState(false);
 
@@ -116,14 +105,6 @@ const ChatInputBar: React.FC<ChatInputBarProps> = memo(
             {value.length >= COUNTER_THRESHOLD ? (
               <Text style={styles.counter}>{`${value.length}/${MAX_MESSAGE_LEN}`}</Text>
             ) : null}
-            <Pressable
-              onPress={onAttach}
-              accessibilityRole="button"
-              accessibilityLabel={t('chat.attachA11y')}
-              hitSlop={12}
-            >
-              <MaterialIcons name="attach-file" size={INPUT_ICON_SIZE} color={colors.textMuted} />
-            </Pressable>
           </View>
           {canSend ? (
             <Pressable

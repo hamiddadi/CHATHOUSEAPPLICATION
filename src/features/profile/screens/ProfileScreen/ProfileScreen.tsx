@@ -133,13 +133,13 @@ export const ProfileScreen: React.FC = () => {
     try {
       await Share.share({
         title: handle,
-        message: `${handle} sur ChatHouse — ${url}`,
+        message: t('profile.shareMessage', { handle, url }),
         url,
       });
     } catch {
       /* user cancelled — no-op */
     }
-  }, [user]);
+  }, [t, user]);
 
   const handleWave = useCallback(() => {
     if (!user) return;

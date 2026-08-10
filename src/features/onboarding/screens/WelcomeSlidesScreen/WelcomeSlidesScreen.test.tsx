@@ -20,10 +20,13 @@ describe('WelcomeSlidesScreen', () => {
   });
 
   it('mounts without throwing and shows the first slide + the Next CTA', () => {
-    const { getByText, toJSON } = renderScreen(<WelcomeSlidesScreen />, {
+    const { getByTestId, getByText, toJSON } = renderScreen(<WelcomeSlidesScreen />, {
       route: { name: 'WelcomeSlides' },
     });
     expect(toJSON()).toBeTruthy();
+    expect(getByTestId('welcome-slides-screen')).toBeTruthy();
+    expect(getByTestId('welcome-slide-welcome')).toBeTruthy();
+    expect(getByTestId('welcome-progress-1-of-4')).toBeTruthy();
     // First slide title (welcome) and the not-last CTA label.
     expect(getByText('Welcome to ChatHouse')).toBeTruthy();
     expect(getByText('Next')).toBeTruthy();
@@ -59,7 +62,7 @@ describe('WelcomeSlidesScreen', () => {
   });
 
   it('announces the slide progress to screen readers and updates it on Next', async () => {
-    const { getByLabelText, getByText } = renderScreen(<WelcomeSlidesScreen />, {
+    const { getByLabelText, getByTestId, getByText } = renderScreen(<WelcomeSlidesScreen />, {
       route: { name: 'WelcomeSlides' },
     });
     // The progress dots are exposed as a single "slide x of y" announcement.
@@ -67,6 +70,7 @@ describe('WelcomeSlidesScreen', () => {
     fireEvent.press(getByText('Next'));
     await waitFor(() => {
       expect(getByLabelText('Slide 2 of 4')).toBeTruthy();
+      expect(getByTestId('welcome-progress-2-of-4')).toBeTruthy();
     });
   });
 

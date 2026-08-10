@@ -2,6 +2,7 @@ import React, { memo, useCallback, useState } from 'react';
 import { Alert, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import MaterialIcons from '@react-native-vector-icons/material-icons';
 import { useMutation } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
 import { Avatar } from '../../../../shared/components/Avatar';
 import { colors, spacing } from '../../../../shared/constants/theme';
 import { apiClient } from '../../../../shared/services/api/apiClient';
@@ -51,6 +52,7 @@ interface ProfileActionSheetProps {
  */
 export const ProfileActionSheet: React.FC<ProfileActionSheetProps> = memo(
   ({ target, roomId, viewerId, onClose, onOpenProfile, onMessage }) => {
+    const { t } = useTranslation();
     const follow = useMutation({ mutationFn: realFollow });
     const ping = usePingUserToRoom();
     const wave = useMutation({ mutationFn: realWave });
@@ -64,7 +66,7 @@ export const ProfileActionSheet: React.FC<ProfileActionSheetProps> = memo(
       mutationFn: (userId: string) =>
         messageService.send(
           userId,
-          `Rejoins-moi sur ChatHouse 👉 ${SHARE_BASE_URL}/room/${roomId}`,
+          t('room.shareDmMessage', { url: `${SHARE_BASE_URL}/room/${roomId}` }),
         ),
     });
     const { status: extStatus } = useExtBackend();
@@ -130,14 +132,14 @@ export const ProfileActionSheet: React.FC<ProfileActionSheetProps> = memo(
       shareDm.mutate(target.id, {
         onSuccess: () => {
           Alert.alert(
-            'Lien envoyé',
-            `@${target.username ?? target.displayName} a reçu le lien de la room.`,
+            t('room.shareSentTitle'),
+            t('room.shareSentBody', { handle: target.username ?? target.displayName }),
           );
           onClose();
         },
-        onError: e => Alert.alert('Erreur', errorMessage(e, 'Échec')),
+        onError: e => Alert.alert(t('common.error'), errorMessage(e, t('common.actionFailed'))),
       });
-    }, [onClose, shareDm, target]);
+    }, [onClose, shareDm, t, target]);
 
     const handleBlock = useCallback(() => {
       if (!target) return;
@@ -217,7 +219,11 @@ export const ProfileActionSheet: React.FC<ProfileActionSheetProps> = memo(
                   ) : null}
                   <ActionRow icon="notifications" label="Ping (rejoins-moi)" onPress={handlePing} />
                   <ActionRow icon="waves" label="Envoyer un wave 🌊" onPress={handleWave} />
-                  <ActionRow icon="share" label="Partager cette room" onPress={handleShareRoom} />
+                  <ActionRow
+                    icon="share"
+                    label={t('room.shareRoomAction')}
+                    onPress={handleShareRoom}
+                  />
                   {extStatus.features.payments && externalPurchasesAllowed ? (
                     <ActionRow
                       icon="volunteer-activism"

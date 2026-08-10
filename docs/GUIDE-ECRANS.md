@@ -2,7 +2,9 @@
 
 > Guide de référence des **53 écrans** de l'application (sous `src/features/`).
 > Pour chaque écran : **Rôle**, **Fonctions** clés, **Accès** (qui / d'où).
-> Basé sur l'audit du code source réel · 28 juin 2026.
+> Basé sur l'audit du code source réel · mis à jour le 10 août 2026.
+>
+> **Validation technique au 10 août 2026** : permission micro iOS contrôlée par le module WebRTC natif ; **3 flows Maestro** pré-auth présents (`onboarding-carousel`, `auth-privacy-smoke`, `auth-consent-gate`) ; audit npm backend production à **0 vulnérabilité**. Le mobile conserve 12 entrées « high » transitives provenant de la chaîne de build Metro/Expo autour de `image-size`, sans version corrigée publiée à cette date.
 
 ## Carte de navigation
 
@@ -84,7 +86,7 @@ L'app s'articule autour de 4 navigateurs :
 
 **12. RoomScreen** — _La salle audio live (cœur de l'app)._
 
-- Scène speakers/listeners avec indicateur « is speaking » (LiveKit) ; **lever/baisser la main + file d'attente** ; **modération complète** (mute autrui, inviter à parler, renvoyer au public, nommer modérateur, transférer l'hôte, mute-all, lock, restriction lever-de-main, kick+ban) ; **réactions emoji** ; **captions live on-device** ; **audio en arrière-plan / mini-bar** ; ping + wave + tip + partage + signalement ; mode invisible (listeners). Réception socket : mute/kick/role/ended.
+- Scène speakers/listeners avec indicateur « is speaking » (LiveKit) ; permission micro demandée puis revérifiée sur iOS via WebRTC natif ; **lever/baisser la main + file d'attente** ; **modération complète** (mute autrui, inviter à parler, renvoyer au public, nommer modérateur, transférer l'hôte, mute-all, lock, restriction lever-de-main, kick+ban) ; **réactions emoji** ; **captions live on-device** ; **audio en arrière-plan / mini-bar** ; ping + wave + tip + partage + signalement ; mode invisible (listeners). Réception socket : mute/kick/role/ended.
 - **Accès** : depuis un tap sur un salon (feed, club, carte, deep-link).
 
 **13. CreateRoomScreen** — _Création de salon (immédiat ou planifié)._
@@ -117,7 +119,7 @@ L'app s'articule autour de 4 navigateurs :
 
 **17. HouseListScreen** — _Liste des clubs (mes clubs + découverte)._
 
-- Onglets Mine/Discover, rangée club (icône, nom, catégorie, nb membres), FAB création. (Recherche de clubs : via Explore.)
+- Onglets Mine/Discover, recherche intégrée avec effacement (filtre local tolérant aux accents dans Mine ; recherche API débouncée dans Discover, clubs privés exclus), rangée club (icône, nom, nb membres), états vide/erreur avec actions, pull-to-refresh et FAB création.
 - **Accès** : depuis le profil / les réglages (« member of »).
 
 **18. HouseDetailScreen** — _Fiche club complète._
@@ -207,7 +209,7 @@ L'app s'articule autour de 4 navigateurs :
 
 **31. ChatDetailScreen** — _Fil de discussion DM 1:1._
 
-- Texte + **notes vocales** (record→upload), liste inversée, séparateurs de date, **indicateur de saisie**, marquage lu auto, suppression de ses messages, emojis. (Appels/pièces jointes = « Coming soon ».)
+- Texte + **notes vocales** (record→upload), liste inversée, séparateurs de date, **indicateur de saisie**, présence du pair selon sa confidentialité, marquage lu auto, suppression de ses messages et emojis. Le bouton d'appel crée une **room audio fermée à deux** et y navigue ; « Plus » propose **Signaler / Bloquer / Annuler** avec appels API réels. La pièce jointe n'est pas affichée tant qu'aucun pipeline bout-en-bout n'existe.
 - **Accès** : tap sur une conversation / un profil.
 
 **32. NewMessageScreen** — _Choisir un ou plusieurs destinataires._

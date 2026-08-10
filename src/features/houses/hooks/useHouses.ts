@@ -7,10 +7,12 @@ import {
   type UpdateHouseInput,
 } from '../services/houseService';
 import type { House, HouseSummary } from '../../../shared/types/domain';
+import { searchService } from '../../search/services/searchService';
 
 export const houseKeys = {
   all: ['houses'] as const,
   list: (filter: 'mine' | 'discover') => [...houseKeys.all, 'list', filter] as const,
+  search: (query: string) => [...houseKeys.all, 'search', query] as const,
   detail: (id: string) => [...houseKeys.all, 'detail', id] as const,
   invitation: (id: string) => [...houseKeys.all, 'invitation', id] as const,
   rooms: (id: string, filter: 'live' | 'upcoming' | 'past') =>
@@ -18,10 +20,31 @@ export const houseKeys = {
   inviteLink: (id: string) => [...houseKeys.all, 'inviteLink', id] as const,
 };
 
-export const useHouses = (filter: 'mine' | 'discover' = 'mine') =>
+export const useHouses = (filter: 'mine' | 'discover' = 'mine', enabled = true) =>
   useQuery<HouseSummary[]>({
     queryKey: houseKeys.list(filter),
     queryFn: () => houseService.list(filter),
+    enabled,
+  });
+
+/**
+ * Search the discoverable club catalogue. The backend already excludes PRIVATE
+ * clubs; the defensive client-side filter prevents an accidentally broadened
+ * API response or stale cache entry from exposing one in Discover.
+ *
+ * Debouncing belongs to the caller so the query key always represents the
+ * exact request that was sent. `enabled` also keeps this request dormant while
+ * the My Houses tab is active or the query is blank.
+ */
+export const useHouseSearch = (query: string, enabled = true) =>
+  useQuery<HouseSummary[]>({
+    queryKey: houseKeys.search(query),
+    queryFn: async () => {
+      const clubs = await searchService.clubs(query);
+      return clubs.filter(club => club.privacy !== 'private');
+    },
+    enabled: enabled && query.trim().length > 0,
+    staleTime: 10_000,
   });
 
 export const useHouse = (houseId: string, inviteToken?: string) =>

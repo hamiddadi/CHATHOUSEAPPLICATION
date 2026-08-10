@@ -18,8 +18,8 @@ export const chatController = {
     const limitRaw = req.query['limit'];
     const cursorRaw = req.query['cursor'];
     const hasPaging = limitRaw !== undefined || cursorRaw !== undefined;
-    // Default high so the unpaginated mobile call still returns every
-    // conversation in the scan window (no silent 30-row truncation).
+    // Keep the legacy unpaginated mobile response capped at 500 conversations;
+    // paginated callers opt into smaller pages through `limit`/`cursor`.
     const limit =
       typeof limitRaw === 'string' ? Math.min(100, Math.max(1, Number(limitRaw) || 30)) : 500;
     const cursor = typeof cursorRaw === 'string' ? cursorRaw : undefined;

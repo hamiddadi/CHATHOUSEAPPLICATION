@@ -54,23 +54,17 @@ export const NotificationsPermissionScreen: React.FC = () => {
     }
     if (status === 'denied') {
       Alert.alert(
-        t('onboarding.notifications.deniedTitle', 'Notifications are off'),
-        t(
-          'onboarding.notifications.deniedBody',
-          'No problem — you can turn them on anytime from your profile settings.',
-        ),
+        t('onboarding.notifications.deniedTitle'),
+        t('onboarding.notifications.deniedBody'),
       );
     } else if (status === 'blocked') {
       Alert.alert(
-        t('onboarding.notifications.deniedTitle', 'Notifications are off'),
-        t(
-          'onboarding.notifications.blockedBody',
-          'Notifications are blocked for ChatHouse. Enable them in your phone settings to get notified.',
-        ),
+        t('onboarding.notifications.deniedTitle'),
+        t('onboarding.notifications.blockedBody'),
         [
-          { text: t('common.cancel', 'Cancel'), style: 'cancel' },
+          { text: t('common.cancel'), style: 'cancel' },
           {
-            text: t('onboarding.notifications.openSettings', 'Open settings'),
+            text: t('onboarding.notifications.openSettings'),
             onPress: () => {
               void Linking.openSettings();
             },
@@ -79,11 +73,8 @@ export const NotificationsPermissionScreen: React.FC = () => {
       );
     } else if (status === 'error') {
       Alert.alert(
-        t('onboarding.notifications.errorTitle', "Notifications weren't enabled"),
-        t(
-          'onboarding.notifications.errorBody',
-          'ChatHouse could not finish enabling notifications. You can continue; ChatHouse will try again automatically the next time you open the app.',
-        ),
+        t('onboarding.notifications.errorTitle'),
+        t('onboarding.notifications.errorBody'),
       );
     }
   }, [goNext, t]);

@@ -2,8 +2,8 @@
  * Render test for ChatDetailScreen (a 1:1 thread). Mounts with a conversation +
  * messages seeded so the thread renders (not the loader), then exercises the
  * header back button (→ goBack), a private call (→ closed two-person Room),
- * the remaining "coming soon" actions, the emoji quick-insert (mutates the
- * draft → reveals send), and the send button after typing.
+ * the real conversation safety options, the emoji quick-insert (mutates the
+ * draft → reveals send), and sending.
  */
 import React from 'react';
 import { Alert } from 'react-native';
@@ -13,6 +13,7 @@ import { renderScreen, mockAuthenticated, resetAuth } from '../../../../test-uti
 import { messageService } from '../../services/messageService';
 import { roomService } from '../../../rooms/services/roomService';
 import { ROOM_TITLE_MAX } from '../../../rooms/constants';
+import { socialService } from '../../../social/services/socialService';
 import { toast } from '../../../../shared/components/Toast';
 import * as socketClient from '../../../../shared/services/realtime/socketClient';
 import { peerPresenceKey } from '../../../extensions/hooks/usePeerPresence';
@@ -176,11 +177,52 @@ describe('ChatDetailScreen', () => {
     });
   });
 
-  it('more header button surfaces a "coming soon" Alert (no crash)', () => {
+  it('more header button exposes real report and block actions', () => {
     const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
     const { getByLabelText } = renderChat();
     fireEvent.press(getByLabelText('More options'));
-    expect(alertSpy).toHaveBeenCalledTimes(1);
+    expect(alertSpy).toHaveBeenCalledWith(
+      'Conversation options',
+      '@alice',
+      expect.arrayContaining([
+        expect.objectContaining({ text: 'Report user' }),
+        expect.objectContaining({ text: 'Block user', style: 'destructive' }),
+      ]),
+      { cancelable: true },
+    );
+  });
+
+  it('reports the peer from conversation options with a selected reason', async () => {
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
+    const reportSpy = jest
+      .spyOn(socialService, 'report')
+      .mockResolvedValue({ reportId: 'profile-report-1' });
+    const { getByLabelText } = renderChat();
+
+    fireEvent.press(getByLabelText('More options'));
+    const menuButtons = alertSpy.mock.calls[0]?.[2];
+    menuButtons?.find(button => button.text === 'Report user')?.onPress?.();
+    fireEvent.press(await waitFor(() => getByLabelText('Harassment')));
+
+    await waitFor(() => {
+      expect(reportSpy).toHaveBeenCalledWith(PEER_ID, { reason: 'harassment' });
+    });
+    await waitFor(() => expect(alertSpy).toHaveBeenCalledWith(expect.stringContaining('Thanks')));
+  });
+
+  it('blocks the peer after confirmation and leaves the conversation', async () => {
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
+    const blockSpy = jest.spyOn(socialService, 'block').mockResolvedValue({ blocked: true });
+    const { navigation, getByLabelText } = renderChat();
+
+    fireEvent.press(getByLabelText('More options'));
+    const menuButtons = alertSpy.mock.calls[0]?.[2];
+    menuButtons?.find(button => button.text === 'Block user')?.onPress?.();
+    const confirmButtons = alertSpy.mock.calls[1]?.[2];
+    confirmButtons?.find(button => button.text === 'Block')?.onPress?.();
+
+    await waitFor(() => expect(blockSpy).toHaveBeenCalledWith(PEER_ID));
+    await waitFor(() => expect(navigation.goBack).toHaveBeenCalledTimes(1));
   });
 
   it('emoji button opens the palette; picking an emoji reveals the send button', async () => {
@@ -214,11 +256,9 @@ describe('ChatDetailScreen', () => {
     });
   });
 
-  it('attach button surfaces a "coming soon" Alert (no crash)', () => {
-    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
-    const { getByLabelText } = renderChat();
-    fireEvent.press(getByLabelText('Attach file'));
-    expect(alertSpy).toHaveBeenCalledTimes(1);
+  it('does not advertise attachments without a complete secure pipeline', () => {
+    const { queryByLabelText } = renderChat();
+    expect(queryByLabelText('Attach file')).toBeNull();
   });
 
   it('long-pressing a received DM reports that individual message', async () => {

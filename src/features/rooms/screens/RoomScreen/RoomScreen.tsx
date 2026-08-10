@@ -382,18 +382,22 @@ export const RoomScreen: React.FC = () => {
     // Optimistic flip — written to the SHARED store (not local state) so the
     // badge follows the press immediately AND survives detail refetches /
     // LiveKit token renews (roomAudioService re-applies getState().isMuted).
-    // Backend is the source of truth: if it rejects, we roll back. The
-    // LiveKit mute is fire-and-forget and not awaited because it's local —
-    // its failure shouldn't drag down the API success.
+    // Backend remains the source of truth, but LiveKit publication must also
+    // succeed before we advertise the new state. Awaiting it lets iOS
+    // permission failures reach roomAudioSession and its mic-denied banner.
     store.setMuted(next);
-    void audio.setMuted(next);
     try {
+      await audio.setMuted(next);
       await setMute.mutateAsync({ roomId: room.id, isMuted: next });
     } catch {
       // Backend refused — undo both the badge AND LiveKit to keep them
       // consistent.
       useCurrentRoomStore.getState().setMuted(!next);
-      void audio.setMuted(!next);
+      try {
+        await audio.setMuted(!next);
+      } catch {
+        // roomAudioSession already surfaced this failure in its reactive state.
+      }
     }
   }, [audio, room, setMute]);
   const handleToggleHand = useCallback(() => {
@@ -551,16 +555,17 @@ export const RoomScreen: React.FC = () => {
 
   const handleShare = useCallback(async () => {
     if (!room) return;
+    const url = `${ROOM_SHARE_BASE_URL}/${room.id}`;
     try {
       await Share.share({
         title: room.title,
-        message: `Rejoins-moi sur ChatHouse : "${room.title}" — ${ROOM_SHARE_BASE_URL}/${room.id}`,
-        url: `${ROOM_SHARE_BASE_URL}/${room.id}`,
+        message: t('room.shareMessage', { title: room.title, url }),
+        url,
       });
     } catch {
       /* user cancelled — no-op */
     }
-  }, [room]);
+  }, [room, t]);
 
   // Real hand-raise queue from the API. We render avatars for every queued
   // user; tapping one promotes them to SPEAKER (host/mod only).

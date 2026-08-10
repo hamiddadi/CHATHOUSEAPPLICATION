@@ -54,6 +54,20 @@ export const useRoomAudioStore = create<RoomAudioState>(() => ({
   scores: EMPTY_SCORES,
 }));
 
+const surfaceRoomAudioError = (error: unknown, roomId: string): void => {
+  const message = errorMessage(error, 'unknown');
+  const status: RoomAudioStatus = message.includes('@livekit/react-native not installed')
+    ? 'unsupported'
+    : 'error';
+
+  // Expected user decisions and an unavailable optional native module are not
+  // incidents. Everything else remains available to consent-gated reporting.
+  if (status === 'error' && message !== MIC_PERMISSION_DENIED_ERROR) {
+    reportException(error, { feature: 'room-audio', roomId });
+  }
+  useRoomAudioStore.setState(state => (state.roomId === roomId ? { status, error: message } : {}));
+};
+
 let handle: RoomAudioHandle | null = null;
 // The room we're currently bound to (or starting). Guards against double-start
 // and lets an in-flight start detect that a stop()/switch raced ahead of it.
@@ -175,6 +189,11 @@ export const roomAudioSession = {
               return { status: next === 'connected' ? 'live' : 'reconnecting' };
             });
           },
+          onError: error => {
+            if (sessionGeneration === generation && boundRoomId === roomId) {
+              surfaceRoomAudioError(error, roomId);
+            }
+          },
         });
         // A stop()/switch happened while we were connecting — discard.
         if (sessionGeneration !== generation || boundRoomId !== roomId) {
@@ -185,17 +204,7 @@ export const roomAudioSession = {
         useRoomAudioStore.setState(s => (s.roomId === roomId ? { status: 'live' } : {}));
       } catch (err) {
         if (sessionGeneration !== generation || boundRoomId !== roomId) return;
-        const msg = errorMessage(err, 'unknown');
-        const status: RoomAudioStatus = msg.includes('@livekit/react-native not installed')
-          ? 'unsupported'
-          : 'error';
-        // Keep the SDK/network detail out of the UI. Expected user decisions
-        // (microphone denied) and an unavailable optional native module are not
-        // incidents; every other failure goes through consent-gated reporting.
-        if (status === 'error' && msg !== MIC_PERMISSION_DENIED_ERROR) {
-          reportException(err, { feature: 'room-audio', roomId });
-        }
-        useRoomAudioStore.setState(s => (s.roomId === roomId ? { status, error: msg } : {}));
+        surfaceRoomAudioError(err, roomId);
       } finally {
         if (sessionGeneration === generation && boundRoomId === roomId) {
           startInFlight = null;
@@ -234,7 +243,23 @@ export const roomAudioSession = {
   },
 
   async setMuted(muted: boolean): Promise<void> {
-    await handle?.setMuted(muted);
+    if (!handle || !boundRoomId) return;
+    const roomId = boundRoomId;
+    try {
+      await handle.setMuted(muted);
+      // Returning from Settings and successfully enabling capture is the
+      // recovery boundary for a previous mic-denied state.
+      if (!muted) {
+        useRoomAudioStore.setState(state =>
+          state.roomId === roomId && state.error === MIC_PERMISSION_DENIED_ERROR
+            ? { status: 'live', error: null }
+            : {},
+        );
+      }
+    } catch (error) {
+      surfaceRoomAudioError(error, roomId);
+      throw error;
+    }
   },
 
   setPeerVolume(userId: string, volume: number): void {

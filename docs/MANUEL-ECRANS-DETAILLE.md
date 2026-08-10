@@ -1,7 +1,9 @@
 # ChatHouse — Manuel détaillé des écrans
 
 > Description **enrichie** des 53 écrans (`src/features/`). Pour chacun : **Rôle & contexte · UI · Données (hooks/API/stores) · Actions · États · Navigation · Accès**.
-> Basé sur l'audit du code source réel (lecture seule) · 28 juin 2026.
+> Basé sur l'audit du code source réel (lecture seule) · mis à jour le 10 août 2026.
+>
+> **Validation technique au 10 août 2026** : permission micro iOS contrôlée par le module WebRTC natif ; **3 flows Maestro** pré-auth déterministes présents ; audit npm backend production à **0 vulnérabilité**. Le reliquat mobile (12 entrées « high » transitives) remonte à `image-size` dans la chaîne de build Metro/Expo et ne dispose d'aucune version corrigée publiée à cette date.
 
 ## Conventions techniques transverses
 
@@ -140,7 +142,7 @@
 - **UI** : TopBar (share/chat/tune[mod]/flag/End Room[host]) ; bannière statut audio ; en-tête room (badges house/catégorie/visibilité/REC, titre éditable si mod, `RoomTimer`/scheduled, compteurs, 🔒) ; partials `StageGrid`, `HandRaiseQueue`, `FollowedByListeners`, `FlatList` « Others » (overflow `+N`) ; `RoomActionBar` (Mute/Raise hand/Visible-Invisible/Invite/Leave) ; `ReactionsBar` ; `ExtCaptionsOverlay` ; sheets/modals `HostActionsSheet`, `ProfileActionSheet`, `RoomChatSidebar`, `RoomControlsSheet`, `TitleEditModal`.
 - **Données** : `useRoom(id)` (`GET /rooms/:id`) ; `useHandRaises` (poll 10s si realtime off) ; `useRoomSocket` (joined/hand/role/mute/kick/ended) ; `useRoomAudio` (LiveKit, scores parole) ; `useExtCaptions`/`useLocalCaptionPublisher` ; mutations `useLeaveRoom`/`useRaiseHand`/`useLowerHand`/`useSetMute`/`useSetHidden`/`useEndRoom`/`useReportRoom` ; stores `useAuthStore`, `useCurrentRoomStore`, `roomAudioSession` (singleton mini-bar).
 - **Actions** : mute (optimiste + LiveKit + rollback) ; raise/lower hand ; ghost ; tap participant → Host/Profile sheet ; promote ; End Room (Alert) ; Report ; Share (`app.chathouse.com/room/:id`) ; Invite → `InviteToRoom` ; Message → cross-tab ChatDetail ; Leave → clear+stop+`leaveRoom`+goBack.
-- **États** : Loader/EmptyState ; bannière audio (connecting/unsupported/error) ; join refusé → goBack+Alert ; events socket filtrés sur viewerId/roomId (garde `cancelled`) ; rôles dérivés `viewerIsHost`/`canModerate`/`canSpeak`.
+- **États** : Loader/EmptyState ; bannière audio (connecting/unsupported/error) ; permission micro iOS demandée puis revérifiée par le module WebRTC natif, refus renvoyé au flux audio ; join refusé → goBack+Alert ; events socket filtrés sur viewerId/roomId (garde `cancelled`) ; rôles dérivés `viewerIsHost`/`canModerate`/`canSpeak`.
 - **Navigation** : depuis RoomFeed/CreateRoom(`replace`)/Explore/Maps/deep-link `room/:id` → InviteToRoom, cross-tab ChatDetail ; back = mini-bar persiste.
 - **Accès** : authentifié + autorisation serveur de join (public/social/closed/ban).
 
@@ -195,10 +197,10 @@
 ## 17. HouseListScreen
 
 - **Rôle & contexte** : Liste des houses, onglets « My Houses » / « Discover ».
-- **UI** : Header, `TabToggle` (mine/discover), `FlatList` de `HouseRow` (Avatar, nom, catégorie+emoji, membersCount), FAB « + » animé.
-- **Données** : `useHouses(tab)` → `GET /clubs?filter=mine|discover`.
-- **Actions** : row → `HouseDetail` ; FAB → `CreateHouse` ; pull-to-refresh ; switch onglet.
-- **États** : Loader ; EmptyState (error). (Pas d'EmptyState liste vide dédié ; recherche club retirée.)
+- **UI** : Header, `TabToggle` (mine/discover), `Input` recherche avec action effacer, `FlatList` de `HouseRow` (Avatar, nom, membersCount), FAB « + » animé.
+- **Données** : `useHouses(tab)` → `GET /clubs?filter=mine|discover` ; `useHouseSearch(query)` → recherche clubs via `searchService` pour Discover (debounce 250 ms, exclusion défensive des clubs privés) ; filtre local normalisé nom/catégorie pour Mine.
+- **Actions** : saisir/effacer une recherche ; row → `HouseDetail` ; FAB → `CreateHouse` ; pull-to-refresh/retry dans le contexte courant ; switch onglet.
+- **États** : Loader de liste ou recherche ; EmptyState contextualisé (erreur avec retry, liste vide avec création, aucun résultat avec effacement).
 - **Navigation** : depuis Profil/Réglages → HouseDetail, CreateHouse.
 - **Accès** : authentifié.
 
@@ -355,11 +357,11 @@
 ## 31. ChatDetailScreen
 
 - **Rôle & contexte** : Thread DM 1:1 (`conversationId` == id du pair == `receiverId`).
-- **UI** : `ChatHeader` (avatar, nom, dot online, « typing… », call/more) ; `FlatList` `inverted` de `Bubble` (texte `ExtLinkifiedText`, vocal `VoiceMessageBubble`, `done-all`) + `DateSeparator` ; `ChatInputBar` (emoji 16, multiline, attach, send/mic) ↔ `VoiceRecordingBar`.
-- **Données** : `useConversation(peerId)` ; `useConversationMessages(peerId)` (`GET /chat/:peerId`) ; `useTypingIndicator(peerId)` (`chat:typing`) ; `useVoiceMessage` ; mutations `useSendMessage`/`useSendVoiceMessage`/`useMarkConversationRead`/`useDeleteMessage`.
-- **Actions** : envoi texte (`POST /chat/:id`) ; frappe → `notifyTyping` ; mic → record → `POST /chat/:id/voice` ; long-press son message → Alert → delete ; auto mark-read ; **call/more/attach → Alert « Coming soon »**.
-- **États** : Loader ; typing (clear 4s) ; vocal `VoiceRecordingBar` ; `isOnline` figé `false` (présence non câblée) ; erreurs via toast.
-- **Navigation** : MessagesList/NewMessage/OnlineUsersList → goBack ; tab bar masquée.
+- **UI** : `ChatHeader` (avatar, nom, dot online, « typing… », call/more) ; `FlatList` `inverted` de `Bubble` (texte `ExtLinkifiedText`, vocal `VoiceMessageBubble`, `done-all`) + `DateSeparator` ; `ChatInputBar` (emoji 16, multiline, send/mic, sans trombone) ↔ `VoiceRecordingBar` ; sheet de signalement utilisateur.
+- **Données** : `useConversation(peerId)` ; `useConversationMessages(peerId)` (`GET /chat/:peerId`) ; `usePeerPresence(peerId)` (visibilité serveur) ; `useTypingIndicator(peerId)` (`chat:typing`) ; `useVoiceMessage` ; `useCreateRoom` ; mutations chat + `useReport`/`useBlock`.
+- **Actions** : envoi texte (`POST /chat/:id`) ; frappe → `notifyTyping` ; mic → record → `POST /chat/:id/voice` ; auto mark-read ; appel → crée une room `closed` à 2 (pair co-host, chat/recording désactivés) puis ouvre `RoomsTab/Room` ; options → Signaler (motif + API) / Bloquer (confirmation + API + retour) / Annuler. Aucune action pièce jointe n'est exposée sans pipeline bout-en-bout.
+- **États** : Loader ; typing (clear 4s) ; vocal `VoiceRecordingBar` ; présence online uniquement si `peerPresence.visible===true` ; appel verrouillé/pending ; report pending ; erreurs API via toast.
+- **Navigation** : MessagesList/NewMessage/OnlineUsersList → goBack ; appel → Main/RoomsTab/Room ; blocage réussi → goBack ; tab bar masquée.
 - **Accès** : authentifié ; DM gaté follow mutuel (403 CHAT_004).
 
 ## 32. NewMessageScreen
@@ -605,8 +607,8 @@
 ## Constats notables (factuels)
 
 - **Routes orphelines / non câblées** : `WaitlistScreen` (deep-link seul), `ExtActivityFeedScreen` (aucun point d'entrée), `ExtPlaygroundScreen` (jamais monté, dev/QA), `ExtTopicExplorerScreen` (monté sans `onSelectTopic` → sélection sans nav).
-- **« Coming soon »** dans ChatDetail : appel vocal, pièces jointes, options de conversation.
-- **Présence en ligne** non branchée (`OnlineUsersList` rend `null` ; `isOnline` figé `false`).
+- **ChatDetail finalisé sur les actions visibles** : appel audio privé, présence respectueuse de la confidentialité, signalement et blocage sont branchés ; l'affordance pièce jointe est volontairement absente tant que son pipeline n'existe pas.
+- **Présence en ligne partielle** : active dans ChatDetail selon la visibilité serveur ; la bande `OnlineUsersList` de MessagesScreen rend encore `null`.
 - **Mocks résiduels** : `CURRENT_USER` sert de fallback d'identité dans Messages/ChatDetail.
 - **Sécurité admin** : le masquage client (`isAtLeast`) est doublé d'un contrôle serveur sur chaque `/admin/*`.
 

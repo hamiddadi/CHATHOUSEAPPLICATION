@@ -252,6 +252,7 @@ notable:
 | ---------------------------------------- | :------: | ------------------------------------------------------------------------------------------------------ |
 | `DATABASE_URL`                           |   yes    | Postgres DSN. In-compose default: `postgres:5432/chathouse`.                                           |
 | `REDIS_URL`                              |   yes    | e.g. `redis://redis:6379`.                                                                             |
+| `REDIS_MAXMEMORY`                        |   rec    | Redis ceiling used by production Compose; defaults to `512mb`.                                         |
 | `JWT_ACCESS_SECRET`                      |   yes    | zod-validated; boot fails if missing.                                                                  |
 | `JWT_REFRESH_SECRET`                     |   yes    | zod-validated; boot fails if missing.                                                                  |
 | `CORS_ORIGINS`                           |   rec    | Comma-separated allowed origins.                                                                       |
@@ -284,6 +285,15 @@ notable:
 LiveKit Cloud is the lowest-ops choice — it provides global TURN and needs only
 the three required `LIVEKIT_*` values above; `LIVEKIT_INTERNAL_URL` may stay
 empty and falls back to the public host (no self-host UDP ports / TURN sidecar).
+
+Production Compose fixes Redis to `maxmemory-policy noeviction`. Redis stores
+BullMQ jobs and revoked-token keys, so evicting an arbitrary key could execute
+or lose work incorrectly, or re-enable a revoked session. When
+`REDIS_MAXMEMORY` is reached, writes fail instead: treat that as an operational
+incident, inspect `INFO memory`, increase the limit/host capacity, and confirm
+the queues and `/health` recover. Size the limit below the container or host
+memory allocation to leave room for Redis/AOF overhead; do not switch to an
+eviction policy to silence capacity errors.
 
 ### 6.3 First host bootstrap
 

@@ -5,6 +5,10 @@
 // with one branch each — net negative for readability.
 // eslint-disable-next-line react-native/split-platform-components
 import { PermissionsAndroid, Platform } from 'react-native';
+import { permissions as mediaPermissions } from '@livekit/react-native-webrtc';
+import { i18n } from '../../core/i18n';
+
+export type AudioPermissionStatus = 'granted' | 'denied' | 'undetermined';
 
 const androidApiLevel = (): number =>
   typeof Platform.Version === 'number' ? Platform.Version : Number.parseInt(Platform.Version, 10);
@@ -19,19 +23,18 @@ export const requestBluetoothAudioPermission = async (): Promise<boolean> => {
   const permission = PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT;
   if (await PermissionsAndroid.check(permission)) return true;
   const result = await PermissionsAndroid.request(permission, {
-    title: 'Appareils audio à proximité',
-    message:
-      'ChatHouse a besoin de cette autorisation pour utiliser vos casques et écouteurs Bluetooth.',
-    buttonPositive: 'Autoriser',
-    buttonNegative: 'Refuser',
+    title: i18n.t('permissions.bluetoothAudioTitle'),
+    message: i18n.t('permissions.bluetoothAudioBody'),
+    buttonPositive: i18n.t('permissions.allow'),
+    buttonNegative: i18n.t('permissions.deny'),
   });
   return result === PermissionsAndroid.RESULTS.GRANTED;
 };
 
 /**
- * Cross-platform microphone permission request. iOS uses the descriptions
- * declared in Info.plist (NSMicrophoneUsageDescription) and the system
- * prompts at first audio capture — we just trust the OS dialog.
+ * Cross-platform microphone permission request. iOS uses the WebRTC native
+ * bridge backed by AVCaptureDevice to query, request and verify the decision;
+ * the prompt text comes from NSMicrophoneUsageDescription in Info.plist.
  *
  * Android needs an explicit `RECORD_AUDIO` runtime permission since API 23.
  * Android 12+ also asks for optional Bluetooth-device access after the mic is
@@ -39,19 +42,25 @@ export const requestBluetoothAudioPermission = async (): Promise<boolean> => {
  */
 export const requestAudioPermission = async (): Promise<boolean> => {
   if (Platform.OS === 'ios') {
-    // iOS will prompt automatically when the audio engine actually starts
-    // (LiveKit room.connect + microphone publish). Returning true here means
-    // "we believe the user will be prompted"; if they decline we'll see
-    // it surface as an error from the engine.
-    return true;
+    // The WebRTC native bridge delegates to AVCaptureDevice on iOS. Querying
+    // before and after the prompt prevents us from assuming that capture is
+    // allowed before the operating system has confirmed the decision.
+    const current = await checkAudioPermission();
+    if (current === 'granted') return true;
+    if (current === 'denied') return false;
+
+    const granted = await mediaPermissions.request({ name: 'microphone' });
+    if (granted !== true) return false;
+
+    return (await checkAudioPermission()) === 'granted';
   }
 
   if (Platform.OS === 'android') {
     const result = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.RECORD_AUDIO, {
-      title: 'Permission micro',
-      message: 'ChatHouse a besoin de votre micro pour parler dans les rooms.',
-      buttonPositive: 'Autoriser',
-      buttonNegative: 'Refuser',
+      title: i18n.t('permissions.microphoneTitle'),
+      message: i18n.t('permissions.microphoneBody'),
+      buttonPositive: i18n.t('permissions.allow'),
+      buttonNegative: i18n.t('permissions.deny'),
     });
     const microphoneGranted = result === PermissionsAndroid.RESULTS.GRANTED;
     if (microphoneGranted) {
@@ -69,10 +78,18 @@ export const requestAudioPermission = async (): Promise<boolean> => {
  * Best-effort check without a prompt. Useful for an early UX decision
  * (e.g. show "enable mic" CTA when status is denied).
  */
-export const checkAudioPermission = async (): Promise<'granted' | 'denied' | 'undetermined'> => {
+export const checkAudioPermission = async (): Promise<AudioPermissionStatus> => {
   if (Platform.OS === 'android') {
     const granted = await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.RECORD_AUDIO);
     return granted ? 'granted' : 'denied';
   }
+
+  if (Platform.OS === 'ios') {
+    const status: unknown = await mediaPermissions.query({ name: 'microphone' });
+    if (status === mediaPermissions.RESULT.GRANTED) return 'granted';
+    if (status === mediaPermissions.RESULT.DENIED) return 'denied';
+    return 'undetermined';
+  }
+
   return 'undetermined';
 };

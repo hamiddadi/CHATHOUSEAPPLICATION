@@ -2,7 +2,7 @@
 
 > Vue agregee de tout le parc teste. Application audio live facon Clubhouse (React Native / Expo, WebSocket + audio LiveKit, push, i18n FR/EN, roles guest/standard/admin, Android + iOS).
 >
-> **Perimetre du parc** : 50 ecrans · 381 boutons · 991 cas de test deja ecrits.
+> **Perimetre du parc** : 50 ecrans · 385 boutons · 991 cas de test deja ecrits. Inventaire fonctionnel actualise le 10 aout 2026.
 >
 > Legende priorite : **P0** = critique (parcours coeur, irreversible, temps-reel sensible) · **P1** = important · **P2** = secondaire.
 > Legende temps-reel : la colonne « Temps-reel » signale les boutons dont l'action declenche/recoit un effet WebSocket, LiveKit ou push (impact multi-utilisateur observable), par opposition aux ecrans 100% REST/React Query (synchro differee par refetch/invalidation).
@@ -34,11 +34,11 @@
 | 19  | Creer une house                    | houses        | standard, admin        |     7      |   21   | Aucun canal propre ; pseudo-synchro par invalidation ['houses'] ; POST /clubs (+ /upload/avatar si icone) ; propagation differee (refetch des autres)                                               |
 | 20  | Detail house                       | houses        | guest, standard, admin |     9      |   34   | Join/changement de role invalident 'houses' (propagation differee) ; sections live/planifiees via useHouseRooms (refetch, pas de subscription) ; ouvrir room -> LiveKit en aval                     |
 | 21  | Invitation house                   | houses        | standard, admin        |     3      |   11   | Accept = POST /clubs/{id}/accept (inviteToken NON transmis) ; invalidation houseKeys.all + replace ; atteint via push CLUB_INVITE/deep link ; inviteToken sensible (jamais logge)                   |
-| 22  | Liste des houses                   | houses        | standard, admin        |     6      |   18   | Aucun flux temps-reel ; fraicheur react-query (pull-to-refresh GET /clubs?filter) ; MAJ indirecte par invalidation cross-ecrans                                                                     |
+| 22  | Liste des houses                   | houses        | standard, admin        |     9      |   18   | Aucun flux temps-reel ; recherche locale Mine / API debouncée Discover ; pull-to-refresh/retry contextuel ; MAJ indirecte par invalidation cross-ecrans                                             |
 | 23  | Inviter un membre (house)          | houses        | standard, admin        |     7      |   18   | Invite (POST /clubs/:id/invite) declenche push CLUB_INVITE ; pas d'event WS retour (UI 'Invited' seulement onSuccess) ; recherche debounce 250 ms                                                   |
 | 24  | Carte                              | maps          | standard, admin        |     9      |   28   | WS maps:update-location (max 30 s/25 m, off en Ghost), maps:toggle-visibility, maps:user-moved/offline, auto-join maps:presence ; REST snapshot + poll 45 s ; Join Room -> LiveKit                  |
 | 25  | Ajouter des membres au groupe      | messages      | standard, admin        |     5      |   17   | Pas de WS/LiveKit propre ; ajout = POST REST ; effet temps-reel indirect (invalidation groups.detail/list) ; autres membres notifies via socket de groupe ailleurs                                  |
-| 26  | Conversation (detail)              | messages      | standard, admin        |     12     |   38   | chat:typing sortant (throttle 2,5 s) / entrant (TTL 4 s) ; envoi texte/vocal optimiste ; mark-read auto ; lecture audio expo-audio ; presence isOnline force false (TODO)                           |
+| 26  | Conversation (detail)              | messages      | standard, admin        |     13     |   38   | chat:typing ; texte/vocal ; presence respectueuse de la confidentialite ; appel ferme a 2 vers LiveKit ; signalement/blocage utilisateur ; mark-read auto                                           |
 | 27  | Chat de groupe                     | messages      | standard, admin        |     9      |   28   | Envoi texte/vocal = POST + setQueryData (PAS de push WS sur l'ecran) ; mark-read auto ; synchro par refetch react-query ; lecture audio expo-audio (build EAS)                                      |
 | 28  | Infos du groupe                    | messages      | standard, admin        |     6      |   22   | Aucun socket/LiveKit propre ; rename/remove/leave invalident detail+list ; propagation quasi temps-reel par refetch                                                                                 |
 | 29  | Messages (liste)                   | messages      | standard, admin        |     5      |   18   | useChatSocket (chat:message/chat:read) + useGroupSocket (group:message) invalident -> liste/badge live sans pull ; pull-to-refresh ; abonnements gates sur authenticated                            |
@@ -251,8 +251,11 @@
 | Liste des houses          | Retour                                    | navigation      | accessibilityLabel="Back" (MaterialIcons arrow-back)                                                                                           |    Non     |    P1    |
 | Liste des houses          | Onglet My Houses                          | toggle          | t('houses.tabs.mine', 'My Houses') ; accessibilityRole="tab", accessibilityState.selected                                                      |    Non     |    P1    |
 | Liste des houses          | Onglet Discover                           | toggle          | t('houses.tabs.discover', 'Discover') ; accessibilityRole="tab", accessibilityState.selected                                                   |    Non     |    P1    |
+| Liste des houses          | Champ Rechercher des houses               | input-submit    | accessibilityLabel=t('houses.searchA11y') ; filtre local Mine / recherche API debouncée Discover                                               |    Non     |    P1    |
+| Liste des houses          | Effacer la recherche                      | icon            | accessibilityLabel=t('houses.clearSearchA11y')                                                                                                 |    Non     |    P2    |
 | Liste des houses          | Cellule house (ligne)                     | list-item       | accessibilityLabel=`Open house ${house.name}` (ex. 'Open house Indie Hackers') ; accessibilityRole="button"                                    |    Non     |    P0    |
 | Liste des houses          | Pull-to-refresh                           | realtime-action | Geste tirer-vers-le-bas ; FlatList.onRefresh -> refetch() ; refreshing={isFetching}                                                            |    Non     |    P1    |
+| Liste des houses          | Action d'etat vide/erreur                 | submit          | Retry / Create a house / Clear search selon le contexte                                                                                        |    Non     |    P1    |
 | Liste des houses          | FAB Creer une house                       | fab             | accessibilityLabel="Create a new house" (MaterialIcons add)                                                                                    |    Non     |    P1    |
 | Inviter un membre (house) | Fermer (Close)                            | navigation      | accessibilityLabel t('houses.invite.closeA11y','Close invite dialog') (MaterialIcons close)                                                    |    Non     |    P1    |
 | Inviter un membre (house) | Copier le lien d'invitation               | icon            | accessibilityLabel t('houses.invite.copyA11y','Copy invite link') (MaterialIcons content-copy)                                                 |    Non     |    P1    |
@@ -286,11 +289,12 @@
 | Ajouter des membres au groupe | Cellule membre deja present (desactivee) | list-item       | accessibilityRole="checkbox" + accessibilityState{disabled:true} ; icone check                                                                                  |    Non     |    P2    |
 | Ajouter des membres au groupe | Ajouter N (Add N)                        | submit          | label = t('messages.addN',{count:N,defaultValue:'Add N'}) (Button variant primary)                                                                              |  **Oui**   |    P0    |
 | Conversation (detail)         | Retour                                   | navigation      | accessibilityLabel = t('chat.backA11y') = 'Retour'                                                                                                              |    Non     |    P1    |
-| Conversation (detail)         | Appeler                                  | icon            | accessibilityLabel = t('chat.callA11y') = 'Appeler' (Alert 'Appel vocal' bientot disponible)                                                                    |    Non     |    P2    |
-| Conversation (detail)         | Plus d'options                           | menu            | accessibilityLabel = t('chat.moreA11y') = 'Plus d'options' (Alert bientot disponible)                                                                           |    Non     |    P2    |
+| Conversation (detail)         | Appeler                                  | realtime-action | accessibilityLabel = t('chat.callA11y') ; cree une room closed a deux puis ouvre RoomsTab/Room                                                                  |  **Oui**   |    P1    |
+| Conversation (detail)         | Plus d'options                           | menu            | accessibilityLabel = t('chat.moreA11y') ; ouvre Signaler / Bloquer / Annuler                                                                                    |    Non     |    P1    |
+| Conversation (detail)         | Signaler l'utilisateur                   | destructive     | t('profile.report') puis sheet motifs spam/harassment/fake_profile/other                                                                                        |    Non     |    P1    |
+| Conversation (detail)         | Bloquer l'utilisateur                    | destructive     | t('profile.block') puis confirmation destructive ; succes -> goBack                                                                                             |    Non     |    P1    |
 | Conversation (detail)         | Inserer un emoji                         | icon            | accessibilityLabel = t('chat.emojiA11y') = 'Inserer un emoji' (ajoute 🙂 au brouillon)                                                                          |    Non     |    P2    |
 | Conversation (detail)         | Champ de message                         | input-submit    | placeholder = t('chat.inputPlaceholder') = 'Ecrire un message…' (onChangeText -> notifyTyping)                                                                  |  **Oui**   |    P0    |
-| Conversation (detail)         | Joindre un fichier                       | icon            | accessibilityLabel = t('chat.attachA11y') = 'Joindre un fichier' (Alert 'Piece jointe' bientot disponible)                                                      |    Non     |    P2    |
 | Conversation (detail)         | Envoyer le message                       | submit          | accessibilityLabel = t('chat.sendA11y') = 'Envoyer le message'                                                                                                  |  **Oui**   |    P0    |
 | Conversation (detail)         | Enregistrer un message vocal (Micro)     | realtime-action | accessibilityLabel = t('chat.micA11y') = 'Enregistrer un message vocal'                                                                                         |  **Oui**   |    P0    |
 | Conversation (detail)         | Annuler l'enregistrement                 | destructive     | accessibilityLabel = t('voice.cancelA11y') = 'Annuler l'enregistrement' (disabled pendant upload)                                                               |    Non     |    P1    |
@@ -530,7 +534,7 @@
 | Indicateur                  | Valeur |
 | --------------------------- | -----: |
 | Ecrans                      |     50 |
-| Boutons (somme nb declares) |    381 |
+| Boutons (somme nb declares) |    385 |
 | Cas de test deja ecrits     |    991 |
 | Features distinctes         |     13 |
 
@@ -542,9 +546,9 @@
 | auth          |   6    |   25    |     83      |
 | events        |   1    |    5    |     14      |
 | extensions    |   5    |   62    |     104     |
-| houses        |   5    |   32    |     102     |
+| houses        |   5    |   35    |     102     |
 | maps          |   1    |    9    |     28      |
-| messages      |   6    |   41    |     139     |
+| messages      |   6    |   42    |     139     |
 | notifications |   1    |    9    |     24      |
 | onboarding    |   4    |   18    |     42      |
 | privacy       |   4    |   13    |     34      |
@@ -552,39 +556,39 @@
 | rooms         |   5    |   57    |     138     |
 | search        |   1    |    6    |     20      |
 | settings      |   2    |   31    |     71      |
-| **TOTAL**     | **50** | **381** |   **991**   |
+| **TOTAL**     | **50** | **385** |   **991**   |
 
 ### 3.3 Repartition par type de bouton
 
 | Type            | Nb boutons |   Part    |
 | --------------- | :--------: | :-------: |
-| toggle          |     85     |  22,3 %   |
-| navigation      |     80     |  21,0 %   |
-| realtime-action |     38     |  10,0 %   |
-| list-item       |     37     |   9,7 %   |
-| submit          |     37     |   9,7 %   |
-| input-submit    |     35     |   9,2 %   |
-| destructive     |     27     |   7,1 %   |
-| icon            |     16     |   4,2 %   |
+| toggle          |     85     |  22,1 %   |
+| navigation      |     80     |  20,8 %   |
+| realtime-action |     39     |  10,1 %   |
+| list-item       |     37     |   9,6 %   |
+| submit          |     38     |   9,9 %   |
+| input-submit    |     36     |   9,4 %   |
+| destructive     |     29     |   7,5 %   |
+| icon            |     15     |   3,9 %   |
 | menu            |     12     |   3,1 %   |
 | link            |     12     |   3,1 %   |
 | fab             |     2      |   0,5 %   |
-| **TOTAL**       |  **381**   | **100 %** |
+| **TOTAL**       |  **385**   | **100 %** |
 
 ### 3.4 Repartition par priorite
 
 | Priorite  | Nb boutons |   Part    |
 | --------- | :--------: | :-------: |
-| P0        |     89     |  23,4 %   |
-| P1        |    220     |  57,7 %   |
-| P2        |     72     |  18,9 %   |
-| **TOTAL** |  **381**   | **100 %** |
+| P0        |     89     |  23,1 %   |
+| P1        |    226     |  58,7 %   |
+| P2        |     70     |  18,2 %   |
+| **TOTAL** |  **385**   | **100 %** |
 
 ### 3.5 Boutons temps-reel (impact WebSocket / LiveKit / push)
 
 | Indicateur                           |                                                                                                                                                                                                                                      Valeur |
 | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------: |
-| Boutons marques temps-reel (rt=true) |                                                                                                                                                                                                                                          75 |
+| Boutons marques temps-reel (rt=true) |                                                                                                                                                                                                                                          76 |
 | Part du parc                         |                                                                                                                                                                                                                                      19,7 % |
 | Ecrans concentrant le temps-reel     | Room audio en direct (47) · Playground (15) · Carte (24) · Notifications (31) · Conversation (26) · Chat de groupe (27) · Messages liste (29) · Detail house (20) · Fil des rooms (46) · Fil d'activite (14) · Detail utilisateur admin (5) |
 

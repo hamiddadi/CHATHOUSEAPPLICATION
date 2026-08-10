@@ -152,6 +152,7 @@ export const PhoneScreen: React.FC = () => {
                 size="lg"
                 leftAdornment={
                   <Pressable
+                    testID="auth-country-selector"
                     onPress={() => {
                       Keyboard.dismiss();
                       setCountryPickerVisible(true);

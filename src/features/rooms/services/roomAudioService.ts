@@ -46,6 +46,27 @@ export const SKELETON_SENTINEL = LIVEKIT_UNAVAILABLE_SENTINEL;
 // room as a listener — audio capture simply never starts).
 export const MIC_PERMISSION_DENIED_ERROR = 'mic permission denied';
 
+const normalizeMicrophonePublicationError = (error: unknown): unknown => {
+  const name =
+    typeof error === 'object' && error !== null && 'name' in error
+      ? String((error as { name?: unknown }).name ?? '')
+      : '';
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === 'string'
+        ? error
+        : String(error ?? '');
+  const permissionFailure =
+    name === 'NotAllowedError' ||
+    name === 'PermissionDeniedError' ||
+    /(?:microphone|record_audio|getusermedia).*(?:permission|denied|not allowed)|permission denied/i.test(
+      message,
+    );
+
+  return permissionFailure ? new Error(MIC_PERMISSION_DENIED_ERROR) : error;
+};
+
 export interface PeerInfo {
   userId: string;
   /** Normalised volume: 0..1. */
@@ -109,6 +130,8 @@ interface StartOptions {
    * path stays a no-op.
    */
   onStatusChange?: (status: AudioConnectionStatus) => void;
+  /** Surfaces failures raised after the initial connection has completed. */
+  onError?: (error: unknown) => void;
 }
 
 /**
@@ -123,6 +146,7 @@ export const startRoomAudio = async ({
   onLocalScore,
   onPeerScore,
   onStatusChange,
+  onError,
   isCancelled,
 }: StartOptions): Promise<RoomAudioHandle> => {
   // Create a new LiveKit Room instance. Throws SKELETON_SENTINEL when
@@ -193,6 +217,16 @@ export const startRoomAudio = async ({
   const throwIfInactive = (): void => {
     if (inactive()) throw new Error('room audio start cancelled');
   };
+  const applyMuted = async (muted: boolean): Promise<void> => {
+    try {
+      await setLiveKitMuted(room, muted);
+    } catch (error) {
+      // Enabling the track is the publication boundary. Convert LiveKit/WebRTC
+      // permission errors to the stable value consumed by RoomScreen while
+      // preserving unrelated device/network failures verbatim.
+      throw muted ? error : normalizeMicrophonePublicationError(error);
+    }
+  };
 
   const scheduleRenewal = (expiresAtMs: number | null): void => {
     if (renewTimer) clearTimeout(renewTimer);
@@ -217,7 +251,12 @@ export const startRoomAudio = async ({
           scheduleRenewal(next.expiresAtMs);
           if (next.canPublish) {
             const isMuted = useCurrentRoomStore.getState().isMuted;
-            await setLiveKitMuted(room, isMuted);
+            try {
+              await applyMuted(isMuted);
+            } catch (error) {
+              onError?.(error);
+              throw error;
+            }
           }
         } catch {
           // Renewal failed — LiveKit will eventually disconnect and
@@ -248,7 +287,12 @@ export const startRoomAudio = async ({
           scheduleRenewal(next.expiresAtMs);
           if (next.canPublish) {
             const isMuted = useCurrentRoomStore.getState().isMuted;
-            await setLiveKitMuted(room, isMuted);
+            try {
+              await applyMuted(isMuted);
+            } catch (error) {
+              onError?.(error);
+              throw error;
+            }
           }
         } catch {
           // This attempt failed; if the SDK fires Disconnected again
@@ -384,6 +428,7 @@ export const startRoomAudio = async ({
       if (fresh.canPublish && !(await requestAudioPermission())) {
         // Keep the existing receive-only connection. A later role event or
         // explicit retry can request the permission again.
+        onError?.(new Error(MIC_PERMISSION_DENIED_ERROR));
         return;
       }
       if (inactive()) return;
@@ -397,10 +442,12 @@ export const startRoomAudio = async ({
       scheduleRenewal(fresh.expiresAtMs);
       if (fresh.canPublish) {
         const isMuted = useCurrentRoomStore.getState().isMuted;
-        await setLiveKitMuted(room, isMuted);
+        await applyMuted(isMuted);
       }
-    } catch {
-      /* failed to reconnect with new role — will retry on next role change */
+    } catch (error) {
+      // Socket event promises are not awaited by socket.io. Surface the
+      // failure through the session callback instead of losing it here.
+      onError?.(error);
     }
   };
 
@@ -414,7 +461,11 @@ export const startRoomAudio = async ({
     if (!payload || (payload.roomId && payload.roomId !== roomId)) return;
     if (payload.userId !== me.id) return; // only act on self
     if (inactive()) return;
-    await setLiveKitMuted(room, payload.isMuted);
+    try {
+      await applyMuted(payload.isMuted);
+    } catch (error) {
+      onError?.(error);
+    }
   };
 
   // Startup is transactional. Every listener registers its inverse before the
@@ -533,7 +584,7 @@ export const startRoomAudio = async ({
     scheduleRenewal(initial.expiresAtMs);
     if (initial.canPublish) {
       const isMuted = useCurrentRoomStore.getState().isMuted;
-      await setLiveKitMuted(room, isMuted);
+      await applyMuted(isMuted);
       throwIfInactive();
     }
 
@@ -559,7 +610,7 @@ export const startRoomAudio = async ({
   return {
     close: cleanupResources,
     setMuted: async (muted: boolean) => {
-      await setLiveKitMuted(room, muted);
+      await applyMuted(muted);
     },
     setPeerVolume: (_userId: string, _volume: number) => {
       // LiveKit doesn't expose per-peer playback volume at the SDK level.
@@ -567,26 +618,25 @@ export const startRoomAudio = async ({
       // if needed in the future. No-op for now.
     },
     setRole: async role => {
-      // Role changes require a new token — fetch and reconnect
-      try {
-        const fresh = await fetchToken();
-        if (inactive()) return;
-        if (fresh.canPublish && !(await requestAudioPermission())) return;
-        if (inactive()) return;
+      // This public method is awaited by its caller. Keep permission and
+      // publication failures observable instead of silently losing them.
+      const fresh = await fetchToken();
+      if (inactive()) return;
+      if (fresh.canPublish && !(await requestAudioPermission())) {
+        throw new Error(MIC_PERMISSION_DENIED_ERROR);
+      }
+      if (inactive()) return;
+      disconnectLiveKitRoom(room);
+      await connectLiveKitRoom(room, fresh.url, fresh.token);
+      if (inactive()) {
         disconnectLiveKitRoom(room);
-        await connectLiveKitRoom(room, fresh.url, fresh.token);
-        if (inactive()) {
-          disconnectLiveKitRoom(room);
-          return;
-        }
-        currentRole = role;
-        scheduleRenewal(fresh.expiresAtMs);
-        if (fresh.canPublish) {
-          const isMuted = useCurrentRoomStore.getState().isMuted;
-          await setLiveKitMuted(room, isMuted);
-        }
-      } catch {
-        /* failed to reconnect with new role */
+        return;
+      }
+      currentRole = role;
+      scheduleRenewal(fresh.expiresAtMs);
+      if (fresh.canPublish) {
+        const isMuted = useCurrentRoomStore.getState().isMuted;
+        await applyMuted(isMuted);
       }
     },
     getPeers: () => peers,

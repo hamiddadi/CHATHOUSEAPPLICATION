@@ -6,4 +6,13 @@ module.exports = {
   MediaStream: class MediaStream {},
   MediaStreamTrack: class MediaStreamTrack {},
   RTCPeerConnection: class RTCPeerConnection {},
+  permissions: {
+    RESULT: {
+      DENIED: 'denied',
+      GRANTED: 'granted',
+      PROMPT: 'prompt',
+    },
+    query: jest.fn().mockResolvedValue('prompt'),
+    request: jest.fn().mockResolvedValue(true),
+  },
 };

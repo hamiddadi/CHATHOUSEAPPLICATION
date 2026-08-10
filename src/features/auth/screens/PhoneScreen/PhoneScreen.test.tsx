@@ -58,6 +58,20 @@ describe('PhoneScreen', () => {
     expect(checkbox.props.accessibilityState.checked).toBe(true);
   });
 
+  it('exposes stable country-picker identifiers and updates the selected country', () => {
+    const { getByTestId } = renderScreen(<PhoneScreen />, {
+      route: { name: 'Phone', params: {} },
+    });
+
+    fireEvent.press(getByTestId('auth-country-selector'));
+    expect(getByTestId('country-picker')).toBeTruthy();
+    fireEvent.press(getByTestId('country-option-fr'));
+
+    expect(getByTestId('auth-country-selector').props.accessibilityValue).toEqual({
+      text: 'France +33',
+    });
+  });
+
   it('requests an OTP and navigates to Otp after a valid submission', async () => {
     const requestOtp = jest.fn().mockResolvedValue(undefined);
     useAuthStore.setState({ requestOtp });

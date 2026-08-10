@@ -78,7 +78,11 @@ export const WelcomeSlidesScreen: React.FC = () => {
 
   const renderItem = useCallback(
     ({ item }: { item: SlideDef }) => (
-      <View style={{ width: windowWidth }} className="px-xxl items-center justify-center">
+      <View
+        testID={`welcome-slide-${item.key}`}
+        style={{ width: windowWidth }}
+        className="px-xxl items-center justify-center"
+      >
         <View className="w-32 h-32 rounded-pill bg-primary-container items-center justify-center mb-xxxl">
           <MaterialIcons name={item.icon} size={56} color={colors.primary} />
         </View>
@@ -96,7 +100,11 @@ export const WelcomeSlidesScreen: React.FC = () => {
   const isLast = index === SLIDES.length - 1;
 
   return (
-    <View className="flex-1 bg-background" style={[styles.fill, { paddingTop: insets.top }]}>
+    <View
+      testID="welcome-slides-screen"
+      className="flex-1 bg-background"
+      style={[styles.fill, { paddingTop: insets.top }]}
+    >
       {/* Skip button — hidden on the last slide since "Get started" closes the flow. */}
       <View className="flex-row justify-end px-xxl py-lg" style={styles.headerRow}>
         {!isLast && (
@@ -132,6 +140,7 @@ export const WelcomeSlidesScreen: React.FC = () => {
       {/* Progress dots — cheap, no animation library needed. Exposed to screen
           readers as a single "slide x of y" progress announcement. */}
       <View
+        testID={`welcome-progress-${index + 1}-of-${SLIDES.length}`}
         className="flex-row justify-center gap-sm py-lg"
         accessible
         accessibilityLabel={t('onboarding.welcome.slideProgress', {

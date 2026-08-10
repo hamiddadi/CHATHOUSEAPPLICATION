@@ -178,7 +178,7 @@
       ]
     },
     {
-      "title": "DB pool connections",
+      "title": "BullMQ active / delayed",
       "type": "timeseries",
       "datasource": { "type": "prometheus", "uid": "${datasource}" },
       "gridPos": { "h": 8, "w": 6, "x": 18, "y": 8 },
@@ -198,8 +198,14 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
-          "expr": "chathouse_db_pool_connections",
-          "legendFormat": "{{state}}"
+          "expr": "max by (queue) (chathouse_bullmq_jobs{state=\"active\"})",
+          "legendFormat": "{{queue}} active"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "max by (queue) (chathouse_bullmq_jobs{state=\"delayed\"})",
+          "legendFormat": "{{queue}} delayed"
         }
       ]
     },
@@ -298,13 +304,13 @@
         {
           "refId": "A",
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
-          "expr": "sum by (queue) (chathouse_bullmq_jobs{state=\"waiting\"})",
+          "expr": "max by (queue) (chathouse_bullmq_jobs{state=\"waiting\"})",
           "legendFormat": "{{queue}} waiting"
         },
         {
           "refId": "B",
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
-          "expr": "sum by (queue) (chathouse_bullmq_jobs{state=\"failed\"})",
+          "expr": "max by (queue) (chathouse_bullmq_jobs{state=\"failed\"})",
           "legendFormat": "{{queue}} failed"
         }
       ]

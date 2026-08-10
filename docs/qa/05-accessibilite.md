@@ -1,6 +1,6 @@
 # 05 - Checklist d'accessibilite + procedures lecteur d'ecran (ChatHouse)
 
-> Perimetre : 50 ecrans, 381 boutons, app audio live (React Native / Expo, temps-reel WebSocket + audio LiveKit), roles guest/standard/admin, Android + iOS (OS recents et anciens), reseaux 3G/4G/5G/Wi-Fi.
+> Perimetre : 50 ecrans, 385 boutons, app audio live (React Native / Expo, temps-reel WebSocket + audio LiveKit), roles guest/standard/admin, Android + iOS (OS recents et anciens), reseaux 3G/4G/5G/Wi-Fi.
 > Reference WCAG : **WCAG 2.1 / 2.2 niveau AA**, applique au mobile natif (mapping `accessibilityRole` / `accessibilityLabel` / `accessibilityState` / live regions).
 > Convention de l'app deja en place : labels a11y via `t()` (i18n FR/EN), `accessibilityState` `selected` / `checked` / `disabled`, tests qui ciblent par `getByLabelText`. Cette doc s'aligne sur ces conventions reelles.
 
@@ -10,7 +10,7 @@
 
 1. **Checklist WCAG mobile** (section 1) : grille de conformite a passer ecran par ecran. Chaque ligne = un critere verifiable, avec le mapping React Native correspondant.
 2. **Procedures pas-a-pas TalkBack / VoiceOver** (sections 2 et 3) : activation, navigation au swipe, double-tap, rotor/menus de lecture par element.
-3. **Cas de test A11Y-NNN reutilisables** (section 4) : a appliquer sur n'importe quel bouton parmi les 381, en remplacant `<LABEL>` par le label reel de la matrice bouton de l'ecran (fichiers `docs/qa/screens/NN-*.md`).
+3. **Cas de test A11Y-NNN reutilisables** (section 4) : a appliquer sur n'importe quel bouton parmi les 385, en remplacant `<LABEL>` par le label reel de la matrice bouton de l'ecran (fichiers `docs/qa/screens/NN-*.md`).
 4. **Verification i18n FR/EN** (section 5).
 5. **Outils** (section 6) : Accessibility Scanner (Android), Accessibility Inspector (Xcode/iOS).
 
@@ -201,7 +201,7 @@ Cocher `[x]` quand verifie. Colonne "Mapping RN" = ce que le testeur/dev doit tr
 
 ## 4. Cas de test accessibilite types (A11Y-NNN) reutilisables
 
-> **Mode d'emploi** : ces cas sont **generiques et parametres**. Pour chaque bouton parmi les 381, instancier le cas pertinent en remplacant `<LABEL_FR>` / `<LABEL_EN>` par les valeurs reelles de la matrice bouton de l'ecran. Repasser systematiquement A11Y-001/002/003 sur chaque bouton P0/P1. Lecteur = TalkBack (Android) **et** VoiceOver (iOS), sauf mention contraire.
+> **Mode d'emploi** : ces cas sont **generiques et parametres**. Pour chaque bouton parmi les 385, instancier le cas pertinent en remplacant `<LABEL_FR>` / `<LABEL_EN>` par les valeurs reelles de la matrice bouton de l'ecran. Repasser systematiquement A11Y-001/002/003 sur chaque bouton P0/P1. Lecteur = TalkBack (Android) **et** VoiceOver (iOS), sauf mention contraire.
 
 ### A11Y-001 - Label de bouton annonce correctement
 
@@ -415,7 +415,7 @@ L'app porte ses labels a11y via `t('cle.xxxA11y')`, definis dans `src/core/i18n/
 
 ## 7. Recapitulatif de couverture (a remplir par campagne)
 
-| Domaine                                  | Cas types | Ecrans couverts / 50 | Boutons couverts / 381 | Statut |
+| Domaine                                  | Cas types | Ecrans couverts / 50 | Boutons couverts / 385 | Statut |
 | ---------------------------------------- | --------- | -------------------- | ---------------------- | ------ |
 | Labels (A11Y-001)                        | 001       |                      |                        |        |
 | Etats (A11Y-002/003)                     | 002, 003  |                      |                        |        |

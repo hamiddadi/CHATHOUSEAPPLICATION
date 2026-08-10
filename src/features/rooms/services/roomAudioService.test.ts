@@ -4,6 +4,7 @@ import { roomService } from './roomService';
 import {
   connectLiveKitRoom,
   disconnectLiveKitRoom,
+  setLiveKitMuted,
   startLiveKitAudioSession,
   stopLiveKitAudioSession,
 } from './livekit/LiveKitEngine';
@@ -67,6 +68,7 @@ const mockToken = roomService.getLivekitToken as jest.MockedFunction<
   typeof roomService.getLivekitToken
 >;
 const mockConnect = connectLiveKitRoom as jest.MockedFunction<typeof connectLiveKitRoom>;
+const mockSetLiveKitMuted = setLiveKitMuted as jest.MockedFunction<typeof setLiveKitMuted>;
 
 const socket = {
   on: jest.fn(),
@@ -98,6 +100,7 @@ describe('startRoomAudio microphone capability', () => {
     jest.clearAllMocks();
     mockPermission.mockResolvedValue(true);
     mockConnect.mockResolvedValue(undefined);
+    mockSetLiveKitMuted.mockReset().mockResolvedValue(undefined);
   });
 
   it('connects a receive-only listener without requesting RECORD_AUDIO', async () => {
@@ -123,6 +126,50 @@ describe('startRoomAudio microphone capability', () => {
     expect(mockPermission).toHaveBeenCalledTimes(1);
     expect(mockConnect).not.toHaveBeenCalled();
     expect(stopLiveKitAudioSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('maps a LiveKit permission publication error to the mic-denied UI contract', async () => {
+    mockToken.mockResolvedValue(tokenResponse(false));
+    const handle = await startRoomAudio({ socket, roomId: 'room-1' });
+    const publicationError = Object.assign(new Error('GetUserMedia Permission denied'), {
+      name: 'NotAllowedError',
+    });
+    mockSetLiveKitMuted.mockRejectedValueOnce(publicationError);
+
+    await expect(handle.setMuted(false)).rejects.toThrow(MIC_PERMISSION_DENIED_ERROR);
+
+    await handle.close();
+  });
+
+  it('preserves a non-permission LiveKit publication error', async () => {
+    mockToken.mockResolvedValue(tokenResponse(false));
+    const handle = await startRoomAudio({ socket, roomId: 'room-1' });
+    const deviceError = new Error('audio device is busy');
+    mockSetLiveKitMuted.mockRejectedValueOnce(deviceError);
+
+    await expect(handle.setMuted(false)).rejects.toBe(deviceError);
+
+    await handle.close();
+  });
+
+  it('surfaces a denied microphone when a listener is promoted to speaker', async () => {
+    mockToken.mockResolvedValueOnce(tokenResponse(false));
+    const onError = jest.fn();
+    const handle = await startRoomAudio({ socket, roomId: 'room-1', onError });
+    mockToken.mockResolvedValueOnce(tokenResponse(true));
+    mockPermission.mockResolvedValueOnce(false);
+    const roleChanged = (socket.on as jest.Mock).mock.calls.find(
+      ([event]) => event === 'room:role_changed',
+    )?.[1] as
+      | ((payload: { userId: string; role: string; roomId: string }) => Promise<void>)
+      | undefined;
+
+    await roleChanged?.({ userId: 'viewer-1', role: 'SPEAKER', roomId: 'room-1' });
+
+    expect(onError).toHaveBeenCalledWith(
+      expect.objectContaining({ message: MIC_PERMISSION_DENIED_ERROR }),
+    );
+    await handle.close();
   });
 
   it('rolls back a token failure and lets a retry own one clean listener/session set', async () => {

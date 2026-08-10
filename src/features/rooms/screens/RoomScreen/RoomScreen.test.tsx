@@ -16,7 +16,7 @@
  * useRoomSocket never opens a socket — the screen renders deterministically.
  */
 import React from 'react';
-import { Alert } from 'react-native';
+import { Alert, Share } from 'react-native';
 import { act, fireEvent, waitFor } from '@testing-library/react-native';
 import { roomKeys } from '../../hooks/useRooms';
 import { roomService } from '../../services/roomService';
@@ -112,6 +112,8 @@ const mountRoom = (room: Room) =>
 
 describe('RoomScreen', () => {
   beforeEach(() => {
+    mockAudioSetMuted.mockReset().mockResolvedValue(undefined);
+    mockAudioRetry.mockClear();
     mockAuthenticated();
     mockUseRoomAudio.mockReturnValue({
       status: 'idle',
@@ -148,10 +150,18 @@ describe('RoomScreen', () => {
     });
 
     it('shares the room link via the share button without crashing', () => {
+      const shareSpy = jest
+        .spyOn(Share, 'share')
+        .mockResolvedValue({ action: 'sharedAction' } as never);
       const { getByLabelText } = mountRoom(fakeRoom());
-      // Share.share is async; the press fires it fire-and-forget. We assert the
-      // press itself does not throw (button has a real handler).
-      expect(() => fireEvent.press(getByLabelText('Share room link'))).not.toThrow();
+      fireEvent.press(getByLabelText('Share room link'));
+      expect(shareSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message:
+            'Join me on ChatHouse in “Deep dive on testing” — https://app.chathouse.com/room/room-test-1',
+          url: 'https://app.chathouse.com/room/room-test-1',
+        }),
+      );
     });
 
     it('opens the chat sidebar without crashing', () => {
@@ -349,6 +359,33 @@ describe('RoomScreen', () => {
       const { getByLabelText } = mountRoom(mutedHostRoom);
       expect(useCurrentRoomStore.getState().isMuted).toBe(true);
       expect(getByLabelText('Unmute microphone')).toBeTruthy();
+    });
+
+    it('rolls back the badge and backend update when LiveKit cannot publish', async () => {
+      const setMuteSpy = jest.spyOn(roomService, 'setMute').mockResolvedValue(undefined as never);
+      const publicationError = new Error('mic permission denied');
+      mockAudioSetMuted.mockRejectedValueOnce(publicationError).mockResolvedValueOnce(undefined);
+      const mutedHostRoom = fakeRoom({
+        hostId: VIEWER_ID,
+        speakers: [
+          {
+            ...hostParticipant(VIEWER_ID),
+            username: 'tester',
+            displayName: 'Test User',
+            audio: 'muted',
+          },
+        ],
+      });
+      const { getByLabelText } = mountRoom(mutedHostRoom);
+
+      fireEvent.press(getByLabelText('Unmute microphone'));
+
+      await waitFor(() => {
+        expect(useCurrentRoomStore.getState().isMuted).toBe(true);
+        expect(mockAudioSetMuted).toHaveBeenNthCalledWith(1, false);
+        expect(mockAudioSetMuted).toHaveBeenNthCalledWith(2, true);
+      });
+      expect(setMuteSpy).not.toHaveBeenCalled();
     });
   });
 });

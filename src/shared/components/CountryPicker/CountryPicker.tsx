@@ -53,6 +53,7 @@ export const CountryPicker: React.FC<CountryPickerProps> = ({ visible, onClose, 
 
   return (
     <Modal
+      testID="country-picker"
       visible={visible}
       animationType="slide"
       presentationStyle="pageSheet"
@@ -61,6 +62,7 @@ export const CountryPicker: React.FC<CountryPickerProps> = ({ visible, onClose, 
       <SafeAreaView className="flex-1 bg-background">
         <View className="px-lg py-md flex-row items-center border-b border-surface-border">
           <Pressable
+            testID="country-picker-close"
             onPress={onClose}
             accessibilityRole="button"
             accessibilityLabel={t('common.close', 'Close')}
@@ -76,6 +78,7 @@ export const CountryPicker: React.FC<CountryPickerProps> = ({ visible, onClose, 
 
         <View className="p-md">
           <TextInput
+            testID="country-picker-search"
             className="bg-surface px-md py-sm rounded-lg text-ink font-body"
             placeholder={t('common.search', 'Search')}
             accessibilityLabel={t('common.search', 'Search')}
@@ -93,6 +96,7 @@ export const CountryPicker: React.FC<CountryPickerProps> = ({ visible, onClose, 
           keyboardShouldPersistTaps="handled"
           renderItem={({ item }) => (
             <Pressable
+              testID={`country-option-${item.cca2.toLowerCase()}`}
               onPress={() => {
                 onSelect(item);
                 onClose();

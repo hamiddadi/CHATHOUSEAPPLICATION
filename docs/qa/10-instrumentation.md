@@ -2,7 +2,7 @@
 
 > **Application** : ChatHouse — audio live façon Clubhouse. React Native / Expo, temps réel WebSocket (Socket.IO) + audio LiveKit (`@livekit/react-native`, build EAS dev-client requis pour la voix), push, i18n FR/EN, rôles guest/standard/admin, Android + iOS, réseaux variables (3G/4G/5G/Wi-Fi, pertes/latence/reconnexion).
 > **But de ce document** : rendre chaque bug — surtout temps-réel — **reproductible et traçable**. On capitalise sur l'existant (`/metrics` Prometheus backend, diag par delta de compteur, Sentry backend) et on comble les trous côté app pour que QA puisse joindre des **traces exploitables** à chaque rapport.
-> **Parc testé** : 50 écrans, 381 boutons, 991 cas. Voir aussi `03-scenarios-temps-reel.md` (scénarios multi-acteurs) et `04-plan-reseau.md` (profils P1…P12).
+> **Parc testé** : 50 écrans, 385 boutons, 991 cas. Voir aussi `03-scenarios-temps-reel.md` (scénarios multi-acteurs) et `04-plan-reseau.md` (profils P1…P12).
 
 ## 0. Existant à réutiliser (ne pas réinventer)
 

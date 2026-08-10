@@ -12,7 +12,6 @@ const baseProps = {
   canSend: false,
   bottomInset: 0,
   keyboardVisible: false,
-  onAttach: jest.fn(),
   onMic: jest.fn(),
   onInputFocus: jest.fn(),
 };

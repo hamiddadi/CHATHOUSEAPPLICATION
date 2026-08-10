@@ -113,7 +113,12 @@ describe('ProfileScreen', () => {
       seedQueryData: seedProfile(user),
     });
     fireEvent.press(getByLabelText('Share profile'));
-    expect(shareSpy).toHaveBeenCalledTimes(1);
+    expect(shareSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: '@tester on ChatHouse — https://app.chathouse.com/u/tester',
+        url: 'https://app.chathouse.com/u/tester',
+      }),
+    );
   });
 
   it('other-user view shows Follow + opens the More (block/report) menu', () => {

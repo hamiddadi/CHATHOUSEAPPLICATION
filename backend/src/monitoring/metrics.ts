@@ -64,25 +64,11 @@ export const dbQueryDuration = new Histogram({
   buckets: [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5],
 });
 
-/**
- * Gauge of BullMQ jobs by queue and state. Update from a periodic collector,
- * e.g. for each queue: bullmqJobsGauge.set({ queue, state: 'waiting' }, count).
- * States typically tracked: waiting, active, completed, failed, delayed.
- */
+/** Gauge of BullMQ jobs, populated by the process-scoped periodic collector. */
 export const bullmqJobsGauge = new Gauge({
   name: 'chathouse_bullmq_jobs',
   help: 'Number of BullMQ jobs by queue and state',
   labelNames: ['queue', 'state'] as const,
-});
-
-/**
- * Optional gauge for the Prisma/PG connection pool. Populate from a periodic
- * collector if you expose pool stats; referenced by the DBPoolSaturated alert.
- */
-export const dbPoolConnectionsGauge = new Gauge({
-  name: 'chathouse_db_pool_connections',
-  help: 'Database connection pool usage by state (active, idle, max)',
-  labelNames: ['state'] as const,
 });
 
 /**

@@ -51,13 +51,19 @@ export const ContentReportSheet: React.FC<ContentReportSheetProps> = ({
       <Pressable
         style={styles.backdrop}
         onPress={submitting ? undefined : onClose}
-        accessibilityLabel={t('moderation.closeReport', 'Close report form')}
+        accessible={false}
       >
-        <Pressable style={styles.sheet} onPress={() => undefined}>
+        <Pressable
+          style={styles.sheet}
+          onPress={() => undefined}
+          accessible={false}
+          accessibilityViewIsModal
+          importantForAccessibility="yes"
+        >
           <View style={styles.handle} />
           <View style={styles.header}>
             <View style={styles.headerText}>
-              <Text style={styles.title}>
+              <Text style={styles.title} accessibilityRole="header">
                 {t('moderation.reportMessageTitle', 'Report this message')}
               </Text>
               <Text style={styles.subtitle}>
@@ -72,6 +78,7 @@ export const ContentReportSheet: React.FC<ContentReportSheetProps> = ({
               disabled={submitting}
               accessibilityRole="button"
               accessibilityLabel={t('common.close', 'Close')}
+              accessibilityState={{ disabled: submitting }}
               hitSlop={8}
             >
               <MaterialIcons name="close" size={22} color={colors.textMuted} />
@@ -85,6 +92,7 @@ export const ContentReportSheet: React.FC<ContentReportSheetProps> = ({
               disabled={submitting}
               accessibilityRole="button"
               accessibilityLabel={t(reason.labelKey, reason.fallback)}
+              accessibilityState={{ disabled: submitting }}
               style={({ pressed }) => [
                 styles.reason,
                 pressed && !submitting ? styles.reasonPressed : null,
@@ -99,7 +107,13 @@ export const ContentReportSheet: React.FC<ContentReportSheetProps> = ({
           ))}
 
           {submitting ? (
-            <View style={styles.progress} accessibilityRole="progressbar">
+            <View
+              style={styles.progress}
+              accessible
+              accessibilityRole="progressbar"
+              accessibilityLabel={t('moderation.submitting', 'Sending report…')}
+              accessibilityLiveRegion="polite"
+            >
               <ActivityIndicator size="small" color={colors.primary} />
               <Text style={styles.progressText}>
                 {t('moderation.submitting', 'Sending report…')}

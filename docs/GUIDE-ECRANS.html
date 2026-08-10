@@ -64,9 +64,11 @@
   <div class="meta">
     14 zones fonctionnelles · sous <code>src/features/</code><br/>
     Basé sur l'audit du code source réel (lecture seule)<br/>
-    28 juin 2026
+    10 août 2026
   </div>
 </div>
+
+<div class="note"><b>Validation technique au 10 août 2026 :</b> permission micro iOS contrôlée par le module WebRTC natif ; <b>3 flows Maestro</b> pré-auth présents (<code>onboarding-carousel</code>, <code>auth-privacy-smoke</code>, <code>auth-consent-gate</code>) ; audit npm backend production à <b>0 vulnérabilité</b>. Le mobile conserve 12 entrées « high » transitives provenant de la chaîne de build Metro/Expo autour de <code>image-size</code>, sans version corrigée publiée à cette date.</div>
 
 <h2>Carte de navigation</h2>
 <div class="nav small">
@@ -142,7 +144,7 @@ L'app s'articule autour de 4 navigateurs :
 
 <div class="screen"><div class="sh"><span class="num">12</span>RoomScreen</div><div class="role">La salle audio live (cœur de l'app).</div>
 <ul>
-<li>Scène speakers/listeners avec « is speaking » (LiveKit) ; lever/baisser la main + file d'attente.</li>
+<li>Scène speakers/listeners avec « is speaking » (LiveKit) ; permission micro demandée puis revérifiée sur iOS via WebRTC natif ; lever/baisser la main + file d'attente.</li>
 <li>Modération complète : mute autrui, inviter à parler, renvoyer au public, nommer modérateur, transférer l'hôte, mute-all, lock, restriction lever-de-main, kick+ban.</li>
 <li>Réactions emoji, captions live on-device, audio en arrière-plan (mini-bar), ping/wave/tip/partage/signalement, mode invisible (listeners).</li>
 </ul>
@@ -169,7 +171,7 @@ L'app s'articule autour de 4 navigateurs :
 <h2>5. Clubs / « Houses » <span class="z">(6 écrans)</span></h2>
 
 <div class="screen"><div class="sh"><span class="num">17</span>HouseListScreen</div><div class="role">Liste des clubs (mes clubs + découverte).</div>
-<ul><li>Onglets Mine/Discover, rangée club (icône, nom, catégorie, nb membres), FAB création. (Recherche de clubs via Explore.)</li></ul>
+<ul><li>Onglets Mine/Discover, recherche intégrée avec effacement (filtre local tolérant aux accents dans Mine ; API débouncée dans Discover, clubs privés exclus), rangée club (icône, nom, nb membres), états vide/erreur avec actions, pull-to-refresh et FAB création.</li></ul>
 <div class="acc"><b>Accès :</b> depuis le profil / les réglages (« member of »).</div></div>
 
 <div class="screen"><div class="sh"><span class="num">18</span>HouseDetailScreen</div><div class="role">Fiche club complète.</div>
@@ -238,7 +240,7 @@ L'app s'articule autour de 4 navigateurs :
 <div class="acc"><b>Accès :</b> onglet Messages.</div></div>
 
 <div class="screen"><div class="sh"><span class="num">31</span>ChatDetailScreen</div><div class="role">Fil de discussion DM 1:1.</div>
-<ul><li>Texte + notes vocales (record→upload), liste inversée, séparateurs de date, indicateur de saisie, marquage lu auto, suppression de ses messages, emojis. (Appels/pièces jointes = « Coming soon ».)</li></ul>
+<ul><li>Texte + notes vocales (record→upload), liste inversée, séparateurs de date, indicateur de saisie, présence du pair selon sa confidentialité, marquage lu auto, suppression de ses messages et emojis. L'appel crée une room audio fermée à deux ; « Plus » propose Signaler / Bloquer / Annuler avec appels API réels. La pièce jointe n'est pas affichée tant qu'aucun pipeline bout-en-bout n'existe.</li></ul>
 <div class="acc"><b>Accès :</b> tap sur une conversation / un profil.</div></div>
 
 <div class="screen"><div class="sh"><span class="num">32</span>NewMessageScreen</div><div class="role">Choisir un ou plusieurs destinataires.</div>
@@ -341,7 +343,7 @@ L'app s'articule autour de 4 navigateurs :
 <ul><li>100 dernières actions privilégiées (rôle, suspension, suppression, fermeture salon, résolution signalement, accès Godmode, impersonation) avec acteur, cible, métadonnées, horodatage, IP.</li></ul>
 <div class="acc"><b>Accès :</b> AdminHome → Journal d'audit (SUPER_ADMIN uniquement).</div></div>
 
-<footer>ChatHouse — Manuel des écrans · 53 écrans · Généré le 28/06/2026 · Analyse basée sur le code source (lecture seule) · Document interne.</footer>
+<footer>ChatHouse — Manuel des écrans · 53 écrans · Mis à jour le 10/08/2026 · Analyse basée sur le code source (lecture seule) · Document interne.</footer>
 
 </body>
 </html>

@@ -58,7 +58,14 @@ const trendingClubs = async (viewerId: string) => {
   });
   const interests = new Set((viewer?.interests ?? []).map(i => i.toLowerCase()));
   const pool = await prisma.club.findMany({
-    where: { privacy: 'OPEN' },
+    where: {
+      privacy: 'OPEN',
+      owner: {
+        deletedAt: null,
+        blocksCreated: { none: { blockedId: viewerId } },
+        blocksReceived: { none: { blockerId: viewerId } },
+      },
+    },
     include: {
       _count: {
         select: {

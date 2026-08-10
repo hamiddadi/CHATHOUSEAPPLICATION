@@ -60,4 +60,34 @@ describe('roomAudioSession cancellation', () => {
       error: null,
     });
   });
+
+  it('surfaces a publication denial and clears it after a successful unmute retry', async () => {
+    const publicationError = new Error('mic permission denied');
+    const setMuted = jest
+      .fn<Promise<void>, [boolean]>()
+      .mockRejectedValueOnce(publicationError)
+      .mockResolvedValueOnce(undefined);
+    mockGetSocket.mockResolvedValue(socket);
+    mockStartRoomAudio.mockResolvedValue({
+      close: jest.fn().mockResolvedValue(undefined),
+      setMuted,
+      setPeerVolume: jest.fn(),
+      setRole: jest.fn().mockResolvedValue(undefined),
+      getPeers: jest.fn(() => new Map()),
+    });
+    await roomAudioSession.start('room-1');
+
+    await expect(roomAudioSession.setMuted(false)).rejects.toBe(publicationError);
+    expect(useRoomAudioStore.getState()).toMatchObject({
+      roomId: 'room-1',
+      status: 'error',
+      error: 'mic permission denied',
+    });
+
+    await roomAudioSession.setMuted(false);
+    expect(useRoomAudioStore.getState()).toMatchObject({
+      status: 'live',
+      error: null,
+    });
+  });
 });

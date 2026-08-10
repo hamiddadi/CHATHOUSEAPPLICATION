@@ -185,21 +185,15 @@ export const SettingsScreen: React.FC = () => {
     try {
       const link = invite ?? (await invitesApi.getLink());
       if (link.remaining <= 0) {
-        Alert.alert(
-          t('invite.noneLeftTitle', "Plus d'invitations"),
-          t('invite.noneLeftBody', "Tu as utilisé toutes tes invitations pour l'instant."),
-        );
+        Alert.alert(t('invite.noneLeftTitle'), t('invite.noneLeftBody'));
         return;
       }
       await Share.share({
-        message: t('invite.shareMessage', {
-          url: link.url,
-          defaultValue: `Rejoins-moi sur ChatHouse 👋 ${link.url}`,
-        }),
+        message: t('invite.shareMessage', { url: link.url }),
         url: link.url,
       });
     } catch {
-      Alert.alert(t('common.error', 'Une erreur est survenue'));
+      Alert.alert(t('common.error'));
     }
   }, [invite, t]);
 

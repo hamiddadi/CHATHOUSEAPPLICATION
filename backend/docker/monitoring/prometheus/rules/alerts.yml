@@ -52,27 +52,6 @@ groups:
           summary: 'Elevated 5xx error rate (> 5%)'
           description: 'More than 5% of HTTP responses have been 5xx over the last 5 minutes (current ratio {{ printf "%.2f" $value }}). Check application logs and Sentry.'
 
-      # Database connection pool is near exhaustion.
-      # NOTE: this relies on a custom gauge `chathouse_db_pool_connections`
-      # (exported as dbPoolConnectionsGauge in metrics.ts). Populate it from a
-      # periodic collector that reads Prisma/PG pool stats and emits the
-      # {state="active"} and {state="max"} series. If you do not export pool
-      # stats yet, this alert simply never fires (no data) — it is safe to keep.
-      - alert: DBPoolSaturated
-        expr: |
-          (
-            chathouse_db_pool_connections{state="active"}
-            /
-            chathouse_db_pool_connections{state="max"}
-          ) > 0.8
-        for: 5m
-        labels:
-          severity: warning
-          service: chathouse-api
-        annotations:
-          summary: 'Database connection pool > 80% utilised'
-          description: 'Active DB connections have exceeded 80% of the pool maximum for 5 minutes (current {{ printf "%.0f" $value }}%). Requests may start queuing on the pool.'
-
       # Node.js process memory is high. Uses the default-metric resident set
       # size; falls back conceptually to nodejs_heap_size_used_bytes. 512MB
       # threshold — tune to your container memory limit.

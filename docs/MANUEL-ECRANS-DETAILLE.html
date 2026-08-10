@@ -29,10 +29,11 @@ h1:first-of-type{page-break-before:avoid;}
 <div class="s">Description enrichie — UI · données · actions · états · navigation · accès</div>
 <div class="rule"></div>
 <div class="big">53<small> écrans</small></div>
-<div class="m">14 zones · audit du code source réel (lecture seule)<br/>28 juin 2026</div>
+<div class="m">14 zones · audit du code source réel (lecture seule)<br/>10 août 2026</div>
 </div>
 <blockquote>Description <b>enrichie</b> des 53 écrans (<code>src/features/</code>). Pour chacun : <b>Rôle &amp; contexte · UI · Données (hooks/API/stores) · Actions · États · Navigation · Accès</b>.</blockquote>
-<blockquote>Basé sur l'audit du code source réel (lecture seule) · 28 juin 2026.</blockquote>
+<blockquote>Basé sur l'audit du code source réel (lecture seule) · mis à jour le 10 août 2026.</blockquote>
+<blockquote><b>Validation technique au 10 août 2026</b> : permission micro iOS contrôlée par le module WebRTC natif ; <b>3 flows Maestro</b> pré-auth déterministes présents ; audit npm backend production à <b>0 vulnérabilité</b>. Le reliquat mobile (12 entrées « high » transitives) remonte à <code>image-size</code> dans la chaîne de build Metro/Expo et ne dispose d'aucune version corrigée publiée à cette date.</blockquote>
 <h2>Conventions techniques transverses</h2>
 <ul>
 <li><b>Réseau</b> : tout passe par <code>apiClient</code> (baseURL <code>/api</code>, enveloppe <code>Envelope&lt;T&gt;</code>). Les modules « core » dé-wrappent <code>res.data.data</code> ; les modules <code>extensions/api/*</code> consomment du JSON brut.</li>
@@ -164,7 +165,7 @@ h1:first-of-type{page-break-before:avoid;}
 <li><b>UI</b> : TopBar (share/chat/tune[mod]/flag/End Room[host]) ; bannière statut audio ; en-tête room (badges house/catégorie/visibilité/REC, titre éditable si mod, <code>RoomTimer</code>/scheduled, compteurs, 🔒) ; partials <code>StageGrid</code>, <code>HandRaiseQueue</code>, <code>FollowedByListeners</code>, <code>FlatList</code> « Others » (overflow <code>+N</code>) ; <code>RoomActionBar</code> (Mute/Raise hand/Visible-Invisible/Invite/Leave) ; <code>ReactionsBar</code> ; <code>ExtCaptionsOverlay</code> ; sheets/modals <code>HostActionsSheet</code>, <code>ProfileActionSheet</code>, <code>RoomChatSidebar</code>, <code>RoomControlsSheet</code>, <code>TitleEditModal</code>.</li>
 <li><b>Données</b> : <code>useRoom(id)</code> (<code>GET /rooms/:id</code>) ; <code>useHandRaises</code> (poll 10s si realtime off) ; <code>useRoomSocket</code> (joined/hand/role/mute/kick/ended) ; <code>useRoomAudio</code> (LiveKit, scores parole) ; <code>useExtCaptions</code>/<code>useLocalCaptionPublisher</code> ; mutations <code>useLeaveRoom</code>/<code>useRaiseHand</code>/<code>useLowerHand</code>/<code>useSetMute</code>/<code>useSetHidden</code>/<code>useEndRoom</code>/<code>useReportRoom</code> ; stores <code>useAuthStore</code>, <code>useCurrentRoomStore</code>, <code>roomAudioSession</code> (singleton mini-bar).</li>
 <li><b>Actions</b> : mute (optimiste + LiveKit + rollback) ; raise/lower hand ; ghost ; tap participant → Host/Profile sheet ; promote ; End Room (Alert) ; Report ; Share (<code>app.chathouse.com/room/:id</code>) ; Invite → <code>InviteToRoom</code> ; Message → cross-tab ChatDetail ; Leave → clear+stop+<code>leaveRoom</code>+goBack.</li>
-<li><b>États</b> : Loader/EmptyState ; bannière audio (connecting/unsupported/error) ; join refusé → goBack+Alert ; events socket filtrés sur viewerId/roomId (garde <code>cancelled</code>) ; rôles dérivés <code>viewerIsHost</code>/<code>canModerate</code>/<code>canSpeak</code>.</li>
+<li><b>États</b> : Loader/EmptyState ; bannière audio (connecting/unsupported/error) ; permission micro iOS demandée puis revérifiée par le module WebRTC natif, refus renvoyé au flux audio ; join refusé → goBack+Alert ; events socket filtrés sur viewerId/roomId (garde <code>cancelled</code>) ; rôles dérivés <code>viewerIsHost</code>/<code>canModerate</code>/<code>canSpeak</code>.</li>
 <li><b>Navigation</b> : depuis RoomFeed/CreateRoom(<code>replace</code>)/Explore/Maps/deep-link <code>room/:id</code> → InviteToRoom, cross-tab ChatDetail ; back = mini-bar persiste.</li>
 <li><b>Accès</b> : authentifié + autorisation serveur de join (public/social/closed/ban).</li>
 </ul>
@@ -215,10 +216,10 @@ h1:first-of-type{page-break-before:avoid;}
 <h2>17. HouseListScreen</h2>
 <ul>
 <li><b>Rôle &amp; contexte</b> : Liste des houses, onglets « My Houses » / « Discover ».</li>
-<li><b>UI</b> : Header, <code>TabToggle</code> (mine/discover), <code>FlatList</code> de <code>HouseRow</code> (Avatar, nom, catégorie+emoji, membersCount), FAB « + » animé.</li>
-<li><b>Données</b> : <code>useHouses(tab)</code> → <code>GET /clubs?filter=mine|discover</code>.</li>
-<li><b>Actions</b> : row → <code>HouseDetail</code> ; FAB → <code>CreateHouse</code> ; pull-to-refresh ; switch onglet.</li>
-<li><b>États</b> : Loader ; EmptyState (error). (Pas d'EmptyState liste vide dédié ; recherche club retirée.)</li>
+<li><b>UI</b> : Header, <code>TabToggle</code> (mine/discover), <code>Input</code> recherche avec action effacer, <code>FlatList</code> de <code>HouseRow</code> (Avatar, nom, membersCount), FAB « + » animé.</li>
+<li><b>Données</b> : <code>useHouses(tab)</code> → <code>GET /clubs?filter=mine|discover</code> ; <code>useHouseSearch(query)</code> → recherche clubs via <code>searchService</code> pour Discover (debounce 250 ms, exclusion défensive des clubs privés) ; filtre local normalisé nom/catégorie pour Mine.</li>
+<li><b>Actions</b> : saisir/effacer une recherche ; row → <code>HouseDetail</code> ; FAB → <code>CreateHouse</code> ; pull-to-refresh/retry dans le contexte courant ; switch onglet.</li>
+<li><b>États</b> : Loader de liste ou recherche ; EmptyState contextualisé (erreur avec retry, liste vide avec création, aucun résultat avec effacement).</li>
 <li><b>Navigation</b> : depuis Profil/Réglages → HouseDetail, CreateHouse.</li>
 <li><b>Accès</b> : authentifié.</li>
 </ul>
@@ -365,11 +366,11 @@ h1:first-of-type{page-break-before:avoid;}
 <h2>31. ChatDetailScreen</h2>
 <ul>
 <li><b>Rôle &amp; contexte</b> : Thread DM 1:1 (<code>conversationId</code> == id du pair == <code>receiverId</code>).</li>
-<li><b>UI</b> : <code>ChatHeader</code> (avatar, nom, dot online, « typing… », call/more) ; <code>FlatList</code> <code>inverted</code> de <code>Bubble</code> (texte <code>ExtLinkifiedText</code>, vocal <code>VoiceMessageBubble</code>, <code>done-all</code>) + <code>DateSeparator</code> ; <code>ChatInputBar</code> (emoji 16, multiline, attach, send/mic) ↔ <code>VoiceRecordingBar</code>.</li>
-<li><b>Données</b> : <code>useConversation(peerId)</code> ; <code>useConversationMessages(peerId)</code> (<code>GET /chat/:peerId</code>) ; <code>useTypingIndicator(peerId)</code> (<code>chat:typing</code>) ; <code>useVoiceMessage</code> ; mutations <code>useSendMessage</code>/<code>useSendVoiceMessage</code>/<code>useMarkConversationRead</code>/<code>useDeleteMessage</code>.</li>
-<li><b>Actions</b> : envoi texte (<code>POST /chat/:id</code>) ; frappe → <code>notifyTyping</code> ; mic → record → <code>POST /chat/:id/voice</code> ; long-press son message → Alert → delete ; auto mark-read ; <b>call/more/attach → Alert « Coming soon »</b>.</li>
-<li><b>États</b> : Loader ; typing (clear 4s) ; vocal <code>VoiceRecordingBar</code> ; <code>isOnline</code> figé <code>false</code> (présence non câblée) ; erreurs via toast.</li>
-<li><b>Navigation</b> : MessagesList/NewMessage/OnlineUsersList → goBack ; tab bar masquée.</li>
+<li><b>UI</b> : <code>ChatHeader</code> (avatar, nom, dot online, « typing… », call/more) ; <code>FlatList</code> <code>inverted</code> de <code>Bubble</code> (texte <code>ExtLinkifiedText</code>, vocal <code>VoiceMessageBubble</code>, <code>done-all</code>) + <code>DateSeparator</code> ; <code>ChatInputBar</code> (emoji 16, multiline, send/mic, sans trombone) ↔ <code>VoiceRecordingBar</code> ; sheet de signalement utilisateur.</li>
+<li><b>Données</b> : <code>useConversation(peerId)</code> ; <code>useConversationMessages(peerId)</code> (<code>GET /chat/:peerId</code>) ; <code>usePeerPresence(peerId)</code> (visibilité serveur) ; <code>useTypingIndicator(peerId)</code> (<code>chat:typing</code>) ; <code>useVoiceMessage</code> ; <code>useCreateRoom</code> ; mutations chat + <code>useReport</code>/<code>useBlock</code>.</li>
+<li><b>Actions</b> : envoi texte (<code>POST /chat/:id</code>) ; frappe → <code>notifyTyping</code> ; mic → record → <code>POST /chat/:id/voice</code> ; auto mark-read ; appel → crée une room <code>closed</code> à 2 (pair co-host, chat/recording désactivés) puis ouvre <code>RoomsTab/Room</code> ; options → Signaler (motif + API) / Bloquer (confirmation + API + retour) / Annuler. Aucune action pièce jointe n'est exposée sans pipeline bout-en-bout.</li>
+<li><b>États</b> : Loader ; typing (clear 4s) ; vocal <code>VoiceRecordingBar</code> ; présence online uniquement si <code>peerPresence.visible===true</code> ; appel verrouillé/pending ; report pending ; erreurs API via toast.</li>
+<li><b>Navigation</b> : MessagesList/NewMessage/OnlineUsersList → goBack ; appel → Main/RoomsTab/Room ; blocage réussi → goBack ; tab bar masquée.</li>
 <li><b>Accès</b> : authentifié ; DM gaté follow mutuel (403 CHAT_004).</li>
 </ul>
 <h2>32. NewMessageScreen</h2>
@@ -605,8 +606,8 @@ h1:first-of-type{page-break-before:avoid;}
 <h2>Constats notables (factuels)</h2>
 <ul>
 <li><b>Routes orphelines / non câblées</b> : <code>WaitlistScreen</code> (deep-link seul), <code>ExtActivityFeedScreen</code> (aucun point d'entrée), <code>ExtPlaygroundScreen</code> (jamais monté, dev/QA), <code>ExtTopicExplorerScreen</code> (monté sans <code>onSelectTopic</code> → sélection sans nav).</li>
-<li><b>« Coming soon »</b> dans ChatDetail : appel vocal, pièces jointes, options de conversation.</li>
-<li><b>Présence en ligne</b> non branchée (<code>OnlineUsersList</code> rend <code>null</code> ; <code>isOnline</code> figé <code>false</code>).</li>
+<li><b>ChatDetail finalisé sur les actions visibles</b> : appel audio privé, présence respectueuse de la confidentialité, signalement et blocage sont branchés ; l'affordance pièce jointe est volontairement absente tant que son pipeline n'existe pas.</li>
+<li><b>Présence en ligne partielle</b> : active dans ChatDetail selon la visibilité serveur ; la bande <code>OnlineUsersList</code> de MessagesScreen rend encore <code>null</code>.</li>
 <li><b>Mocks résiduels</b> : <code>CURRENT_USER</code> sert de fallback d'identité dans Messages/ChatDetail.</li>
 <li><b>Sécurité admin</b> : le masquage client (<code>isAtLeast</code>) est doublé d'un contrôle serveur sur chaque <code>/admin/*</code>.</li>
 </ul>

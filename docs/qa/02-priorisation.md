@@ -2,16 +2,16 @@
 
 Document de pilotage QA pour **ChatHouse** (app audio live facon Clubhouse — React Native / Expo, temps reel WebSocket + audio LiveKit, push, i18n FR/EN, roles guest/standard/admin, Android + iOS, reseaux variables).
 
-Perimetre couvert : **50 ecrans**, **381 boutons / controles interactifs**, **991 cas de test** deja rediges.
+Perimetre couvert : **50 ecrans**, **385 boutons / controles interactifs**, **991 cas de test** deja rediges. Inventaire fonctionnel actualise le 10 aout 2026.
 
-Repartition des 381 controles par niveau de priorite (issue de l'agregation des 50 fiches ecran) :
+Repartition des 385 controles par niveau de priorite (issue de l'agregation des 50 fiches ecran) :
 
 | Niveau    | Nombre de controles | Part  | Intention de couverture                                                                         |
 | --------- | ------------------- | ----- | ----------------------------------------------------------------------------------------------- |
 | **P0**    | 89                  | 23 %  | Chemin critique — bloquant pour livrer. Tout doit passer avant toute mise en production.        |
-| **P1**    | 220                 | 58 %  | Important — fonctionnel coeur non-bloquant immediat, a couvrir avant release majeure.           |
-| **P2**    | 72                  | 19 %  | Secondaire — confort, contenu statique, accessibilite fine, variantes. Couverture opportuniste. |
-| **Total** | **381**             | 100 % |                                                                                                 |
+| **P1**    | 226                 | 59 %  | Important — fonctionnel coeur non-bloquant immediat, a couvrir avant release majeure.           |
+| **P2**    | 70                  | 18 %  | Secondaire — confort, contenu statique, accessibilite fine, variantes. Couverture opportuniste. |
+| **Total** | **385**             | 100 % |                                                                                                 |
 
 > Remarque : le niveau de priorite est porte par **controle** (bouton/champ/toggle), pas par cas de test. Un meme controle P0 (ex. Micro Mute) genere plusieurs cas de test (positif, multi-clic, hors-ligne, reconnexion, accessibilite). La campagne smoke (section 5) ne retient qu'**un sous-ensemble** des cas de chaque controle P0.
 
@@ -183,7 +183,7 @@ Chaque ligne = justification en une phrase. Regroupement par domaine fonctionnel
 
 ---
 
-## 3. Liste P1 (important / non-bloquant immediat) — 220 controles
+## 3. Liste P1 (important / non-bloquant immediat) — 226 controles
 
 Categories representatives (non exhaustif, regroupe par nature ; chaque controle conserve sa fiche ecran detaillee).
 
@@ -203,7 +203,7 @@ Categories representatives (non exhaustif, regroupe par nature ; chaque controle
 ### 3.3 Rafraichissement & synchro manuelle (pull-to-refresh, retry)
 
 - Pull-to-refresh : Admin Audit/Reports/Rooms/Users, Ext-Feed, Houses, Messages, Notifications, Room-Feed, Search — seul moyen de re-synchroniser des ecrans non temps-reel ; robustesse hors-ligne/reconnexion.
-- Reessayer (Settings-Notif) — unique recuperation apres echec GET.
+- Reessayer (Settings-Notif et HouseList) — recuperation directe apres echec GET/recherche.
 
 ### 3.4 Social / viralite / croissance
 
@@ -215,7 +215,8 @@ Categories representatives (non exhaustif, regroupe par nature ; chaque controle
 ### 3.5 Reactions, audio differe & controles room secondaires
 
 - Reaction emoji ❤️🔥👏😂🌊🎉 (Room-Live, throttle 250 ms, cap 24 floats).
-- Signaler la room (Room-Live, Profile « Plus ») — moderation/securite niveau utilisateur.
+- Signaler la room ou l'utilisateur (Room-Live, Profile « Plus », ChatDetail « Plus ») ; bloquer le pair depuis ChatDetail — moderation/securite niveau utilisateur.
+- Appel prive ChatDetail — creation verrouillee d'une room fermee a deux puis navigation LiveKit.
 - Lecture/Pause des bulles vocales (Chat, GChat) — player independant par bulle.
 - Partage/chat/controles room (Partager le lien, Ouvrir le chat, Controles, Editer le titre).
 
@@ -231,7 +232,7 @@ Categories representatives (non exhaustif, regroupe par nature ; chaque controle
 
 ### 3.8 Champs de recherche & saisie secondaires
 
-- Champs recherche : Houses-Invite, Room-Invite, Room-Create co-host, MSG-AddGrp, MSG-New, Map « Find a friend ».
+- Champs recherche : HouseList (Mine local / Discover API), Houses-Invite, Room-Invite, Room-Create co-host, MSG-AddGrp, MSG-New, Map « Find a friend ».
 - Cellules a cocher : Room-Invite candidat, champs nom de groupe (GInfo), champ Nom affiche (Profile-Edit).
 
 ### 3.9 Cartes & temps-reel social (non audio)
@@ -247,7 +248,7 @@ Categories representatives (non exhaustif, regroupe par nature ; chaque controle
 
 ---
 
-## 4. Liste P2 (secondaire / opportuniste) — 72 controles
+## 4. Liste P2 (secondaire / opportuniste) — 70 controles
 
 Categories representatives.
 
@@ -281,7 +282,7 @@ Categories representatives.
 
 - Profile : copier le pseudo, Voir plus/moins (bio), liens Twitter/Instagram, « Tout voir » Houses.
 - Settings : See more/less bio, Stat Clubs (lecture seule), View all houses, Privacy/Terms/Export, Wave top-bar.
-- Chat : Appeler, Plus d'options, Inserer un emoji, Joindre un fichier (tous « bientot disponible »).
+- Chat : Inserer un emoji. La piece jointe n'est pas comptee, car son affordance a ete retiree tant que le pipeline n'existe pas ; Appeler et Plus d'options sont desormais P1 et fonctionnels.
 - House-Invite : etat « Invited », actions Alert Partager/OK ; House-Detail Partager la house.
 - Onboarding-Welcome carousel swipe ; Map marker « Your location ».
 

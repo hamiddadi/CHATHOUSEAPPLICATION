@@ -9,7 +9,7 @@
  * the analytics privacy toggle (mutates the consent store), and the stat taps.
  */
 import React from 'react';
-import { Alert } from 'react-native';
+import { Alert, Share } from 'react-native';
 import { fireEvent } from '@testing-library/react-native';
 import { profileKeys } from '../../../profile/hooks/useProfile';
 import { houseKeys } from '../../../houses/hooks/useHouses';
@@ -172,6 +172,29 @@ describe('SettingsScreen', () => {
     });
     fireEvent.press(getByLabelText('Notifications'));
     expect(navigation.navigate).toHaveBeenCalledWith('NotificationSettings');
+  });
+
+  it('shares the localized personal invite message', () => {
+    const shareSpy = jest
+      .spyOn(Share, 'share')
+      .mockResolvedValue({ action: 'sharedAction' } as never);
+    const inviteUrl = 'https://app.chathouse.com/invite/test-code';
+    const { getByLabelText } = renderScreen(<SettingsScreen />, {
+      seedQueryData: [
+        seedMe(makeUser()),
+        {
+          key: ['ext', 'invite', 'link'],
+          data: { url: inviteUrl, code: 'test-code', remaining: 2 },
+        },
+      ],
+    });
+
+    fireEvent.press(getByLabelText('Invite friends'));
+
+    expect(shareSpy).toHaveBeenCalledWith({
+      message: `Join me on ChatHouse 👋 ${inviteUrl}`,
+      url: inviteUrl,
+    });
   });
 
   it('Blocked accounts row navigates to BlockedUsers', () => {

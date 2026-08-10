@@ -2,6 +2,7 @@ import type { Prisma } from '@prisma/client';
 import { prisma } from '../../config/database';
 import { getBlockedIdSet } from '../social/blocks';
 import { discoverableRoomWhere } from '../rooms/rooms.access';
+import { privacyToApi } from '../clubs/clubs.mapper';
 import type { SearchInput } from './search.schema';
 
 const publicUser = {
@@ -61,11 +62,19 @@ const clubSelect = {
   _count: { select: { members: { where: { user: { deletedAt: null } } } } },
 } as const satisfies Prisma.ClubSelect;
 
-const searchClubs = async (q: string, limit: number) => {
+const searchClubs = async (q: string, limit: number, viewerId: string) => {
   const clubs = await prisma.club.findMany({
     where: {
       // Discoverable clubs span OPEN + SOCIAL (PRIVATE stays hidden from search).
       privacy: { in: ['OPEN', 'SOCIAL'] },
+      // Keep club discovery aligned with the regular Discover feed: a deleted
+      // owner, or a block in either direction, makes that owner's content
+      // invisible to the viewer as well.
+      owner: {
+        deletedAt: null,
+        blocksCreated: { none: { blockedId: viewerId } },
+        blocksReceived: { none: { blockerId: viewerId } },
+      },
       OR: [
         { name: { contains: q, mode: 'insensitive' } },
         { description: { contains: q, mode: 'insensitive' } },
@@ -83,7 +92,7 @@ const searchClubs = async (q: string, limit: number) => {
     categoryEmoji: c.categoryEmoji,
     iconUrl: c.iconUrl,
     membersCount: c._count.members,
-    privacy: c.privacy === 'PRIVATE' ? ('private' as const) : ('open' as const),
+    privacy: privacyToApi(c.privacy),
   }));
 };
 
@@ -136,7 +145,7 @@ export const searchService = {
   async search(input: SearchInput, viewerId: string) {
     const { q, type, limit } = input;
     if (type === 'users') return { users: await searchUsers(q, limit, viewerId) };
-    if (type === 'clubs') return { clubs: await searchClubs(q, limit) };
+    if (type === 'clubs') return { clubs: await searchClubs(q, limit, viewerId) };
     if (type === 'rooms') return { rooms: await searchRooms(q, limit, viewerId) };
 
     // type === 'all' → run all three in parallel. Split the limit so no
@@ -144,7 +153,7 @@ export const searchService = {
     const perFacet = Math.max(5, Math.floor(limit / 3));
     const [users, clubs, rooms] = await Promise.all([
       searchUsers(q, perFacet, viewerId),
-      searchClubs(q, perFacet),
+      searchClubs(q, perFacet, viewerId),
       searchRooms(q, perFacet, viewerId),
     ]);
     return { users, clubs, rooms };

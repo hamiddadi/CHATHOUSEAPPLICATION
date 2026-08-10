@@ -123,6 +123,83 @@ describe('Chat integration', () => {
     expect(denied.status).toBe(403);
   });
 
+  it('keeps an old conversation visible beyond 500 newer messages and counts all unread rows', async () => {
+    const viewer = await registerUser(app);
+    const busyPeer = await registerUser(app);
+    const oldPeer = await registerUser(app);
+    createdIds.push(viewer.id, busyPeer.id, oldPeer.id);
+
+    const now = Date.now();
+    const oldMessage = await prisma.message.create({
+      data: {
+        content: 'old but still a real conversation',
+        senderId: oldPeer.id,
+        receiverId: viewer.id,
+        createdAt: new Date(now - 60_000),
+      },
+    });
+    await prisma.message.createMany({
+      data: Array.from({ length: 501 }, (_, index) => ({
+        id: `bulk_${rand()}_${index}`,
+        content: `busy-${index}`,
+        senderId: busyPeer.id,
+        receiverId: viewer.id,
+        createdAt: new Date(now - 10_000 + index),
+      })),
+    });
+
+    const response = await request(app)
+      .get('/api/chat/conversations?limit=2')
+      .set('Authorization', `Bearer ${viewer.token}`);
+
+    expect(response.status).toBe(200);
+    expect(response.body.data.hasMore).toBe(false);
+    expect(response.body.data.nextCursor).toBeNull();
+    expect(response.body.data.data).toHaveLength(2);
+    expect(response.body.data.data.map((item: { peer: { id: string } }) => item.peer.id)).toEqual([
+      busyPeer.id,
+      oldPeer.id,
+    ]);
+    expect(response.body.data.data[0].unreadCount).toBe(501);
+    expect(response.body.data.data[1].unreadCount).toBe(1);
+
+    // PostgreSQL timestamps can collide (or differ below JavaScript's
+    // millisecond precision). A composite cursor must still return each peer
+    // exactly once across page boundaries.
+    await prisma.message.update({
+      where: { id: oldMessage.id },
+      data: { createdAt: new Date(now - 10_000 + 500) },
+    });
+    const firstPage = await request(app)
+      .get('/api/chat/conversations?limit=1')
+      .set('Authorization', `Bearer ${viewer.token}`);
+    const cursor = firstPage.body.data.nextCursor as string;
+    const secondPage = await request(app)
+      .get(`/api/chat/conversations?limit=1&cursor=${encodeURIComponent(cursor)}`)
+      .set('Authorization', `Bearer ${viewer.token}`);
+
+    expect(firstPage.body.data.hasMore).toBe(true);
+    expect(cursor).toMatch(/^v1\./);
+    expect(secondPage.body.data.hasMore).toBe(false);
+    expect(
+      new Set([
+        firstPage.body.data.data[0].peer.id as string,
+        secondPage.body.data.data[0].peer.id as string,
+      ]),
+    ).toEqual(new Set([busyPeer.id, oldPeer.id]));
+
+    await prisma.user.update({
+      where: { id: oldPeer.id },
+      data: { deletedAt: new Date() },
+    });
+    const withoutDeletedPeer = await request(app)
+      .get('/api/chat/conversations?limit=2')
+      .set('Authorization', `Bearer ${viewer.token}`);
+    expect(
+      withoutDeletedPeer.body.data.data.map((item: { peer: { id: string } }) => item.peer.id),
+    ).toEqual([busyPeer.id]);
+  });
+
   it('mutual-follow guard: blocks DM unless both sides follow each other (CHAT_004)', async () => {
     const alice = await registerUser(app);
     const bob = await registerUser(app);

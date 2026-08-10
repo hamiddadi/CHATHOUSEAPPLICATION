@@ -584,9 +584,8 @@ model Message {
   @@index([receiverId])
   @@index([roomId])
   @@index([createdAt])
-  // Serve the windowed, createdAt-ordered DM-conversation scan (chat.service
-  // listConversations) from an index instead of a sort on a sender/receiver
-  // filtered set.
+  // Serve exact DM peer discovery and the indexed per-peer last-message
+  // lookups used by chat.service listConversations.
   @@index([receiverId, createdAt])
   @@index([senderId, createdAt])
   @@index([senderId, receiverId, createdAt])

@@ -79,13 +79,13 @@
   <div class="sub">Comparaison approfondie, écran par écran</div>
   <div class="rule"></div>
   <div class="badge-final">
-    <div class="n">88<small>/100</small></div>
+    <div class="n">89<small>/100</small></div>
     <div class="l">Parité globale</div>
   </div>
   <div class="meta">
     39 écrans analysés · 11 zones fonctionnelles<br/>
     Basé sur l'audit du code source réel (lecture seule)<br/>
-    28 juin 2026
+    10 août 2026
   </div>
 </div>
 
@@ -97,7 +97,11 @@
   <span><span class="chip s-amber">60–79</span> partielle</span>
   <span><span class="chip s-red">&lt;60</span> lacune</span>
 </p>
-<div class="note small"><b>Cadrage technique :</b> ChatHouse est une app <b>React Native (bare)</b> — audio temps réel via <b>LiveKit/WebRTC</b>, backend Node/TS. Référentiel Clubhouse : hallway, rooms live (scène / lever de main / modération / replays / captions), clubs, profil-identité, Backchannel DM, onboarding téléphone, events/RSVP.</div>
+<div class="note small"><b>Cadrage technique :</b> ChatHouse est une app <b>React Native (bare)</b> — audio temps réel via <b>LiveKit/WebRTC</b>, backend Node/TS. Référentiel Clubhouse : hallway, rooms live, Houses, profil-identité, VMs privées, House Chats, onboarding téléphone, events/RSVP et replays. Vérification du 10 août 2026 : permission micro iOS demandée et contrôlée via le module WebRTC natif ; 3 flows Maestro pré-auth déterministes ; audit npm backend production à 0 vulnérabilité. L'audit mobile conserve 12 entrées « high » issues d'une même chaîne de build Metro/Expo autour de <code>image-size</code>, sans version corrigée publiée ; aucun downgrade React Native risqué n'est compté comme correction.</div>
+
+<h3>Sources officielles Clubhouse <span class="small muted">(consultées le 10 août 2026)</span></h3>
+<p class="small"><a href="https://support.clubhouse.com/hc/en-us/articles/20083179573907-About-VMs">About VMs</a> · <a href="https://support.clubhouse.com/hc/en-us/articles/20201528225939-Find-Join-or-Create-Houses">Find, Join, or Create Houses</a> · <a href="https://support.clubhouse.com/hc/en-us/articles/37955529136403-House-Chats">House Chats</a> · <a href="https://support.clubhouse.com/hc/en-us/articles/20084265581587-What-are-Live-Rooms">What are Live Rooms?</a> · <a href="https://support.clubhouse.com/hc/en-us/articles/21291292478099-Replays">Replays</a>.</p>
+<p class="small">Ces sources confirment notamment les VMs vocales asynchrones privées en 1:1 ou en groupe, les House Chats préenregistrés, la recherche de Houses via Explore, le chat privé texte/voix en live room, ainsi que l'enregistrement, la sauvegarde et le téléchargement des replays. Les notes vocales et groupes DM sont donc comptés comme <b>parité</b>, jamais comme exclusivité ChatHouse.</p>
 
 <h2>1. Onboarding / Auth</h2>
 <table>
@@ -125,7 +129,7 @@
 <tr><td>RoomScreen</td><td>Room</td><td>Scène speakers/listeners, <b>lever main + file</b>, <b>modération complète</b> (mute others / make-speaker / move-to-audience / mod / transfert host / kick+ban / mute-all / lock / restrict main), <b>réactions emoji</b>, <b>captions live</b>, <b>audio arrière-plan</b>, ping+wave, tip, chat, ghost listener</td><td><span class="x">Spatial audio ✕</span> · <span class="x">Music mode ✕</span></td><td class="score s-blue">88</td></tr>
 <tr><td>CreateRoomScreen</td><td>Start a room</td><td>Visibilité 3 niveaux, house, topics, <b>co-hôtes</b>, <b>planification</b>, recording</td><td>—</td><td class="score s-green">95</td></tr>
 <tr><td>InviteToRoomScreen</td><td>Invite to room</td><td>Recherche + sélection multiple (max 50)</td><td>—</td><td class="score s-green">90</td></tr>
-<tr><td>ReplaysScreen</td><td>Replays</td><td>Liste + lecteur inline (play/pause/progression)</td><td>Pas de <b>scrub/seek</b>, ni <b>clips</b>, ni <b>transcript</b></td><td class="score s-amber">60</td></tr>
+<tr><td>ReplaysScreen</td><td>Replays</td><td>Liste + lecteur inline (play/pause/progression)</td><td>Lecteur sans <b>seek</b> ; pas de <b>clips</b> ni de parcours de sauvegarde/téléchargement hôte</td><td class="score s-amber">60</td></tr>
 <tr><td>EventsScreen</td><td>Upcoming / Events</td><td>Upcoming/Mine, <b>RSVP</b>, <b>export calendrier .ics</b>, host reschedule/cancel</td><td>Rappels push dédiés</td><td class="score s-blue">85</td></tr>
 </tbody>
 </table>
@@ -135,7 +139,7 @@
 <table>
 <thead><tr><th>Écran ChatHouse</th><th>Équivalent Clubhouse</th><th>État ChatHouse</th><th>Manques</th><th class="score">Score</th></tr></thead>
 <tbody>
-<tr><td>HouseListScreen</td><td>Clubs list</td><td>Onglets Mine / Discover, FAB création</td><td>Pas de recherche club ici (via Explore)</td><td class="score s-blue">80</td></tr>
+<tr><td>HouseListScreen</td><td>Clubs list</td><td>Onglets Mine / Discover, <b>recherche directe</b> (filtre local Mine, API débouncée Discover), états vide/erreur + retry, FAB création</td><td>Pas de filtre dédié par catégorie dans cette liste</td><td class="score s-green">90</td></tr>
 <tr><td>HouseDetailScreen</td><td>Club page</td><td>Cover, règles, membres, <b>rôles admin/mod/member</b>, <b>inbox demandes SOCIAL</b>, rooms live/planifiées/passées</td><td>—</td><td class="score s-green">90</td></tr>
 <tr><td>CreateHouseScreen</td><td>Create club</td><td>Icône, nom/desc/<b>règles</b>, <b>privacy OPEN/SOCIAL/PRIVATE</b></td><td>—</td><td class="score s-green">92</td></tr>
 <tr><td>ManageHouseScreen</td><td>Club admin</td><td>Édition + suppression (owner)</td><td>Pas d'édition cover/icône ici</td><td class="score s-blue">85</td></tr>
@@ -143,13 +147,13 @@
 <tr><td>InviteMemberScreen</td><td>Invite to club</td><td>Lien partageable + invite ciblée</td><td>—</td><td class="score s-green">90</td></tr>
 </tbody>
 </table>
-<p class="small">Sous-total : <span class="zone-score">~87/100</span> — modèle clubs complet : 3 niveaux de privacy + approbation + rôles.</p>
+<p class="small">Sous-total : <span class="zone-score">~89/100</span> — parité confirmée sur la recherche/découverte des Houses ; ChatHouse place aussi la recherche directement dans HouseList. Modèle clubs complet : 3 niveaux de privacy + approbation + rôles.</p>
 
 <h2>4. Identité <span class="small muted">(Profil)</span></h2>
 <table>
 <thead><tr><th>Écran ChatHouse</th><th>Équivalent Clubhouse</th><th>État ChatHouse</th><th>Manques</th><th class="score">Score</th></tr></thead>
 <tbody>
-<tr><td>ProfileScreen</td><td>Profile</td><td>Vrai nom + @username, bio, <b>Joined</b>, <b>Nominated by</b>, <b>liens Twitter/Insta</b>, follow, wave, badges, liens custom, live-banner, block/report</td><td>— (dépasse via badges/premium)</td><td class="score s-green">95</td></tr>
+<tr><td>ProfileScreen</td><td>Profile</td><td>Vrai nom + @username, bio, <b>Joined</b>, <b>Nominated by</b>, <b>liens Twitter/Insta</b>, follow, wave, badges, liens custom, live-banner, block/report</td><td>— (extensions ChatHouse : badges/premium)</td><td class="score s-green">95</td></tr>
 <tr><td>EditProfileScreen</td><td>Edit profile</td><td>Photo, noms, username, bio, handles, <b>DM privacy</b></td><td>—</td><td class="score s-green">90</td></tr>
 <tr><td>FollowersScreen</td><td>Followers / Following</td><td>Onglets + follow inline</td><td>—</td><td class="score s-green">95</td></tr>
 <tr><td>TipHistoryScreen</td><td>Payments</td><td>Historique tips (envoyés/reçus)</td><td><i>bonus — proche des Payments Clubhouse</i></td><td class="score s-blue">85</td></tr>
@@ -172,14 +176,14 @@
 <thead><tr><th>Écran ChatHouse</th><th>Équivalent Clubhouse</th><th>État ChatHouse</th><th>Manques</th><th class="score">Score</th></tr></thead>
 <tbody>
 <tr><td>MessagesScreen</td><td>Backchannel list</td><td>Conversations 1:1 + <b>groupes</b>, aperçu vocal, live socket</td><td>Bande présence en ligne inactive</td><td class="score s-blue">85</td></tr>
-<tr><td>ChatDetailScreen</td><td>DM thread</td><td>Texte + <b>notes vocales</b>, typing, accusés lu, suppression, emojis</td><td><b>Appels</b> &amp; <b>pièces jointes</b> = « Coming soon » ; présence off</td><td class="score s-blue">82</td></tr>
+<tr><td>ChatDetailScreen</td><td>DM thread</td><td>Texte + <b>notes vocales</b>, typing, accusés lu, suppression, emojis, <b>appel audio privé réel</b> (room fermée à 2), présence respectueuse de la confidentialité, <b>signaler/bloquer</b></td><td>Pas de pipeline de pièces jointes ; l'action n'est volontairement pas affichée</td><td class="score s-green">90</td></tr>
 <tr><td>NewMessageScreen</td><td>New message</td><td>Recherche, 1:1 ou groupe</td><td>—</td><td class="score s-green">95</td></tr>
 <tr><td>GroupChatScreen</td><td>Group chat</td><td>Texte + vocal, brouillon</td><td>—</td><td class="score s-green">90</td></tr>
 <tr><td>GroupInfoScreen</td><td>Group management</td><td>Renommer / membres / retirer / quitter</td><td>—</td><td class="score s-green">90</td></tr>
 <tr><td>AddGroupMembersScreen</td><td>Add members</td><td>Recherche + exclusion des membres présents</td><td>—</td><td class="score s-green">95</td></tr>
 </tbody>
 </table>
-<p class="small">Sous-total : <span class="zone-score">~89/100</span> — dépasse Clubhouse sur le vocal/groupes ; freiné par les stubs « Coming soon ».</p>
+<p class="small">Sous-total : <span class="zone-score">~91/100</span> — notes vocales et groupes comptés en parité avec les VMs Clubhouse ; l'appel privé, la présence et les actions de sûreté sont branchés. Les pièces jointes restent le principal écart.</p>
 
 <h2>7. Settings</h2>
 <table>
@@ -192,50 +196,53 @@
 </table>
 <p class="small">Sous-total : <span class="zone-score">~93/100</span>.</p>
 
-<h2>8. Exclusif ChatHouse <span class="small muted">(hors Clubhouse — bonus)</span></h2>
+<h2>8. Extensions ChatHouse auditées <span class="small muted">(hors calcul de parité)</span></h2>
 <table>
 <thead><tr><th>Élément</th><th>Apport</th></tr></thead>
 <tbody>
 <tr><td><b>MapsScreen</b></td><td>Carte géo-sociale des abonnés en ligne + Ghost Mode + rejoindre une room / envoyer un DM depuis la carte</td></tr>
-<tr><td>Transverse</td><td><b>Tips / monétisation</b>, <b>premium « qui a vu mon profil »</b>, <b>notes vocales en DM</b>, <b>badges</b>, <b>liens de profil custom</b>, rooms rattachées aux clubs, RGPD complet</td></tr>
+<tr><td>Transverse</td><td><b>Tips / monétisation</b>, <b>premium « qui a vu mon profil »</b>, <b>badges</b>, <b>liens de profil custom</b>, outils RGPD intégrés</td></tr>
 </tbody>
 </table>
+<p class="small">Cette section inventorie des extensions visibles dans le code ChatHouse ; elle ne prétend pas que Clubhouse en est dépourvu et ne majore pas le score.</p>
 
 <div class="pb"></div>
 <h2>Récapitulatif par zone</h2>
 <div class="bars">
   <div class="bar-row"><span class="lab">Rooms / Hallway <span class="muted">(30%)</span></span><div class="track"><div class="fill f-blue" style="width:85%"></div></div><span class="val">85</span></div>
   <div class="bar-row"><span class="lab">Onboarding / Auth <span class="muted">(12%)</span></span><div class="track"><div class="fill f-blue" style="width:89%"></div></div><span class="val">89</span></div>
-  <div class="bar-row"><span class="lab">Clubs (Houses) <span class="muted">(12%)</span></span><div class="track"><div class="fill f-blue" style="width:87%"></div></div><span class="val">87</span></div>
+  <div class="bar-row"><span class="lab">Clubs (Houses) <span class="muted">(12%)</span></span><div class="track"><div class="fill f-blue" style="width:89%"></div></div><span class="val">89</span></div>
   <div class="bar-row"><span class="lab">Identité (Profil) <span class="muted">(12%)</span></span><div class="track"><div class="fill f-green" style="width:91%"></div></div><span class="val">91</span></div>
   <div class="bar-row"><span class="lab">Découverte <span class="muted">(10%)</span></span><div class="track"><div class="fill f-green" style="width:90%"></div></div><span class="val">90</span></div>
-  <div class="bar-row"><span class="lab">Messages (Backchannel) <span class="muted">(12%)</span></span><div class="track"><div class="fill f-blue" style="width:89%"></div></div><span class="val">89</span></div>
+  <div class="bar-row"><span class="lab">Messages (Backchannel) <span class="muted">(12%)</span></span><div class="track"><div class="fill f-green" style="width:91%"></div></div><span class="val">91</span></div>
   <div class="bar-row"><span class="lab">Settings <span class="muted">(7%)</span></span><div class="track"><div class="fill f-green" style="width:93%"></div></div><span class="val">93</span></div>
 </div>
+<p class="small"><b>Calcul :</b> somme(score de zone × poids) = 84,21 points sur 95 % de poids comparatif ; normalisée sur 100, la note vaut <b>88,64</b>, arrondie à <b>89</b>. Les extensions hors parité ne gonflent pas la note.</p>
 
 <div class="gauge">
-  <div class="track"><div class="fill" style="width:88%"><span>88 / 100</span></div></div>
+  <div class="track"><div class="fill" style="width:89%"><span>89 / 100</span></div></div>
   <div class="cap"><span>0</span><span>Parité globale pondérée</span><span>100</span></div>
 </div>
 
 <h3 class="ok">Forces</h3>
 <ul>
   <li>Reproduit fidèlement le <b>cœur Clubhouse</b> : hallway scoré, rooms live (scène, lever de main + file, modération complète, réactions, captions live, audio arrière-plan), clubs à 3 niveaux de privacy avec rôles et approbation, identité complète, onboarding téléphone dans l'ordre Clubhouse, events + RSVP, Backchannel DM.</li>
-  <li><b>Dépasse</b> Clubhouse sur plusieurs axes : notes vocales en DM, groupes DM complets, carte géo-sociale, tips, premium, badges, RGPD complet, filtres de recherche langue/catégorie.</li>
+  <li>La messagerie texte/voix 1:1 et de groupe est une <b>parité</b> avec les VMs Clubhouse, pas une exclusivité. Dans ChatHouse, cette zone comprend aussi appel privé, présence et actions signaler/bloquer.</li>
+  <li>Extensions ChatHouse confirmées par le code : carte géo-sociale, outils RGPD intégrés, badges/liens personnalisés et filtres de recherche langue/catégorie — sans les compter comme preuve d'une supériorité globale.</li>
 </ul>
 <h3 class="x">Écarts restants</h3>
 <ul>
   <li><b>Spatial audio</b> ✕ et <b>music mode / partage de son en room</b> ✕ (briques signature Clubhouse).</li>
-  <li><b>Profondeur des replays</b> : pas de scrub/clips/transcript.</li>
+  <li><b>Profondeur des replays</b> : lecteur sans seek, pas de clips ni de parcours de sauvegarde/téléchargement hôte.</li>
   <li>Pas de <b>waitlist / sync contacts</b> réelle à l'entrée.</li>
-  <li>Finitions : appels &amp; pièces jointes DM (« Coming soon »), présence en ligne non branchée, deep-link DM des notifications.</li>
+  <li>Finitions : pas de pièces jointes DM (affordance retirée tant que le pipeline n'existe pas), bande de présence de la liste de conversations inactive, deep-link DM des notifications.</li>
 </ul>
 <div class="note">
-  <b>Conclusion.</b> À <b>~88 % de parité écran</b>, et compte tenu de ses extensions, ChatHouse est <b>fonctionnellement au niveau de Clubhouse — voire au-dessus en largeur de fonctionnalités</b>. Il ne lui manque essentiellement que <b>trois briques signature</b> (spatial audio, music mode, replays riches) pour une parité quasi totale.
+  <b>Conclusion.</b> Le score reste <b>89/100 de parité écran</b> après correction factuelle : <b>88,64</b> arrondi, sans bonus pour les notes vocales ni les groupes DM déjà présents dans Clubhouse. Il traduit une forte couverture du périmètre audité, pas une preuve de supériorité globale. Les priorités restantes sont le spatial audio, le music mode, des replays plus riches et les pièces jointes DM.
 </div>
 
 <footer>
-  ChatHouse vs Clubhouse — Comparaison écran par écran · Généré le 28/06/2026 · Analyse basée sur le code source (lecture seule) · Document interne.
+  ChatHouse vs Clubhouse — Comparaison écran par écran · Mis à jour le 10/08/2026 · Analyse basée sur le code source (lecture seule) · Document interne.
 </footer>
 
 </body>

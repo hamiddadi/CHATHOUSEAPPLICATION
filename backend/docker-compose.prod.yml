@@ -44,12 +44,18 @@ services:
     image: redis:7-alpine
     container_name: chathouse-redis
     restart: unless-stopped
-    # AUTH on (no anonymous access) + AOF persistence.
+    # AUTH on (no anonymous access) + AOF persistence. Redis also backs
+    # BullMQ and token revocations, so never evict keys silently at capacity:
+    # reject new writes and alert/scale instead.
     command:
       [
         'redis-server',
         '--appendonly',
         'yes',
+        '--maxmemory',
+        '${REDIS_MAXMEMORY:-512mb}',
+        '--maxmemory-policy',
+        'noeviction',
         '--requirepass',
         '${REDIS_PASSWORD:?REDIS_PASSWORD is required}',
       ]

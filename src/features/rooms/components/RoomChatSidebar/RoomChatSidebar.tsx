@@ -100,22 +100,22 @@ export const RoomChatSidebar: React.FC<RoomChatSidebarProps> = memo(
     chatVisibility = 'ALL',
     canModerate = false,
   }) => {
+    const { t } = useTranslation();
     // Can the viewer post? Chat must be on, and either open to all or the viewer
     // is a host/moderator. When they can't, we replace the composer with a note.
     const canPost = chatEnabled && (chatVisibility !== 'MODS_ONLY' || canModerate);
-    const cantPostNotice = !chatEnabled
-      ? 'Le chat est désactivé pour cette room.'
-      : 'Le chat est réservé aux modérateurs.';
+    const cantPostNotice = !chatEnabled ? t('roomChat.chatDisabled') : t('roomChat.moderatorsOnly');
     const { data: messages = [] } = useRoomMessages(visible ? roomId : null);
     const sendMessage = useSendRoomMessage();
     const reportMessage = useReportRoomMessage();
     const qc = useQueryClient();
-    const { t } = useTranslation();
     const myId = useAuthStore(s => s.user?.id ?? null);
     const [draft, setDraft] = useState('');
     const [replyTo, setReplyTo] = useState<ChatMessage | null>(null);
     const [reportMessageId, setReportMessageId] = useState<string | null>(null);
+    const [deletingMessageId, setDeletingMessageId] = useState<string | null>(null);
     const listRef = useRef<FlatList<ChatMessage>>(null);
+    const sendDisabled = draft.trim().length === 0 || sendMessage.isPending;
 
     // Subscribe to live `room:chat_message` so new entries land instantly
     // without polling. The hook only attaches while the sidebar is mounted
@@ -185,10 +185,10 @@ export const RoomChatSidebar: React.FC<RoomChatSidebarProps> = memo(
             setDraft('');
             setReplyTo(null);
           },
-          onError: e => Alert.alert('Erreur', errorMessage(e, "Échec de l'envoi")),
+          onError: e => Alert.alert(t('common.error'), errorMessage(e, t('roomChat.sendFailed'))),
         },
       );
-    }, [draft, roomId, replyTo, sendMessage]);
+    }, [draft, roomId, replyTo, sendMessage, t]);
 
     const handleStartReply = useCallback((msg: ChatMessage) => setReplyTo(msg), []);
     const handleCancelReply = useCallback(() => setReplyTo(null), []);
@@ -202,20 +202,14 @@ export const RoomChatSidebar: React.FC<RoomChatSidebarProps> = memo(
             onSuccess: result => {
               setReportMessageId(null);
               Alert.alert(
-                t('moderation.reportSentTitle', 'Signalement envoyé'),
+                t('moderation.reportSentTitle'),
                 result.alreadyReported
-                  ? t('moderation.reportAlreadySent', 'Vous avez déjà signalé ce message.')
-                  : t(
-                      'moderation.reportSentBody',
-                      "L'équipe de modération va examiner ce message.",
-                    ),
+                  ? t('moderation.reportAlreadySent')
+                  : t('moderation.reportSentBody'),
               );
             },
             onError: e =>
-              Alert.alert(
-                t('common.error', 'Erreur'),
-                errorMessage(e, t('moderation.reportFailed', 'Échec du signalement')),
-              ),
+              Alert.alert(t('common.error'), errorMessage(e, t('moderation.reportFailed'))),
           },
         );
       },
@@ -226,27 +220,32 @@ export const RoomChatSidebar: React.FC<RoomChatSidebarProps> = memo(
     // Same query key the socket handler writes to, so the list stays in sync.
     const handleDeleteMessage = useCallback(
       (msg: ChatMessage) => {
-        Alert.alert('Supprimer le message', 'Supprimer ce message du chat ?', [
-          { text: 'Annuler', style: 'cancel' },
+        Alert.alert(t('roomChat.deleteTitle'), t('roomChat.deleteBody'), [
+          { text: t('common.cancel'), style: 'cancel' },
           {
-            text: 'Supprimer',
+            text: t('common.delete'),
             style: 'destructive',
             onPress: () => {
+              if (deletingMessageId !== null) return;
               const key = [...roomKeys.all, 'messages', roomId] as const;
               const previous = qc.getQueryData<ChatMessage[]>(key);
+              setDeletingMessageId(msg.id);
               // Optimistic removal — re-add the cached list on failure.
               qc.setQueryData<ChatMessage[]>(key, prev =>
                 prev ? prev.filter(m => m.id !== msg.id) : prev,
               );
-              void chatmodApi.deleteMessage(msg.id).catch(e => {
-                if (previous) qc.setQueryData<ChatMessage[]>(key, previous);
-                Alert.alert('Erreur', errorMessage(e, 'Échec de la suppression'));
-              });
+              void chatmodApi
+                .deleteMessage(msg.id)
+                .catch(e => {
+                  if (previous) qc.setQueryData<ChatMessage[]>(key, previous);
+                  Alert.alert(t('common.error'), errorMessage(e, t('roomChat.deleteFailed')));
+                })
+                .finally(() => setDeletingMessageId(null));
             },
           },
         ]);
       },
-      [qc, roomId],
+      [deletingMessageId, qc, roomId, t],
     );
 
     const renderItem = useCallback(
@@ -254,7 +253,10 @@ export const RoomChatSidebar: React.FC<RoomChatSidebarProps> = memo(
         <Pressable
           onLongPress={() => handleStartReply(item)}
           accessibilityRole="button"
-          accessibilityLabel={`Message de ${item.user.displayName}, appui long pour répondre`}
+          accessibilityLabel={t('roomChat.messageA11y', {
+            name: item.user.displayName || item.user.username,
+          })}
+          accessibilityHint={t('roomChat.replyMessageHint')}
           style={styles.row}
         >
           <Avatar
@@ -270,8 +272,13 @@ export const RoomChatSidebar: React.FC<RoomChatSidebarProps> = memo(
                   <Pressable
                     onPress={() => setReportMessageId(item.id)}
                     hitSlop={8}
+                    disabled={reportMessage.isPending}
                     accessibilityRole="button"
-                    accessibilityLabel={t('moderation.reportMessageA11y', 'Signaler le message')}
+                    accessibilityLabel={t('moderation.reportMessageA11y')}
+                    accessibilityState={{
+                      busy: reportMessage.isPending,
+                      disabled: reportMessage.isPending,
+                    }}
                     style={styles.messageAction}
                   >
                     <MaterialIcons name="flag" size={16} color={colors.danger} />
@@ -281,8 +288,13 @@ export const RoomChatSidebar: React.FC<RoomChatSidebarProps> = memo(
                   <Pressable
                     onPress={() => handleDeleteMessage(item)}
                     hitSlop={8}
+                    disabled={deletingMessageId !== null}
                     accessibilityRole="button"
-                    accessibilityLabel="Supprimer le message"
+                    accessibilityLabel={t('roomChat.deleteMessageA11y')}
+                    accessibilityState={{
+                      busy: deletingMessageId === item.id,
+                      disabled: deletingMessageId !== null,
+                    }}
                     style={styles.messageAction}
                   >
                     <MaterialIcons name="delete-outline" size={16} color={colors.textMuted} />
@@ -304,25 +316,41 @@ export const RoomChatSidebar: React.FC<RoomChatSidebarProps> = memo(
           </View>
         </Pressable>
       ),
-      [canModerate, handleDeleteMessage, handleStartReply, myId, t],
+      [
+        canModerate,
+        deletingMessageId,
+        handleDeleteMessage,
+        handleStartReply,
+        myId,
+        reportMessage.isPending,
+        t,
+      ],
     );
 
     return (
       <>
         <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-          <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="Fermer le chat">
-            <Pressable style={styles.sheet} onPress={() => undefined}>
+          <Pressable style={styles.backdrop} onPress={onClose} accessible={false}>
+            <Pressable
+              style={styles.sheet}
+              onPress={() => undefined}
+              accessible={false}
+              accessibilityViewIsModal
+              importantForAccessibility="yes"
+            >
               <KeyboardAvoidingView
                 behavior={Platform.OS === 'ios' ? 'padding' : undefined}
                 style={styles.keyboardWrap}
               >
                 <View style={styles.header}>
-                  <Text style={styles.title}>Chat de la room</Text>
+                  <Text style={styles.title} accessibilityRole="header">
+                    {t('roomChat.title')}
+                  </Text>
                   <Pressable
                     onPress={onClose}
                     hitSlop={8}
                     accessibilityRole="button"
-                    accessibilityLabel="Fermer"
+                    accessibilityLabel={t('roomChat.closeA11y')}
                   >
                     <MaterialIcons name="close" size={22} color={colors.text} />
                   </Pressable>
@@ -338,12 +366,16 @@ export const RoomChatSidebar: React.FC<RoomChatSidebarProps> = memo(
                   maxToRenderPerBatch={20}
                   windowSize={11}
                   removeClippedSubviews
+                  accessibilityRole="list"
+                  accessibilityLabel={t('roomChat.messagesA11y')}
                 />
                 {replyTo ? (
-                  <View style={styles.replyBanner}>
+                  <View style={styles.replyBanner} accessibilityLiveRegion="polite">
                     <View style={styles.replyBannerFlex}>
                       <Text style={styles.replyBannerLabel}>
-                        Réponse à @{replyTo.user.username || replyTo.user.displayName}
+                        {t('roomChat.replyingTo', {
+                          name: replyTo.user.username || replyTo.user.displayName,
+                        })}
                       </Text>
                       <Text style={styles.replyBannerSnippet} numberOfLines={1}>
                         {replyTo.content}
@@ -352,7 +384,7 @@ export const RoomChatSidebar: React.FC<RoomChatSidebarProps> = memo(
                     <Pressable
                       onPress={handleCancelReply}
                       accessibilityRole="button"
-                      accessibilityLabel="Annuler la réponse"
+                      accessibilityLabel={t('roomChat.cancelReplyA11y')}
                       hitSlop={8}
                     >
                       <MaterialIcons name="close" size={16} color={colors.textMuted} />
@@ -364,30 +396,37 @@ export const RoomChatSidebar: React.FC<RoomChatSidebarProps> = memo(
                     <TextInput
                       value={draft}
                       onChangeText={setDraft}
-                      placeholder={replyTo ? 'Réponse…' : 'Écrire…'}
+                      placeholder={
+                        replyTo ? t('roomChat.replyPlaceholder') : t('roomChat.inputPlaceholder')
+                      }
                       placeholderTextColor={colors.textMuted}
                       style={styles.input}
                       multiline
                       maxLength={MAX_MESSAGE_LENGTH}
-                      accessibilityLabel="Message de chat"
+                      accessibilityLabel={t('roomChat.inputA11y')}
                     />
                     <Pressable
                       onPress={handleSend}
-                      disabled={draft.trim().length === 0 || sendMessage.isPending}
+                      disabled={sendDisabled}
                       accessibilityRole="button"
-                      accessibilityLabel="Envoyer"
-                      style={[
-                        styles.sendBtn,
-                        draft.trim().length === 0 || sendMessage.isPending
-                          ? styles.sendBtnDisabled
-                          : null,
-                      ]}
+                      accessibilityLabel={t('roomChat.sendA11y')}
+                      accessibilityState={{
+                        busy: sendMessage.isPending,
+                        disabled: sendDisabled,
+                      }}
+                      style={[styles.sendBtn, sendDisabled ? styles.sendBtnDisabled : null]}
                     >
                       <MaterialIcons name="send" size={18} color={colors.background} />
                     </Pressable>
                   </View>
                 ) : (
-                  <View style={styles.composerDisabled}>
+                  <View
+                    style={styles.composerDisabled}
+                    accessible
+                    accessibilityRole="text"
+                    accessibilityLiveRegion="polite"
+                    accessibilityLabel={cantPostNotice}
+                  >
                     <MaterialIcons name="lock" size={16} color={colors.textMuted} />
                     <Text style={styles.composerDisabledText}>{cantPostNotice}</Text>
                   </View>

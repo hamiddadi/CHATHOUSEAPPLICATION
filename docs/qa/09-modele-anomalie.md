@@ -2,7 +2,7 @@
 
 > **But** : standardiser la remontee de bugs sur **ChatHouse** (app audio live facon Clubhouse — React Native / Expo, temps-reel WebSocket socket.io + audio LiveKit, push, i18n FR/EN, roles guest/standard/admin, Android + iOS, reseaux 3G/4G/5G/Wi-Fi).
 >
-> Perimetre du parc : **50 ecrans · 381 boutons · 991 cas de test**. Chaque anomalie doit pointer vers l'**ecran**, le **bouton** (avec son **locator reel**) et le **cas de test** d'origine (`docs/qa/screens/NN-*.md` ou un scenario `RT-NNN` / `A11Y-NNN`).
+> Perimetre du parc : **50 ecrans · 385 boutons · 991 cas de test**. Chaque anomalie doit pointer vers l'**ecran**, le **bouton** (avec son **locator reel**) et le **cas de test** d'origine (`docs/qa/screens/NN-*.md` ou un scenario `RT-NNN` / `A11Y-NNN`).
 >
 > **Regle d'or** : une anomalie = un seul probleme. Si plusieurs symptomes, ouvrir plusieurs tickets et les lier (`bloque par` / `duplique`).
 
