@@ -235,15 +235,15 @@ export const PhoneScreen: React.FC = () => {
                   {value && <MaterialIcons name="check" size={16} color="white" />}
                 </View>
               </Pressable>
-              <Text className="text-sm font-body-semibold text-ink flex-1">
+              <Text
+                testID="auth-terms-link"
+                onPress={handleTerms}
+                accessibilityRole="link"
+                accessibilityLabel={t('auth.phone.termsLinkA11y', 'Terms of Service')}
+                className="text-sm font-body-semibold text-ink flex-1"
+              >
                 {t('auth.phone.termsAcceptancePrefix', 'I accept the ')}
-                <Text
-                  testID="auth-terms-link"
-                  onPress={handleTerms}
-                  accessibilityRole="link"
-                  accessibilityLabel={t('auth.phone.termsLinkA11y', 'Terms of Service')}
-                  className="text-primary font-body-medium"
-                >
+                <Text className="text-primary font-body-medium">
                   {t('auth.phone.termsLinkA11y', 'Terms of Service')}
                 </Text>
                 {t('auth.phone.legalVersion', ' (version {{version}})', {
@@ -286,18 +286,18 @@ export const PhoneScreen: React.FC = () => {
                   {value && <MaterialIcons name="check" size={16} color="white" />}
                 </View>
               </Pressable>
-              <Text className="text-sm font-body-semibold text-ink flex-1">
+              <Text
+                testID="auth-privacy-link"
+                onPress={handlePrivacy}
+                accessibilityRole="link"
+                accessibilityLabel={t('auth.phone.privacyLinkA11y', 'Privacy Policy')}
+                className="text-sm font-body-semibold text-ink flex-1"
+              >
                 {t(
                   'auth.phone.privacyAcknowledgementPrefix',
                   'I acknowledge that I have read the ',
                 )}
-                <Text
-                  testID="auth-privacy-link"
-                  onPress={handlePrivacy}
-                  accessibilityRole="link"
-                  accessibilityLabel={t('auth.phone.privacyLinkA11y', 'Privacy Policy')}
-                  className="text-primary font-body-medium"
-                >
+                <Text className="text-primary font-body-medium">
                   {t('auth.phone.privacyLinkA11y', 'Privacy Policy')}
                 </Text>
                 {t('auth.phone.privacyNotConsent', '. This is not consent to optional processing.')}

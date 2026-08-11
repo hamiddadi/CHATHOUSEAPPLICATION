@@ -39,12 +39,16 @@ describe('PhoneScreen', () => {
   });
 
   it('navigates to Terms and PrivacyPolicy from the footer links', () => {
-    const { navigation, getByLabelText } = renderScreen(<PhoneScreen />, {
+    const { navigation, getByLabelText, getByTestId } = renderScreen(<PhoneScreen />, {
       route: { name: 'Phone', params: {} },
     });
-    fireEvent.press(getByLabelText('Terms of Service'));
+
+    expect(getByTestId('auth-terms-link')).toBe(getByLabelText('Terms of Service'));
+    expect(getByTestId('auth-privacy-link')).toBe(getByLabelText('Privacy Policy'));
+
+    fireEvent.press(getByTestId('auth-terms-link'));
     expect(navigation.navigate).toHaveBeenCalledWith('Terms');
-    fireEvent.press(getByLabelText('Privacy Policy'));
+    fireEvent.press(getByTestId('auth-privacy-link'));
     expect(navigation.navigate).toHaveBeenCalledWith('PrivacyPolicy');
   });
 

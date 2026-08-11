@@ -200,9 +200,11 @@ jobs:
         with:
           api-level: 35
           arch: x86_64
-          target: google_apis
+          # ATD removes Pixel Launcher and other background services that can
+          # produce unrelated ANR overlays on resource-constrained CI runners.
+          target: google_atd
           profile: pixel_6
-          disable-animations: false
+          disable-animations: true
           script: bash scripts/run-android-maestro.sh
       - name: Upload Android E2E diagnostics
         if: always()
