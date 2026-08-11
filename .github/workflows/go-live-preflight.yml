@@ -107,7 +107,7 @@ jobs:
       - name: Download the existing signed Android artifact
         id: download-android
         continue-on-error: true
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           name: ${{ inputs.android_artifact_name }}
           path: ${{ runner.temp }}/go-live/android
@@ -118,7 +118,7 @@ jobs:
       - name: Download the existing signed iOS artifact
         id: download-ios
         continue-on-error: true
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           name: ${{ inputs.ios_artifact_name }}
           path: ${{ runner.temp }}/go-live/ios
