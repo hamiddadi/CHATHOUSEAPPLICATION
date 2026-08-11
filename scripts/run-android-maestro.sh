@@ -44,6 +44,16 @@ if [[ "$metro_ready" != true ]]; then
   exit 1
 fi
 
+# A cold React Native bundle takes longer than the UI-flow timeout on hosted
+# runners. Populate Metro's transform cache before Maestro launches and clears
+# the app for each independent flow.
+curl --fail --show-error --silent \
+  --retry 2 \
+  --retry-all-errors \
+  --max-time 600 \
+  'http://127.0.0.1:8081/index.bundle?platform=android&dev=true&lazy=true&minify=false&app=com.chathouse.app&modulesOnly=false&runModule=true&excludeSource=true&sourcePaths=url-server' \
+  --output /dev/null
+
 test -f "$apk_path"
 test -x "$maestro_bin"
 adb wait-for-device
