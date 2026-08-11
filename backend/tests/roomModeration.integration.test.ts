@@ -11,6 +11,8 @@ const { createApp } = require('../src/app') as typeof import('../src/app');
 const { prisma } = require('../src/config/database') as typeof import('../src/config/database');
 const { connectRedis, disconnectRedis } =
   require('../src/config/redis') as typeof import('../src/config/redis');
+const { LIVEKIT_REVOCATION_TOPIC } =
+  require('../src/modules/rooms/livekit-revocation.outbox') as typeof import('../src/modules/rooms/livekit-revocation.outbox');
 /* eslint-enable @typescript-eslint/no-require-imports */
 
 const rand = () => Math.random().toString(36).slice(2, 10);
@@ -68,6 +70,9 @@ describe('Room moderation — ping / mute / mute-all / invite / kick / room type
   const join = (u: User, roomId: string) =>
     request(app).post(`/api/rooms/${roomId}/join`).set('Authorization', `Bearer ${u.token}`);
 
+  const leave = (u: User, roomId: string) =>
+    request(app).post(`/api/rooms/${roomId}/leave`).set('Authorization', `Bearer ${u.token}`);
+
   const setRole = (caller: User, roomId: string, userId: string, role: string) =>
     request(app)
       .patch(`/api/rooms/${roomId}/role`)
@@ -89,6 +94,75 @@ describe('Room moderation — ping / mute / mute-all / invite / kick / room type
     const idempotent = await join(listener, roomId);
     expect(idempotent.status).toBe(200);
     expect(idempotent.body.data.changed).toBe(false);
+  });
+
+  it('demotes the former host during hand-off and never restores HOST authority on rejoin', async () => {
+    const formerHost = await register();
+    const successor = await register();
+    const target = await register();
+    const roomId = await createRoom(formerHost);
+    await join(successor, roomId);
+    await join(target, roomId);
+    expect((await setRole(formerHost, roomId, successor.id, 'MODERATOR')).status).toBe(200);
+
+    const departure = await leave(formerHost, roomId);
+    expect(departure.status).toBe(200);
+    expect(
+      await prisma.room.findUniqueOrThrow({ where: { id: roomId }, select: { hostId: true } }),
+    ).toEqual({ hostId: successor.id });
+    expect(await participant(roomId, formerHost.id)).toEqual(
+      expect.objectContaining({ role: 'LISTENER', isMuted: true }),
+    );
+
+    const rejoin = await join(formerHost, roomId);
+    expect(rejoin.status).toBe(200);
+    expect(await participant(roomId, formerHost.id)).toEqual(
+      expect.objectContaining({ role: 'LISTENER', isMuted: true, leftAt: null }),
+    );
+    const activeHosts = await prisma.participant.findMany({
+      where: { roomId, leftAt: null, role: 'HOST' },
+      select: { userId: true },
+    });
+    expect(activeHosts).toEqual([{ userId: successor.id }]);
+
+    const roleAttempt = await setRole(formerHost, roomId, target.id, 'SPEAKER');
+    expect(roleAttempt.status).toBe(403);
+    expect(roleAttempt.body.error.code).toBe('ROOM_003');
+    const muteAttempt = await request(app)
+      .patch(`/api/rooms/${roomId}/mute`)
+      .set('Authorization', `Bearer ${formerHost.token}`)
+      .send({ isMuted: true, userId: target.id });
+    expect(muteAttempt.status).toBe(403);
+    expect(muteAttempt.body.error.code).toBe('ROOM_003');
+    const kickAttempt = await request(app)
+      .post(`/api/rooms/${roomId}/kick`)
+      .set('Authorization', `Bearer ${formerHost.token}`)
+      .send({ userId: target.id });
+    expect(kickAttempt.status).toBe(403);
+    expect(kickAttempt.body.error.code).toBe('ROOM_003');
+  });
+
+  it('treats moderator authority as session-scoped across an explicit leave and rejoin', async () => {
+    const host = await register();
+    const moderator = await register();
+    const target = await register();
+    const roomId = await createRoom(host);
+    await join(moderator, roomId);
+    await join(target, roomId);
+    expect((await setRole(host, roomId, moderator.id, 'MODERATOR')).status).toBe(200);
+
+    expect((await leave(moderator, roomId)).status).toBe(200);
+    expect(await participant(roomId, moderator.id)).toEqual(
+      expect.objectContaining({ role: 'LISTENER', isMuted: true }),
+    );
+    expect((await join(moderator, roomId)).status).toBe(200);
+
+    const denied = await request(app)
+      .post(`/api/rooms/${roomId}/kick`)
+      .set('Authorization', `Bearer ${moderator.token}`)
+      .send({ userId: target.id });
+    expect(denied.status).toBe(403);
+    expect(denied.body.error.code).toBe('ROOM_003');
   });
 
   // ─────────────────────────────── PING ────────────────────────────────
@@ -329,10 +403,40 @@ describe('Room moderation — ping / mute / mute-all / invite / kick / room type
       expect(res.status).toBe(200);
       expect(res.body.data.kicked).toBe(true);
       expect((await participant(roomId, listener.id))?.leftAt).not.toBeNull();
+      expect(
+        await prisma.user.findUniqueOrThrow({
+          where: { id: listener.id },
+          select: { currentRoomId: true },
+        }),
+      ).toEqual({ currentRoomId: null });
+      expect(
+        await prisma.room.findUniqueOrThrow({
+          where: { id: roomId },
+          select: { participantCount: true },
+        }),
+      ).toEqual({ participantCount: 1 });
+      expect(
+        await prisma.roomBan.findUnique({
+          where: { roomId_userId: { roomId, userId: listener.id } },
+        }),
+      ).toEqual(expect.objectContaining({ bannedBy: host.id }));
+      const transitions = (
+        await prisma.outboxEvent.findMany({
+          where: { topic: LIVEKIT_REVOCATION_TOPIC },
+        })
+      ).filter(row => {
+        const payload = row.payload as { roomId?: string; userId?: string };
+        return payload.roomId === roomId && payload.userId === listener.id;
+      });
+      expect(transitions).toHaveLength(1);
+      expect(transitions[0]?.aggregateId).toBe(transitions[0]?.eventKey);
 
       const rejoin = await join(listener, roomId);
       expect(rejoin.status).toBe(403);
       expect(rejoin.body.error.code).toBe('ROOM_008');
+      await prisma.outboxEvent.deleteMany({
+        where: { id: { in: transitions.map(row => row.id) } },
+      });
     });
 
     it('cannot kick the host → ROOM_003', async () => {
@@ -379,6 +483,48 @@ describe('Room moderation — ping / mute / mute-all / invite / kick / room type
         .send({ userId: b.id });
       expect(res.status).toBe(403);
       expect(res.body.error.code).toBe('ROOM_003');
+    });
+
+    it('a kicked moderator rejoins as a muted listener after its finite ban expires', async () => {
+      const host = await register();
+      const moderator = await register();
+      const target = await register();
+      const roomId = await createRoom(host);
+      await join(moderator, roomId);
+      await join(target, roomId);
+      expect((await setRole(host, roomId, moderator.id, 'MODERATOR')).status).toBe(200);
+
+      const kicked = await request(app)
+        .post(`/api/rooms/${roomId}/kick`)
+        .set('Authorization', `Bearer ${host.token}`)
+        .send({ userId: moderator.id, banMinutes: 1 });
+      expect(kicked.status).toBe(200);
+      expect(await participant(roomId, moderator.id)).toEqual(
+        expect.objectContaining({ role: 'LISTENER', isMuted: true }),
+      );
+
+      await prisma.roomBan.update({
+        where: { roomId_userId: { roomId, userId: moderator.id } },
+        data: { expiresAt: new Date(Date.now() - 1_000) },
+      });
+      const rejoin = await join(moderator, roomId);
+      expect(rejoin.status).toBe(200);
+      expect(await participant(roomId, moderator.id)).toEqual(
+        expect.objectContaining({ role: 'LISTENER', isMuted: true, leftAt: null }),
+      );
+
+      const kickAttempt = await request(app)
+        .post(`/api/rooms/${roomId}/kick`)
+        .set('Authorization', `Bearer ${moderator.token}`)
+        .send({ userId: target.id });
+      expect(kickAttempt.status).toBe(403);
+      expect(kickAttempt.body.error.code).toBe('ROOM_003');
+      const muteAttempt = await request(app)
+        .patch(`/api/rooms/${roomId}/mute`)
+        .set('Authorization', `Bearer ${moderator.token}`)
+        .send({ isMuted: true, userId: target.id });
+      expect(muteAttempt.status).toBe(403);
+      expect(muteAttempt.body.error.code).toBe('ROOM_003');
     });
   });
 

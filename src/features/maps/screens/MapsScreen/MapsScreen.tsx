@@ -10,7 +10,6 @@ import { EmptyState } from '../../../../shared/components/EmptyState';
 import { layout, spacing } from '../../../../shared/constants/theme';
 import type { FollowerOnMap } from '../../../../shared/types/domain';
 import type { RootStackParamList } from '../../../../core/navigation/types';
-import { DEFAULT_MAP_CENTER } from '../../../../shared/mocks/followersOnMap.mock';
 import { useCurrentLocation } from '../../hooks/useCurrentLocation';
 import { useFollowersOnMap } from '../../hooks/useFollowersOnMap';
 import { useLocationBroadcast } from '../../hooks/useLocationBroadcast';
@@ -35,6 +34,12 @@ const MINI_CARD_LIFT = 120;
 const MARKER_TRACK_SETTLE_MS = 1500;
 // Default map zoom level used for auto-center / pin-press / recenter regions.
 const ZOOM_DELTA = 0.01;
+const DEFAULT_MAP_CENTER = {
+  latitude: 14.7167,
+  longitude: -17.4677,
+  latitudeDelta: 0.05,
+  longitudeDelta: 0.05,
+};
 
 const regionFor = (
   latitude: number,

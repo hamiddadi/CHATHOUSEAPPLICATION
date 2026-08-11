@@ -359,6 +359,13 @@ export const emitChatMessage = (senderId: string, receiverId: string, msg: unkno
   ioRef?.to(userChannel(receiverId)).emit('chat:message', msg);
 };
 
+/** Policy-aware durable delivery can target only the still-eligible accounts. */
+export const emitChatMessageToUsers = (userIds: readonly string[], msg: unknown): void => {
+  for (const id of new Set(userIds)) {
+    ioRef?.to(userChannel(id)).emit('chat:message', msg);
+  }
+};
+
 /**
  * Fan a new group message out to every member's personal channel so their
  * conversation list / open thread updates live. Group conversations have no

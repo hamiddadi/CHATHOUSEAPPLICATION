@@ -11,6 +11,9 @@ export const registerUploadPaths = (
     id: z.string(),
     url: z.string().url(),
   });
+  const idempotencyHeaders = z.object({
+    'Idempotency-Key': z.string().min(8).max(128).optional(),
+  });
 
   for (const kind of ['avatar', 'voice'] as const) {
     registry.registerPath({
@@ -19,6 +22,7 @@ export const registerUploadPaths = (
       tags: ['Uploads'],
       security: [{ bearerAuth: [] }],
       request: {
+        headers: idempotencyHeaders,
         body: {
           content: {
             'application/json': { schema: uploadBodySchema },
@@ -43,6 +47,10 @@ export const registerUploadPaths = (
         },
         413: {
           description: 'Decoded media exceeds the configured limit',
+          content: { 'application/json': { schema: ErrorBody } },
+        },
+        409: {
+          description: 'Idempotency key was already used with different media content',
           content: { 'application/json': { schema: ErrorBody } },
         },
         429: {

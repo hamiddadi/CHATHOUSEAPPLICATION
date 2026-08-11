@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -19,11 +20,17 @@ import {
   validateStoreListingMetadata,
   validateAndroidNativeConfiguration,
   validateAndroidFirebaseData,
+  validateAcceptanceEvidence,
   validateBackendReleaseIdentifiers,
+  validateComposeInterpolatedPostgresIdentifiers,
+  validateComposeInterpolatedPasswords,
+  validateCorsOrigins,
   validateElfLoadAlignment,
   validateAndroidManifestTargetSdk,
   validateIosFirebaseText,
   validateIosNativeConfiguration,
+  validateMediaS3Region,
+  validateMetricsTokenSecretFile,
   validatePublicUrl,
   validateProductionLiveKitAndStripe,
 } from './go-live-preflight.mjs';
@@ -174,6 +181,124 @@ test('parseEnv handles comments, quotes, BOM and last-value-wins', () => {
   });
 });
 
+test('production Compose passwords remain safe when interpolated into internal DSNs', () => {
+  const safe = {
+    POSTGRES_PASSWORD: `Pg_${'a'.repeat(30)}-._~`,
+    POSTGRES_APP_PASSWORD: `PgApp_${'c'.repeat(28)}-._~`,
+    REDIS_PASSWORD: `Redis_${'b'.repeat(30)}-._~`,
+  };
+
+  assert.equal(validateComposeInterpolatedPasswords(safe), 3);
+  for (const [field, value] of [
+    ['POSTGRES_PASSWORD', 'unsafe@host'],
+    ['POSTGRES_PASSWORD', 'unsafe:port'],
+    ['POSTGRES_APP_PASSWORD', 'unsafe?query'],
+    ['REDIS_PASSWORD', 'unsafe/path'],
+    ['REDIS_PASSWORD', 'unsafe#fragment'],
+    ['REDIS_PASSWORD', 'unsafe%escape'],
+  ]) {
+    assert.throws(
+      () => validateComposeInterpolatedPasswords({ ...safe, [field]: value }),
+      new RegExp(`${field}.*A-Za-z0-9`, 'u'),
+    );
+  }
+  assert.throws(
+    () =>
+      validateComposeInterpolatedPasswords({
+        ...safe,
+        POSTGRES_APP_PASSWORD: safe.POSTGRES_PASSWORD,
+      }),
+    /POSTGRES_APP_PASSWORD.*distinct/u,
+  );
+});
+
+test('production Compose Postgres identifiers remain safe inside the internal DSN', () => {
+  assert.deepEqual(
+    validateComposeInterpolatedPostgresIdentifiers({
+      POSTGRES_USER: 'chathouse_migrator',
+      POSTGRES_APP_USER: 'chathouse_api',
+      POSTGRES_DB: 'chathouse-prod',
+    }),
+    {
+      POSTGRES_USER: 'chathouse_migrator',
+      POSTGRES_APP_USER: 'chathouse_api',
+      POSTGRES_DB: 'chathouse-prod',
+    },
+  );
+  assert.equal(
+    validateComposeInterpolatedPostgresIdentifiers({
+      POSTGRES_USER: 'chathouse_migrator',
+      POSTGRES_APP_USER: 'chathouse_api',
+    }).POSTGRES_DB,
+    'chathouse',
+  );
+  for (const [field, value] of [
+    ['POSTGRES_USER', 'api@postgres'],
+    ['POSTGRES_APP_USER', 'api/role'],
+    ['POSTGRES_DB', 'chathouse/database'],
+    ['POSTGRES_DB', '__CHANGE_ME__'],
+  ]) {
+    assert.throws(
+      () =>
+        validateComposeInterpolatedPostgresIdentifiers({
+          POSTGRES_USER: 'chathouse_migrator',
+          POSTGRES_APP_USER: 'chathouse_api',
+          POSTGRES_DB: 'chathouse',
+          [field]: value,
+        }),
+      new RegExp(`${field}.*A-Za-z0-9`, 'u'),
+    );
+  }
+  assert.throws(
+    () =>
+      validateComposeInterpolatedPostgresIdentifiers({
+        POSTGRES_USER: 'chathouse',
+        POSTGRES_APP_USER: 'chathouse',
+        POSTGRES_DB: 'chathouse',
+      }),
+    /POSTGRES_APP_USER.*distinct/u,
+  );
+});
+
+test('production CORS, S3 region and metrics secret inputs fail closed', t => {
+  assert.equal(validateCorsOrigins('https://app.chathouse.com,https://api.chathouse.app'), 2);
+  for (const value of [
+    'http://app.chathouse.com',
+    'https://app.chathouse.com/path',
+    'https://app.chathouse.com,',
+    'https://app.chathouse.com,https://app.chathouse.com',
+  ]) {
+    assert.throws(() => validateCorsOrigins(value), /CORS_ORIGINS|protocole requis/u);
+  }
+
+  assert.equal(validateMediaS3Region('auto'), 'auto');
+  assert.equal(validateMediaS3Region('eu-west-3'), 'eu-west-3');
+  for (const value of ['your-region', 'example', 'EU West 3', '__CHANGE_ME__']) {
+    assert.throws(() => validateMediaS3Region(value), /région S3 réelle/u);
+  }
+
+  const secretDirectory = mkdtempSync(path.join(tmpdir(), 'chathouse-metrics-secret-'));
+  t.after(() => rmSync(secretDirectory, { recursive: true, force: true }));
+  const secretPath = path.join(secretDirectory, 'metrics-token');
+  writeFileSync(secretPath, 'a'.repeat(64), { encoding: 'utf8', mode: 0o600 });
+  assert.equal(
+    validateMetricsTokenSecretFile('/opt/chathouse/secrets/metrics_token', secretPath),
+    secretPath,
+  );
+  assert.throws(
+    () => validateMetricsTokenSecretFile('relative/metrics_token', secretPath),
+    /chemin absolu/u,
+  );
+  assert.throws(
+    () =>
+      validateMetricsTokenSecretFile(
+        '/opt/chathouse/secrets/metrics_token',
+        path.join(secretDirectory, 'missing'),
+      ),
+    /introuvable/u,
+  );
+});
+
 test('validatePublicUrl accepts public TLS URLs', () => {
   assert.equal(
     validatePublicUrl('https://api.chathouse.app/api', ['https:']).hostname,
@@ -191,6 +316,56 @@ test('validatePublicUrl rejects local, cleartext and placeholder URLs', () => {
   assert.throws(
     () => validatePublicUrl('https://your-project.livekit.cloud', ['https:']),
     /placeholder/u,
+  );
+});
+
+test('acceptance evidence is bound to the exact Android and iOS artifacts and iOS build', t => {
+  const artifactDirectory = mkdtempSync(path.join(tmpdir(), 'chathouse-evidence-'));
+  t.after(() => rmSync(artifactDirectory, { recursive: true, force: true }));
+  const aabPath = path.join(artifactDirectory, 'android-production.aab');
+  const iosTarballPath = path.join(artifactDirectory, 'ChatHouse.xcarchive.tgz');
+  const aab = Buffer.from('signed Android fixture');
+  const iosTarball = Buffer.from('signed iOS archive fixture');
+  writeFileSync(aabPath, aab);
+  writeFileSync(iosTarballPath, iosTarball);
+  const sha256 = value => createHash('sha256').update(value).digest('hex');
+  const testedAt = new Date().toISOString();
+  const evidence = {
+    source_sha: 'a'.repeat(40),
+    android: {
+      artifact_sha256: sha256(aab),
+      play_internal: { status: 'passed', tested_at: testedAt, reference: 'play-release-42' },
+      physical_devices: [{ status: 'passed', model: 'Pixel 9', os_version: 'Android 16' }],
+    },
+    ios: {
+      artifact_sha256: sha256(iosTarball),
+      build_number: '42',
+      testflight: { status: 'passed', tested_at: testedAt, reference: 'testflight-build-42' },
+      physical_devices: [
+        { family: 'iphone', status: 'passed', model: 'iPhone 16', os_version: '18.5' },
+        { family: 'ipad', status: 'passed', model: 'iPad Air', os_version: '18.5' },
+      ],
+    },
+  };
+
+  assert.match(
+    validateAcceptanceEvidence(evidence, 'a'.repeat(40), aabPath, iosTarballPath, '42'),
+    /Artefacts Android\/iOS exacts/u,
+  );
+  assert.throws(
+    () =>
+      validateAcceptanceEvidence(
+        { ...evidence, ios: { ...evidence.ios, artifact_sha256: '0'.repeat(64) } },
+        'a'.repeat(40),
+        aabPath,
+        iosTarballPath,
+        '42',
+      ),
+    /SHA-256 de l'archive iOS/u,
+  );
+  assert.throws(
+    () => validateAcceptanceEvidence(evidence, 'a'.repeat(40), aabPath, iosTarballPath, '43'),
+    /numéro de build iOS/u,
   );
 });
 

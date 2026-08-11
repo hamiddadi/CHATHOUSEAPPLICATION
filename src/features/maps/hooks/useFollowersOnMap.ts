@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { env } from '../../../config/env';
-import { MOCK_FOLLOWERS_ON_MAP } from '../../../shared/mocks/followersOnMap.mock';
 import { getSocket } from '../../../shared/services/realtime/socketClient';
 import { mapsService, toMapUser, type RawMapUser } from '../services/mapsService';
 import type { FollowerOnMap } from '../../../shared/types/domain';
@@ -32,8 +31,8 @@ interface MapUserUpdate {
 
 /**
  * Subscribes to the presence of every opted-in, visible, non-blocked user.
- * Falls back to `MOCK_FOLLOWERS_ON_MAP` when `env.REALTIME_ENABLED === false`
- * so the feature is demo-able without a server.
+ * When realtime is disabled, the hook fails honest with an empty roster; demo
+ * fixtures belong in tests/Storybook and must never appear as real people.
  *
  * Event contract is dictated by the backend (backend/src/socket/handlers/maps.handler.ts):
  * - The socket auto-joins the `maps:presence` channel — there is NO subscribe message.
@@ -42,17 +41,12 @@ interface MapUserUpdate {
  *
  * Roster strategy: GET /maps/users seeds all currently eligible users. A full
  * socket snapshot can then add a newly-visible pin or update an existing one;
- * `maps:user-offline` removes it. In demo mode we seed from the legacy mock.
+ * `maps:user-offline` removes it.
  */
 export const useFollowersOnMap = (): FollowerOnMap[] => {
-  // Realtime: start empty and fill from the REST snapshot below. Demo mode
-  // (no realtime): seed from the mock roster so the feature is browsable.
-  const [followers, setFollowers] = useState<FollowerOnMap[]>(() =>
-    env.REALTIME_ENABLED ? [] : [...MOCK_FOLLOWERS_ON_MAP],
-  );
+  const [followers, setFollowers] = useState<FollowerOnMap[]>([]);
 
   useEffect(() => {
-    if (!env.REALTIME_ENABLED) return;
     let cancelled = false;
 
     // 1) Seed the roster with full public metadata from the REST snapshot.
@@ -62,9 +56,15 @@ export const useFollowersOnMap = (): FollowerOnMap[] => {
         if (!cancelled) setFollowers(roster);
       })
       .catch(() => {
-        // Snapshot failed — keep an empty roster. Subsequent full socket
-        // snapshots can still materialise pins as users publish locations.
+        // Snapshot failed — keep an empty roster. When realtime is enabled,
+        // subsequent full socket snapshots can still materialise pins.
       });
+
+    if (!env.REALTIME_ENABLED) {
+      return () => {
+        cancelled = true;
+      };
+    }
 
     const onMoved = (m: MapsUserMoved) => {
       if (cancelled) return;

@@ -25,6 +25,7 @@ interface RawUser {
   followerCount?: number;
   followingCount?: number;
   isFollowedByMe?: boolean;
+  followRequestedByMe?: boolean;
   createdAt?: string;
   // Inviter relation — only on the detail payload (GET /users/:id).
   invitedBy?: { id: string; username: string | null; displayName: string | null } | null;
@@ -51,18 +52,19 @@ interface RawSearchUser {
   // Follow-list endpoints now stamp this per-viewer so the Follow/Following
   // toggle is correct. Optional: search payloads still omit it.
   isFollowedByMe?: boolean;
+  followRequestedByMe?: boolean;
   // The authenticated viewer's following list includes this server-computed
   // privacy result. Search/profile payloads deliberately omit it.
   canDirectMessage?: boolean;
 }
 
 // Follow list endpoints return a paginated envelope: { data, nextCursor,
-// hasMore }. `nextCursor` is the createdAt ISO timestamp of the last row —
-// pass it back as the `cursor` query param to fetch the next page.
+// hasMore }. New cursors are opaque `(createdAt,id)` values; pass them back
+// unchanged as `cursor` (legacy ISO values remain accepted by the backend).
 interface RawFollowList {
   data: RawSearchUser[];
   nextCursor: string | null;
-  hasMore: boolean;
+  hasMore?: boolean;
 }
 
 // A mapped page of a follow list, surfaced to the hooks (useInfiniteQuery).
@@ -70,6 +72,7 @@ interface RawFollowList {
 export interface FollowPage {
   items: User[];
   nextCursor: string | null;
+  hasMore: boolean;
 }
 
 // Fields shared by `mapUser` and `mapSummary`: the username/displayName/
@@ -119,6 +122,7 @@ const mapUser = (u: RawUser): User => ({
   // Follow table). GET /users/me omits it (you don't follow yourself) → the
   // ?? false default applies there, which is correct.
   isFollowedByMe: u.isFollowedByMe ?? false,
+  followRequestedByMe: u.followRequestedByMe ?? false,
   currentRoomId: u.currentRoomId ?? null,
   dmPrivacy: u.dmPrivacy,
 });
@@ -134,6 +138,7 @@ const mapSummary = (u: RawSearchUser): User => ({
   // omit it → default false. Hardcoding false made the FollowersScreen toggle
   // always show "Follow" (and re-follow instead of unfollow).
   isFollowedByMe: u.isFollowedByMe ?? false,
+  followRequestedByMe: u.followRequestedByMe ?? false,
   canDirectMessage: u.canDirectMessage,
 });
 
@@ -225,14 +230,37 @@ export const profileService = {
     return mapUser(res.data.data);
   },
 
-  async follow(userId: string): Promise<{ followed: true }> {
-    await apiClient.post(`/follow/${userId}`);
-    return { followed: true } as const;
+  async follow(userId: string): Promise<{ following: boolean; requested: boolean }> {
+    const res = await apiClient.post<Envelope<{ following: boolean; requested?: boolean }>>(
+      `/follow/${userId}`,
+    );
+    return {
+      following: res.data.data.following,
+      requested: res.data.data.requested ?? false,
+    };
   },
 
   async unfollow(userId: string): Promise<{ unfollowed: true }> {
     await apiClient.delete(`/follow/${userId}`);
     return { unfollowed: true } as const;
+  },
+
+  async followRequests(cursor?: string): Promise<FollowPage> {
+    const res = await apiClient.get<Envelope<RawFollowList>>('/follow/requests', {
+      params: cursor ? { cursor } : undefined,
+    });
+    const { data, nextCursor, hasMore } = res.data.data;
+    return { items: data.map(mapSummary), nextCursor, hasMore: hasMore ?? nextCursor !== null };
+  },
+
+  async acceptFollowRequest(userId: string): Promise<{ accepted: true }> {
+    const res = await apiClient.post<Envelope<{ accepted: true }>>(`/follow/${userId}/accept`);
+    return res.data.data;
+  },
+
+  async rejectFollowRequest(userId: string): Promise<{ rejected: boolean }> {
+    const res = await apiClient.post<Envelope<{ rejected: boolean }>>(`/follow/${userId}/reject`);
+    return res.data.data;
   },
 
   async followers(userId: string, cursor?: string): Promise<FollowPage> {
@@ -243,16 +271,16 @@ export const profileService = {
     const res = await apiClient.get<Envelope<RawFollowList>>(`/follow/${userId}/followers`, {
       params: cursor ? { cursor } : undefined,
     });
-    const { data, nextCursor } = res.data.data;
-    return { items: data.map(mapSummary), nextCursor };
+    const { data, nextCursor, hasMore } = res.data.data;
+    return { items: data.map(mapSummary), nextCursor, hasMore: hasMore ?? nextCursor !== null };
   },
 
   async following(userId: string, cursor?: string): Promise<FollowPage> {
     const res = await apiClient.get<Envelope<RawFollowList>>(`/follow/${userId}/following`, {
       params: cursor ? { cursor } : undefined,
     });
-    const { data, nextCursor } = res.data.data;
-    return { items: data.map(mapSummary), nextCursor };
+    const { data, nextCursor, hasMore } = res.data.data;
+    return { items: data.map(mapSummary), nextCursor, hasMore: hasMore ?? nextCursor !== null };
   },
 
   async search(query: string): Promise<User[]> {

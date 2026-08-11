@@ -90,6 +90,8 @@ export const RoomScreen: React.FC = () => {
   // showed "muted". The screen only READS it; writes go through the store.
   const isMuted = useCurrentRoomStore(s => s.isMuted);
   const [isHandRaised, setIsHandRaised] = useState(false);
+  const [isMuteBusy, setIsMuteBusy] = useState(false);
+  const muteInFlightRef = useRef(false);
   // The viewer is the actor of the room end (pressed "End Room"): ignore the
   // `room:ended` broadcast echo, which would otherwise pop the screen a second
   // time and show the "Room ended" alert to the very host who closed it.
@@ -172,7 +174,7 @@ export const RoomScreen: React.FC = () => {
   // mute-changed, kicked, ended). Without this, the screen is static and
   // never reflects what other participants do. The second arg backs out on a
   // gated/denied join (see handleJoinDenied).
-  useRoomSocket(roomId, handleJoinDenied);
+  const socketAdmissionConfirmed = useRoomSocket(roomId, handleJoinDenied);
 
   // #86: a host nominated me to speak — prompt to accept/refuse (respond posts
   // back; on accept the backend promotes me to SPEAKER).
@@ -240,7 +242,10 @@ export const RoomScreen: React.FC = () => {
   // engine auto-activates if `@livekit/react-native` is installed; in Expo
   // Go it returns `status: 'unsupported'` and the rest of the screen
   // (chat, hand-raise, reactions) keeps working.
-  const audio = useRoomAudio({ roomId, enabled: Boolean(roomId) });
+  const audio = useRoomAudio({
+    roomId,
+    enabled: Boolean(roomId) && socketAdmissionConfirmed,
+  });
 
   // Live captions (Clubhouse-style). `useExtCaptions` subscribes to the
   // `room:caption` stream + the live on/off flag; the publisher runs the
@@ -376,7 +381,9 @@ export const RoomScreen: React.FC = () => {
   }, [finishSelfEnd, navigation, roomId, viewerId, t]);
 
   const handleToggleMute = useCallback(async () => {
-    if (!room) return;
+    if (!room || muteInFlightRef.current) return;
+    muteInFlightRef.current = true;
+    setIsMuteBusy(true);
     const store = useCurrentRoomStore.getState();
     const next = !store.isMuted;
     // Optimistic flip — written to the SHARED store (not local state) so the
@@ -398,6 +405,9 @@ export const RoomScreen: React.FC = () => {
       } catch {
         // roomAudioSession already surfaced this failure in its reactive state.
       }
+    } finally {
+      muteInFlightRef.current = false;
+      setIsMuteBusy(false);
     }
   }, [audio, room, setMute]);
   const handleToggleHand = useCallback(() => {
@@ -987,6 +997,7 @@ export const RoomScreen: React.FC = () => {
         <RoomActionBar
           viewerCanSpeak={viewerCanSpeak}
           isMuted={isMuted}
+          isMuteBusy={isMuteBusy}
           isHandRaised={isHandRaised}
           onToggleMute={handleToggleMute}
           onToggleHand={handleToggleHand}

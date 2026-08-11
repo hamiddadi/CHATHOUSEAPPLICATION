@@ -38,8 +38,8 @@ export const groupsController = {
 
   async messages(req: Request, res: Response) {
     const input = listGroupMessagesSchema.parse(req.query);
-    const messages = await groupsService.listMessages(authedUserId(req), paramId(req, 'id'), input);
-    sendOk(res, messages);
+    const page = await groupsService.listMessages(authedUserId(req), paramId(req, 'id'), input);
+    sendOk(res, input.paginated ? page : page.data);
   },
 
   async send(req: Request, res: Response) {

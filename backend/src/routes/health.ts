@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { prisma } from '../config/database';
 import { redis } from '../config/redis';
+import { checkRedisReadiness } from '../monitoring/redisMetrics';
 import { asyncHandler } from '../utils/asyncHandler';
 
 export const healthRouter = Router();
@@ -13,11 +14,10 @@ export const healthRouter = Router();
 healthRouter.get(
   '/health',
   asyncHandler(async (_req, res) => {
-    const dbOk = await prisma.$queryRaw`SELECT 1`.then(() => true).catch(() => false);
-    const redisOk = await redis
-      .ping()
-      .then(() => true)
-      .catch(() => false);
+    const [dbOk, redisOk] = await Promise.all([
+      prisma.$queryRaw`SELECT 1`.then(() => true).catch(() => false),
+      checkRedisReadiness(redis),
+    ]);
 
     const allOk = dbOk && redisOk;
     res.status(allOk ? 200 : 503).json({

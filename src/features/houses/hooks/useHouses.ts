@@ -8,6 +8,8 @@ import {
 } from '../services/houseService';
 import type { House, HouseSummary } from '../../../shared/types/domain';
 import { searchService } from '../../search/services/searchService';
+import { createIdempotencyKey } from '../../../shared/utils/idempotency';
+import { retryTransientMutation } from '../../../shared/services/api/retryPolicy';
 
 export const houseKeys = {
   all: ['houses'] as const,
@@ -57,12 +59,25 @@ export const useHouse = (houseId: string, inviteToken?: string) =>
 
 export const useCreateHouse = () => {
   const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (input: CreateHouseInput) => houseService.create(input),
+  const mutation = useMutation({
+    mutationFn: ({ input, idempotencyKey }: { input: CreateHouseInput; idempotencyKey: string }) =>
+      houseService.create(input, idempotencyKey),
+    retry: retryTransientMutation,
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: houseKeys.all });
     },
   });
+  const withKey = (input: CreateHouseInput) => ({
+    input,
+    idempotencyKey: createIdempotencyKey(),
+  });
+  return {
+    ...mutation,
+    mutate: (input: CreateHouseInput, options?: Parameters<typeof mutation.mutate>[1]) =>
+      mutation.mutate(withKey(input), options),
+    mutateAsync: (input: CreateHouseInput, options?: Parameters<typeof mutation.mutateAsync>[1]) =>
+      mutation.mutateAsync(withKey(input), options),
+  };
 };
 
 export const useUpdateHouse = () => {

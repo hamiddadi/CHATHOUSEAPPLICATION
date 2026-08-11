@@ -182,7 +182,16 @@ export const MessagesScreen: React.FC = () => {
   useChatSocket();
   useGroupSocket();
   const myId = useAuthStore(s => s.user?.id ?? null);
-  const { data: conversations, isLoading, isError, refetch, isRefetching } = useConversations();
+  const {
+    data: conversations,
+    isLoading,
+    isError,
+    refetch,
+    isRefetching,
+    hasNextPage,
+    isFetchingNextPage,
+    fetchNextPage,
+  } = useConversations();
   const { data: groups, refetch: refetchGroups, isRefetching: isRefetchingGroups } = useGroups();
   // "Online now" strip: people I follow who are currently online / recently-seen
   // and free to chat (GET /api/ext/presence/available). Copy the backend id
@@ -214,6 +223,10 @@ export const MessagesScreen: React.FC = () => {
     void refetch();
     void refetchGroups();
   }, [refetch, refetchGroups]);
+
+  const handleEndReached = useCallback(() => {
+    if (hasNextPage && !isFetchingNextPage) void fetchNextPage();
+  }, [fetchNextPage, hasNextPage, isFetchingNextPage]);
 
   const handleOpenDirectMessage = useCallback(
     (peerId: string) => navigation.navigate('ChatDetail', { conversationId: peerId }),
@@ -291,6 +304,11 @@ export const MessagesScreen: React.FC = () => {
           keyExtractor={keyExtractor}
           ItemSeparatorComponent={renderSeparator}
           ListHeaderComponent={ListHeader}
+          ListFooterComponent={
+            isFetchingNextPage ? (
+              <Loader size="small" accessibilityLabel={t('common.loading')} />
+            ) : null
+          }
           ListEmptyComponent={
             (groups?.length ?? 0) === 0 ? (
               <EmptyState title={t('messages.empty')} description={t('messages.startHint')} />
@@ -298,6 +316,8 @@ export const MessagesScreen: React.FC = () => {
           }
           refreshing={isRefetching || isRefetchingGroups}
           onRefresh={handleRefresh}
+          onEndReached={handleEndReached}
+          onEndReachedThreshold={0.4}
           contentContainerStyle={[
             styles.list,
             {

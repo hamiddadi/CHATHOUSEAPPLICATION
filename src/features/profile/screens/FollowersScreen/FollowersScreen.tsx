@@ -55,9 +55,11 @@ const UserRow: React.FC<UserRowProps> = memo(({ user, onToggle, pending, isSelf 
           label={
             user.isFollowedByMe
               ? t('profile.following', 'Following')
-              : t('profile.follow', 'Follow')
+              : user.followRequestedByMe
+                ? t('profile.requested', 'Requested')
+                : t('profile.follow', 'Follow')
           }
-          variant={user.isFollowedByMe ? 'ghost' : 'primary'}
+          variant={user.isFollowedByMe || user.followRequestedByMe ? 'ghost' : 'primary'}
           size="sm"
           loading={pending}
           onPress={handle}
@@ -148,8 +150,9 @@ export const FollowersScreen: React.FC = () => {
           t('common.error', 'Something went wrong'),
           t('profile.actionFailed', 'Action failed. Please try again.'),
         );
-      if (user.isFollowedByMe) unfollow.mutate(user.id, { onError });
-      else follow.mutate(user.id, { onError });
+      if (user.isFollowedByMe || user.followRequestedByMe) {
+        unfollow.mutate(user.id, { onError });
+      } else follow.mutate(user.id, { onError });
     },
     [follow, t, unfollow],
   );

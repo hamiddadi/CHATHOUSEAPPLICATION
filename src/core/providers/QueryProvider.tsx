@@ -24,9 +24,11 @@ export const createQueryClient = (): QueryClient =>
         refetchOnWindowFocus: false,
       },
       mutations: {
-        // One retry on genuinely transient errors. Anything else (401/422/
-        // 403/client bugs) is surfaced immediately to the UI via toast.
-        retry: (count, err) => count < 1 && shouldRetryError(err),
+        // Mutations are unsafe to replay by default: an HTTP timeout does not
+        // prove the server failed to commit. Hooks may opt into one transient
+        // retry only when they carry a stable idempotency key (or use an
+        // equivalent server-side upsert guarantee).
+        retry: false,
       },
     },
   });

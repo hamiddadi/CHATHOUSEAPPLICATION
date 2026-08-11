@@ -1,4 +1,6 @@
+import { createIdempotencyKey } from '../../utils/idempotency';
 import { apiClient } from './apiClient';
+import { retryIdempotentMutationOnce } from './retryPolicy';
 
 /**
  * Backend POST /api/upload/avatar returns the standard success envelope
@@ -28,14 +30,18 @@ export const mediaService = {
    * `completeOnboarding` only accept an http(s) URL (not a local `file://`
    * URI), so call this first and pass the returned URL through as avatarUrl.
    */
-  async uploadAvatar(base64: string, mime?: string): Promise<string> {
-    const res = await apiClient.post<AvatarUploadEnvelope>(
-      '/upload/avatar',
-      { dataUrl: toDataUrl(base64, mime) },
-      // A base64 image is much larger/slower than a normal JSON call; the
-      // global 15s timeout would abort an otherwise-succeeding upload on a slow
-      // connection. Give this request a generous 60s.
-      { timeout: 60_000 },
+  async uploadAvatar(base64: string, mime?: string, attemptKey?: string): Promise<string> {
+    const idempotencyKey = attemptKey ?? createIdempotencyKey();
+    const payload = { dataUrl: toDataUrl(base64, mime) };
+    const res = await retryIdempotentMutationOnce(() =>
+      apiClient.post<AvatarUploadEnvelope>(
+        '/upload/avatar',
+        payload,
+        // A base64 image is much larger/slower than a normal JSON call; the
+        // global 15s timeout would abort an otherwise-succeeding upload on a slow
+        // connection. Give this request a generous 60s.
+        { timeout: 60_000, headers: { 'Idempotency-Key': idempotencyKey } },
+      ),
     );
     const url = res.data?.data?.url ?? res.data?.url;
     if (!url) {

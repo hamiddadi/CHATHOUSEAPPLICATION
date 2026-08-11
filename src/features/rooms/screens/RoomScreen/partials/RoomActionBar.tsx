@@ -17,6 +17,7 @@ interface RoomActionBarProps {
   /** Mic button only renders for users with publishing rights. */
   viewerCanSpeak: boolean;
   isMuted: boolean;
+  isMuteBusy: boolean;
   isHandRaised: boolean;
   onToggleMute: () => void;
   onToggleHand: () => void;
@@ -26,7 +27,16 @@ interface RoomActionBarProps {
 }
 
 const RoomActionBar: React.FC<RoomActionBarProps> = memo(
-  ({ viewerCanSpeak, isMuted, isHandRaised, onToggleMute, onToggleHand, onInvite, onLeave }) => {
+  ({
+    viewerCanSpeak,
+    isMuted,
+    isMuteBusy,
+    isHandRaised,
+    onToggleMute,
+    onToggleHand,
+    onInvite,
+    onLeave,
+  }) => {
     const { t } = useTranslation();
     const muteBtn = useAnimatedPress({ scaleTo: 0.96 });
     const raiseBtn = useAnimatedPress({ scaleTo: 0.96 });
@@ -39,6 +49,7 @@ const RoomActionBar: React.FC<RoomActionBarProps> = memo(
           <Animated.View style={muteBtn.animatedStyle}>
             <Pressable
               onPress={onToggleMute}
+              disabled={isMuteBusy}
               onPressIn={muteBtn.onPressIn}
               onPressOut={muteBtn.onPressOut}
               accessibilityRole="button"
@@ -47,7 +58,7 @@ const RoomActionBar: React.FC<RoomActionBarProps> = memo(
                   ? t('room.unmuteA11y', 'Unmute microphone')
                   : t('room.muteA11y', 'Mute microphone')
               }
-              accessibilityState={{ selected: isMuted }}
+              accessibilityState={{ selected: isMuted, disabled: isMuteBusy, busy: isMuteBusy }}
               hitSlop={ACTION_HIT_SLOP}
               className="flex-row items-center gap-sm bg-danger rounded-pill py-sm px-sm"
             >

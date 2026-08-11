@@ -4,7 +4,10 @@ import { Prisma } from '@prisma/client';
  * Follow, block and group-admission mutations all lock the same User rows in
  * lexical order. This gives those otherwise independent tables one shared
  * serialization boundary: after a block commits, a concurrent follow/group
- * write cannot recreate the relationship from a stale pre-check.
+ * write cannot recreate the relationship from a stale pre-check. NO KEY UPDATE
+ * deliberately remains compatible with the KEY SHARE lock acquired by an
+ * idempotency row's User foreign key before its callback starts, avoiding a
+ * lock-order deadlock while still conflicting with every peer policy writer.
  */
 export const lockUserRows = async (
   tx: Prisma.TransactionClient,
@@ -19,7 +22,7 @@ export const lockUserRows = async (
       FROM "User"
       WHERE id IN (${Prisma.join(ids)})
       ORDER BY id
-      FOR UPDATE
+      FOR NO KEY UPDATE
     `,
   );
   return rows.map(row => row.id);

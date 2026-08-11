@@ -6,7 +6,7 @@
  */
 import React from 'react';
 import { Alert } from 'react-native';
-import { fireEvent, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, waitFor } from '@testing-library/react-native';
 import { groupKeys, GROUP_MESSAGES_PAGE_SIZE } from '../../hooks/useGroups';
 import { renderScreen, mockAuthenticated, resetAuth } from '../../../../test-utils/renderScreen';
 import {
@@ -49,7 +49,7 @@ const messages = (): GroupMessage[] => [
 // The group thread is now a useInfiniteQuery, so its cache is InfiniteData
 // (pages + pageParams), not a flat array. Wrap a single ascending page.
 const seededThread = (msgs: GroupMessage[]) => ({
-  pages: [msgs],
+  pages: [{ items: msgs, nextCursor: null }],
   pageParams: [undefined],
 });
 
@@ -100,8 +100,32 @@ describe('GroupChatScreen', () => {
     const send = await waitFor(() => getByLabelText('Send'));
     fireEvent.press(send);
     await waitFor(() => {
-      expect(sendSpy).toHaveBeenCalledWith(GROUP_ID, 'Hi team');
+      expect(sendSpy).toHaveBeenCalledWith(GROUP_ID, 'Hi team', expect.stringMatching(/^rn-/));
     });
+  });
+
+  it('turns a same-tick double press into one group message', async () => {
+    let resolveSend!: (message: GroupMessage) => void;
+    const sent: GroupMessage = {
+      ...messages()[0]!,
+      id: 'gm-one-press',
+      senderId: 'user-test-1',
+      content: 'Only once',
+      sender: { id: 'user-test-1', username: 'tester', displayName: 'Test User', avatarUrl: null },
+    };
+    const sendSpy = jest
+      .spyOn(groupService, 'send')
+      .mockReturnValue(new Promise(resolve => (resolveSend = resolve)));
+    const { getByPlaceholderText, getByLabelText } = renderGroup();
+    fireEvent.changeText(getByPlaceholderText('Message'), 'Only once');
+    const sendButton = await waitFor(() => getByLabelText('Send'));
+
+    act(() => {
+      fireEvent.press(sendButton);
+      fireEvent.press(sendButton);
+    });
+    await waitFor(() => expect(sendSpy).toHaveBeenCalledTimes(1));
+    await act(async () => resolveSend(sent));
   });
 
   it('shows the mic button when the draft is empty', async () => {
@@ -155,8 +179,8 @@ describe('GroupChatScreen', () => {
     ];
     const messagesSpy = jest
       .spyOn(groupService, 'messages')
-      .mockResolvedValueOnce(fullPage)
-      .mockResolvedValueOnce(olderPage);
+      .mockResolvedValueOnce({ items: fullPage, nextCursor: 'v1.older-group-page' })
+      .mockResolvedValueOnce({ items: olderPage, nextCursor: null });
 
     // Do NOT seed the thread cache — let the query fetch page 1 from the spy.
     const { getByTestId } = renderScreen(<GroupChatScreen />, {

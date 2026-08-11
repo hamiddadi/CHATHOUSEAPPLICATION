@@ -12,6 +12,7 @@ jest.mock('livekit-server-sdk', () => {
     events: [] as string[],
     tokenTtls: [] as string[],
     roomServiceHosts: [] as string[],
+    grants: [] as Array<Record<string, unknown>>,
   };
 
   class RoomServiceClient {
@@ -38,8 +39,9 @@ jest.mock('livekit-server-sdk', () => {
       state.tokenTtls.push(options.ttl);
     }
 
-    addGrant(grant: { room: string }) {
+    addGrant(grant: { room: string } & Record<string, unknown>) {
       this.room = grant.room;
+      state.grants.push(grant);
     }
 
     async toJwt() {
@@ -79,10 +81,17 @@ jest.mock('livekit-server-sdk', () => {
 /* eslint-disable @typescript-eslint/no-require-imports */
 const { createApp } = require('../src/app') as typeof import('../src/app');
 const { prisma } = require('../src/config/database') as typeof import('../src/config/database');
+const { roomsService } =
+  require('../src/modules/rooms/rooms.service') as typeof import('../src/modules/rooms/rooms.service');
 const { connectRedis, disconnectRedis } =
   require('../src/config/redis') as typeof import('../src/config/redis');
 const { __livekitMock } = require('livekit-server-sdk') as {
-  __livekitMock: { events: string[]; tokenTtls: string[]; roomServiceHosts: string[] };
+  __livekitMock: {
+    events: string[];
+    tokenTtls: string[];
+    roomServiceHosts: string[];
+    grants: Array<Record<string, unknown>>;
+  };
 };
 /* eslint-enable @typescript-eslint/no-require-imports */
 
@@ -136,6 +145,15 @@ describe('LiveKit room-token lifecycle guard', () => {
     __livekitMock.events.length = 0;
     __livekitMock.tokenTtls.length = 0;
     __livekitMock.roomServiceHosts.length = 0;
+
+    const beforeSocketAdmission = await request(app)
+      .get(`/api/rooms/${roomId}/livekit-token`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(beforeSocketAdmission.status).toBe(403);
+    expect(beforeSocketAdmission.body.error.code).toBe('ROOM_005');
+    expect(__livekitMock.events).toHaveLength(0);
+
+    await expect(roomsService.confirmSocketAdmission(roomId, userId)).resolves.toBe(true);
     const whileLive = await request(app)
       .get(`/api/rooms/${roomId}/livekit-token`)
       .set('Authorization', `Bearer ${token}`);
@@ -153,6 +171,56 @@ describe('LiveKit room-token lifecycle guard', () => {
     expect(__livekitMock.tokenTtls).toEqual(['300s']);
     expect(__livekitMock.roomServiceHosts).toEqual(['http://livekit:7880']);
     expect(__livekitMock.events).toEqual([`create:${roomId}`, `sign:${roomId}`]);
+
+    await prisma.participant.update({
+      where: { userId_roomId: { userId, roomId } },
+      data: { isMuted: true },
+    });
+    __livekitMock.grants.length = 0;
+    const whileMuted = await request(app)
+      .get(`/api/rooms/${roomId}/livekit-token`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(whileMuted.status).toBe(200);
+    expect(whileMuted.body.data.canPublish).toBe(false);
+    expect(__livekitMock.grants.at(-1)).toEqual(
+      expect.objectContaining({ room: roomId, canPublish: false }),
+    );
+
+    // Room.hostId, not a historical Participant.role=HOST label, is the
+    // authority boundary used to mint provider publish grants.
+    const successorName = `lk_successor_${rand()}`;
+    const successorRegistration = await request(app)
+      .post('/api/auth/register')
+      .send({
+        username: successorName,
+        email: `${successorName}@test.local`,
+        password: 'test-password-123',
+      });
+    expect(successorRegistration.status).toBe(201);
+    const successorId = successorRegistration.body.data.user.id as string;
+    userIds.push(successorId);
+    await prisma.room.update({ where: { id: roomId }, data: { hostId: successorId } });
+    await prisma.participant.update({
+      where: { userId_roomId: { userId, roomId } },
+      data: { role: 'HOST', isMuted: false },
+    });
+    __livekitMock.grants.length = 0;
+    const staleHost = await request(app)
+      .get(`/api/rooms/${roomId}/livekit-token`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(staleHost.status).toBe(200);
+    expect(staleHost.body.data.canPublish).toBe(false);
+    expect(__livekitMock.grants.at(-1)).toEqual(
+      expect.objectContaining({ room: roomId, canPublish: false }),
+    );
+
+    const eventsBeforeUnknown = __livekitMock.events.length;
+    const unknown = await request(app)
+      .get('/api/rooms/nonexistent-livekit-room/livekit-token')
+      .set('Authorization', `Bearer ${token}`);
+    expect(unknown.status).toBe(403);
+    expect(unknown.body.error.code).toBe('ROOM_005');
+    expect(__livekitMock.events).toHaveLength(eventsBeforeUnknown);
 
     // Reproduce the production corruption precisely: the room is terminal,
     // while its historical Participant row incorrectly remains active.

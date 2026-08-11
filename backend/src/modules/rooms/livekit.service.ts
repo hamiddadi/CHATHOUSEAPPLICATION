@@ -1,6 +1,5 @@
 import { AccessToken, RoomServiceClient } from 'livekit-server-sdk';
 import { env, LIVEKIT_TOKEN_MAX_TTL_SECONDS } from '../../config/env';
-import { logger } from '../../config/logger';
 import { AppError } from '../../middlewares/error.middleware';
 import { hasCurrentLegalAcceptance } from '../auth/legal-acceptance';
 
@@ -22,6 +21,9 @@ import { hasCurrentLegalAcceptance } from '../auth/legal-acceptance';
  */
 
 export type LivekitParticipantRole = 'HOST' | 'MODERATOR' | 'SPEAKER' | 'LISTENER';
+// Must stay below OUTBOX_HANDLER_TIMEOUT_MS (20s): no timed-out provider call
+// may complete later and overwrite a newer mute/revocation decision.
+export const LIVEKIT_ADMIN_REQUEST_TIMEOUT_SECONDS = 15;
 
 const isLivekitConfigured = (): boolean =>
   Boolean(env.LIVEKIT_API_KEY && env.LIVEKIT_API_SECRET && env.LIVEKIT_URL);
@@ -34,8 +36,14 @@ const httpHost = (wsUrl: string): string => wsUrl.replace(/^ws/i, 'http');
 const errorMessage = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
 const isAlreadyAbsent = (err: unknown): boolean => {
-  const message = errorMessage(err).toLowerCase();
-  return message.includes('does not exist') || message.includes('not found');
+  if (!err || typeof err !== 'object') return false;
+
+  // Only the structured Twirp/gRPC provider code proves idempotent absence.
+  // A reverse proxy or wrong endpoint can return a generic 404 HTML response;
+  // acknowledging that would strand a participant on the real LiveKit server.
+  const candidate = err as { code?: unknown };
+  const code = typeof candidate.code === 'string' ? candidate.code.toLowerCase() : candidate.code;
+  return code === 'not_found' || code === 'notfound' || code === 5;
 };
 
 const isAlreadyPresent = (err: unknown): boolean => {
@@ -64,6 +72,7 @@ const roomServiceClient = (): RoomServiceClient | null => {
       httpHost(env.LIVEKIT_INTERNAL_URL ?? (env.LIVEKIT_URL as string)),
       env.LIVEKIT_API_KEY as string,
       env.LIVEKIT_API_SECRET as string,
+      { requestTimeout: LIVEKIT_ADMIN_REQUEST_TIMEOUT_SECONDS },
     );
   }
   return roomServiceRef;
@@ -86,6 +95,11 @@ const ensureRoomExists = async (room: string): Promise<void> => {
 export const livekitService = {
   isConfigured: isLivekitConfigured,
 
+  /** Provision the provider room before entering a short database lock. */
+  async ensureRoom(roomId: string): Promise<void> {
+    await ensureRoomExists(roomId);
+  },
+
   /**
    * Issue a token good for `env.LIVEKIT_TOKEN_TTL_SECONDS`. Returns the
    * triplet the client needs: token + url + room + identity + the absolute
@@ -95,6 +109,10 @@ export const livekitService = {
     roomId: string;
     userId: string;
     role: LivekitParticipantRole;
+    /** Authoritative DB-derived override used by the locked token path. */
+    canPublish?: boolean;
+    /** The caller already provisioned the room before acquiring DB locks. */
+    roomReady?: boolean;
   }): Promise<{
     token: string;
     url: string;
@@ -126,12 +144,13 @@ export const livekitService = {
     // Existing accounts that have not accepted the current Terms may still
     // listen, but their signed provider capability is receive-only. This
     // closes the native LiveKit publishing path in addition to HTTP/socket UGC.
-    const canPublish = roleCanPublish && (await hasCurrentLegalAcceptance(input.userId));
+    const canPublish =
+      input.canPublish ?? (roleCanPublish && (await hasCurrentLegalAcceptance(input.userId)));
 
     // Self-hosted LiveKit runs with room.auto_create=false. Ensure the
     // application room exists before minting any usable join capability.
     // A transport/server failure therefore fails closed: no JWT is signed.
-    await ensureRoomExists(room);
+    if (!input.roomReady) await ensureRoomExists(room);
 
     const at = new AccessToken(apiKey, apiSecret, {
       identity,
@@ -166,9 +185,10 @@ export const livekitService = {
   /**
    * Force-disconnect a participant from the LiveKit room (server-side kick).
    * Without this, a kicked client's still-valid token lets it keep streaming
-   * audio until the token expires. Best-effort: no-op when LiveKit isn't
-   * configured, and swallows "participant not found" (they may never have
-   * connected to the audio bus). identity === userId by our token convention.
+   * audio until the token expires. No-op when LiveKit isn't configured, and
+   * treats "participant not found" as idempotent success (they may never have
+   * connected to the audio bus). Every other provider error propagates so the
+   * transactional outbox can retry. identity === userId by our token convention.
    */
   async removeParticipant(roomId: string, userId: string): Promise<void> {
     const client = roomServiceClient();
@@ -177,11 +197,33 @@ export const livekitService = {
       await client.removeParticipant(roomId, userId);
     } catch (err) {
       if (isAlreadyAbsent(err)) return;
-      logger.warn('livekit removeParticipant failed', {
-        roomId,
-        userId,
-        err: errorMessage(err),
+      throw err;
+    }
+  },
+
+  /**
+   * Converge an already-connected participant to the current application
+   * publishing policy. Repeated calls are idempotent; a disconnected identity
+   * is also success, while provider outages propagate to the durable outbox.
+   */
+  async setParticipantCanPublish(
+    roomId: string,
+    userId: string,
+    canPublish: boolean,
+  ): Promise<void> {
+    const client = roomServiceClient();
+    if (!client) return;
+    try {
+      await client.updateParticipant(roomId, userId, {
+        permission: {
+          canPublish,
+          canSubscribe: true,
+          canPublishData: false,
+        },
       });
+    } catch (err) {
+      if (isAlreadyAbsent(err)) return;
+      throw err;
     }
   },
 
@@ -197,10 +239,7 @@ export const livekitService = {
       await client.deleteRoom(roomId);
     } catch (err) {
       if (isAlreadyAbsent(err)) return;
-      logger.warn('livekit deleteRoom failed', {
-        roomId,
-        err: errorMessage(err),
-      });
+      throw err;
     }
   },
 };

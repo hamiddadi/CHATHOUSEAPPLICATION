@@ -1,5 +1,4 @@
 import { apiClient } from '../../../shared/services/api/apiClient';
-import { createIdempotencyKey } from '../../../shared/utils/idempotency';
 import type {
   Room,
   RoomCategory,
@@ -10,6 +9,7 @@ import type {
 } from '../../../shared/types/domain';
 import type { Envelope } from '../../../shared/types/api';
 import type { ContentReportReason, ContentReportResult } from '../../../shared/types/moderation';
+import { clearRoomSocketAdmission } from './roomSocketAdmission';
 
 /**
  * Backend is now authoritative for rooms. The service translates the
@@ -290,7 +290,7 @@ export const roomService = {
     return res.data.data.map(toSummary);
   },
 
-  async create(input: CreateRoomInput): Promise<Room> {
+  async create(input: CreateRoomInput, idempotencyKey: string): Promise<Room> {
     const trimmed = input.title.trim();
     if (trimmed.length === 0) throw new Error('Title is required');
     const { isPrivate, roomType } = visibilityToBackend(input.visibility, input.isPrivate);
@@ -309,7 +309,7 @@ export const roomService = {
         topics: input.topics ?? [],
         coHostIds: input.coHostIds ?? [],
       },
-      { headers: { 'Idempotency-Key': createIdempotencyKey() } },
+      { headers: { 'Idempotency-Key': idempotencyKey } },
     );
     return toRoom(res.data.data);
   },
@@ -332,6 +332,7 @@ export const roomService = {
 
   async leave(roomId: string): Promise<{ left: true }> {
     await apiClient.post(`/rooms/${roomId}/leave`);
+    clearRoomSocketAdmission(roomId);
     return { left: true };
   },
 
@@ -410,6 +411,7 @@ export const roomService = {
 
   async end(roomId: string): Promise<{ ended: true }> {
     await apiClient.delete(`/rooms/${roomId}`);
+    clearRoomSocketAdmission(roomId);
     return { ended: true };
   },
 

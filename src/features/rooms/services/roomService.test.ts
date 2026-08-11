@@ -44,6 +44,7 @@ const rawRoom = (over: Record<string, unknown> = {}) => ({
 });
 
 const baseCreate: CreateRoomInput = { title: 'My room', visibility: 'public' };
+const roomCreateKey = 'rn-room-create-contract-123';
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -55,53 +56,53 @@ beforeEach(() => {
 
 describe('roomService.create — the 3 room types map to backend gating fields', () => {
   it('PUBLIC → POST /rooms with isPrivate:false, roomType:OPEN', async () => {
-    await roomService.create({ ...baseCreate, visibility: 'public' });
+    await roomService.create({ ...baseCreate, visibility: 'public' }, roomCreateKey);
     expect(api.post).toHaveBeenCalledWith(
       '/rooms',
       expect.objectContaining({ isPrivate: false, roomType: 'OPEN' }),
       expect.objectContaining({
-        headers: expect.objectContaining({ 'Idempotency-Key': expect.any(String) }),
+        headers: { 'Idempotency-Key': roomCreateKey },
       }),
     );
   });
 
   it('SOCIAL → POST /rooms with isPrivate:false, roomType:SOCIAL (keeps follow-gate path)', async () => {
-    await roomService.create({ ...baseCreate, visibility: 'social' });
+    await roomService.create({ ...baseCreate, visibility: 'social' }, roomCreateKey);
     expect(api.post).toHaveBeenCalledWith(
       '/rooms',
       expect.objectContaining({ isPrivate: false, roomType: 'SOCIAL' }),
       expect.objectContaining({
-        headers: expect.objectContaining({ 'Idempotency-Key': expect.any(String) }),
+        headers: { 'Idempotency-Key': roomCreateKey },
       }),
     );
   });
 
   it('CLOSED/private → POST /rooms with isPrivate:true, roomType:CLOSED', async () => {
-    await roomService.create({ ...baseCreate, visibility: 'closed' });
+    await roomService.create({ ...baseCreate, visibility: 'closed' }, roomCreateKey);
     expect(api.post).toHaveBeenCalledWith(
       '/rooms',
       expect.objectContaining({ isPrivate: true, roomType: 'CLOSED' }),
       expect.objectContaining({
-        headers: expect.objectContaining({ 'Idempotency-Key': expect.any(String) }),
+        headers: { 'Idempotency-Key': roomCreateKey },
       }),
     );
   });
 
   it('trims the title and defaults chatEnabled=true, recordingEnabled=false', async () => {
-    await roomService.create({ ...baseCreate, title: '  Spaced  ' });
+    await roomService.create({ ...baseCreate, title: '  Spaced  ' }, roomCreateKey);
     expect(api.post).toHaveBeenCalledWith(
       '/rooms',
       expect.objectContaining({ title: 'Spaced', chatEnabled: true, recordingEnabled: false }),
       expect.objectContaining({
-        headers: expect.objectContaining({ 'Idempotency-Key': expect.any(String) }),
+        headers: { 'Idempotency-Key': roomCreateKey },
       }),
     );
   });
 
   it('rejects an empty/whitespace title before calling the API', async () => {
-    await expect(roomService.create({ ...baseCreate, title: '   ' })).rejects.toThrow(
-      'Title is required',
-    );
+    await expect(
+      roomService.create({ ...baseCreate, title: '   ' }, roomCreateKey),
+    ).rejects.toThrow('Title is required');
     expect(api.post).not.toHaveBeenCalled();
   });
 });

@@ -78,6 +78,7 @@ const androidAppSigningSha256 =
 const htmlHeaders = (res: Response, language: LegalLanguage): void => {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.setHeader('Content-Language', language);
+  res.setHeader('X-ChatHouse-Legal-Document-Version', legalIdentity.documentVersion);
   res.setHeader('Cache-Control', 'public, max-age=300');
   res.setHeader(
     'Content-Security-Policy',

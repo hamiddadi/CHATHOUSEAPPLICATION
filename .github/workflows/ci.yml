@@ -141,6 +141,8 @@ jobs:
           distribution: temurin
           java-version: '17'
       - uses: gradle/actions/setup-gradle@v4
+      - name: Test the fail-closed Android signature verifier
+        run: node --test scripts/verify-android-jar-signature.test.mjs
       - run: npm ci
       - name: Configure Firebase for native compile
         shell: bash
@@ -298,7 +300,7 @@ jobs:
         run: |
           mkdir -p e2e-artifacts/ios
           ENVFILE=.env.test nohup npm start -- --reset-cache > e2e-artifacts/ios/metro.log 2>&1 &
-          for attempt in {1..60}; do
+          for _ in {1..60}; do
             if curl -fsS http://127.0.0.1:8081/status; then
               break
             fi
@@ -355,6 +357,11 @@ jobs:
       - run: npm ci
       - run: npx prisma generate
       - run: npm run typecheck
+      - name: Verify sourced Postgres bootstrap isolation
+        run: |
+          sh scripts/deploy/test-bootstrap-app-role-source.sh
+          bash scripts/deploy/test-livekit-deploy-guard.sh
+          sh scripts/deploy/test-database-deploy-contract.sh
 
   backend-test:
     name: Backend — Jest (integration)
@@ -402,18 +409,40 @@ jobs:
           cache-dependency-path: backend/package-lock.json
       - run: npm ci
       - run: npx prisma generate
-      # Apply the real migration chain (init -> add_profile_view -> sync_schema_drift)
-      # exactly as production does (backend/Dockerfile runs `migrate deploy`), so CI
-      # catches migration/schema drift instead of masking it with `db push`.
+      # Apply the real migration chain exactly as the production one-shot
+      # `migrate` service does, so CI catches drift instead of masking it with
+      # `db push`.
       - name: Apply migrations to CI Postgres
         run: npx prisma migrate deploy
-      - run: npm run test:ci -- --testTimeout=60000
+      - name: Assert migration/schema parity
+        run: npx prisma migrate diff --from-url "$DATABASE_URL" --to-schema-datamodel prisma/schema.prisma --exit-code
+      - name: Bootstrap restricted CI application role
+        env:
+          POSTGRES_CONTAINER_ID: ${{ job.services.postgres.id }}
+        run: |
+          set -euo pipefail
+          docker cp scripts/deploy/bootstrap-app-role.sh "${POSTGRES_CONTAINER_ID}:/tmp/bootstrap-app-role.sh"
+          docker exec \
+            -e POSTGRES_USER=chathouse \
+            -e POSTGRES_PASSWORD=chathouse \
+            -e POSTGRES_DB=chathouse_test \
+            -e POSTGRES_APP_USER=chathouse_app_ci \
+            -e POSTGRES_APP_PASSWORD=ci_app_role_0123456789abcdef \
+            "$POSTGRES_CONTAINER_ID" \
+            sh /tmp/bootstrap-app-role.sh
+      - name: Run backend suite with the restricted runtime role
+        env:
+          DATABASE_URL: postgresql://chathouse_app_ci:ci_app_role_0123456789abcdef@localhost:5433/chathouse_test?schema=public
+          TEST_APP_DATABASE_URL: postgresql://chathouse_app_ci:ci_app_role_0123456789abcdef@localhost:5433/chathouse_test?schema=public
+          TEST_MIGRATION_DATABASE_URL: postgresql://chathouse:chathouse@localhost:5433/chathouse_test?schema=public
+        run: npm run test:ci -- --testTimeout=60000
       # The full suite raises AUTH_RATE_LIMIT_MAX to 1000 (a shared in-memory
       # bucket) so the login rate-limiter assertion self-skips. Run it once in
       # isolation with a low cap so the 429 RATE_LIMIT_001 path is covered in CI.
       - name: Rate-limiter assertion (isolated low cap)
         env:
           AUTH_RATE_LIMIT_MAX: '10'
+          DATABASE_URL: postgresql://chathouse_app_ci:ci_app_role_0123456789abcdef@localhost:5433/chathouse_test?schema=public
         run: npx jest auth.coverage --runInBand -t 'rate limiter'
       - name: Upload backend coverage
         if: always()
@@ -543,12 +572,27 @@ jobs:
         run: npm run load:check
       - run: npx prisma generate
       - run: npx prisma migrate deploy
+      - name: Bootstrap restricted load-test application role
+        env:
+          POSTGRES_CONTAINER_ID: ${{ job.services.postgres.id }}
+        run: |
+          set -euo pipefail
+          docker cp scripts/deploy/bootstrap-app-role.sh "${POSTGRES_CONTAINER_ID}:/tmp/bootstrap-app-role.sh"
+          docker exec \
+            -e POSTGRES_USER=chathouse \
+            -e POSTGRES_PASSWORD=chathouse \
+            -e POSTGRES_DB=chathouse_test \
+            -e POSTGRES_APP_USER=chathouse_app_ci \
+            -e POSTGRES_APP_PASSWORD=ci_app_role_0123456789abcdef \
+            "$POSTGRES_CONTAINER_ID" \
+            sh /tmp/bootstrap-app-role.sh
       - run: npm run build
       - name: Start the compiled mono-server
         shell: bash
         run: |
-          nohup npm start > load-api.log 2>&1 &
-          for attempt in {1..60}; do
+          DATABASE_URL='postgresql://chathouse_app_ci:ci_app_role_0123456789abcdef@localhost:5433/chathouse_test?schema=public' \
+            nohup npm start > load-api.log 2>&1 &
+          for _ in {1..60}; do
             if curl -fsS http://127.0.0.1:4000/health; then
               break
             fi
@@ -591,19 +635,21 @@ jobs:
           GITLEAKS_ENABLE_SUMMARY: 'true'
 
   npm-audit:
-    name: npm audit (blocking)
+    name: npm audit (blocking + reviewed backport)
     runs-on: ubuntu-latest
     strategy:
       matrix:
         workdir: ['.', 'backend']
-    defaults:
-      run:
-        working-directory: ${{ matrix.workdir }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
       # Build and test tooling runs arbitrary repository inputs in CI, so
-      # high-severity findings in devDependencies must block the pipeline too.
-      - run: npm audit --audit-level=high
+      # high-severity findings in devDependencies must block too. The guard
+      # permits only reviewed advisories whose patch hash, installed version,
+      # dependency node and expiry are all pinned; every new advisory fails.
+      - name: Test the audit guard once from the repository root
+        if: ${{ matrix.workdir == '.' }}
+        run: node --test scripts/npm-audit-guard.test.mjs
+      - run: node scripts/npm-audit-guard.mjs --workdir "${{ matrix.workdir }}"

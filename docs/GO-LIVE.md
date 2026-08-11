@@ -1,6 +1,6 @@
 # ChatHouse — audit Go-Live Android et iOS
 
-> **Décision au 28 juillet 2026 : NO-GO.**
+> **Décision au 10 août 2026 : NO-GO.**
 >
 > Le dépôt a été fortement durci, mais cette version ne doit pas encore être
 > envoyée en production ni soumise aux stores. Il manque des artefacts signés
@@ -14,6 +14,8 @@
 
 La variable GitHub `PUBLIC_RELEASE_ENABLED` doit rester absente ou à `false`
 jusqu’à ce que toutes les cases obligatoires soient accompagnées d’une preuve.
+Dans cet état, le workflow de production échoue explicitement : une publication
+désactivée ne peut plus apparaître comme un workflow vert simplement sauté.
 
 ## Préflight reproductible
 
@@ -35,8 +37,9 @@ Le verdict `GO` exige simultanément :
 - DNS, TLS, pages publiques, `assetlinks.json` et
   `apple-app-site-association` accessibles et cohérents ;
 - les documents juridiques et fiches stores sans brouillon ni placeholder ;
-- une preuve liée au SHA exact pour Play Internal Testing, TestFlight et les
-  tests physiques Android, iPhone et iPad. Le format est fourni dans
+- une preuve liée au SHA source, au SHA-256 exact de l’AAB, au SHA-256 exact de
+  `ChatHouse.xcarchive.tgz` et au numéro de build iOS pour Play Internal Testing,
+  TestFlight et les tests physiques Android, iPhone et iPad. Le format est fourni dans
   `docs/GO-LIVE-EVIDENCE.example.json`.
 
 Dans GitHub Actions, lancer manuellement **Go-Live Preflight - Android and iOS**
@@ -46,6 +49,7 @@ artefacts signés. L’environnement GitHub protégé `production` doit fournir 
 - secrets : `MOBILE_PRODUCTION_ENV_BASE64`,
   `BACKEND_PRODUCTION_ENV_BASE64`, `FIREBASE_ANDROID_CONFIG_BASE64`,
   `FIREBASE_IOS_CONFIG_BASE64`, `ANDROID_UPLOAD_KEYSTORE_BASE64`,
+  `METRICS_TOKEN_BASE64`,
   `ANDROID_UPLOAD_STORE_PASSWORD`, `ANDROID_UPLOAD_KEY_ALIAS` et
   `ANDROID_UPLOAD_KEY_PASSWORD` ;
 - variables : `IOS_TEAM_ID`, `ANDROID_APP_SIGNING_SHA256`,
@@ -56,19 +60,19 @@ artefacts signés. L’environnement GitHub protégé `production` doit fournir 
 Le rapport Actions est conservé 90 jours. Un rapport absent, un contrôle sauté
 ou un artefact provenant d’un autre commit reste un `NO-GO`.
 
-## État vérifié dans ce workspace
+## État des gates dans le dépôt
 
-| Zone                  | État                                                                                                                                                                           | Limite de la preuve                                                                                                    |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------- |
-| Frontend React Native | Qualité OK ; 92/92 suites et 604/604 tests réussis                                                                                                                             | Les builds natifs signés et les essais sur appareils physiques restent requis.                                         |
-| Backend               | Lint, typecheck, build, 65/65 suites (485 tests) et 8 migrations sur base PostgreSQL vierge validés                                                                            | Un clone anonymisé de production, les tests de charge et un déploiement production restent requis.                     |
-| Android               | Debug/lint validés ; release TLS-only ; smoke debug ARM64 réussi sur OPPO CPH2043 Android 12 (installation, 2 lancements à froid, navigation onboarding, aucune erreur fatale) | Aucun AAB production signé ; ce smoke ne couvre ni Play Internal ni les parcours réseau, micro et notifications.       |
-| iOS                   | Configuration statique, garde d’environnement, AppIcon 1024 × 1024 sans alpha et ressources contrôlées                                                                         | Aucune archive signée ni aucun TestFlight n’a été produit sous Windows.                                                |
-| Production            | Non disponible                                                                                                                                                                 | `api.chathouse.app`, `livekit.chathouse.app` et `app.chathouse.com` n’ont pas d’enregistrement DNS A lors du contrôle. |
+| Zone                  | Gates disponibles dans le dépôt                                          | Preuve encore requise sur le SHA candidat                                      |
+| --------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------ |
+| Frontend React Native | Lint, format, typecheck, couverture et suite Jest bloquants dans la CI   | Rejouer tous les gates puis tester les binaires signés sur appareils physiques |
+| Backend               | Lint, typecheck, build, tests, migrations et charge bloquants dans la CI | Drill sur clone anonymisé, restauration et déploiement staging                 |
+| Android               | Gardes Release, TLS, signature stricte et compatibilité 16 Kio contrôlés | AAB signé exact, Play Internal et parcours physiques                           |
+| iOS                   | Gardes Release, ressources, signature et profil d’archive contrôlés      | Archive signée exacte, TestFlight, iPhone et iPad physiques                    |
+| Production            | Déploiement par digest, smoke tests et rollback automatisés              | Infrastructure publique et exercice réel rattachés au digest candidat          |
 
-Ces résultats locaux ont été obtenus après les derniers correctifs. Ils ne
-remplacent jamais les tests staging, appareils, TestFlight ou Play Internal
-Testing.
+La présence d’un gate ne constitue pas sa preuve d’exécution. Le SHA candidat
+doit repasser tous les contrôles ; aucun compteur historique n’est utilisé comme
+preuve de release.
 
 ## Artefacts techniques à ne jamais publier
 
@@ -80,12 +84,11 @@ doivent être ni téléversées dans Play Console ni distribuées à des utilisa
 
 ## 1. Gate commune — code et données
 
-- [x] `npm run quality` réussit sans avertissement.
-- [x] `npm run test:ci` réussit intégralement avec la couverture attendue.
-- [x] Backend : lint, typecheck, build et suite complète réussissent
-      (65 suites, 485 tests réussis, 1 ignoré ; couverture lignes 71,67 %).
+- [ ] Le SHA candidat passe `npm run quality` sans avertissement.
+- [ ] Le SHA candidat passe `npm run test:ci` avec la couverture attendue.
+- [ ] Backend : lint, typecheck, build et suite complète passent sur le SHA candidat.
 - [ ] Les patches natifs passent `patch-package --error-on-fail`.
-- [x] Les huit migrations se déploient sur une base PostgreSQL vide.
+- [ ] Toute la chaîne de migrations se déploie sur une base PostgreSQL vide.
 - [ ] `prisma migrate deploy` réussit sur un clone récent et anonymisé de la
       production, sans `db push`, perte de données ni verrou excessif.
 - [ ] La migration suit un schéma expand/contract rétrocompatible avec l’image
@@ -117,8 +120,9 @@ Références détaillées :
 - [ ] Choisir explicitement un `versionCode` inutilisé et un `versionName`.
 - [ ] Générer l’AAB **toutes ABI** via
       `.\scripts\build-release-aab.ps1 -VersionCode N -VersionName X.Y.Z`.
-- [ ] Vérifier la signature d’upload, l’alignement 16 Kio et chaque bibliothèque
-      native de l’AAB final.
+- [ ] Vérifier la signature d’upload en mode strict et son empreinte par rapport
+      au keystore protégé, puis l’alignement 16 Kio et chaque bibliothèque native
+      de l’AAB final.
 - [ ] Téléverser d’abord sur Play Internal Testing et enregistrer l’empreinte
       Play App Signing dans Firebase et les restrictions Google Maps.
 - [ ] Publier
@@ -169,7 +173,8 @@ Référence : [`runbook.md`](../backend/docs/deployment/runbook.md).
       publiquement avec un certificat valide.
 - [ ] Renseigner tous les secrets de production : JWT, métriques, Postgres,
       Redis, Twilio, Resend, Firebase/ADC, S3, LiveKit, Stripe et éventuellement
-      Sentry. Aucun mode stub ne doit rester actif.
+      Sentry. Les mots de passe Postgres/Redis doivent respecter le contrat URI
+      non réservé du runbook. Aucun mode stub ne doit rester actif.
 - [ ] Vérifier sur staging les vrais SMS/e-mails, push FCM/APNs, média privé,
       LiveKit, webhooks Stripe et purge RGPD.
 - [ ] Tester Prometheus/Grafana/Alertmanager et recevoir une vraie alerte de
@@ -212,6 +217,15 @@ Référence : [`runbook.md`](../backend/docs/deployment/runbook.md).
 - [ ] Maintenir les achats numériques et pourboires désactivés dans les builds
       mobiles tant qu’un parcours conforme StoreKit/Google Play Billing n’est
       pas livré et approuvé.
+
+### P2 — durcissement de la chaîne d’approvisionnement
+
+- [ ] Remplacer les tags GitHub Actions mutables par des SHA de commit complets,
+      avec un processus documenté de mise à jour.
+- [ ] Remplacer l’installation Maestro par pipeline distant par un artefact
+      versionné dont le checksum est vérifié avant exécution.
+- [ ] Épingler les images d’infrastructure de production par digest et automatiser
+      les propositions de mise à jour avec revue humaine.
 
 ## 6. Ordre d’activation
 

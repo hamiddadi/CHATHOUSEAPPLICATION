@@ -30,6 +30,10 @@ const renderSheet = (target = makeTarget()) => {
 };
 
 describe('HostActionsSheet', () => {
+  beforeEach(async () => {
+    await i18n.changeLanguage('en');
+  });
+
   afterEach(() => {
     jest.restoreAllMocks();
   });
@@ -38,7 +42,7 @@ describe('HostActionsSheet', () => {
     const muteSpy = jest.spyOn(roomService, 'setMute').mockResolvedValue({ isMuted: true });
     const { getByLabelText, onClose } = renderSheet();
 
-    fireEvent.press(getByLabelText('Couper son micro'));
+    fireEvent.press(getByLabelText('Mute microphone'));
 
     await waitFor(() => expect(muteSpy).toHaveBeenCalledWith('room-1', true, 'participant-1'));
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
@@ -49,7 +53,7 @@ describe('HostActionsSheet', () => {
     jest.spyOn(roomService, 'setMute').mockRejectedValue({});
     const { getByLabelText, getByText, onClose } = renderSheet();
 
-    fireEvent.press(getByLabelText('Couper son micro'));
+    fireEvent.press(getByLabelText('Mute microphone'));
 
     await waitFor(() =>
       expect(alertSpy).toHaveBeenCalledWith(i18n.t('common.error'), i18n.t('common.actionFailed')),
@@ -57,7 +61,7 @@ describe('HostActionsSheet', () => {
     expect(onClose).not.toHaveBeenCalled();
     expect(getByText('Test Speaker')).toBeTruthy();
     await waitFor(() =>
-      expect(getByLabelText('Couper son micro').props.accessibilityState.disabled).toBe(false),
+      expect(getByLabelText('Mute microphone').props.accessibilityState.disabled).toBe(false),
     );
   });
 
@@ -69,14 +73,14 @@ describe('HostActionsSheet', () => {
     const muteSpy = jest.spyOn(roomService, 'setMute').mockReturnValue(request);
     const { getByLabelText, onClose } = renderSheet();
 
-    const muteButton = getByLabelText('Couper son micro');
+    const muteButton = getByLabelText('Mute microphone');
     fireEvent.press(muteButton);
     fireEvent.press(muteButton);
 
     await waitFor(() => expect(muteSpy).toHaveBeenCalledTimes(1));
     await waitFor(() => {
-      expect(getByLabelText('Couper son micro').props.accessibilityState.disabled).toBe(true);
-      expect(getByLabelText('Annuler').props.accessibilityState.disabled).toBe(true);
+      expect(getByLabelText('Mute microphone').props.accessibilityState.disabled).toBe(true);
+      expect(getByLabelText('Cancel').props.accessibilityState.disabled).toBe(true);
     });
 
     resolveRequest({ isMuted: true });
@@ -93,7 +97,7 @@ describe('HostActionsSheet', () => {
     const kickSpy = jest.spyOn(roomService, 'kick').mockRejectedValue({});
     const { getByLabelText, getByText, onClose } = renderSheet();
 
-    fireEvent.press(getByLabelText('Expulser (ban 30 min)'));
+    fireEvent.press(getByLabelText('Remove (30-minute ban)'));
     expect(confirmButton).toBeDefined();
 
     act(() => {
@@ -122,12 +126,30 @@ describe('HostActionsSheet', () => {
       makeTarget({ role: 'listener', audio: 'idle' }),
     );
 
-    fireEvent.press(getByLabelText('Nominer pour parler (demande)'));
+    fireEvent.press(getByLabelText('Nominate to speak (request)'));
 
     await waitFor(() => expect(inviteSpy).toHaveBeenCalledWith('room-1', 'participant-1'));
     await waitFor(() =>
       expect(alertSpy).toHaveBeenCalledWith(i18n.t('common.error'), i18n.t('common.actionFailed')),
     );
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('localizes action rows and confirmation dialogs in French', async () => {
+    await i18n.changeLanguage('fr');
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
+    const { getByLabelText } = renderSheet();
+
+    expect(getByLabelText('Couper son micro')).toBeTruthy();
+    fireEvent.press(getByLabelText("Transférer le rôle d'hôte"));
+
+    expect(alertSpy).toHaveBeenCalledWith(
+      'Transférer la room',
+      "Donner le rôle d'hôte à @speaker ? Vous deviendrez speaker.",
+      expect.arrayContaining([
+        expect.objectContaining({ text: 'Annuler', style: 'cancel' }),
+        expect.objectContaining({ text: 'Transférer', style: 'destructive' }),
+      ]),
+    );
   });
 });

@@ -1,4 +1,4 @@
-import React, { memo, useCallback, useState } from 'react';
+import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import MaterialIcons from '@react-native-vector-icons/material-icons';
 import { useMutation } from '@tanstack/react-query';
@@ -15,21 +15,15 @@ import { SHARE_BASE_URL } from '../../../../core/navigation/linking';
 import { useExtBackend } from '../../../extensions/hooks/useExtBackend';
 import { ExtTipSheet } from '../../../extensions/components/ExtTipSheet';
 import { areExternalDigitalPurchasesAllowed } from '../../../extensions/utils/digitalPurchases';
+import { ProfileReportSheet } from '../../../social/components/ProfileReportSheet';
+import { createIdempotencyKey } from '../../../../shared/utils/idempotency';
+import { profileService } from '../../../profile/services/profileService';
+import { retryTransientMutation } from '../../../../shared/services/api/retryPolicy';
 
-// Direct REST shims — the existing `profileService.follow/wave` are
-// in-memory mocks. We hit the real API here so taps actually mutate
-// state. A later refactor can centralise these into a typed service.
-const realFollow = (userId: string): Promise<unknown> =>
-  apiClient.post(`/follow/${userId}`).then(r => r.data);
+// Follow uses the typed profile service so private-account request state is
+// retained. Wave remains a small direct REST call until it joins that service.
 const realWave = (userId: string): Promise<unknown> =>
   apiClient.post(`/users/${userId}/wave`).then(r => r.data);
-const REPORT_REASONS: readonly { label: string; value: ReportReason }[] = [
-  { label: 'Spam', value: 'spam' },
-  { label: 'Harcèlement', value: 'harassment' },
-  { label: 'Faux profil', value: 'fake_profile' },
-  { label: 'Autre', value: 'other' },
-];
-
 interface ProfileActionSheetProps {
   /** When null, the sheet is hidden. */
   target: UserSummary | null;
@@ -53,7 +47,7 @@ interface ProfileActionSheetProps {
 export const ProfileActionSheet: React.FC<ProfileActionSheetProps> = memo(
   ({ target, roomId, viewerId, onClose, onOpenProfile, onMessage }) => {
     const { t } = useTranslation();
-    const follow = useMutation({ mutationFn: realFollow });
+    const follow = useMutation({ mutationFn: profileService.follow });
     const ping = usePingUserToRoom();
     const wave = useMutation({ mutationFn: realWave });
     const block = useMutation({ mutationFn: socialService.block });
@@ -63,15 +57,22 @@ export const ProfileActionSheet: React.FC<ProfileActionSheetProps> = memo(
     });
     // #112: post the room link as a DM so the participant can hop in from chat.
     const shareDm = useMutation({
-      mutationFn: (userId: string) =>
+      mutationFn: ({ userId, idempotencyKey }: { userId: string; idempotencyKey: string }) =>
         messageService.send(
           userId,
           t('room.shareDmMessage', { url: `${SHARE_BASE_URL}/room/${roomId}` }),
+          idempotencyKey,
         ),
+      retry: retryTransientMutation,
     });
     const { status: extStatus } = useExtBackend();
     const externalPurchasesAllowed = areExternalDigitalPurchasesAllowed();
     const [tipping, setTipping] = useState(false);
+    const [reportVisible, setReportVisible] = useState(false);
+    const shareInFlightRef = useRef(false);
+    useEffect(() => {
+      if (!target) setReportVisible(false);
+    }, [target]);
     const handleTip = useCallback(() => setTipping(true), []);
     const handleTipClose = useCallback(() => setTipping(false), []);
     const handleTipSent = useCallback(() => {
@@ -82,13 +83,23 @@ export const ProfileActionSheet: React.FC<ProfileActionSheetProps> = memo(
     const handleFollow = useCallback(() => {
       if (!target) return;
       follow.mutate(target.id, {
-        onSuccess: () => {
-          Alert.alert('OK', `Vous suivez maintenant @${target.username ?? target.displayName}.`);
+        onSuccess: result => {
+          Alert.alert(
+            result.requested
+              ? t('room.profileActions.requestedTitle')
+              : t('room.profileActions.followedTitle'),
+            t(
+              result.requested
+                ? 'room.profileActions.requestedBody'
+                : 'room.profileActions.followedBody',
+              { handle: target.username ?? target.displayName },
+            ),
+          );
           onClose();
         },
-        onError: e => Alert.alert('Erreur', errorMessage(e, 'Échec')),
+        onError: e => Alert.alert(t('common.error'), errorMessage(e, t('common.actionFailed'))),
       });
-    }, [follow, onClose, target]);
+    }, [follow, onClose, t, target]);
 
     const handlePing = useCallback(() => {
       if (!target) return;
@@ -97,23 +108,25 @@ export const ProfileActionSheet: React.FC<ProfileActionSheetProps> = memo(
         {
           onSuccess: () => {
             Alert.alert(
-              'Ping envoyé',
-              `@${target.username ?? target.displayName} reçoit une notification.`,
+              t('room.profileActions.pingSentTitle'),
+              t('room.profileActions.pingSentBody', {
+                handle: target.username ?? target.displayName,
+              }),
             );
             onClose();
           },
-          onError: e => Alert.alert('Erreur', errorMessage(e, 'Échec')),
+          onError: e => Alert.alert(t('common.error'), errorMessage(e, t('common.actionFailed'))),
         },
       );
-    }, [onClose, ping, roomId, target]);
+    }, [onClose, ping, roomId, t, target]);
 
     const handleWave = useCallback(() => {
       if (!target) return;
       wave.mutate(target.id, {
         onSuccess: () => onClose(),
-        onError: e => Alert.alert('Erreur', errorMessage(e, 'Échec')),
+        onError: e => Alert.alert(t('common.error'), errorMessage(e, t('common.actionFailed'))),
       });
-    }, [onClose, target, wave]);
+    }, [onClose, t, target, wave]);
 
     const handleOpenProfile = useCallback(() => {
       if (!target || !onOpenProfile) return;
@@ -127,77 +140,82 @@ export const ProfileActionSheet: React.FC<ProfileActionSheetProps> = memo(
       onClose();
     }, [onClose, onMessage, target]);
 
-    const handleShareRoom = useCallback(() => {
-      if (!target) return;
-      shareDm.mutate(target.id, {
-        onSuccess: () => {
-          Alert.alert(
-            t('room.shareSentTitle'),
-            t('room.shareSentBody', { handle: target.username ?? target.displayName }),
-          );
-          onClose();
-        },
-        onError: e => Alert.alert(t('common.error'), errorMessage(e, t('common.actionFailed'))),
-      });
+    const handleShareRoom = useCallback(async () => {
+      if (!target || shareInFlightRef.current) return;
+      shareInFlightRef.current = true;
+      try {
+        await shareDm.mutateAsync({
+          userId: target.id,
+          idempotencyKey: createIdempotencyKey(),
+        });
+        Alert.alert(
+          t('room.shareSentTitle'),
+          t('room.shareSentBody', { handle: target.username ?? target.displayName }),
+        );
+        onClose();
+      } catch (e) {
+        Alert.alert(t('common.error'), errorMessage(e, t('common.actionFailed')));
+      } finally {
+        shareInFlightRef.current = false;
+      }
     }, [onClose, shareDm, t, target]);
 
     const handleBlock = useCallback(() => {
       if (!target) return;
       const handle = target.username ?? target.displayName;
       Alert.alert(
-        `Bloquer @${handle} ?`,
-        'Vous ne pourrez plus vous suivre, échanger de messages ni partager une room.',
+        t('profile.blockConfirmTitle', { handle: `@${handle}` }),
+        t('room.profileActions.blockBody'),
         [
-          { text: 'Annuler', style: 'cancel' },
+          { text: t('common.cancel'), style: 'cancel' },
           {
-            text: 'Bloquer',
+            text: t('profile.blockConfirm'),
             style: 'destructive',
             onPress: () =>
               block.mutate(target.id, {
                 onSuccess: () => onClose(),
-                onError: e => Alert.alert('Erreur', errorMessage(e, 'Échec du blocage')),
+                onError: e =>
+                  Alert.alert(t('common.error'), errorMessage(e, t('common.actionFailed'))),
               }),
           },
         ],
         { cancelable: true },
       );
-    }, [block, onClose, target]);
+    }, [block, onClose, t, target]);
 
-    const handleReport = useCallback(() => {
-      if (!target) return;
-      const handle = target.username ?? target.displayName;
-      Alert.alert(
-        `Signaler @${handle}`,
-        'Pourquoi souhaitez-vous signaler ce profil ?',
-        [
-          ...REPORT_REASONS.map(reason => ({
-            text: reason.label,
-            onPress: () =>
-              report.mutate(
-                { userId: target.id, reason: reason.value },
-                {
-                  onSuccess: () => {
-                    Alert.alert('Merci', 'Votre signalement a été transmis à la modération.');
-                    onClose();
-                  },
-                  onError: e => Alert.alert('Erreur', errorMessage(e, 'Échec du signalement')),
-                },
-              ),
-          })),
-          { text: 'Annuler', style: 'cancel' as const },
-        ],
-        { cancelable: true },
-      );
-    }, [onClose, report, target]);
+    const handleReport = useCallback(() => setReportVisible(true), []);
+    const handleReportReason = useCallback(
+      (reason: ReportReason) => {
+        if (!target || report.isPending) return;
+        report.mutate(
+          { userId: target.id, reason },
+          {
+            onSuccess: () => {
+              setReportVisible(false);
+              Alert.alert(t('room.profileActions.reportSentTitle'), t('profile.reportThanks'));
+              onClose();
+            },
+            onError: e => Alert.alert(t('common.error'), errorMessage(e, t('common.actionFailed'))),
+          },
+        );
+      },
+      [onClose, report, t, target],
+    );
 
     if (!target) return null;
     const isSelf = viewerId === target.id;
 
     return (
       <>
-        <Modal visible transparent animationType="slide" onRequestClose={onClose}>
-          <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="Fermer">
-            <Pressable style={styles.sheet} onPress={() => undefined}>
+        <Modal visible={!reportVisible} transparent animationType="slide" onRequestClose={onClose}>
+          <Pressable style={styles.backdrop} onPress={onClose} accessible={false}>
+            <Pressable
+              style={styles.sheet}
+              onPress={() => undefined}
+              accessible={false}
+              accessibilityViewIsModal
+              importantForAccessibility="yes"
+            >
               <View style={styles.handle} />
               <View style={styles.header}>
                 <Avatar
@@ -213,12 +231,24 @@ export const ProfileActionSheet: React.FC<ProfileActionSheetProps> = memo(
 
               {!isSelf ? (
                 <>
-                  <ActionRow icon="person-add" label="Suivre" onPress={handleFollow} />
+                  <ActionRow icon="person-add" label={t('profile.follow')} onPress={handleFollow} />
                   {onMessage ? (
-                    <ActionRow icon="chat" label="Envoyer un message" onPress={handleMessage} />
+                    <ActionRow
+                      icon="chat"
+                      label={t('room.profileActions.message')}
+                      onPress={handleMessage}
+                    />
                   ) : null}
-                  <ActionRow icon="notifications" label="Ping (rejoins-moi)" onPress={handlePing} />
-                  <ActionRow icon="waves" label="Envoyer un wave 🌊" onPress={handleWave} />
+                  <ActionRow
+                    icon="notifications"
+                    label={t('room.profileActions.ping')}
+                    onPress={handlePing}
+                  />
+                  <ActionRow
+                    icon="waves"
+                    label={t('room.profileActions.wave')}
+                    onPress={handleWave}
+                  />
                   <ActionRow
                     icon="share"
                     label={t('room.shareRoomAction')}
@@ -227,34 +257,49 @@ export const ProfileActionSheet: React.FC<ProfileActionSheetProps> = memo(
                   {extStatus.features.payments && externalPurchasesAllowed ? (
                     <ActionRow
                       icon="volunteer-activism"
-                      label="Envoyer un pourboire 💸"
+                      label={t('room.profileActions.tip')}
                       onPress={handleTip}
                     />
                   ) : null}
                   {onOpenProfile ? (
                     <ActionRow
                       icon="person"
-                      label="Voir le profil complet"
+                      label={t('room.profileActions.openProfile')}
                       onPress={handleOpenProfile}
                     />
                   ) : null}
-                  <ActionRow icon="flag" label="Signaler ce profil" onPress={handleReport} />
-                  <ActionRow icon="block" label="Bloquer ce profil" onPress={handleBlock} />
+                  <ActionRow
+                    icon="flag"
+                    label={t('room.profileActions.report')}
+                    onPress={handleReport}
+                  />
+                  <ActionRow
+                    icon="block"
+                    label={t('room.profileActions.block')}
+                    onPress={handleBlock}
+                  />
                 </>
               ) : (
-                <Text style={styles.selfNote}>C&apos;est vous 👋</Text>
+                <Text style={styles.selfNote}>{t('room.profileActions.self')}</Text>
               )}
               <Pressable
                 onPress={onClose}
                 style={styles.cancel}
                 accessibilityRole="button"
-                accessibilityLabel="Fermer"
+                accessibilityLabel={t('common.close')}
               >
-                <Text style={styles.cancelLabel}>Annuler</Text>
+                <Text style={styles.cancelLabel}>{t('common.cancel')}</Text>
               </Pressable>
             </Pressable>
           </Pressable>
         </Modal>
+        <ProfileReportSheet
+          visible={reportVisible}
+          targetLabel={`@${target.username ?? target.displayName}`}
+          submitting={report.isPending}
+          onClose={() => setReportVisible(false)}
+          onSelect={handleReportReason}
+        />
         <ExtTipSheet
           target={externalPurchasesAllowed && tipping ? target : null}
           onClose={handleTipClose}

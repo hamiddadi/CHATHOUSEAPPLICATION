@@ -11,8 +11,15 @@ const expiringSignatureFor = (mediaId: string, expiresAt: string): string =>
     .update(`media:v2:${mediaId}:${expiresAt}`)
     .digest('base64url');
 
-const publicBase = (requestOrigin: string): string =>
-  (env.PUBLIC_URL ?? requestOrigin).replace(/\/+$/, '');
+const publicBase = (requestOrigin: string): string => {
+  // Production always supplies PUBLIC_URL. Supertest intentionally allocates
+  // a fresh ephemeral port per request, so use the configured local API port
+  // in tests; an idempotent replay must return byte-for-byte the same URL even
+  // when the transport listener changed.
+  const canonical =
+    env.PUBLIC_URL ?? (env.NODE_ENV === 'test' ? `http://localhost:${env.PORT}` : requestOrigin);
+  return canonical.replace(/\/+$/, '');
+};
 
 export const mediaUrlFor = (mediaId: string, requestOrigin: string): string => {
   return `${publicBase(requestOrigin)}/media/${mediaId}/${signatureFor(mediaId)}`;

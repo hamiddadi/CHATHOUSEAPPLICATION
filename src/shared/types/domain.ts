@@ -25,6 +25,8 @@ export interface User {
   followersCount: number;
   followingCount: number;
   isFollowedByMe: boolean;
+  /** True only for my own pending request to this private account. */
+  followRequestedByMe?: boolean;
   // Present on the authenticated viewer's following list. It is an
   // actionable server-side privacy result, not the recipient's private
   // dmPrivacy value. Undefined on search/profile payloads.
@@ -172,9 +174,12 @@ export interface Conversation {
  * ========================================================== */
 export type NotificationKind =
   | 'follow'
+  | 'follow_request'
   | 'room_invite'
   | 'house_invite'
   | 'room_starting'
+  | 'room_canceled'
+  | 'room_ended_by_admin'
   | 'mention'
   | 'wave'
   | 'hand_accepted'
@@ -188,6 +193,9 @@ export interface AppNotification {
   message: string;
   roomId: string | null;
   houseId: string | null;
+  /** Present for message notifications; group ids route to GroupChat. */
+  conversationId?: string | null;
+  conversationType?: 'dm' | 'group' | null;
   createdAt: string;
   isRead: boolean;
 }

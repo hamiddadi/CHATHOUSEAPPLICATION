@@ -1,6 +1,8 @@
+import type { Prisma } from '@prisma/client';
 import { redis } from '../../../config/redis';
 import { prisma } from '../../../config/database';
 import { extError } from '../../utils/ExtAppError';
+import { withLockedRoomState } from '../../../modules/rooms/room-state-lock';
 
 /**
  * Per-message chat reactions (Module 7.3 / CHAT-007).
@@ -27,8 +29,14 @@ const kUser = (id: string) => `ext:chatreact:${id}:user`;
 
 export type ReactionsByEmoji = Record<string, { count: number; byMe: boolean }>;
 
-const requireMessageAccess = async (callerId: string, messageId: string): Promise<void> => {
-  const msg = await prisma.roomChatMessage.findFirst({
+type MessageAccessClient = Pick<Prisma.TransactionClient, 'roomChatMessage'>;
+
+const requireMessageAccess = async (
+  client: MessageAccessClient,
+  callerId: string,
+  messageId: string,
+): Promise<void> => {
+  const msg = await client.roomChatMessage.findFirst({
     where: {
       id: messageId,
       isDeleted: false,
@@ -43,6 +51,7 @@ const requireMessageAccess = async (callerId: string, messageId: string): Promis
       room: {
         select: {
           chatVisibility: true,
+          hostId: true,
           participants: {
             where: { userId: callerId, leftAt: null },
             select: { role: true },
@@ -54,7 +63,11 @@ const requireMessageAccess = async (callerId: string, messageId: string): Promis
   });
   if (!msg) throw extError('CLUB_REQ_NOT_FOUND', 'Message not found');
   const role = msg.room.participants[0]?.role;
-  if (msg.room.chatVisibility === 'MODS_ONLY' && role !== 'HOST' && role !== 'MODERATOR') {
+  if (
+    msg.room.chatVisibility === 'MODS_ONLY' &&
+    msg.room.hostId !== callerId &&
+    role !== 'MODERATOR'
+  ) {
     // Match roomsService.listRoomMessages: listeners cannot infer reactions
     // for chat history hidden from them.
     throw extError('CLUB_REQ_NOT_FOUND', 'Message not found');
@@ -119,16 +132,23 @@ export const chatReactionsService = {
     if (!ALLOWED.has(emoji)) {
       throw extError('PAY_INVALID', `Emoji "${emoji}" not in allowed set`);
     }
-    await requireMessageAccess(callerId, messageId);
-    await redis.eval(TOGGLE_SCRIPT, {
-      keys: [kUser(messageId), ...ALLOWED_LIST.map(value => kBy(messageId, value))],
-      arguments: [callerId, emoji, String(TTL_S), ...ALLOWED_LIST],
+    const reference = await prisma.roomChatMessage.findUnique({
+      where: { id: messageId },
+      select: { roomId: true },
+    });
+    if (!reference) throw extError('CLUB_REQ_NOT_FOUND', 'Message not found');
+    await withLockedRoomState(reference.roomId, async tx => {
+      await requireMessageAccess(tx, callerId, messageId);
+      await redis.eval(TOGGLE_SCRIPT, {
+        keys: [kUser(messageId), ...ALLOWED_LIST.map(value => kBy(messageId, value))],
+        arguments: [callerId, emoji, String(TTL_S), ...ALLOWED_LIST],
+      });
     });
     return readReactions(callerId, messageId);
   },
 
   async list(callerId: string, messageId: string): Promise<ReactionsByEmoji> {
-    await requireMessageAccess(callerId, messageId);
+    await requireMessageAccess(prisma, callerId, messageId);
     return readReactions(callerId, messageId);
   },
 };

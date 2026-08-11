@@ -62,6 +62,115 @@ export function hasPlaceholder(value) {
   return !value || PLACEHOLDER_PATTERN.test(String(value));
 }
 
+/**
+ * Production Compose inserts these passwords directly into PostgreSQL/Redis
+ * URLs. Until the compose contract accepts separately encoded DSNs, restrict
+ * them to RFC 3986 unreserved characters so URL parsing cannot reinterpret a
+ * secret as a hostname, port, path, query or fragment.
+ */
+export function validateComposeInterpolatedPasswords(values = {}) {
+  const passwordFields = ['POSTGRES_PASSWORD', 'POSTGRES_APP_PASSWORD', 'REDIS_PASSWORD'];
+  const unsafe = passwordFields.filter(
+    field => !/^[A-Za-z0-9._~-]+$/u.test(String(values[field] ?? '')),
+  );
+  if (unsafe.length) {
+    throw new Error(
+      `${unsafe.join(', ')} doit utiliser uniquement les caractères URI non réservés ` +
+        '[A-Za-z0-9._~-], car Docker Compose insère ce secret sans encodage dans une URI',
+    );
+  }
+  if (String(values.POSTGRES_PASSWORD) === String(values.POSTGRES_APP_PASSWORD)) {
+    throw new Error(
+      'POSTGRES_APP_PASSWORD doit être distinct de POSTGRES_PASSWORD afin de séparer le rôle applicatif du rôle de migration',
+    );
+  }
+  return passwordFields.length;
+}
+
+/**
+ * Production Compose also inserts the Postgres role and database name into an
+ * internal DSN. Keep them URI-safe for the same reason as the passwords.
+ */
+export function validateComposeInterpolatedPostgresIdentifiers(values = {}) {
+  const identifiers = {
+    POSTGRES_USER: String(values.POSTGRES_USER ?? ''),
+    POSTGRES_APP_USER: String(values.POSTGRES_APP_USER ?? ''),
+    POSTGRES_DB: String(values.POSTGRES_DB || 'chathouse'),
+  };
+  const unsafe = Object.entries(identifiers)
+    .filter(([, value]) => hasPlaceholder(value) || !/^[A-Za-z0-9._~-]+$/u.test(value))
+    .map(([field]) => field);
+  if (unsafe.length) {
+    throw new Error(
+      `${unsafe.join(', ')} doit utiliser uniquement les caractères URI non réservés ` +
+        '[A-Za-z0-9._~-], car Docker Compose insère cette valeur sans encodage dans une URI',
+    );
+  }
+  if (identifiers.POSTGRES_USER === identifiers.POSTGRES_APP_USER) {
+    throw new Error(
+      'POSTGRES_APP_USER doit être distinct de POSTGRES_USER afin que l’API ne soit pas superutilisateur',
+    );
+  }
+  return identifiers;
+}
+
+export function validateCorsOrigins(rawValue) {
+  if (hasPlaceholder(rawValue)) {
+    throw new Error('CORS_ORIGINS est absent ou contient un placeholder');
+  }
+  const origins = String(rawValue)
+    .split(',')
+    .map(origin => origin.trim());
+  if (!origins.length || origins.some(origin => !origin)) {
+    throw new Error(
+      'CORS_ORIGINS doit contenir des origines HTTPS non vides séparées par des virgules',
+    );
+  }
+  const unique = new Set();
+  for (const origin of origins) {
+    const parsed = validatePublicUrl(origin, ['https:']);
+    if (origin !== parsed.origin) {
+      throw new Error(
+        `CORS_ORIGINS: ${origin} doit être une origine HTTPS canonique sans chemin, requête ni fragment`,
+      );
+    }
+    if (unique.has(parsed.origin)) {
+      throw new Error(`CORS_ORIGINS contient une origine dupliquée: ${parsed.origin}`);
+    }
+    unique.add(parsed.origin);
+  }
+  return origins.length;
+}
+
+export function validateMediaS3Region(rawValue) {
+  const region = String(rawValue ?? '').trim();
+  if (
+    hasPlaceholder(region) ||
+    !/^[a-z0-9][a-z0-9-]{1,62}$/u.test(region) ||
+    /^(?:example|sample|test|dummy|fake|none|null|region|your-?region)$/u.test(region)
+  ) {
+    throw new Error('MEDIA_S3_REGION doit contenir une région S3 réelle et non factice');
+  }
+  return region;
+}
+
+function isAbsolutePath(filePath) {
+  return path.posix.isAbsolute(filePath) || path.win32.isAbsolute(filePath);
+}
+
+export function validateMetricsTokenSecretFile(configuredPath, verificationPath = configuredPath) {
+  const configured = String(configuredPath ?? '').trim();
+  const candidate = String(verificationPath ?? '').trim();
+  if (hasPlaceholder(configured) || !isAbsolutePath(configured)) {
+    throw new Error('METRICS_TOKEN_SECRET_FILE doit être un chemin absolu non factice');
+  }
+  if (!isAbsolutePath(candidate)) {
+    throw new Error('le chemin de vérification du secret de métriques doit être absolu');
+  }
+  requireFile(candidate, 'fichier secret METRICS_TOKEN_SECRET_FILE');
+  return candidate;
+}
+
 function isPrivateIpv4(hostname) {
   const parts = hostname.split('.').map(Number);
   if (parts.length !== 4 || parts.some(part => !Number.isInteger(part))) return false;
@@ -1558,10 +1667,14 @@ function validateBackendProductionEnv(root) {
   const values = parseEnv(readText(envPath, 'environnement backend production'));
   validateProductionLiveKitAndStripe(values);
   const required = [
+    'POSTGRES_USER',
     'POSTGRES_PASSWORD',
+    'POSTGRES_APP_USER',
+    'POSTGRES_APP_PASSWORD',
     'REDIS_PASSWORD',
     'JWT_ACCESS_SECRET',
     'JWT_REFRESH_SECRET',
+    'CORS_ORIGINS',
     'PUBLIC_URL',
     'LEGAL_ENTITY_NAME',
     'LEGAL_REGISTERED_ADDRESS',
@@ -1592,6 +1705,7 @@ function validateBackendProductionEnv(root) {
     'ANDROID_APP_SIGNING_SHA256',
     'MEDIA_URL_SIGNING_SECRET',
     'MEDIA_S3_BUCKET',
+    'MEDIA_S3_REGION',
     'MEDIA_S3_ENDPOINT',
     'MEDIA_S3_ACCESS_KEY',
     'MEDIA_S3_SECRET_KEY',
@@ -1603,12 +1717,21 @@ function validateBackendProductionEnv(root) {
     'TWILIO_FROM_NUMBER',
     'RESEND_API_KEY',
     'MAIL_FROM',
+    'METRICS_TOKEN_SECRET_FILE',
     'CHATHOUSE_API_IMAGE',
   ];
   const missing = required.filter(key => hasPlaceholder(values[key]));
   if (missing.length) {
     throw new Error(`valeurs backend absentes/factices: ${missing.join(', ')}`);
   }
+  validateComposeInterpolatedPasswords(values);
+  validateComposeInterpolatedPostgresIdentifiers(values);
+  validateCorsOrigins(values.CORS_ORIGINS);
+  validateMediaS3Region(values.MEDIA_S3_REGION);
+  validateMetricsTokenSecretFile(
+    values.METRICS_TOKEN_SECRET_FILE,
+    process.env.GO_LIVE_METRICS_TOKEN_SECRET_FILE || values.METRICS_TOKEN_SECRET_FILE,
+  );
   if (!/^\d{4}-\d{2}-\d{2}$/u.test(values.LEGAL_DOCUMENT_VERSION ?? '')) {
     throw new Error('LEGAL_DOCUMENT_VERSION doit être une date ISO revue');
   }
@@ -1960,6 +2083,17 @@ function verifyIosArchive(root, teamId, mobileEnv) {
   return `${path.basename(archivePath)}, Apple Distribution, Team ${teamId}`;
 }
 
+function iosArchiveBuildNumber(archivePath) {
+  requireDirectory(archivePath, 'archive iOS liée aux preuves TestFlight');
+  const appPath = findFirstDirectory(path.join(archivePath, 'Products', 'Applications'), '.app');
+  requireDirectory(appPath, 'application iOS liée aux preuves TestFlight');
+  const buildNumber = plutilExtract(path.join(appPath, 'Info.plist'), 'CFBundleVersion');
+  if (!/^[1-9][0-9]*$/u.test(buildNumber)) {
+    throw new Error(`numéro de build iOS invalide dans l'archive: ${buildNumber || 'absent'}`);
+  }
+  return buildNumber;
+}
+
 async function fetchText(url, timeoutMs) {
   let response;
   try {
@@ -2014,7 +2148,13 @@ function assertCleanWorktree(root, reportPath) {
   }
 }
 
-function validateAcceptanceEvidence(data, expectedSha, aabPath) {
+export function validateAcceptanceEvidence(
+  data,
+  expectedSha,
+  aabPath,
+  iosArchiveTarballPath,
+  iosBuildNumber,
+) {
   if (normalizeSha(data?.source_sha) !== normalizeSha(expectedSha)) {
     throw new Error('source_sha des preuves ne correspond pas au commit contrôlé');
   }
@@ -2056,7 +2196,24 @@ function validateAcceptanceEvidence(data, expectedSha, aabPath) {
   if (!/^[a-f0-9]{64}$/u.test(expectedHash) || expectedHash !== hashFile(aabPath)) {
     throw new Error("le SHA-256 de l'AAB ne correspond pas à la preuve Play");
   }
-  return 'Play Internal, TestFlight, Android, iPhone et iPad validés';
+
+  requireFile(iosArchiveTarballPath, 'archive iOS compressée liée aux preuves TestFlight');
+  const expectedIosHash = normalizeSha(data?.ios?.artifact_sha256);
+  if (
+    !/^[a-f0-9]{64}$/u.test(expectedIosHash) ||
+    expectedIosHash !== hashFile(iosArchiveTarballPath)
+  ) {
+    throw new Error("le SHA-256 de l'archive iOS ne correspond pas à la preuve TestFlight");
+  }
+  const evidenceBuildNumber = String(data?.ios?.build_number ?? '').trim();
+  const archiveBuildNumber = String(iosBuildNumber ?? '').trim();
+  if (!/^[1-9][0-9]*$/u.test(evidenceBuildNumber) || evidenceBuildNumber !== archiveBuildNumber) {
+    throw new Error(
+      `le numéro de build iOS des preuves (${evidenceBuildNumber || 'absent'}) ne correspond pas ` +
+        `à l'archive (${archiveBuildNumber || 'absent'})`,
+    );
+  }
+  return 'Artefacts Android/iOS exacts, Play Internal, TestFlight, Android, iPhone et iPad validés';
 }
 
 async function runPreflight(options) {
@@ -2349,7 +2506,22 @@ async function runPreflight(options) {
         root,
         process.env.GO_LIVE_ANDROID_AAB || path.join('artifacts', 'android-production.aab'),
       );
-      return validateAcceptanceEvidence(data, expectedSha, aabPath);
+      const iosArchiveTarballPath = path.resolve(
+        root,
+        process.env.GO_LIVE_IOS_ARCHIVE_TARBALL ||
+          path.join('artifacts', 'ChatHouse.xcarchive.tgz'),
+      );
+      const iosArchivePath = path.resolve(
+        root,
+        process.env.GO_LIVE_IOS_ARCHIVE || path.join('artifacts', 'ChatHouse-production.xcarchive'),
+      );
+      return validateAcceptanceEvidence(
+        data,
+        expectedSha,
+        aabPath,
+        iosArchiveTarballPath,
+        iosArchiveBuildNumber(iosArchivePath),
+      );
     });
   }
 

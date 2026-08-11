@@ -1,5 +1,6 @@
+import { randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { mkdir, stat, unlink, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import {
@@ -28,6 +29,18 @@ interface PrivateObjectStore {
 }
 
 const LOCAL_ROOT = path.resolve(process.cwd(), 'private-media');
+const localWriteTails = new Map<string, Promise<void>>();
+
+const withLocalWriteLock = async (key: string, operation: () => Promise<void>): Promise<void> => {
+  const previous = localWriteTails.get(key) ?? Promise.resolve();
+  const current = previous.catch(() => undefined).then(operation);
+  localWriteTails.set(key, current);
+  try {
+    await current;
+  } finally {
+    if (localWriteTails.get(key) === current) localWriteTails.delete(key);
+  }
+};
 
 const resolveLocalKey = (key: string): string => {
   const target = path.resolve(LOCAL_ROOT, ...key.split('/'));
@@ -40,12 +53,45 @@ const resolveLocalKey = (key: string): string => {
 
 const localStore: PrivateObjectStore = {
   async put(key, body): Promise<void> {
-    const target = resolveLocalKey(key);
-    // resolveLocalKey enforces containment in the non-public LOCAL_ROOT.
-    // eslint-disable-next-line security/detect-non-literal-fs-filename
-    await mkdir(path.dirname(target), { recursive: true });
-    // eslint-disable-next-line security/detect-non-literal-fs-filename
-    await writeFile(target, body, { flag: 'wx' });
+    await withLocalWriteLock(key, async () => {
+      const target = resolveLocalKey(key);
+      const temporary = `${target}.${randomUUID()}.upload`;
+      // resolveLocalKey enforces containment in the non-public LOCAL_ROOT.
+      // eslint-disable-next-line security/detect-non-literal-fs-filename
+      await mkdir(path.dirname(target), { recursive: true });
+      try {
+        // Write the full object beside its destination, then publish it with a
+        // rename. Readers therefore observe either the old complete bytes or
+        // the new complete bytes, never a retry truncating the live file.
+        // eslint-disable-next-line security/detect-non-literal-fs-filename
+        await writeFile(temporary, body, { flag: 'wx' });
+        try {
+          // POSIX replaces atomically; Windows reports EEXIST/EPERM when the
+          // destination exists, handled below without touching identical data.
+          // eslint-disable-next-line security/detect-non-literal-fs-filename
+          await rename(temporary, target);
+        } catch (error) {
+          const code = (error as NodeJS.ErrnoException).code;
+          if (code !== 'EEXIST' && code !== 'EPERM') throw error;
+          // eslint-disable-next-line security/detect-non-literal-fs-filename
+          const existing = await readFile(target);
+          if (existing.equals(body)) return;
+          // This branch repairs a legacy/interrupted partial file. Same-key
+          // writes are serialized above, so a complete concurrent retry cannot
+          // be removed between comparison and replacement in this process.
+          // eslint-disable-next-line security/detect-non-literal-fs-filename
+          await unlink(target);
+          // eslint-disable-next-line security/detect-non-literal-fs-filename
+          await rename(temporary, target);
+        }
+      } finally {
+        // rename consumes the temp path; ENOENT is the normal success case.
+        // eslint-disable-next-line security/detect-non-literal-fs-filename
+        await unlink(temporary).catch(error => {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+        });
+      }
+    });
   },
 
   async open(key, range): Promise<OpenedPrivateObject> {

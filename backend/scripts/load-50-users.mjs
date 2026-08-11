@@ -27,6 +27,7 @@ let REQUEST_TIMEOUT_MS;
 let SOCKET_TIMEOUT_MS;
 let HTTP_RETRIES;
 let MAX_FAILURE_RATE;
+let LEGAL_DOCUMENT_VERSION_OVERRIDE;
 let redis = null;
 const openSockets = new Set();
 
@@ -85,16 +86,15 @@ const http = async (method, path, { token, body } = {}) => {
       if (attempt < HTTP_RETRIES) continue;
       return { status: 0, ok: false, body: { error: String(err) } };
     }
-    if (res.status === 429) {
+    if (res.status === 429 && attempt < HTTP_RETRIES) {
+      await res.body?.cancel();
       await flushRateLimit();
-      if (attempt < HTTP_RETRIES) {
-        const retryAfter = Number(res.headers.get('retry-after'));
-        const delayMs = Number.isFinite(retryAfter)
-          ? Math.min(Math.max(retryAfter * 1_000, 100), 5_000)
-          : 250;
-        await new Promise(resolve => setTimeout(resolve, delayMs));
-        continue;
-      }
+      const retryAfter = Number(res.headers.get('retry-after'));
+      const delayMs = Number.isFinite(retryAfter)
+        ? Math.min(Math.max(retryAfter * 1_000, 100), 5_000)
+        : 250;
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+      continue;
     }
     let json = null;
     try {
@@ -105,6 +105,53 @@ const http = async (method, path, { token, body } = {}) => {
     return { status: res.status, ok: res.ok, body: json };
   }
   return { status: 0, ok: false, body: { error: 'request attempts exhausted' } };
+};
+
+const resolveLegalDocumentVersion = async () => {
+  let lastFailure = 'no response';
+  for (let attempt = 0; attempt <= HTTP_RETRIES; attempt++) {
+    httpCount++;
+    try {
+      const response = await fetch(`${API}/terms`, {
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        redirect: 'error',
+        headers: { Accept: 'text/html' },
+      });
+      if (!response.ok) {
+        await response.body?.cancel();
+        lastFailure = `HTTP ${response.status}`;
+        continue;
+      }
+
+      const publishedHeader = response.headers.get('x-chathouse-legal-document-version');
+      await response.text();
+      if (publishedHeader === null) {
+        if (LEGAL_DOCUMENT_VERSION_OVERRIDE) return LEGAL_DOCUMENT_VERSION_OVERRIDE;
+        lastFailure = 'the Terms response omitted its legal document version header';
+        continue;
+      }
+
+      const publishedVersion = publishedHeader.trim();
+      if (!/^\d{4}-\d{2}-\d{2}$/u.test(publishedVersion)) {
+        lastFailure = 'the Terms response published an invalid legal document version';
+        continue;
+      }
+      if (LEGAL_DOCUMENT_VERSION_OVERRIDE && LEGAL_DOCUMENT_VERSION_OVERRIDE !== publishedVersion) {
+        throw new Error(
+          `LOAD_TEST_LEGAL_DOCUMENT_VERSION=${LEGAL_DOCUMENT_VERSION_OVERRIDE} does not ` +
+            `match the server version ${publishedVersion}`,
+        );
+      }
+      return publishedVersion;
+    } catch (error) {
+      lastFailure = error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  throw new Error(
+    `legal document version discovery failed (${lastFailure}); ` +
+      'set LOAD_TEST_LEGAL_DOCUMENT_VERSION=YYYY-MM-DD to override it',
+  );
 };
 
 // ─────────────────────── concurrency ───────────────────────
@@ -120,6 +167,16 @@ const mapLimit = async (items, limit, fn) => {
   await Promise.all(workers);
   return out;
 };
+
+export const selectDistinctWaveTarget = (users, sourceIndex) => {
+  if (users.length < 2) throw new Error('wave target selection requires at least two users');
+  const preferredOffset = 7;
+  const distinctOffset = 1 + ((preferredOffset - 1) % (users.length - 1));
+  return users[(sourceIndex + distinctOffset) % users.length];
+};
+
+export const functionalRoomHostCount = userCount =>
+  Math.min(10, Math.max(1, Math.floor(userCount / 2)));
 
 const connectSocket = (token, userId) =>
   new Promise((resolve, reject) => {
@@ -201,6 +258,8 @@ const run = async () => {
     throw new Error(`target health check failed (HTTP ${health.status})`);
   }
   const m0 = await metricsSnapshot();
+  const legalDocumentVersion = await resolveLegalDocumentVersion();
+  console.log(`  legal document version: ${legalDocumentVersion}`);
 
   // 1 ─ register 50 users (+ profile via /me)
   console.log(`\n▸ Phase 1 — register ${N} users + load profile`);
@@ -209,7 +268,17 @@ const run = async () => {
     const username = `lt_${RUN}_${i}`;
     const email = `${username}@loadtest.local`;
     const reg = await http('POST', '/api/auth/register', {
-      body: { username, email, password: PASSWORD, displayName: `LoadTester ${i}` },
+      body: {
+        username,
+        email,
+        password: PASSWORD,
+        displayName: `LoadTester ${i}`,
+        ageConfirmed: true,
+        termsAccepted: true,
+        privacyNoticeAcknowledged: true,
+        legalDocumentVersion,
+        legalLocale: 'en',
+      },
     });
     const okReg = reg.status === 201 && reg.body?.success && reg.body.data?.accessToken;
     record('01 register', !!okReg, `status=${reg.status} ${JSON.stringify(reg.body?.error ?? '')}`);
@@ -255,19 +324,22 @@ const run = async () => {
     record('06 follow-lists', fr.ok && fg.ok, `followers=${fr.status} following=${fg.status}`);
   });
 
-  // 4 ─ rooms: first 10 users host a room; everyone lists feed
-  console.log('\n▸ Phase 4 — create rooms (10 hosts) + list / feed');
-  const hosts = users.slice(0, 10);
-  const rooms = [];
-  await mapLimit(hosts, 5, async u => {
-    const r = await http('POST', '/api/rooms', {
-      token: u.token,
-      body: { title: `LoadTest room ${u.i} (${RUN})`, description: 'auto', roomType: 'OPEN' },
-    });
-    const ok = r.status === 201 && r.body?.data?.id;
-    record('07 room-create', !!ok, `status=${r.status} ${JSON.stringify(r.body?.error ?? '')}`);
-    if (ok) rooms.push({ id: r.body.data.id, host: u });
-  });
+  // 4 ─ rooms: up to 10 users host; keep at least half of small runs available
+  // as listeners so every supported LOAD_TEST_USERS value exercises joining.
+  const hostCount = functionalRoomHostCount(users.length);
+  console.log(`\n▸ Phase 4 — create rooms (${hostCount} hosts) + list / feed`);
+  const hosts = users.slice(0, hostCount);
+  const rooms = (
+    await mapLimit(hosts, 5, async u => {
+      const r = await http('POST', '/api/rooms', {
+        token: u.token,
+        body: { title: `LoadTest room ${u.i} (${RUN})`, description: 'auto', roomType: 'OPEN' },
+      });
+      const ok = r.status === 201 && r.body?.data?.id;
+      record('07 room-create', !!ok, `status=${r.status} ${JSON.stringify(r.body?.error ?? '')}`);
+      return ok ? { id: r.body.data.id, host: u } : null;
+    })
+  ).filter(Boolean);
   console.log(`  ✅ ${rooms.length} rooms created`);
   await mapLimit(users.slice(0, 12), CONCURRENCY, async u => {
     const list = await http('GET', '/api/rooms', { token: u.token });
@@ -281,8 +353,15 @@ const run = async () => {
   });
   if (rooms.length === 0) throw new Error('no rooms created — aborting room phases');
 
-  // assign every user to a room (round-robin), host already in their own
-  const assign = users.map((u, idx) => ({ u, room: rooms[idx % rooms.length] }));
+  // Keep every successful host in the room they created. Concurrent room
+  // responses need not arrive in host order, so assign all other users with a
+  // separate round-robin cursor instead of relying on array insertion order.
+  const roomByHostId = new Map(rooms.map(room => [room.host.id, room]));
+  let nextRoom = 0;
+  const assign = users.map(u => ({
+    u,
+    room: roomByHostId.get(u.id) ?? rooms[nextRoom++ % rooms.length],
+  }));
 
   // 5 ─ join rooms (REST), non-hosts
   console.log('\n▸ Phase 5 — join rooms (REST)');
@@ -423,8 +502,13 @@ const run = async () => {
       `status=${lk.status} ${JSON.stringify(lk.body?.error ?? '')}`,
     );
   });
-  await mapLimit(users.slice(0, 10), CONCURRENCY, async u => {
-    const target = users[(u.i + 7) % users.length];
+  await mapLimit(users.slice(0, 10), CONCURRENCY, async (u, sourceIndex) => {
+    const target = selectDistinctWaveTarget(users, sourceIndex);
+    const follow = await http('POST', `/api/follow/${target.id}`, { token: u.token });
+    if (!follow.ok) {
+      record('28 wave', false, `follow prerequisite status=${follow.status}`);
+      return;
+    }
     const w = await http('POST', `/api/users/${target.id}/wave`, { token: u.token });
     record('28 wave', w.ok || w.status === 201, `status=${w.status}`);
   });
@@ -499,6 +583,7 @@ const configure = env => {
   SOCKET_TIMEOUT_MS = config.socketTimeoutMs;
   HTTP_RETRIES = config.httpRetries;
   MAX_FAILURE_RATE = config.maxFailureRate;
+  LEGAL_DOCUMENT_VERSION_OVERRIDE = config.legalDocumentVersion;
   return config;
 };
 
@@ -541,6 +626,7 @@ export async function main(argv = process.argv.slice(2), env = process.env) {
           requestTimeoutMs: config.requestTimeoutMs,
           resetRateLimits: config.resetRateLimits,
           maxFailureRate: config.maxFailureRate,
+          legalDocumentVersion: config.legalDocumentVersion ?? 'discover from /terms',
         },
         null,
         2,

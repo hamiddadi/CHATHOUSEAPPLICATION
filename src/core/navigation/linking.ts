@@ -121,6 +121,7 @@ export const linking: LinkingOptions<RootStackParamList> = {
               HouseInvitation: 'house/:houseId/invite/:inviteToken?',
               InviteMember: 'house/:houseId/invite-member',
               Notifications: 'notifications',
+              FollowRequests: 'notifications/follow-requests',
             },
           },
           MapsTab: { screens: { Maps: 'map' } },

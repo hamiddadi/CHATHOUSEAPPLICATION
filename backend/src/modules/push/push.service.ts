@@ -39,13 +39,13 @@ export const PUSH_CREDENTIAL_PROBE_TIMEOUT_MS = 10_000;
 
 // firebase-admin error codes that mean the token is dead and should be pruned.
 // `registration-token-not-registered` = uninstalled / token rotated;
-// `invalid-argument` also catches legacy Expo tokens (ExponentPushToken[…])
-// left in the table from before the FCM migration. See
+// Payload-level `messaging/invalid-argument` is deliberately not included: it
+// is ambiguous and pruning a valid token for our malformed payload would be
+// destructive. See
 // https://firebase.google.com/docs/cloud-messaging/manage-tokens
 const DEAD_TOKEN_ERRORS = new Set([
   'messaging/registration-token-not-registered',
   'messaging/invalid-registration-token',
-  'messaging/invalid-argument',
 ]);
 
 // Lazily-initialised messaging client. Production also calls initializePush()
@@ -257,23 +257,37 @@ const sendBatch = async (
   data: Record<string, string> | undefined,
 ): Promise<void> => {
   try {
+    const notificationId = payload.data?.['notificationId'];
+    const collapseId =
+      typeof notificationId === 'string' && notificationId.length > 0
+        ? notificationId.slice(0, 64)
+        : undefined;
     const response = await messaging.sendEachForMulticast({
       tokens,
       notification: { title: payload.title, body: payload.body },
       data,
       android: {
         priority: 'high',
+        ...(collapseId ? { collapseKey: collapseId } : {}),
         notification: {
           channelId: 'default',
           icon: 'ic_stat_audio',
           sound: 'default',
         },
       },
+      ...(collapseId
+        ? {
+            apns: {
+              headers: { 'apns-collapse-id': collapseId },
+            },
+          }
+        : {}),
     });
 
     if (response.failureCount === 0) return;
 
     const deadTokens: string[] = [];
+    const retryableFailureCodes = new Set<string>();
     response.responses.forEach((res, idx) => {
       if (res.success) return;
       const token = tokens[idx];
@@ -284,6 +298,12 @@ const sendBatch = async (
       });
       if (token && code && DEAD_TOKEN_ERRORS.has(code)) {
         deadTokens.push(token);
+      } else {
+        // A BatchResponse can contain per-token transport/server failures even
+        // though the outer Firebase promise resolved. Surface every failure
+        // that was not a terminal token rejection so the transactional outbox
+        // retries instead of marking the push DELIVERED.
+        retryableFailureCodes.add(code ?? 'messaging/unknown-error');
       }
     });
 
@@ -292,6 +312,11 @@ const sendBatch = async (
         where: { token: { in: deadTokens } },
       });
       logger.info(`push: pruned ${pruned.count} dead token(s)`);
+    }
+    if (retryableFailureCodes.size > 0) {
+      throw new Error(
+        `FCM batch contained retryable failures: ${[...retryableFailureCodes].sort().join(',')}`,
+      );
     }
   } catch (err) {
     // The notification caller may keep the already-persisted in-app row, but

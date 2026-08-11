@@ -22,7 +22,14 @@
 # (socket.io) connections, so wss://api.chathouse.app works with no extra config.
 api.chathouse.app {
 	encode zstd gzip
-	reverse_proxy api:4000
+	# Keep provider admission enforcement reachable even when the API process is
+	# unhealthy. LiveKit authenticates this raw-body route with its signed JWT.
+	handle /webhooks/livekit {
+		reverse_proxy livekit-revocation-worker:4010
+	}
+	handle {
+		reverse_proxy api:4000
+	}
 }
 
 # Universal/App Links host. The API serves both well-known association

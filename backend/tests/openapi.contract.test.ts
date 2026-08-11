@@ -42,6 +42,7 @@ describe('OpenAPI release contract', () => {
     ['post', '/api/auth/logout'],
     ['post', '/api/auth/reset-password'],
     ['get', '/api/users/me'],
+    ['get', '/api/users/{id}'],
     ['post', '/api/users/me/request-deletion'],
     ['post', '/api/users/me/cancel-deletion'],
     ['get', '/api/users/me/export'],
@@ -51,11 +52,16 @@ describe('OpenAPI release contract', () => {
     ['post', '/api/rooms/{id}/end'],
     ['post', '/api/follow/{userId}'],
     ['delete', '/api/follow/{userId}'],
+    ['get', '/api/follow/requests'],
     ['post', '/api/follow/{userId}/accept'],
+    ['post', '/api/follow/{userId}/reject'],
     ['post', '/api/groups'],
     ['post', '/api/groups/{id}/messages'],
+    ['post', '/api/groups/{id}/voice'],
     ['post', '/api/groups/{id}/members'],
     ['post', '/api/groups/{id}/leave'],
+    ['post', '/api/chat/{userId}'],
+    ['post', '/api/chat/{userId}/voice'],
     ['post', '/api/chat/messages/{messageId}/report'],
     ['post', '/api/groups/{id}/messages/{messageId}/report'],
     ['post', '/api/rooms/{id}/messages/{messageId}/report'],
@@ -129,7 +135,10 @@ describe('OpenAPI release contract', () => {
       '/api/rooms',
       '/api/groups',
       '/api/groups/{id}/messages',
+      '/api/groups/{id}/voice',
       '/api/groups/{id}/members',
+      '/api/chat/{userId}',
+      '/api/chat/{userId}/voice',
     ]) {
       const operation = asObject(asObject(paths[path])['post']);
       expect(operation['parameters']).toEqual(
@@ -142,6 +151,59 @@ describe('OpenAPI release contract', () => {
         ]),
       );
     }
+  });
+
+  it('distinguishes exactly-once message persistence from at-least-once delivery', () => {
+    for (const path of [
+      '/api/chat/{userId}',
+      '/api/chat/{userId}/voice',
+      '/api/groups/{id}/messages',
+      '/api/groups/{id}/voice',
+    ]) {
+      const operation = asObject(asObject(paths[path])['post']);
+      const created = asObject(asObject(operation['responses'])['201']);
+      const description = created['description'];
+      expect(description).toEqual(expect.any(String));
+      expect(description).toContain('exactly once per Idempotency-Key');
+      expect(description).toContain('at least once');
+      expect(description).toContain('messageId');
+      expect(description).toContain('notificationId');
+      expect(description).not.toContain('fanned out exactly once');
+    }
+  });
+
+  it('documents legacy arrays and opt-in paginated message envelopes', () => {
+    for (const path of ['/api/chat/{userId}', '/api/groups/{id}/messages']) {
+      const operation = asObject(asObject(paths[path])['get']);
+      const ok = asObject(asObject(operation['responses'])['200']);
+      expect(ok['description']).toContain('paginated=true');
+      const mediaType = asObject(asObject(ok['content'])['application/json']);
+      const schema = asObject(mediaType['schema']);
+      const variants = (schema['anyOf'] ?? schema['oneOf']) as unknown[] | undefined;
+      expect(variants).toHaveLength(2);
+      const serialized = JSON.stringify(schema);
+      expect(serialized).toContain('nextCursor');
+      expect(serialized).toContain('hasMore');
+      expect(serialized).toContain('array');
+    }
+  });
+
+  it('documents the group voice payload fields', () => {
+    const operation = asObject(asObject(paths['/api/groups/{id}/voice'])['post']);
+    expect(JSON.stringify(operation)).toContain('audioUrl');
+    expect(JSON.stringify(operation)).toContain('durationMs');
+  });
+
+  it('documents private follow state and every actionable notification kind', () => {
+    const profileOperation = asObject(asObject(paths['/api/users/{id}'])['get']);
+    const notificationOperation = asObject(asObject(paths['/api/notifications'])['get']);
+    const profileContract = JSON.stringify(profileOperation);
+    const notificationContract = JSON.stringify(notificationOperation);
+
+    expect(profileContract).toContain('followRequestedByMe');
+    expect(notificationContract).toContain('FOLLOW_REQUEST');
+    expect(notificationContract).toContain('ROOM_CANCELED');
+    expect(notificationContract).toContain('ROOM_ENDED_BY_ADMIN');
   });
 
   it('serves the generated JSON contract outside production', async () => {
@@ -167,6 +229,7 @@ describe('OpenAPI release contract', () => {
     expect(response.headers['content-security-policy']).toContain("default-src 'none'");
     expect(response.headers['referrer-policy']).toBe('no-referrer');
     expect(response.headers['content-language']).toBe('en');
+    expect(response.headers['x-chathouse-legal-document-version']).toBe('2026-07-29');
     expect(response.text).toContain('<html lang="en">');
     expect(response.text).toContain('Version: 2026-07-29');
   });

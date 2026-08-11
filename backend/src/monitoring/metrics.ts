@@ -71,6 +71,50 @@ export const bullmqJobsGauge = new Gauge({
   labelNames: ['queue', 'state'] as const,
 });
 
+/** Redis allocator usage reported by `INFO memory`. */
+export const redisMemoryUsedBytesGauge = new Gauge({
+  name: 'chathouse_redis_memory_used_bytes',
+  help: 'Redis used_memory in bytes',
+});
+
+/** Configured Redis maxmemory ceiling; zero means no Redis-level ceiling. */
+export const redisMemoryMaxBytesGauge = new Gauge({
+  name: 'chathouse_redis_memory_max_bytes',
+  help: 'Configured Redis maxmemory in bytes (zero means unlimited)',
+});
+
+/** `used_memory / maxmemory`; zero when Redis has no configured ceiling. */
+export const redisMemoryUsageRatioGauge = new Gauge({
+  name: 'chathouse_redis_memory_usage_ratio',
+  help: 'Ratio of Redis used_memory to maxmemory (zero when maxmemory is unlimited)',
+});
+
+/** Whether the most recent Redis memory telemetry collection succeeded. */
+export const redisMemoryMetricsAvailableGauge = new Gauge({
+  name: 'chathouse_redis_memory_metrics_available',
+  help: '1 when the latest Redis INFO memory collection succeeded, otherwise 0',
+});
+
+/** Durable outbox outcomes, labelled only by the bounded server-owned topic. */
+export const outboxEventsTotal = new Counter({
+  name: 'chathouse_outbox_events_total',
+  help: 'Transactional outbox delivery outcomes',
+  labelNames: ['topic', 'result'] as const,
+});
+
+/** Current outbox rows by lifecycle status. */
+export const outboxBacklogGauge = new Gauge({
+  name: 'chathouse_outbox_backlog',
+  help: 'Current transactional outbox rows by status',
+  labelNames: ['status'] as const,
+});
+
+/** Age of the oldest undelivered event, or zero when the queue is empty. */
+export const outboxOldestPendingAgeSecondsGauge = new Gauge({
+  name: 'chathouse_outbox_oldest_pending_age_seconds',
+  help: 'Age in seconds of the oldest undelivered transactional outbox event',
+});
+
 /**
  * Express middleware that times each request and records the HTTP histogram +
  * counter. Mount it as early as practical so the timer covers downstream

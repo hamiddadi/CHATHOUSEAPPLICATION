@@ -18,22 +18,28 @@ export interface ActivityItem {
   createdAt: string;
 }
 
+export interface ActivityPage {
+  items: ActivityItem[];
+  nextCursor: string | null;
+  hasMore: boolean;
+}
+
+const PAGE_SIZE = 50;
+
 export const activityApi = {
   /**
    * Fetches the user's notification feed. Reuses the existing
    * `/api/notifications` endpoint — no new backend needed. The response
-   * is normalized into the `ActivityItem` shape; both `{ items }` and bare
-   * arrays are accepted.
+   * is normalized into an `ActivityPage`; legacy arrays and nested page
+   * envelopes are still accepted during rolling deployments.
    *
-   * `cursor` is the `createdAt` ISO timestamp of the last item already loaded;
-   * the backend returns rows strictly older than it (keyset pagination). The
-   * REST surface returns the array directly (no `nextCursor` in the body), so
-   * the caller derives the next cursor from the last row's `createdAt`.
+   * New cursors are opaque `(createdAt,id)` values. An older backend may still
+   * omit metadata; in that case a full page falls back to its legacy ISO cursor.
    */
   async list(
     filter: 'all' | 'rooms' | 'social' | 'clubs' = 'all',
     cursor?: string,
-  ): Promise<ActivityItem[]> {
+  ): Promise<ActivityPage> {
     const { data } = await apiClient.get<unknown>('/notifications', {
       params: { filter, ...(cursor ? { cursor } : {}) },
     });
@@ -50,7 +56,24 @@ export const activityApi = {
       }
       return [];
     };
-    return unwrapArray(data);
+    const items = unwrapArray(data);
+    const root = data && typeof data === 'object' ? (data as Record<string, unknown>) : null;
+    const payload = root?.data;
+    const nested =
+      payload && typeof payload === 'object' && !Array.isArray(payload)
+        ? (payload as Record<string, unknown>)
+        : null;
+    const rawHasMore = root?.hasMore ?? nested?.hasMore;
+    const hasMore = typeof rawHasMore === 'boolean' ? rawHasMore : items.length >= PAGE_SIZE;
+    const rawNextCursor = root?.nextCursor ?? nested?.nextCursor;
+    const legacyCursor = hasMore ? (items[items.length - 1]?.createdAt ?? null) : null;
+    const nextCursor =
+      typeof rawNextCursor === 'string'
+        ? rawNextCursor
+        : rawNextCursor === null
+          ? null
+          : legacyCursor;
+    return { items, nextCursor, hasMore };
   },
   async markRead(id: string): Promise<void> {
     // Backend exposes PATCH (not POST) for these routes — a POST 404s.

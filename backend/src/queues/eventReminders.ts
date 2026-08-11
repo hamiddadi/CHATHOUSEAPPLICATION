@@ -4,6 +4,7 @@ import { prisma, runWriteWithRetry } from '../config/database';
 import { notificationsService } from '../modules/notifications/notifications.service';
 import { getBlockedIdSet } from '../modules/social/blocks';
 import { cancelReminder15, scheduleReminder15 } from '../extensions/queues/reminder15';
+import { fanoutOne } from '../extensions/queues/followFanout';
 import { bullConnection } from './connection';
 
 /**
@@ -26,6 +27,7 @@ import { bullConnection } from './connection';
 
 const QUEUE_NAME = 'event-reminders';
 const LEAD_TIME_MS = 5 * 60 * 1000; // 5 minutes
+const GO_LIVE_ATTEMPTS = 5;
 
 export type ReminderJobKind = 'remind' | 'go-live';
 
@@ -106,6 +108,11 @@ export const scheduleEventReminder = async (roomId: string, scheduledFor: Date):
     {
       jobId: goLiveJobIdForRoom(roomId),
       delay: goLiveDelay,
+      // Opening is transactional, while ROOM_STARTED delivery is retryable per
+      // recipient. A retry sees the room already live and repairs only missing
+      // recipients instead of opening/seating the host twice.
+      attempts: GO_LIVE_ATTEMPTS,
+      backoff: { type: 'exponential', delay: 5_000 },
       removeOnComplete: true,
       removeOnFail: { age: 24 * 3600 },
     },
@@ -182,12 +189,20 @@ const openScheduledRoom = async (roomId: string): Promise<void> => {
       });
       await tx.participant.upsert({
         where: { userId_roomId: { userId: room.hostId, roomId: room.id } },
-        create: { roomId: room.id, userId: room.hostId, role: 'HOST' },
+        create: {
+          roomId: room.id,
+          userId: room.hostId,
+          role: 'HOST',
+          admissionConfirmedAt: null,
+        },
         update: {
           role: 'HOST',
           isMuted: false,
           leftAt: null,
           joinedAt: now,
+          // A scheduled room becoming live starts a fresh realtime admission.
+          // Never carry a confirmation timestamp from an earlier session.
+          admissionConfirmedAt: null,
         },
       });
       await tx.user.update({
@@ -210,7 +225,20 @@ const openScheduledRoom = async (roomId: string): Promise<void> => {
     });
     return;
   }
-  if (result.state === 'noop') return;
+  if (result.state === 'noop') {
+    // A previous attempt may have committed the live transition and then lost
+    // one notification. The retry must still enter recipient-level repair.
+    if (room.isLive && !room.endedAt) {
+      const repaired = await fanoutOne(room.id);
+      if (repaired > 0) {
+        logger.info('event-reminder: repaired ROOM_STARTED fan-out', {
+          roomId: room.id,
+          count: repaired,
+        });
+      }
+    }
+    return;
+  }
   // Broadcast hallway:room_created so live feeds light up. We import
   // lazily to avoid a circular import between queues → realtime → socket.
   const { emitHallwayRoomCreated } = await import('../socket/realtime');
@@ -237,6 +265,17 @@ const openScheduledRoom = async (roomId: string): Promise<void> => {
       .catch(err =>
         logger.warn('event-reminder: recording start failed', { err, roomId: room.id }),
       );
+  }
+
+  // Keep this awaited: recipient failures make the BullMQ attempt fail. The
+  // next attempt follows the noop-live branch above and repairs only the
+  // recipients without a completed marker/persisted notification.
+  const notified = await fanoutOne(room.id);
+  if (notified > 0) {
+    logger.info('event-reminder: ROOM_STARTED fan-out completed', {
+      roomId: room.id,
+      count: notified,
+    });
   }
 };
 

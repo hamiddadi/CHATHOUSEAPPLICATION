@@ -114,6 +114,7 @@ export const RoomChatSidebar: React.FC<RoomChatSidebarProps> = memo(
     const [replyTo, setReplyTo] = useState<ChatMessage | null>(null);
     const [reportMessageId, setReportMessageId] = useState<string | null>(null);
     const [deletingMessageId, setDeletingMessageId] = useState<string | null>(null);
+    const sendInFlightRef = useRef(false);
     const listRef = useRef<FlatList<ChatMessage>>(null);
     const sendDisabled = draft.trim().length === 0 || sendMessage.isPending;
 
@@ -174,10 +175,10 @@ export const RoomChatSidebar: React.FC<RoomChatSidebarProps> = memo(
 
     const handleSend = useCallback(() => {
       const content = draft.trim();
-      // Guard against a double-tap firing two mutations before isPending
-      // flips (React state is async): otherwise the same message is sent
-      // twice since the draft is only cleared in onSuccess.
-      if (content.length === 0 || sendMessage.isPending) return;
+      // `isPending` reaches the rendered tree asynchronously. The ref closes the
+      // same-tick double-press window before React Query can publish that state.
+      if (content.length === 0 || sendInFlightRef.current || sendMessage.isPending) return;
+      sendInFlightRef.current = true;
       sendMessage.mutate(
         { roomId, content, replyToId: replyTo?.id },
         {
@@ -186,6 +187,9 @@ export const RoomChatSidebar: React.FC<RoomChatSidebarProps> = memo(
             setReplyTo(null);
           },
           onError: e => Alert.alert(t('common.error'), errorMessage(e, t('roomChat.sendFailed'))),
+          onSettled: () => {
+            sendInFlightRef.current = false;
+          },
         },
       );
     }, [draft, roomId, replyTo, sendMessage, t]);

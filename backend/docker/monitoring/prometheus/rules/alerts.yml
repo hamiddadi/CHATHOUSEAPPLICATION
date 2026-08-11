@@ -70,6 +70,85 @@ groups:
           summary: 'API process memory above 512MB'
           description: 'The Node.js process resident memory has exceeded 512MB for 5 minutes (current {{ printf "%.0f" $value | humanize1024 }}B). Investigate for leaks or raise the container memory limit.'
 
+      # Redis uses noeviction because it stores queues and revocations. Alert
+      # before writes are rejected at the configured maxmemory ceiling.
+      - alert: RedisMemoryHigh
+        expr: |
+          max(chathouse_redis_memory_usage_ratio) >= 0.80
+          and
+          max(chathouse_redis_memory_usage_ratio) < 0.90
+        for: 10m
+        labels:
+          severity: warning
+          service: chathouse-api
+        annotations:
+          summary: 'Redis memory usage above 80%'
+          description: 'Redis has remained between 80% and 90% of maxmemory for 10 minutes (current {{ $value | humanizePercentage }}). Increase capacity or reduce retained data before noeviction rejects writes.'
+
+      - alert: RedisMemoryCritical
+        expr: max(chathouse_redis_memory_usage_ratio) >= 0.90
+        for: 5m
+        labels:
+          severity: critical
+          service: chathouse-api
+        annotations:
+          summary: 'Redis memory usage above 90%'
+          description: 'Redis has exceeded 90% of maxmemory for 5 minutes (current {{ $value | humanizePercentage }}). BullMQ, revocation and rate-limit writes are at imminent risk.'
+
+      - alert: RedisMemoryTelemetryUnavailable
+        expr: min(chathouse_redis_memory_metrics_available) == 0
+        for: 2m
+        labels:
+          severity: warning
+          service: chathouse-api
+        annotations:
+          summary: 'Redis memory telemetry unavailable'
+          description: 'The API has been unable to read Redis INFO memory for 2 minutes. Check Redis connectivity and permissions.'
+
+      # Failed jobs are retained for diagnosis. A transient failure gets ten
+      # minutes to retry/recover before paging an operator.
+      - alert: BullMQFailedJobs
+        expr: max by (queue) (chathouse_bullmq_jobs{state="failed"}) > 0
+        for: 10m
+        labels:
+          severity: warning
+          service: chathouse-api
+        annotations:
+          summary: 'BullMQ queue {{ $labels.queue }} has failed jobs'
+          description: 'Queue {{ $labels.queue }} has retained failed jobs for at least 10 minutes (count {{ printf "%.0f" $value }}). Inspect the worker logs and failed job reasons.'
+
+      # Waiting excludes scheduled/delayed reminders; a sustained large value
+      # therefore indicates workers cannot keep up or are unavailable.
+      - alert: BullMQBacklogHigh
+        expr: max by (queue) (chathouse_bullmq_jobs{state="waiting"}) > 100
+        for: 10m
+        labels:
+          severity: warning
+          service: chathouse-api
+        annotations:
+          summary: 'BullMQ queue {{ $labels.queue }} backlog above 100'
+          description: 'Queue {{ $labels.queue }} has had more than 100 immediately-waiting jobs for 10 minutes (current {{ printf "%.0f" $value }}). Check worker health and throughput.'
+
+      - alert: TransactionalOutboxStalled
+        expr: max(chathouse_outbox_oldest_pending_age_seconds) > 300
+        for: 5m
+        labels:
+          severity: critical
+          service: chathouse-api
+        annotations:
+          summary: 'Transactional outbox has events older than 5 minutes'
+          description: 'The oldest undelivered notification/message event is {{ printf "%.0f" $value }} seconds old. Check PostgreSQL, FCM and outbox worker logs.'
+
+      - alert: TransactionalOutboxRetriesHigh
+        expr: sum(rate(chathouse_outbox_events_total{result=~"retry|timeout"}[5m])) > 0.1
+        for: 10m
+        labels:
+          severity: warning
+          service: chathouse-api
+        annotations:
+          summary: 'Transactional outbox retries are sustained'
+          description: 'Outbox handlers have retried at more than 0.1 events/second for 10 minutes. Inspect provider health and the bounded failure categories.'
+
   - name: host
     rules:
       # Host filesystem usage above 85% (root or any mounted, non-tmpfs FS).

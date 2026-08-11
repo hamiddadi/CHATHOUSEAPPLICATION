@@ -60,7 +60,11 @@ export const notificationDataToDeepLink = (data: NotificationData): string => {
     return `chathouse://room/${pathSegment(roomId)}`;
   }
 
-  if (type === 'NEW_FOLLOWER' || type === 'FOLLOW_REQUEST' || type === 'WAVE') {
+  if (type === 'FOLLOW_REQUEST') {
+    return 'chathouse://notifications/follow-requests';
+  }
+
+  if (type === 'NEW_FOLLOWER' || type === 'WAVE') {
     const userId =
       asIdentifier(data?.followerId) ??
       asIdentifier(data?.waverId) ??

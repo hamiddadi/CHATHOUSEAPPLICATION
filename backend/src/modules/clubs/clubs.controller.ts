@@ -28,7 +28,7 @@ export const clubsController = {
 
   async create(req: Request, res: Response) {
     const input = createClubSchema.parse(req.body);
-    const club = await clubsService.create(requireUserId(req), input);
+    const club = await clubsService.create(requireUserId(req), input, req.get('Idempotency-Key'));
     sendOk(res, club, 201);
   },
 

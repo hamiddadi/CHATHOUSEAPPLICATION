@@ -1,12 +1,18 @@
 import { z } from 'zod';
 import { publicContentString } from '../../utils/publicContentModeration';
+import { decodeChatCursor } from '../chat/chat.cursor';
+
+export const MAX_GROUP_MEMBERS = 50;
 
 export const createGroupSchema = z.object({
   // Optional group name; when omitted the client falls back to member names.
   title: publicContentString(z.string().trim().min(1).max(80)).optional(),
   // The OTHER members (the creator is added implicitly). A group is 3+ people,
   // so we require at least two others — a single pick is a 1:1 DM instead.
-  memberIds: z.array(z.string().min(1)).min(2).max(50),
+  memberIds: z
+    .array(z.string().min(1))
+    .min(2)
+    .max(MAX_GROUP_MEMBERS - 1),
 });
 
 export const sendGroupMessageSchema = z.object({
@@ -24,11 +30,18 @@ export const sendGroupVoiceSchema = z.object({
 export const listGroupMessagesSchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(30),
   // ISO 8601 cursor — return messages strictly older than this.
-  before: z.string().datetime({ offset: true }).optional(),
+  before: z
+    .string()
+    .refine(value => decodeChatCursor(value) !== null, { message: 'Invalid message cursor' })
+    .optional(),
+  paginated: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform(value => value === 'true'),
 });
 
 export const addGroupMembersSchema = z.object({
-  userIds: z.array(z.string().min(1)).min(1).max(50),
+  userIds: z.array(z.string().min(1)).min(1).max(MAX_GROUP_MEMBERS),
 });
 
 export const renameGroupSchema = z.object({

@@ -143,6 +143,7 @@ jobs:
           FIREBASE_ANDROID_BASE64: ${{ secrets.FIREBASE_ANDROID_CONFIG_BASE64 }}
           FIREBASE_IOS_BASE64: ${{ secrets.FIREBASE_IOS_CONFIG_BASE64 }}
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 }}
+          METRICS_TOKEN_BASE64: ${{ secrets.METRICS_TOKEN_BASE64 }}
           STORE_EVIDENCE_BASE64: ${{ vars.GO_LIVE_STORE_EVIDENCE_BASE64 }}
         run: |
           set -euo pipefail
@@ -157,6 +158,7 @@ jobs:
             FIREBASE_ANDROID_BASE64: 'google-services.json',
             FIREBASE_IOS_BASE64: 'GoogleService-Info.plist',
             ANDROID_KEYSTORE_BASE64: 'android-upload.jks',
+            METRICS_TOKEN_BASE64: 'metrics-token',
             STORE_EVIDENCE_BASE64: 'go-live-evidence.json',
           };
           for (const [variable, filename] of Object.entries(files)) {
@@ -174,8 +176,8 @@ jobs:
           set -euo pipefail
           android_aab="$(find "$RUNNER_TEMP/go-live/android" -type f -name '*.aab' -print -quit 2>/dev/null || true)"
           ios_archive="$(find "$RUNNER_TEMP/go-live/ios" -type d -name '*.xcarchive' -print -quit 2>/dev/null || true)"
+          ios_tar="$(find "$RUNNER_TEMP/go-live/ios" -type f \( -name '*.xcarchive.tgz' -o -name '*.xcarchive.tar.gz' \) -print -quit 2>/dev/null || true)"
           if [ -z "$ios_archive" ]; then
-            ios_tar="$(find "$RUNNER_TEMP/go-live/ios" -type f \( -name '*.xcarchive.tgz' -o -name '*.xcarchive.tar.gz' \) -print -quit 2>/dev/null || true)"
             if [ -n "$ios_tar" ]; then
               tar -tzf "$ios_tar" > "$RUNNER_TEMP/go-live/ios-tar-entries.txt"
               if grep -Eq '(^/|(^|/)\.\.(/|$))' "$RUNNER_TEMP/go-live/ios-tar-entries.txt"; then
@@ -187,8 +189,11 @@ jobs:
               ios_archive="$(find "$RUNNER_TEMP/go-live/ios-extracted" -type d -name '*.xcarchive' -print -quit 2>/dev/null || true)"
             fi
           fi
-          echo "GO_LIVE_ANDROID_AAB=${android_aab:-$RUNNER_TEMP/go-live/android/MISSING.aab}" >> "$GITHUB_ENV"
-          echo "GO_LIVE_IOS_ARCHIVE=${ios_archive:-$RUNNER_TEMP/go-live/ios/MISSING.xcarchive}" >> "$GITHUB_ENV"
+          {
+            echo "GO_LIVE_ANDROID_AAB=${android_aab:-$RUNNER_TEMP/go-live/android/MISSING.aab}"
+            echo "GO_LIVE_IOS_ARCHIVE=${ios_archive:-$RUNNER_TEMP/go-live/ios/MISSING.xcarchive}"
+            echo "GO_LIVE_IOS_ARCHIVE_TARBALL=${ios_tar:-$RUNNER_TEMP/go-live/ios/MISSING.xcarchive.tgz}"
+          } >> "$GITHUB_ENV"
 
       - name: Run the single read-only Go-Live preflight
         shell: bash
@@ -198,6 +203,7 @@ jobs:
           GO_LIVE_BACKEND_ENV_FILE: ${{ runner.temp }}/go-live/config/backend.env.production
           GO_LIVE_ANDROID_FIREBASE: ${{ runner.temp }}/go-live/config/google-services.json
           GO_LIVE_IOS_FIREBASE: ${{ runner.temp }}/go-live/config/GoogleService-Info.plist
+          GO_LIVE_METRICS_TOKEN_SECRET_FILE: ${{ runner.temp }}/go-live/config/metrics-token
           GO_LIVE_STORE_EVIDENCE: ${{ runner.temp }}/go-live/config/go-live-evidence.json
           GO_LIVE_REPORT: ${{ runner.temp }}/go-live-preflight.json
           CHATHOUSE_UPLOAD_STORE_FILE: ${{ runner.temp }}/go-live/config/android-upload.jks

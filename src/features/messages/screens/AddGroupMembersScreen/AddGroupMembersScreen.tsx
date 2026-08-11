@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -63,6 +63,7 @@ export const AddGroupMembersScreen: React.FC = () => {
 
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<Map<string, User>>(new Map());
+  const addInFlightRef = useRef(false);
 
   // People I follow who aren't already in the group, narrowed by the filter.
   const candidates = useMemo(
@@ -92,16 +93,19 @@ export const AddGroupMembersScreen: React.FC = () => {
     if (hasNextPage && !isFetchingNextPage) void fetchNextPage();
   }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
-  const handleAdd = useCallback(() => {
+  const handleAdd = useCallback(async () => {
+    if (addInFlightRef.current) return;
     const userIds = [...selected.keys()];
     if (userIds.length === 0) return;
-    addMembers.mutate(
-      { conversationId, userIds },
-      {
-        onSuccess: () => navigation.goBack(),
-        onError: () => Alert.alert(t('messages.addError', "Couldn't add members. Try again.")),
-      },
-    );
+    addInFlightRef.current = true;
+    try {
+      await addMembers.mutateAsync({ conversationId, userIds });
+      navigation.goBack();
+    } catch {
+      Alert.alert(t('messages.addError', "Couldn't add members. Try again."));
+    } finally {
+      addInFlightRef.current = false;
+    }
   }, [addMembers, conversationId, navigation, selected, t]);
 
   const handleClose = useCallback(() => navigation.goBack(), [navigation]);

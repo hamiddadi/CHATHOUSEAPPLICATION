@@ -32,7 +32,7 @@ interface CaptionPublishPayload {
   speakerName?: unknown;
 }
 
-const SPEAKER_ROLES = new Set(['HOST', 'MODERATOR', 'SPEAKER']);
+const SPEAKER_ROLES = new Set(['MODERATOR', 'SPEAKER']);
 const MAX_TEXT = 500;
 const MAX_ID = 64;
 const MAX_NAME = 80;
@@ -85,9 +85,20 @@ export const registerCaptionsRealtime = (io: Server, socket: Socket): void => {
       } else {
         const p = await prisma.participant.findUnique({
           where: { userId_roomId: { userId, roomId } },
-          select: { role: true },
+          select: {
+            role: true,
+            leftAt: true,
+            admissionConfirmedAt: true,
+            room: { select: { hostId: true, isLive: true, endedAt: true } },
+          },
         });
-        allowed = p ? SPEAKER_ROLES.has(p.role) : false;
+        allowed =
+          !!p &&
+          p.leftAt === null &&
+          p.admissionConfirmedAt !== null &&
+          p.room.isLive &&
+          p.room.endedAt === null &&
+          (p.room.hostId === userId || SPEAKER_ROLES.has(p.role));
         authzCache.set(cacheKey, { until: now + AUTHZ_TTL_MS, allowed });
       }
       if (!allowed) return;

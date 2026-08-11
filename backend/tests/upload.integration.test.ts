@@ -109,6 +109,46 @@ describe('Private media uploads', () => {
     expect(tamperedExpiry.status).toBe(404);
   });
 
+  it('replays an upload at the exact same object and rejects key reuse with changed bytes', async () => {
+    const user = await register(app);
+    userIds.push(user.id);
+    const idempotencyKey = `avatar-upload-${rand()}-${rand()}`;
+
+    const first = await request(app)
+      .post('/api/upload/avatar')
+      .set('Authorization', `Bearer ${user.token}`)
+      .set('Idempotency-Key', idempotencyKey)
+      .send({ dataUrl: PNG_DATA_URL });
+    const replay = await request(app)
+      .post('/api/upload/avatar')
+      .set('Authorization', `Bearer ${user.token}`)
+      .set('Idempotency-Key', idempotencyKey)
+      .send({ dataUrl: PNG_DATA_URL });
+
+    expect(first.status).toBe(201);
+    expect(replay.status).toBe(201);
+    expect(replay.body.data).toEqual(first.body.data);
+    expect(
+      await prisma.mediaObject.count({
+        where: { ownerId: user.id, kind: 'AVATAR' },
+      }),
+    ).toBe(1);
+
+    const changedPng = Buffer.concat([PNG_BYTES, Buffer.from([0])]).toString('base64');
+    const conflict = await request(app)
+      .post('/api/upload/avatar')
+      .set('Authorization', `Bearer ${user.token}`)
+      .set('Idempotency-Key', idempotencyKey)
+      .send({ base64: changedPng, mime: 'image/png' });
+    expect(conflict.status).toBe(409);
+    expect(conflict.body.error.code).toBe('IDEMPOTENCY_001');
+    expect(
+      await prisma.mediaObject.count({
+        where: { ownerId: user.id, kind: 'AVATAR' },
+      }),
+    ).toBe(1);
+  });
+
   it('exports private media through expiring links without stable capabilities', async () => {
     const user = await register(app);
     userIds.push(user.id);
@@ -132,6 +172,9 @@ describe('Private media uploads', () => {
     expect(exported.headers['content-disposition']).toMatch(
       /^attachment; filename="chathouse-export-\d{4}-\d{2}-\d{2}\.json"$/,
     );
+    expect(exported.headers['transfer-encoding']).toBe('chunked');
+    expect(exported.headers['cache-control']).toBe('private, no-store');
+    expect(exported.headers['x-content-type-options']).toBe('nosniff');
     expect(exported.body.exportFormat).toBe('chathouse-user-export-v4');
     expect(exported.body.retention.mediaDownloadUrlTtlSeconds).toBeGreaterThanOrEqual(300);
     expect(exported.body.profile.avatarUrl).toBeUndefined();

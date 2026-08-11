@@ -31,6 +31,14 @@ CHATHOUSE_UPLOAD_KEY_PASSWORD=********
 Release tasks fail immediately if any value is absent. They never fall back to
 the shared debug key.
 
+The store-artifact workflow runs `jarsigner -verify -strict`, rejects unsigned
+or partially signed entries, debug/weak signers and expired certificates, then
+compares the AAB signer SHA-256 with the certificate exported from the protected
+upload keystore. The resulting non-secret fingerprint is recorded in the
+Android artifact manifest. Keep an independently reviewed copy of that upload
+fingerprint in the password manager and Play Console records so a keystore
+replacement is an explicit release event.
+
 ### Version and build
 
 Choose an explicit, unused `VERSION_CODE` and a release `VERSION_NAME`. Defaults
@@ -124,4 +132,7 @@ iOS archive contains the expected Apple Distribution team, App Store profile,
 production APNs entitlement and requested version/build. It intentionally does
 not upload to Play or TestFlight: use the verified artifacts on the Internal
 Testing/TestFlight tracks, then record those external runs in the protected
-Go-Live evidence.
+Go-Live evidence. The iOS manifest records both `artifact_sha256` for the exact
+`ChatHouse.xcarchive.tgz` and `build_number`; copy these values into the evidence
+schema. The Go-Live preflight recomputes the tarball hash and extracts
+`CFBundleVersion` from the archive, so evidence for a different build fails.

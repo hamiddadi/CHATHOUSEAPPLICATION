@@ -335,4 +335,47 @@ describe('Groups — block gate, ownership transfer, rename-to-null', () => {
     expect(renamed.status).toBe(200);
     expect(renamed.body.data.title).toBe('Renamed');
   });
+
+  it('keeps every equal-timestamp group message across a composite-cursor boundary', async () => {
+    const alice = await register(app);
+    const bob = await register(app);
+    const carol = await register(app);
+    createdIds.push(alice.id, bob.id, carol.id);
+    const group = await createGroup(app, alice.token, [bob.id, carol.id]);
+    const groupId = group.body.data.id as string;
+    const timestamp = new Date('2026-08-10T12:00:00.456Z');
+    const prefix = `group_tie_${rand()}`;
+    const ids = ['a', 'b', 'c', 'd'].map(suffix => `${prefix}_${suffix}`);
+    await prisma.groupMessage.createMany({
+      data: ids.map((id, index) => ({
+        id,
+        conversationId: groupId,
+        senderId: alice.id,
+        content: `tied group ${index}`,
+        createdAt: timestamp,
+      })),
+    });
+
+    const seen: string[] = [];
+    let before: string | undefined;
+    let pageCount = 0;
+
+    do {
+      const page = await request(app)
+        .get(`/api/groups/${groupId}/messages`)
+        .query({ limit: 2, paginated: 'true', ...(before ? { before } : {}) })
+        .set('Authorization', `Bearer ${alice.token}`);
+
+      expect(page.status).toBe(200);
+      if (pageCount === 0) expect(page.body.data.nextCursor).toMatch(/^v1\./);
+      seen.push(...page.body.data.data.map((message: { id: string }) => message.id));
+      before = page.body.data.nextCursor ?? undefined;
+      pageCount += 1;
+      expect(pageCount).toBeLessThan(10);
+    } while (before);
+
+    const tiedSeen = seen.filter(id => ids.includes(id));
+    expect(new Set(tiedSeen)).toEqual(new Set(ids));
+    expect(tiedSeen).toHaveLength(ids.length);
+  });
 });

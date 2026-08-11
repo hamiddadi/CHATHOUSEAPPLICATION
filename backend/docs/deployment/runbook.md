@@ -121,6 +121,10 @@ later.
    - **image_digest**: the exact full ref
      `ghcr.io/<owner>/<repo>/api@sha256:<64 lowercase hex characters>`.
      Tags, other registries and other repositories are rejected.
+     The target must carry both image labels
+     `org.chathouse.database-role-contract=v1` and
+     `org.chathouse.livekit-revocation-contract=v1`. Older images are rejected
+     before DB preparation and are never activated.
 3. The workflow SSHes to the chosen host, pulls + deploys that digest, verifies
    `/health`, and logs the rollback to Slack.
 
@@ -143,8 +147,65 @@ IMAGE_NAME=<owner>/<repo>/api ./scripts/deploy/rollback.sh \
 `rollback.sh` accepts only immutable digests from the configured repository. If
 the requested rollback target fails Compose, image verification, or health
 checks, it restores and verifies the digest that was running before the command.
+Manual rollback targets must have been built after both contract cutovers.
+There is no runtime exemption: every image reactivated after the cutovers must
+carry both `org.chathouse.database-role-contract=v1` and
+`org.chathouse.livekit-revocation-contract=v1`.
 
-### 4d. Standalone health probe
+### 4d. Runtime rollback compatibility contracts
+
+Images built before `org.chathouse.livekit-revocation-contract=v1` do not consume
+the durable `livekit.*` revocation topics and must never become authoritative.
+A point-in-time queue drain is not a safe compatibility bridge: the old binary
+could mint a new room token or create another state transition after the drain,
+without preserving the required revocation effect.
+
+The deploy script therefore fails closed on every activation path. Before any
+role bootstrap, grant change, API stop, migration or API replacement, it checks
+the captured rollback digest. Manual rollback targets are rejected too;
+automatic, maintenance-recovery and signal-recovery paths verify both labels
+again immediately before activation. If either label is absent or differs from
+`v1`, the image is not started. Never add a label to an old image as a
+workaround: each label certifies behavior implemented by that image.
+
+The first v1 upgrade of an environment already running a pre-v1 image is a
+one-way contract cutover because no compatible predecessor exists yet. (A
+brand-new environment with no running API needs no override.) Use this
+procedure exactly once per existing environment:
+
+1. Complete the production-clone migration drill and verified backup/restore
+   drill, then deploy the exact digest to staging with both one-way LiveKit and
+   database-role workflow-dispatch checkboxes enabled.
+2. Record the healthy staging API, worker and signed-webhook evidence. Select
+   the same tested tag in the production workflow-dispatch screen and enable
+   both checkboxes. The workflow passes
+   `ALLOW_ONE_WAY_LIVEKIT_REVOCATION_UPGRADE=true` and
+   `ALLOW_ONE_WAY_DATABASE_ROLE_UPGRADE=true` only for that
+   invocation.
+3. Each override bypasses only its corresponding _previous-image_
+   compatibility preflight. The candidate's two v1 image labels, DB/schema
+   preflight, worker health and public health gates remain mandatory. If
+   failure happens after maintenance starts, the pre-v1 API remains stopped;
+   deploy the tested v1 digest (or a corrected v1 digest) rather than attempting
+   the incompatible rollback.
+4. After the first successful v1 deployment, leave both checkboxes disabled for
+   every deployment. A compatible predecessor and worker digest are then
+   captured and restored automatically on candidate failure.
+
+The contract-v1 image also runs `livekit-revocation-worker`, independently of
+API boot. It consumes only the participant/room revocation topics and receives
+signed LiveKit webhooks at `/webhooks/livekit`. Self-hosted LiveKit calls the
+worker directly over the Compose network. For LiveKit Cloud, configure the
+project webhook as `https://api.chathouse.app/webhooks/livekit`; Caddy routes
+that exact path directly to the security worker even while `api` is unhealthy.
+Select the same API key configured on the worker as the webhook signing key.
+Worker startup and `--check` perform a bounded authenticated room-list probe;
+periodic failures make its health endpoint return 503 after the freshness
+window. The self-hosted LiveKit service therefore has no dependency on worker
+health (which would be circular): Compose starts both independently, the worker
+restarts/probes until LiveKit is reachable, and API waits for worker health.
+
+### 4e. Standalone health probe
 
 ```bash
 BASE_URL=http://localhost:4000 ./scripts/deploy/health-check.sh
@@ -202,14 +263,28 @@ Run through this **before** pushing a `v*.*.*` tag:
       Alertmanager, then fire a controlled warning and critical test alert.
 - [ ] **On-call notified** — post in the ops channel that a prod deploy is
       starting; ensure an approver is available for the environment gate.
-- [ ] **Rollback target known** — note the current pullable production digest
-      so you can pass its exact full reference to `rollback.yml` if needed.
+- [ ] **Rollback target contracts known** — note the current pullable
+      production digest and confirm both
+      `org.chathouse.database-role-contract=v1` and
+      `org.chathouse.livekit-revocation-contract=v1`. A target missing either
+      contract cannot be activated, including by automatic or signal recovery.
 - [ ] **Migration is backward-compatible** — use expand/contract migrations:
       the previous application image must continue working after
       `prisma migrate deploy`. Do not drop/rename columns or tighten constraints
       in the same release that stops reading the old shape. Database rollback
       is not automatic; verify the latest encrypted backup/restore drill before
       any destructive follow-up release.
+- [ ] **Database roles are separated** — `POSTGRES_USER` is reserved for
+      bootstrap/migrations and `POSTGRES_APP_USER` is a distinct non-superuser.
+      Never copy the migration DSN into the API service or application logs.
+- [ ] **Write-blocking migration maintenance is scheduled when pending** — migrations
+      `20260810190000_search_trigram_indexes` and
+      `20260810190000_stable_notification_follow_cursors` build/swap
+      transactional indexes; `20260810214000_media_idempotency_cleanup`
+      backfills media/message relations and then creates their indexes and
+      foreign keys. Announce a maintenance window; CD stops the API for the
+      first run of any of these migrations instead of blocking live writes
+      silently.
 
 ---
 
@@ -250,12 +325,16 @@ notable:
 
 | Var                                      | Required | Notes                                                                                                  |
 | ---------------------------------------- | :------: | ------------------------------------------------------------------------------------------------------ |
-| `DATABASE_URL`                           |   yes    | Postgres DSN. In-compose default: `postgres:5432/chathouse`.                                           |
-| `REDIS_URL`                              |   yes    | e.g. `redis://redis:6379`.                                                                             |
+| `POSTGRES_USER`                          |   yes    | URI-unreserved bootstrap/migration owner; never passed to the long-lived API.                          |
+| `POSTGRES_PASSWORD`                      |   yes    | Migration-role secret, restricted to URI-unreserved characters; see the note below.                    |
+| `POSTGRES_DB`                            |   opt    | URI-unreserved database name; defaults to `chathouse`.                                                 |
+| `POSTGRES_APP_USER`                      |   yes    | Distinct URI-unreserved non-superuser used only by the API.                                            |
+| `POSTGRES_APP_PASSWORD`                  |   yes    | Distinct runtime-role secret, restricted to URI-unreserved characters.                                 |
+| `REDIS_PASSWORD`                         |   yes    | Redis AUTH secret restricted to URI-unreserved characters; Compose builds `REDIS_URL`.                 |
 | `REDIS_MAXMEMORY`                        |   rec    | Redis ceiling used by production Compose; defaults to `512mb`.                                         |
 | `JWT_ACCESS_SECRET`                      |   yes    | zod-validated; boot fails if missing.                                                                  |
 | `JWT_REFRESH_SECRET`                     |   yes    | zod-validated; boot fails if missing.                                                                  |
-| `CORS_ORIGINS`                           |   rec    | Comma-separated allowed origins.                                                                       |
+| `CORS_ORIGINS`                           |   yes    | Comma-separated canonical public HTTPS origins, without paths, queries or fragments.                   |
 | `NODE_ENV`                               |   rec    | `production` on prod.                                                                                  |
 | `LIVEKIT_URL`                            |   yes    | Public `wss://` LiveKit endpoint (Cloud or self-hosted). Live audio 503s without it.                   |
 | `LIVEKIT_INTERNAL_URL`                   |   cond   | Server-to-server HTTP URL; required for self-host (`http://livekit:7880`), Cloud falls back to public. |
@@ -274,13 +353,25 @@ notable:
 | `ACCOUNT_DELETION_GRACE_DAYS`            |   opt    | GDPR hard-delete grace (default 30).                                                                   |
 | `AUDIT_LOG_RETENTION_DAYS`               |   opt    | Audit log retention (default 90).                                                                      |
 | `SENTRY_DSN`                             |   opt    | Enables error reporting (@sentry/node v8).                                                             |
-| `METRICS_TOKEN_SECRET_FILE`              |   yes    | Absolute host path to the shared API/Prometheus Bearer-token file.                                     |
+| `MEDIA_S3_REGION`                        |   yes    | Real provider region (`auto` is valid for Cloudflare R2); placeholders are rejected.                   |
+| `METRICS_TOKEN_SECRET_FILE`              |   yes    | Absolute, existing host path to the shared API/Prometheus Bearer-token file.                           |
 | `GF_SECURITY_ADMIN_PASSWORD`             |  yes\*   | Required when starting the separate Grafana monitoring stack; no default is accepted.                  |
 | `CHATHOUSE_API_IMAGE`                    |   yes    | Initial `repository@sha256` digest; CD overrides it with a verified digest.                            |
 | `SMTP_SMARTHOST` / `SMTP_FROM`           |  yes\*   | Non-secret SMTP routing rendered before Alertmanager starts.                                           |
 | `SMTP_USERNAME` / `ALERT_EMAIL_TO`       |  yes\*   | Non-secret Alertmanager mail routing.                                                                  |
 | `ALERTMANAGER_SLACK_WEBHOOK_SECRET_FILE` |  yes\*   | Absolute host path to the Slack webhook secret file.                                                   |
 | `ALERTMANAGER_SMTP_PASSWORD_SECRET_FILE` |  yes\*   | Absolute host path to the SMTP password secret file.                                                   |
+
+`docker-compose.prod.yml` constructs separate migration and runtime PostgreSQL
+DSNs plus the Redis DSN by inserting `POSTGRES_USER`, `POSTGRES_APP_USER`,
+`POSTGRES_DB`, both Postgres passwords and `REDIS_PASSWORD` directly. Until
+those inputs are replaced by separately percent-encoded DSNs, each must contain
+only RFC 3986 unreserved characters
+(`A-Z`, `a-z`, `0-9`, `.`, `_`, `~`, `-`). `openssl rand -hex 32` is strong and
+compatible for passwords. The Go-Live preflight rejects reserved characters
+instead of allowing a valid-looking configuration to fail when the API boots.
+It also requires canonical HTTPS-only CORS origins, a non-placeholder S3 region
+and an absolute metrics-secret path whose verification target exists.
 
 LiveKit Cloud is the lowest-ops choice — it provides global TURN and needs only
 the three required `LIVEKIT_*` values above; `LIVEKIT_INTERNAL_URL` may stay
@@ -295,6 +386,19 @@ the queues and `/health` recover. Size the limit below the container or host
 memory allocation to leave room for Redis/AOF overhead; do not switch to an
 eviction policy to silence capacity errors.
 
+The API samples `INFO memory` every 15 seconds and exports
+`chathouse_redis_memory_used_bytes`, `chathouse_redis_memory_max_bytes` and
+`chathouse_redis_memory_usage_ratio`. Prometheus warns after 10 minutes above
+80% and pages critically after 5 minutes above 90%; loss of this telemetry also
+alerts. The readiness endpoint performs no SET/DEL probe: it combines `PING`
+with the reported policy and memory ratio, and returns 503 once a bounded Redis
+is not using `noeviction` or reaches 98%. This avoids leaving probe keys behind
+while withdrawing an API instance before ordinary writes start failing.
+
+BullMQ gauges also alert when a queue retains failed jobs for 10 minutes or has
+more than 100 immediately waiting (not delayed) jobs for 10 minutes. Inspect
+worker logs and the failed job payload before retrying or deleting a job.
+
 ### 6.3 First host bootstrap
 
 The CD archive deliberately contains no `.env` or secret. Before the first
@@ -308,7 +412,8 @@ CHATHOUSE_API_IMAGE=ghcr.io/<owner>/<repo>/api@sha256:<64-lowercase-hex-characte
 ```
 
 The file must also contain every `${VAR:?required}` value referenced by
-`docker-compose.prod.yml`: Postgres/Redis credentials, JWT, CORS/public URL,
+`docker-compose.prod.yml`: both distinct Postgres roles/passwords, Redis
+credentials, JWT, CORS/public URL,
 private media storage, LiveKit, Twilio, Resend, Firebase, Stripe, metrics secret
 path and the Alertmanager values documented below. The `LEGAL_*` and public
 contact values must come from the reviewed
@@ -328,6 +433,62 @@ docker compose --env-file .env -f docker-compose.prod.yml pull
 docker compose --env-file .env -f docker-compose.prod.yml up -d
 BASE_URL=http://localhost:4000 ./scripts/deploy/health-check.sh
 ```
+
+On a fresh volume, the Postgres init hook creates the non-superuser application
+role. Compose then waits for `db-role-bootstrap`, `migrate` and
+`db-role-grants` to complete before it starts `api`. The migration service is
+the only application image process that receives `POSTGRES_USER`; the API uses
+`POSTGRES_APP_USER` and is limited to DML on application tables/sequences.
+
+#### Existing database upgrade to split roles
+
+This is a mandatory one-time upgrade for a host created before the role split.
+First add new, distinct `POSTGRES_APP_USER` and `POSTGRES_APP_PASSWORD` values
+to the protected host `.env`; do not rename or rotate the existing
+`POSTGRES_USER` in the same operation. Install the candidate Compose file and
+`scripts/deploy/bootstrap-app-role.sh`, then run the exact ordered sequence:
+
+```bash
+cd /opt/chathouse/backend
+chmod 0600 .env
+docker compose --env-file .env -f docker-compose.prod.yml config --quiet
+docker compose --env-file .env -f docker-compose.prod.yml \
+  run --rm --no-deps db-role-bootstrap
+docker compose --env-file .env -f docker-compose.prod.yml stop api
+docker compose --env-file .env -f docker-compose.prod.yml \
+  run --rm --no-deps migrate
+docker compose --env-file .env -f docker-compose.prod.yml \
+  run --rm --no-deps db-role-grants
+docker compose --env-file .env -f docker-compose.prod.yml \
+  up -d --no-deps api
+BASE_URL=http://localhost:4000 ./scripts/deploy/health-check.sh
+```
+
+The bootstrap/grant script is idempotent: it creates or hardens the runtime
+role, removes inherited memberships and broad grants, installs current/default
+DML grants, and revokes access to `_prisma_migrations`. One advisory-locked
+transaction makes the revoke/grant replacement atomic and rolls everything
+back on any intermediate error. It also revokes database CONNECT/TEMPORARY from
+PUBLIC; this dedicated stack uses only the migration owner and the explicitly
+granted API role. If an external installation has separate backup/read-only
+roles, grant each one CONNECT and its reviewed object privileges explicitly
+before applying the upgrade; never restore TEMPORARY to the API role. Normal CD
+executes this same sequence before every activation. While any known
+write-blocking migration is pending, `db-maintenance-check` makes CD stop the
+API before applying it. The index-only migrations use a five-second lock
+timeout and bounded statement timeouts and roll back on failure. Later releases
+keep the previous API online because the check returns “already complete”. For
+rollback, CD reapplies the role contract but deliberately skips forward migrations;
+database schema changes remain forward-only and must satisfy the
+expand/contract rule above.
+
+The bootstrap fails transactionally if `POSTGRES_APP_USER` owns any database,
+extension, non-system schema, table/index/sequence, function or type, or retains
+CREATE on another non-system schema. For an existing external database,
+inventory those objects first and transfer each reviewed owner to
+`POSTGRES_USER` (or another dedicated owner) during maintenance, then rerun the
+bootstrap. Do not use `DROP OWNED` as remediation: it can delete production
+objects rather than merely transferring ownership.
 
 After this bootstrap, CD synchronizes only its explicit versioned allowlist and
 activates immutable API images. It never copies `.env`, `/opt/chathouse/secrets`,
@@ -406,6 +567,39 @@ The one-shot `alertmanager-config-renderer` substitutes only SMTP routing and
 recipient values. It writes to a private named volume; webhook and SMTP
 password remain file-backed secrets read directly by Alertmanager. CI runs
 `amtool check-config`, `promtool check config`, and `promtool check rules`.
+
+#### Write-blocking migration maintenance window
+
+Each maintenance-gated PostgreSQL migration file contains an explicit
+`BEGIN`/`COMMIT` boundary; Prisma 5.22 does not add that transaction boundary
+automatically. `CREATE INDEX CONCURRENTLY` therefore cannot be used in these
+files.
+Migrations that build the search or stable notification/follow pagination
+indexes therefore use ordinary `CREATE INDEX`: reads remain available, but
+writes to each indexed table are blocked while its index is built. The media
+idempotency migration also backfills existing media/message rows before adding
+ordinary indexes and foreign keys, so it belongs to the same maintenance gate.
+The participant-admission migration backfills active participant leases and
+builds the complete lease-reaper index, so it uses that gate as well.
+
+Before approving any of these migrations, measure its duration on the latest
+production clone, announce a write-maintenance window, drain/stop API workers
+that write the affected tables, and check for long-running transactions. All
+four maintenance-gated migrations use a five-second `lock_timeout`; no SQL
+statement may exceed 30 minutes. CD additionally caps the complete Prisma
+migration command at 35 minutes, gives its one-off container two minutes to
+terminate, and keeps the SSH command alive for up to 60 minutes so verified API
+rollback/health checks retain substantial margin. TERM/INT/HUP during an active
+maintenance window first force-removes the globally named migration container,
+then waits (up to two minutes) until the migration owner has no active database
+session, and only then permits previous-image/Caddy reactivation plus an
+internal health check. If transaction quiescence cannot be proven, API writers
+remain stopped and the deployment raises a critical failure. Run only the one-shot migration service, require
+`prisma migrate status` to be clean, verify the expected new indexes and foreign
+keys exist and superseded prefix indexes are absent, then restore API traffic. A
+timeout or failed migration is a stopped deployment; do not mark it applied
+manually or resume writes until the database operator has inspected and resolved
+it.
 
 ### 6.5 Production-clone migration upgrade drill
 

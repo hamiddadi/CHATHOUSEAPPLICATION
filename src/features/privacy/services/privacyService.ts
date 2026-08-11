@@ -15,6 +15,10 @@ export const privacyService = {
    * Pull the full user-data archive as raw JSON. Returned as a string so
    * the caller can hand it off to the Share sheet or write to disk
    * without going through React Query.
+   *
+   * The API produces bounded, chunked output, but React Native Axios still
+   * buffers `responseType: text` on the device. A future native direct-to-file
+   * transport can remove that client-side limit without changing this API URL.
    */
   async exportMyData(): Promise<string> {
     const res = await apiClient.get<string>('/users/me/export', {

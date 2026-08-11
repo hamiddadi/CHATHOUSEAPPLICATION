@@ -1,6 +1,6 @@
 import React from 'react';
 import { Alert } from 'react-native';
-import { fireEvent, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, waitFor } from '@testing-library/react-native';
 import { i18n } from '../../../../core/i18n';
 import { renderScreen, mockAuthenticated, resetAuth } from '../../../../test-utils/renderScreen';
 import { roomKeys } from '../../hooks/useRooms';
@@ -134,5 +134,39 @@ describe('RoomChatSidebar content reporting', () => {
 
     fireEvent.press(getByLabelText('Cancel reply'));
     expect(getByPlaceholderText('Write a message…')).toBeTruthy();
+  });
+
+  it('synchronously blocks a double send while the first room message is pending', async () => {
+    let resolveSend!: (message: Awaited<ReturnType<typeof roomService.sendMessage>>) => void;
+    const pendingSend = new Promise<Awaited<ReturnType<typeof roomService.sendMessage>>>(
+      resolve => {
+        resolveSend = resolve;
+      },
+    );
+    const sendSpy = jest.spyOn(roomService, 'sendMessage').mockReturnValue(pendingSend);
+    const { getByLabelText } = renderScreen(
+      <RoomChatSidebar visible roomId={ROOM_ID} onClose={jest.fn()} />,
+      {
+        seedQueryData: [
+          {
+            key: [...roomKeys.all, 'messages', ROOM_ID],
+            data: messages,
+          },
+        ],
+      },
+    );
+
+    fireEvent.changeText(getByLabelText('Chat message'), 'Only once');
+    const sendButton = getByLabelText('Send message');
+    fireEvent.press(sendButton);
+    fireEvent.press(sendButton);
+
+    await waitFor(() => expect(sendSpy).toHaveBeenCalledTimes(1));
+    expect(sendSpy).toHaveBeenCalledWith(ROOM_ID, 'Only once', undefined);
+
+    await act(async () => {
+      resolveSend({ ...messages[0]!, id: 'sent-room-message' });
+      await pendingSend;
+    });
   });
 });

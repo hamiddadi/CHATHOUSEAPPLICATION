@@ -80,14 +80,18 @@ export const houseService = {
     return res.data.data;
   },
 
-  async create(input: CreateHouseInput): Promise<House> {
-    const res = await apiClient.post<Envelope<House>>('/clubs', {
-      name: input.name.trim(),
-      description: input.description.trim() || undefined,
-      rules: input.rules?.trim() || undefined,
-      privacy: PRIVACY_TO_DB[input.privacy],
-      iconUrl: input.iconUrl ?? undefined,
-    });
+  async create(input: CreateHouseInput, idempotencyKey: string): Promise<House> {
+    const res = await apiClient.post<Envelope<House>>(
+      '/clubs',
+      {
+        name: input.name.trim(),
+        description: input.description.trim() || undefined,
+        rules: input.rules?.trim() || undefined,
+        privacy: PRIVACY_TO_DB[input.privacy],
+        iconUrl: input.iconUrl ?? undefined,
+      },
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    );
     return res.data.data;
   },
 

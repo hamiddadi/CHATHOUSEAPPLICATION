@@ -1,29 +1,41 @@
 import type { Request, Response } from 'express';
 import { Router } from 'express';
+import { z } from 'zod';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { requireAuth } from '../../middlewares/auth.middleware';
 import { sendOk } from '../../utils/response';
 import { AppError } from '../../middlewares/error.middleware';
 import { authedUserId as uid } from '../../utils/authedUserId';
+import { decodeTimeIdCursor } from '../../utils/timeIdCursor';
 import { notificationsService, parseFilter } from './notifications.service';
 
 export const notificationsRouter: Router = Router();
 
 notificationsRouter.use(requireAuth);
 
+const listQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(50).default(50),
+  cursor: z
+    .string()
+    .max(1024)
+    .refine(value => decodeTimeIdCursor(value) !== null, { message: 'Invalid notification cursor' })
+    .optional(),
+});
+
 notificationsRouter.get(
   '/',
   asyncHandler(async (req, res) => {
     const filter = parseFilter(req.query['filter']);
-    const limitRaw = req.query['limit'];
-    const parsedLimit = typeof limitRaw === 'string' ? Number(limitRaw) : NaN;
-    const limit = Number.isFinite(parsedLimit) ? Math.min(50, Math.max(1, parsedLimit)) : 50;
-    const cursor = typeof req.query['cursor'] === 'string' ? req.query['cursor'] : undefined;
+    const { limit, cursor } = listQuerySchema.parse(req.query);
     const page = await notificationsService.list(uid(req), filter, limit, cursor);
-    // Return the array directly (matches the OpenAPI contract: data: array).
-    // The clients read `data` as the notification array; wrapping the paginated
-    // object here made them `.map` over an object and crash.
-    sendOk(res, page.data);
+    // Preserve `data` as an array for installed clients while exposing paging
+    // metadata to newer clients at the envelope's top level.
+    res.status(200).json({
+      success: true,
+      data: page.data,
+      nextCursor: page.nextCursor,
+      hasMore: page.hasMore,
+    });
   }),
 );
 

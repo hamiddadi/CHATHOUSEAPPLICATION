@@ -9,7 +9,7 @@
  */
 import React from 'react';
 import { Alert } from 'react-native';
-import { fireEvent, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, waitFor } from '@testing-library/react-native';
 import { renderScreen, mockAuthenticated, resetAuth } from '../../../../test-utils/renderScreen';
 import { houseService } from '../../services/houseService';
 import type { House } from '../../../../shared/types/domain';
@@ -45,9 +45,8 @@ describe('CreateHouseScreen', () => {
       route: { name: 'CreateHouse' },
     });
     expect(toJSON()).toBeTruthy();
-    // i18n en.json: houses.create.title === 'Create House'; the submit button
-    // label (houses.create.submitBtn) is absent → falls back to its inline
-    // default 'Create House' too, so the text appears twice (header + CTA).
+    // i18n en.json intentionally gives the title and submit CTA the same
+    // "Create House" copy, so the text appears twice (header + button).
     expect(getAllByText('Create House').length).toBeGreaterThanOrEqual(2);
   });
 
@@ -87,9 +86,33 @@ describe('CreateHouseScreen', () => {
     const matches = getAllByText('Create House');
     fireEvent.press(matches[matches.length - 1]);
     await waitFor(() => {
-      expect(createSpy).toHaveBeenCalledWith(expect.objectContaining({ name: 'My House' }));
+      expect(createSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'My House' }),
+        expect.stringMatching(/^rn-/),
+      );
       expect(navigation.goBack).toHaveBeenCalledTimes(1);
     });
+  });
+
+  it('coalesces two presses in the same tick into one house creation action', async () => {
+    let resolveCreate!: (house: House) => void;
+    const createSpy = jest
+      .spyOn(houseService, 'create')
+      .mockReturnValue(new Promise(resolve => (resolveCreate = resolve)));
+    const { getAllByText, getByPlaceholderText } = renderScreen(<CreateHouseScreen />, {
+      route: { name: 'CreateHouse' },
+    });
+    fireEvent.changeText(getByPlaceholderText('House Name'), 'One tap House');
+    const matches = getAllByText('Create House');
+    const submit = matches[matches.length - 1];
+
+    act(() => {
+      fireEvent.press(submit);
+      fireEvent.press(submit);
+    });
+    await waitFor(() => expect(createSpy).toHaveBeenCalledTimes(1));
+
+    await act(async () => resolveCreate(createdHouse()));
   });
 
   it('shows an inline error under the name field while it is too short', () => {

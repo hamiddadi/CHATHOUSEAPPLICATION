@@ -81,13 +81,13 @@
   </div>
   <div class="meta">
     39 screens analysed · 11 functional zones<br/>
-    Based on a read-only audit of the actual source code<br/>
+    Based on an audit of the actual source code and automated tests<br/>
     August 10, 2026
   </div>
 </div>
 
 <h2>Method &amp; scoring</h2>
-<p>Each ChatHouse screen is compared to its Clubhouse counterpart and rated for <b>parity</b>: <b>100 = matches or exceeds</b> Clubhouse for the intended function. Areas where ChatHouse <b>exceeds</b> Clubhouse are not penalised. The feature inventory comes from reading the real code (screen <code>.tsx</code> files + hooks/partials/services), not assumptions.</p>
+<p>Each ChatHouse screen is compared to its Clubhouse counterpart and rated for <b>parity</b>: <b>100 = matches or exceeds</b> Clubhouse for the intended function. Areas where ChatHouse <b>exceeds</b> Clubhouse are not penalised. The feature inventory comes from auditing the real code (screen <code>.tsx</code> files + hooks/partials/services/backend) and its automated tests, not assumptions.</p>
 <p class="legend small">
   <span><span class="chip s-green">90–100</span> full / superior parity</span>
   <span><span class="chip s-blue">80–89</span> strong parity</span>
@@ -124,10 +124,10 @@
 <tbody>
 <tr><td>RoomFeedScreen</td><td>Hallway</td><td>Paginated live feed, filters, upcoming, strips (wave / suggestions / recently-played), socket updates</td><td>—</td><td class="score s-green">92</td></tr>
 <tr><td>RoomScreen</td><td>Room</td><td>Speaker/listener stage, <b>raise hand + queue</b>, <b>full moderation</b> (mute others / make-speaker / move-to-audience / mod / transfer host / kick+ban / mute-all / lock / hand restrictions), <b>emoji reactions</b>, <b>live captions</b>, <b>background audio</b>, ping+wave, tip, chat, ghost listener</td><td><span class="x">Spatial audio ✕</span> · <span class="x">Music mode ✕</span></td><td class="score s-blue">88</td></tr>
-<tr><td>CreateRoomScreen</td><td>Start a room</td><td>3-level visibility, house, topics, <b>co-hosts</b>, <b>scheduling</b>, recording</td><td>—</td><td class="score s-green">95</td></tr>
+<tr><td>CreateRoomScreen</td><td>Start a room</td><td>3-level visibility, house, topics, <b>co-hosts</b>, <b>scheduling</b></td><td>Recording is prepared in the backend but disabled in production until consent and operations are approved</td><td class="score s-green">90</td></tr>
 <tr><td>InviteToRoomScreen</td><td>Invite to room</td><td>Search + multi-select (max 50)</td><td>—</td><td class="score s-green">90</td></tr>
 <tr><td>ReplaysScreen</td><td>Replays</td><td>List + inline player (play/pause/progress)</td><td>Player has no <b>seek</b>; no <b>clips</b> or host save/download workflow</td><td class="score s-amber">60</td></tr>
-<tr><td>EventsScreen</td><td>Upcoming / Events</td><td>Upcoming/Mine, <b>RSVP</b>, <b>calendar .ics export</b>, host reschedule/cancel</td><td>Dedicated push reminders</td><td class="score s-blue">85</td></tr>
+<tr><td>EventsScreen</td><td>Upcoming / Events</td><td>Upcoming/Mine, <b>RSVP</b>, <b>dedicated T−15/T−5 reminders</b>, <b>calendar .ics export</b>, host reschedule/cancel</td><td>—</td><td class="score s-blue">85</td></tr>
 </tbody>
 </table>
 <p class="small">Subtotal: <span class="zone-score">~85/100</span> — very strong core; real gaps: <b>spatial audio</b>, <b>music mode</b>, replay depth.</p>
@@ -163,7 +163,8 @@
 <thead><tr><th>ChatHouse screen</th><th>Clubhouse equivalent</th><th>ChatHouse state</th><th>Gaps</th><th class="score">Score</th></tr></thead>
 <tbody>
 <tr><td>ExploreScreen</td><td>Explore / Search</td><td>Trending rooms/clubs/users, search users/clubs/rooms/<b>topics</b>, <b>language/category filters</b>, recent searches</td><td>—</td><td class="score s-green">92</td></tr>
-<tr><td>NotificationsScreen</td><td>Activity</td><td>9 types, tabs, deep-links, mark-read, swipe-delete</td><td>DM deep-link not finalised</td><td class="score s-blue">88</td></tr>
+<tr><td>NotificationsScreen</td><td>Activity</td><td><b>13 types</b>, tabs, deep-links, composite/infinite pagination, mark-read, swipe-delete, <b>private follow requests with accept/decline</b></td><td>—</td><td class="score s-green">90</td></tr>
+<tr><td>FollowRequestsScreen</td><td>Follow request inbox</td><td>Paginated list, pull-to-refresh, <b>accept/decline</b>, accessible loading/error/empty states</td><td>—</td><td class="score s-green">90</td></tr>
 </tbody>
 </table>
 <p class="small">Subtotal: <span class="zone-score">~90/100</span>.</p>
@@ -172,7 +173,7 @@
 <table>
 <thead><tr><th>ChatHouse screen</th><th>Clubhouse equivalent</th><th>ChatHouse state</th><th>Gaps</th><th class="score">Score</th></tr></thead>
 <tbody>
-<tr><td>MessagesScreen</td><td>Backchannel list</td><td>1:1 + <b>group</b> conversations, voice preview, live socket</td><td>Online-presence strip inactive</td><td class="score s-blue">85</td></tr>
+<tr><td>MessagesScreen</td><td>Backchannel list</td><td>1:1 + <b>group</b> conversations, voice preview, live socket, <b>wired online-presence strip</b></td><td>—</td><td class="score s-green">90</td></tr>
 <tr><td>ChatDetailScreen</td><td>DM thread</td><td>Text + <b>voice notes</b>, typing, read receipts, delete, emojis, <b>real private audio call</b> (closed 2-person room), privacy-aware presence, <b>report/block</b></td><td>No attachment pipeline; the action is intentionally not shown</td><td class="score s-green">90</td></tr>
 <tr><td>NewMessageScreen</td><td>New message</td><td>Search, 1:1 or group</td><td>—</td><td class="score s-green">95</td></tr>
 <tr><td>GroupChatScreen</td><td>Group chat</td><td>Text + voice, draft restore</td><td>—</td><td class="score s-green">90</td></tr>
@@ -212,9 +213,9 @@
   <div class="bar-row"><span class="lab">Identity (Profile) <span class="muted">(12%)</span></span><div class="track"><div class="fill f-green" style="width:91%"></div></div><span class="val">91</span></div>
   <div class="bar-row"><span class="lab">Discovery <span class="muted">(10%)</span></span><div class="track"><div class="fill f-green" style="width:90%"></div></div><span class="val">90</span></div>
   <div class="bar-row"><span class="lab">Messages (Backchannel) <span class="muted">(12%)</span></span><div class="track"><div class="fill f-green" style="width:91%"></div></div><span class="val">91</span></div>
-  <div class="bar-row"><span class="lab">Settings <span class="muted">(7%)</span></span><div class="track"><div class="fill f-green" style="width:93%"></div></div><span class="val">93</span></div>
+  <div class="bar-row"><span class="lab">Settings <span class="muted">(12%)</span></span><div class="track"><div class="fill f-green" style="width:93%"></div></div><span class="val">93</span></div>
 </div>
-<p class="small"><b>Calculation:</b> sum(zone score × weight) = 84.21 points across 95% comparative weight; normalized to 100, the score is <b>88.64</b>, rounded to <b>89</b>. Extensions outside parity do not inflate the score.</p>
+<p class="small"><b>Calculation:</b> the seven zone weights total 100%; sum(zone score × weight) = <b>88.86</b>, rounded to <b>89</b>. Extensions outside parity do not inflate the score.</p>
 
 <div class="gauge">
   <div class="track"><div class="fill" style="width:89%"><span>89 / 100</span></div></div>
@@ -232,14 +233,15 @@
   <li><b>Spatial audio</b> ✕ and <b>music mode / in-room sound sharing</b> ✕ (Clubhouse signature features).</li>
   <li><b>Replay depth</b>: player without seek, no clips or host save/download workflow.</li>
   <li>No real <b>waitlist / contacts sync</b> at entry.</li>
-  <li>Polish: no DM attachments (affordance removed until the pipeline exists), inactive online-presence strip in the conversation list, notification DM deep-link.</li>
+  <li>Polish: no DM attachments (affordance removed until the pipeline exists).</li>
+  <li>Room recording remains deliberately gated off in production until consent and operational readiness are approved.</li>
 </ul>
 <div class="note">
-  <b>Conclusion.</b> The score remains <b>89/100 screen parity</b> after factual correction: <b>88.64</b> rounded, with no bonus for voice notes or group DMs already available in Clubhouse. It reflects strong coverage of the audited scope, not proof of overall superiority. Remaining priorities are spatial audio, music mode, richer replays and DM attachments.
+  <b>Conclusion.</b> The score remains <b>89/100 screen parity</b> after factual correction: <b>88.86</b> rounded, with no bonus for voice notes or group DMs already available in Clubhouse. It reflects strong coverage of the audited scope, not proof of overall superiority. Remaining priorities are spatial audio, music mode, richer replays and DM attachments.
 </div>
 
 <footer>
-  ChatHouse vs Clubhouse — Screen-by-screen comparison · Updated August 10, 2026 · Source-code-based analysis (read-only) · Internal document.
+  ChatHouse vs Clubhouse — Screen-by-screen comparison · Updated August 10, 2026 · Source-code and automated-test analysis · Internal document.
 </footer>
 
 </body>

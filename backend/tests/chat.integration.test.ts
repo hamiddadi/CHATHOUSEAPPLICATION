@@ -200,6 +200,101 @@ describe('Chat integration', () => {
     ).toEqual([busyPeer.id]);
   });
 
+  it('paginates 501 distinct conversations without truncating the final peer', async () => {
+    const viewer = await registerUser(app);
+    createdIds.push(viewer.id);
+    const tag = `many_${rand()}`;
+    const peerRows = Array.from({ length: 501 }, (_, index) => ({
+      id: `${tag}_peer_${String(index).padStart(3, '0')}`,
+      username: `${tag}_${index}`,
+      displayName: `Peer ${index}`,
+    }));
+
+    try {
+      await prisma.user.createMany({ data: peerRows });
+      const base = Date.now() - 1_000_000;
+      await prisma.message.createMany({
+        data: peerRows.map((peer, index) => ({
+          id: `${tag}_message_${String(index).padStart(3, '0')}`,
+          content: `conversation ${index}`,
+          senderId: peer.id,
+          receiverId: viewer.id,
+          createdAt: new Date(base + index),
+        })),
+      });
+
+      const seen = new Set<string>();
+      let cursor: string | undefined;
+      do {
+        const page = await request(app)
+          .get('/api/chat/conversations')
+          .query({ limit: 100, ...(cursor ? { cursor } : {}) })
+          .set('Authorization', `Bearer ${viewer.token}`);
+        expect(page.status).toBe(200);
+        for (const item of page.body.data.data as Array<{ peer: { id: string } }>) {
+          expect(seen.has(item.peer.id)).toBe(false);
+          seen.add(item.peer.id);
+        }
+        cursor = (page.body.data.nextCursor as string | null) ?? undefined;
+      } while (cursor);
+
+      expect(seen.size).toBe(501);
+      expect(peerRows.every(peer => seen.has(peer.id))).toBe(true);
+    } finally {
+      await prisma.user.deleteMany({ where: { id: { in: peerRows.map(peer => peer.id) } } });
+    }
+  });
+
+  it('uses a composite cursor so equal-timestamp DM rows survive a page boundary', async () => {
+    const alice = await registerUser(app);
+    const bob = await registerUser(app);
+    createdIds.push(alice.id, bob.id);
+    const timestamp = new Date('2026-08-10T12:00:00.123Z');
+    const prefix = `tie_${rand()}`;
+    const ids = ['a', 'b', 'c', 'd'].map(suffix => `${prefix}_${suffix}`);
+    await prisma.message.createMany({
+      data: ids.map((id, index) => ({
+        id,
+        content: `tied ${index}`,
+        senderId: alice.id,
+        receiverId: bob.id,
+        createdAt: timestamp,
+      })),
+    });
+
+    const first = await request(app)
+      .get(`/api/chat/${alice.id}`)
+      .query({ limit: 2, paginated: 'true' })
+      .set('Authorization', `Bearer ${bob.token}`);
+    const second = await request(app)
+      .get(`/api/chat/${alice.id}`)
+      .query({ limit: 2, paginated: 'true', before: first.body.data.nextCursor })
+      .set('Authorization', `Bearer ${bob.token}`);
+
+    expect(first.status).toBe(200);
+    expect(first.body.data.nextCursor).toMatch(/^v1\./);
+    expect(second.status).toBe(200);
+    const seen = [...first.body.data.data, ...second.body.data.data].map(
+      (message: { id: string }) => message.id,
+    );
+    expect(new Set(seen)).toEqual(new Set(ids));
+    expect(seen).toHaveLength(ids.length);
+    expect(second.body.data.nextCursor).toBeNull();
+  });
+
+  it('rejects an invalid DM history cursor as a 400 validation error', async () => {
+    const viewer = await registerUser(app);
+    createdIds.push(viewer.id);
+
+    const response = await request(app)
+      .get('/api/chat/any-peer')
+      .query({ before: 'not-a-valid-cursor', paginated: 'true' })
+      .set('Authorization', `Bearer ${viewer.token}`);
+
+    expect(response.status).toBe(400);
+    expect(response.body.error.code).toBe('VALIDATION_001');
+  });
+
   it('mutual-follow guard: blocks DM unless both sides follow each other (CHAT_004)', async () => {
     const alice = await registerUser(app);
     const bob = await registerUser(app);

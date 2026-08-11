@@ -1,4 +1,4 @@
-import React, { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import MaterialIcons from '@react-native-vector-icons/material-icons';
 import { useNavigation } from '@react-navigation/native';
@@ -223,6 +223,10 @@ export const CreateRoomScreen: React.FC = () => {
   const [searchResults, setSearchResults] = useState<SearchHit[]>([]);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState(false);
+  // `isPending` changes on the next render. This synchronous latch prevents
+  // two presses in one event-loop turn from creating two mutation attempts
+  // (and therefore two different idempotency keys).
+  const submittingRef = useRef(false);
 
   useEffect(() => {
     const id = setTimeout(() => setDebouncedQuery(query.trim()), SEARCH_DEBOUNCE_MS);
@@ -301,23 +305,25 @@ export const CreateRoomScreen: React.FC = () => {
   }, []);
 
   const handleStart = useCallback(async () => {
-    let scheduledFor: string | undefined;
-    if (isScheduled) {
-      if (scheduleMode === 'custom') {
-        // The custom date was picked earlier and may now sit in the past (the
-        // sheet stayed open a while) — re-clamp it to at least one minute out so
-        // the backend never rejects a "scheduled in the past" room.
-        const picked = new Date(customScheduledFor).getTime();
-        const floor = Date.now() + 60_000;
-        scheduledFor = new Date(Math.max(picked, floor)).toISOString();
-      } else {
-        const preset = SCHEDULE_PRESETS.find(p => p.id === schedulePreset);
-        if (preset) {
-          scheduledFor = new Date(Date.now() + preset.minutes * 60_000).toISOString();
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+    try {
+      let scheduledFor: string | undefined;
+      if (isScheduled) {
+        if (scheduleMode === 'custom') {
+          // The custom date was picked earlier and may now sit in the past (the
+          // sheet stayed open a while) — re-clamp it to at least one minute out so
+          // the backend never rejects a "scheduled in the past" room.
+          const picked = new Date(customScheduledFor).getTime();
+          const floor = Date.now() + 60_000;
+          scheduledFor = new Date(Math.max(picked, floor)).toISOString();
+        } else {
+          const preset = SCHEDULE_PRESETS.find(p => p.id === schedulePreset);
+          if (preset) {
+            scheduledFor = new Date(Date.now() + preset.minutes * 60_000).toISOString();
+          }
         }
       }
-    }
-    try {
       const created = await createRoom.mutateAsync({
         title,
         description: description.trim() || undefined,
@@ -343,6 +349,8 @@ export const CreateRoomScreen: React.FC = () => {
         t('createRoom.errorTitle', 'Création impossible'),
         errorMessage(err, t('createRoom.errorBody', 'Impossible de créer la room. Réessaie.')),
       );
+    } finally {
+      submittingRef.current = false;
     }
   }, [
     createRoom,

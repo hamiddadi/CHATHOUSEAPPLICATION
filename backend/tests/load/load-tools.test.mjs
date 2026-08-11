@@ -9,9 +9,11 @@ import {
   parseBoundedInteger,
   parseBoundedRatio,
   parseDuration,
+  parseOptionalIsoDate,
   validateLoadTarget,
   validateLocalRedisTarget,
 } from '../../scripts/load-test-config.mjs';
+import { functionalRoomHostCount, selectDistinctWaveTarget } from '../../scripts/load-50-users.mjs';
 
 const TEST_DIR = path.dirname(fileURLToPath(import.meta.url));
 const BACKEND_ROOT = path.resolve(TEST_DIR, '..', '..');
@@ -25,6 +27,7 @@ test('functional load defaults are bounded, local and non-destructive', () => {
   assert.equal(config.concurrency, 10);
   assert.equal(config.resetRateLimits, false);
   assert.equal(config.maxFailureRate, 0);
+  assert.equal(config.legalDocumentVersion, null);
 });
 
 test('numeric and duration options fail closed outside their bounds', () => {
@@ -37,6 +40,38 @@ test('numeric and duration options fail closed outside their bounds', () => {
   assert.throws(() => parseBoundedRatio('FAILURE_RATE', '1', 0), /less than 1/u);
   assert.equal(parseDuration('DURATION', '2m'), '2m');
   assert.throws(() => parseDuration('DURATION', '20m'), /between 1s and 15m/u);
+});
+
+test('legal document version overrides are optional and strictly ISO-formatted', () => {
+  assert.equal(parseOptionalIsoDate('LEGAL_VERSION', undefined), null);
+  assert.equal(parseOptionalIsoDate('LEGAL_VERSION', ' 2026-07-29 '), '2026-07-29');
+  assert.throws(
+    () => parseOptionalIsoDate('LEGAL_VERSION', '29/07/2026'),
+    /ISO date \(YYYY-MM-DD\)/u,
+  );
+
+  const config = createFunctionalLoadConfig({
+    LOAD_TEST_LEGAL_DOCUMENT_VERSION: '2026-07-29',
+  });
+  assert.equal(config.legalDocumentVersion, '2026-07-29');
+});
+
+test('wave targets never select the sender across the supported user range', () => {
+  for (let userCount = 2; userCount <= 200; userCount++) {
+    const users = Array.from({ length: userCount }, (_, index) => ({ index }));
+    for (let sourceIndex = 0; sourceIndex < userCount; sourceIndex++) {
+      assert.notEqual(selectDistinctWaveTarget(users, sourceIndex), users[sourceIndex]);
+    }
+  }
+});
+
+test('small functional runs always retain listeners as well as hosts', () => {
+  for (let userCount = 2; userCount <= 200; userCount++) {
+    const hostCount = functionalRoomHostCount(userCount);
+    assert.ok(hostCount >= 1);
+    assert.ok(hostCount <= 10);
+    assert.ok(hostCount < userCount);
+  }
 });
 
 test('remote load targets require HTTPS, opt-in and exact confirmation', () => {
@@ -141,11 +176,23 @@ test('functional runner uses bounded requests and never issues Redis KEYS', () =
   const source = readFileSync(path.join(BACKEND_ROOT, 'scripts', 'load-50-users.mjs'), 'utf8');
 
   assert.match(source, /AbortSignal\.timeout\(REQUEST_TIMEOUT_MS\)/u);
+  assert.match(source, /await res\.body\?\.cancel\(\)/u);
   assert.match(source, /redirect: 'error'/u);
   assert.match(source, /redis\.scan\(/u);
   assert.doesNotMatch(source, /redis\.keys\(/u);
   assert.match(source, /failureRate <= MAX_FAILURE_RATE/u);
   assert.match(source, /target health check failed/u);
+  assert.match(source, /fetch\(`\$\{API\}\/terms`/u);
+  assert.match(source, /x-chathouse-legal-document-version/u);
+  assert.match(source, /ageConfirmed: true/u);
+  assert.match(source, /termsAccepted: true/u);
+  assert.match(source, /privacyNoticeAcknowledged: true/u);
+  assert.match(source, /legalDocumentVersion,/u);
+  assert.match(source, /legalLocale: 'en'/u);
+  assert.match(source, /const roomByHostId = new Map/u);
+  assert.match(source, /roomByHostId\.get\(u\.id\)/u);
+  assert.doesNotMatch(source, /rooms\.push\(/u);
+  assert.match(source, /follow prerequisite status=/u);
 });
 
 test('k6 smoke test retains the shared guard, timeouts and aborting thresholds', () => {

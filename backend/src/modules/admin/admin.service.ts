@@ -1,14 +1,29 @@
-import type { AppRole, Prisma } from '@prisma/client';
-import { prisma } from '../../config/database';
+import { randomUUID } from 'node:crypto';
+import { Prisma, type AppRole } from '@prisma/client';
+import { prisma, runWriteWithRetry } from '../../config/database';
 import { redis } from '../../config/redis';
 import { logger } from '../../config/logger';
 import { AppError } from '../../middlewares/error.middleware';
 import { closeRoom as closeSfuRoom } from '../../webrtc/mediasoup.manager';
-import { disconnectUserSockets, emitHallwayRoomClosed } from '../../socket/realtime';
+import {
+  disconnectUserSockets,
+  emitHallwayRoomClosed,
+  emitRoomEnded,
+  forceAllSocketsLeaveRoom,
+} from '../../socket/realtime';
 import { signImpersonationToken } from '../../utils/jwt';
 import { cancelEventReminder } from '../../queues/eventReminders';
 import { recordingsService } from '../recordings/recordings.service';
 import { notificationsService } from '../notifications/notifications.service';
+import {
+  livekitRevocationOutboxData,
+  wakeLivekitRevocation,
+} from '../rooms/livekit-revocation.outbox';
+import {
+  livekitRoomRevocationOutboxData,
+  wakeLivekitRoomRevocation,
+} from '../rooms/livekit-room-revocation.outbox';
+import { scheduleBackgroundTask } from '../../utils/backgroundTasks';
 import { auditLogService } from './auditLog.service';
 import { decodeAdminCursor, encodeAdminCursor } from './admin.cursor';
 import type {
@@ -30,14 +45,9 @@ const PERMANENT_BAN_DATE = new Date('9999-12-31T23:59:59Z');
 // stale cache after a manual unsuspend.
 const SUSPENSION_CACHE_TTL_SEC = 60 * 60;
 
-// Hard cap on rows materialised in a single CSV export. Without cursor
-// streaming the whole result set is held in memory, so we bound it. When the
-// cap is hit the export is silently incomplete from the caller's point of
-// view, so we log a warning to make the truncation visible operationally.
-// TODO(audit): stream exports in cursor batches instead of a flat cap, and
-// consider partial PII masking (email/phone) — both are product/architecture
-// decisions deferred here.
-const CSV_EXPORT_LIMIT = 5000;
+// Each completed page is released before the next one is fetched. The HTTP
+// response remains complete while service memory stays bounded.
+export const CSV_EXPORT_BATCH_SIZE = 500;
 
 // Spreadsheet programs may execute a quoted CSV cell as a formula when its
 // first meaningful character is =, +, -, @, TAB, CR or LF. Leading whitespace
@@ -54,14 +64,6 @@ export const csvCell = (v: unknown): string => {
   const s = typeof v === 'string' && DANGEROUS_CSV_STRING_PREFIX.test(raw) ? `'${raw}` : raw;
   // Escape inner quotes per RFC 4180. Newlines/commas survive once wrapped.
   return `"${s.replace(/"/g, '""')}"`;
-};
-
-const toCsv = (header: readonly string[], rows: readonly Record<string, unknown>[]): string => {
-  const lines = [header.map(csvCell).join(',')];
-  for (const row of rows) {
-    lines.push(header.map(h => csvCell(row[h])).join(','));
-  }
-  return lines.join('\r\n');
 };
 
 const ROLE_RANK: Record<AppRole, number> = {
@@ -94,12 +96,209 @@ interface ActorContext {
   userAgent: string | null;
 }
 
+interface RevokedAdminPresence {
+  roomId: string;
+  transitionId: string;
+}
+
+interface AdminProviderRevocations {
+  participants: RevokedAdminPresence[];
+  rooms: string[];
+}
+
+type AdminActorState = {
+  appRole: AppRole;
+  deletedAt: Date | null;
+  suspendedUntil: Date | null;
+};
+
+const assertActiveAdminActor = (
+  actor: AdminActorState,
+  requiredRole?: AppRole,
+  now = new Date(),
+): void => {
+  if (actor.deletedAt) throw new AppError('AUTH_003');
+  if (actor.suspendedUntil && actor.suspendedUntil > now) {
+    throw new AppError('AUTH_007');
+  }
+  if (requiredRole && ROLE_RANK[actor.appRole] < ROLE_RANK[requiredRole]) {
+    throw new AppError('AUTH_008');
+  }
+};
+
+/**
+ * Revoke every active room presence while holding Room -> User locks, update
+ * denormalized counts, and persist one provider hand-off per real transition.
+ * A concurrent join waits on the same User row and then fails its suspension /
+ * deletion recheck after this transaction commits.
+ */
+const revokeActiveRoomPresence = async (
+  tx: Prisma.TransactionClient,
+  userId: string,
+  revokedAt: Date,
+  actorId?: string,
+  requiredActorRole: AppRole = 'MODERATOR',
+): Promise<AdminProviderRevocations> => {
+  const [beforeLock, hostedBeforeLock] = await Promise.all([
+    tx.participant.findMany({
+      where: { userId, leftAt: null },
+      select: { roomId: true },
+    }),
+    tx.room.findMany({
+      where: { hostId: userId, endedAt: null },
+      select: { id: true },
+    }),
+  ]);
+  const roomIds = [
+    ...new Set([...beforeLock.map(row => row.roomId), ...hostedBeforeLock.map(room => room.id)]),
+  ].sort();
+  if (roomIds.length > 0) {
+    await tx.$queryRaw(
+      Prisma.sql`SELECT id FROM "Room" WHERE id IN (${Prisma.join(roomIds)}) ORDER BY id FOR UPDATE`,
+    );
+  }
+  const moderationUserIds = [...new Set([userId, ...(actorId ? [actorId] : [])])].sort();
+  await tx.$queryRaw(
+    Prisma.sql`SELECT id FROM "User" WHERE id IN (${Prisma.join(moderationUserIds)}) ORDER BY id FOR UPDATE`,
+  );
+  if (actorId) {
+    const [lockedActor, lockedTarget] = await Promise.all([
+      tx.user.findUnique({
+        where: { id: actorId },
+        select: { appRole: true, deletedAt: true, suspendedUntil: true },
+      }),
+      tx.user.findUnique({ where: { id: userId }, select: { appRole: true } }),
+    ]);
+    if (!lockedActor) throw new AppError('AUTH_003');
+    if (!lockedTarget) throw new AppError('USER_001');
+    assertActiveAdminActor(lockedActor, requiredActorRole);
+    assertCanActOn(lockedActor, lockedTarget);
+  }
+  const [active, hostedRooms] = await Promise.all([
+    tx.participant.findMany({
+      where: { userId, leftAt: null },
+      select: { roomId: true },
+    }),
+    tx.room.findMany({
+      where: { hostId: userId, endedAt: null },
+      select: { id: true },
+    }),
+  ]);
+  const hostedRoomIds = hostedRooms.map(room => room.id);
+  const activeRoomIds = [...new Set(active.map(row => row.roomId))];
+  const allCurrentRoomIds = [...new Set([...activeRoomIds, ...hostedRoomIds])];
+  const newlyVisibleRoomIds = allCurrentRoomIds.filter(roomId => !roomIds.includes(roomId)).sort();
+  if (newlyVisibleRoomIds.length > 0) {
+    await tx.$queryRaw(
+      Prisma.sql`SELECT id FROM "Room" WHERE id IN (${Prisma.join(newlyVisibleRoomIds)}) ORDER BY id FOR UPDATE`,
+    );
+  }
+  // Fail-safe moderation semantics: a suspended/deleted host cannot leave a
+  // live room with no authority. Close every hosted room and evict all of its
+  // participants atomically; one room-level provider event tears down audio.
+  if (hostedRoomIds.length > 0) {
+    const hostedParticipants = await tx.participant.findMany({
+      where: { roomId: { in: hostedRoomIds }, leftAt: null },
+      select: { userId: true },
+    });
+    const hostedUserIds = [...new Set(hostedParticipants.map(row => row.userId))].sort();
+    if (hostedUserIds.length > 0) {
+      await tx.$queryRaw(
+        Prisma.sql`SELECT id FROM "User" WHERE id IN (${Prisma.join(hostedUserIds)}) ORDER BY id FOR UPDATE`,
+      );
+      await tx.user.updateMany({
+        where: { id: { in: hostedUserIds }, currentRoomId: { in: hostedRoomIds } },
+        data: { currentRoomId: null },
+      });
+    }
+    await tx.participant.updateMany({
+      where: { roomId: { in: hostedRoomIds }, leftAt: null },
+      data: { leftAt: revokedAt },
+    });
+    await tx.room.updateMany({
+      where: { id: { in: hostedRoomIds }, endedAt: null },
+      data: { isLive: false, endedAt: revokedAt, participantCount: 0 },
+    });
+    await tx.roomHandRaise.deleteMany({ where: { roomId: { in: hostedRoomIds } } });
+  }
+
+  const nonHostedActiveRoomIds = activeRoomIds.filter(roomId => !hostedRoomIds.includes(roomId));
+  if (nonHostedActiveRoomIds.length > 0) {
+    await tx.participant.updateMany({
+      where: { userId, roomId: { in: nonHostedActiveRoomIds }, leftAt: null },
+      // Suspension/deletion is a punitive presence revocation. Never let an
+      // expired suspension resurrect a previous room moderator/stage role.
+      data: { leftAt: revokedAt, role: 'LISTENER', isMuted: true },
+    });
+    await tx.user.updateMany({
+      where: { id: userId, currentRoomId: { in: nonHostedActiveRoomIds } },
+      data: { currentRoomId: null },
+    });
+    await tx.roomHandRaise.deleteMany({
+      where: { userId, roomId: { in: nonHostedActiveRoomIds } },
+    });
+  }
+  for (const roomId of nonHostedActiveRoomIds) {
+    await tx.$executeRaw`UPDATE "Room" SET "participantCount" = GREATEST("participantCount" - 1, 0) WHERE id = ${roomId}`;
+  }
+  const transitions = nonHostedActiveRoomIds.map(roomId => ({
+    roomId,
+    transitionId: randomUUID(),
+  }));
+  const roomTransitions = hostedRoomIds.map(roomId => ({ roomId, transitionId: randomUUID() }));
+  const outboxData = [
+    ...transitions.map(transition =>
+      livekitRevocationOutboxData({ roomId: transition.roomId, userId }, transition.transitionId),
+    ),
+    ...roomTransitions.map(transition =>
+      livekitRoomRevocationOutboxData(transition.roomId, transition.transitionId),
+    ),
+  ];
+  if (outboxData.length > 0) await tx.outboxEvent.createMany({ data: outboxData });
+  return { participants: transitions, rooms: hostedRoomIds };
+};
+
+const wakeAdminPresenceRevocations = async (
+  operation: string,
+  transitions: AdminProviderRevocations,
+): Promise<void> => {
+  for (const transition of transitions.participants) {
+    await scheduleBackgroundTask(wakeLivekitRevocation(transition.transitionId), err =>
+      logger.warn(`${operation}: LiveKit revocation wake failed`, {
+        err,
+        roomId: transition.roomId,
+      }),
+    );
+  }
+  for (const roomId of transitions.rooms) {
+    await scheduleBackgroundTask(wakeLivekitRoomRevocation(roomId), err =>
+      logger.warn(`${operation}: LiveKit room revocation wake failed`, { err, roomId }),
+    );
+  }
+};
+
+const finalizeAdminHostedRoomClosures = async (
+  operation: string,
+  roomIds: string[],
+): Promise<void> => {
+  for (const roomId of roomIds) {
+    await closeSfuRoom(roomId);
+    emitHallwayRoomClosed(roomId);
+    emitRoomEnded(roomId);
+    forceAllSocketsLeaveRoom(roomId);
+    await scheduleBackgroundTask(recordingsService.stopForRoom(roomId), err =>
+      logger.warn(`${operation}: recording stop failed`, { err, roomId }),
+    );
+  }
+};
+
 const fetchActor = async (actorId: string) => {
   const actor = await prisma.user.findUnique({
     where: { id: actorId },
-    select: { id: true, appRole: true },
+    select: { id: true, appRole: true, deletedAt: true, suspendedUntil: true },
   });
   if (!actor) throw new AppError('AUTH_003');
+  assertActiveAdminActor(actor);
   return actor;
 };
 
@@ -114,24 +313,44 @@ const assertCanActOn = (actor: { appRole: AppRole }, target: { appRole: AppRole 
   }
 };
 
-/**
- * CSV exports hold the whole result set in memory, so they are bounded by
- * `CSV_EXPORT_LIMIT`. When the cap is hit the export is silently incomplete
- * from the caller's point of view, so we log a warning to make the truncation
- * visible operationally. `label` matches the per-exporter message previously
- * inlined in each exporter.
- */
-const warnIfCsvTruncated = (label: string, rowCount: number): void => {
-  if (rowCount === CSV_EXPORT_LIMIT) {
-    logger.warn(`${label} truncated at row cap — export is incomplete`, {
-      limit: CSV_EXPORT_LIMIT,
-    });
-  }
-};
-
 type StableCursorWhere = {
   createdAt?: { lt: Date };
   OR?: [{ createdAt: { lt: Date } }, { createdAt: Date; id: { lt: string } }];
+};
+
+interface CsvCursor {
+  createdAt: Date;
+  id: string;
+}
+
+const csvCursorWhere = (cursor: CsvCursor): StableCursorWhere => ({
+  OR: [
+    { createdAt: { lt: cursor.createdAt } },
+    { createdAt: cursor.createdAt, id: { lt: cursor.id } },
+  ],
+});
+
+const streamCsv = async function* <Row extends { id: string; createdAt: Date }>(
+  header: readonly string[],
+  fetchPage: (cursor?: CsvCursor) => Promise<readonly Row[]>,
+  flatten: (row: Row) => Record<string, unknown>,
+): AsyncGenerator<string> {
+  // Load only the first bounded page before yielding the CSV header. The
+  // controller preflights this first chunk, allowing an initial database error
+  // to be rendered normally before download headers are committed.
+  let rows = await fetchPage();
+  yield header.map(csvCell).join(',');
+
+  for (;;) {
+    if (rows.length === 0) return;
+    for (const row of rows) {
+      const flat = flatten(row);
+      yield `\r\n${header.map(column => csvCell(flat[column])).join(',')}`;
+    }
+    const last = rows.at(-1);
+    if (!last || rows.length < CSV_EXPORT_BATCH_SIZE) return;
+    rows = await fetchPage({ createdAt: last.createdAt, id: last.id });
+  }
 };
 
 const stableCursorWhere = (cursor: string): StableCursorWhere => {
@@ -213,47 +432,55 @@ export const adminService = {
    */
   async setRole(actorId: string, targetUserId: string, input: SetRoleInput, ctx: ActorContext) {
     if (actorId === targetUserId) throw new AppError('ADMIN_002');
-    const [actor, target] = await Promise.all([
-      fetchActor(actorId),
-      prisma.user.findUnique({
-        where: { id: targetUserId },
-        select: { id: true, appRole: true },
+    const atomicMutation: {
+      updated: Prisma.UserGetPayload<{ select: typeof publicAdminUser }>;
+      previousRole: AppRole;
+    } = await runWriteWithRetry(() =>
+      prisma.$transaction(async tx => {
+        const ids = [actorId, targetUserId].sort();
+        await tx.$queryRaw(
+          Prisma.sql`SELECT id FROM "User" WHERE id IN (${Prisma.join(ids)}) ORDER BY id FOR UPDATE`,
+        );
+        const [lockedActor, lockedTarget] = await Promise.all([
+          tx.user.findUnique({
+            where: { id: actorId },
+            select: { appRole: true, deletedAt: true, suspendedUntil: true },
+          }),
+          tx.user.findUnique({ where: { id: targetUserId }, select: { appRole: true } }),
+        ]);
+        if (!lockedActor) throw new AppError('AUTH_003');
+        if (!lockedTarget) throw new AppError('USER_001');
+        assertActiveAdminActor(lockedActor, 'SUPER_ADMIN');
+        if (ROLE_RANK[input.role] > ROLE_RANK[lockedActor.appRole]) {
+          throw new AppError('ADMIN_002');
+        }
+        assertCanActOn(lockedActor, lockedTarget);
+        if (lockedTarget.appRole === 'SUPER_ADMIN' && input.role !== 'SUPER_ADMIN') {
+          const remaining = await tx.user.count({
+            where: { appRole: 'SUPER_ADMIN', id: { not: targetUserId } },
+          });
+          if (remaining === 0) throw new AppError('ADMIN_001');
+        }
+        const updated = await tx.user.update({
+          where: { id: targetUserId },
+          data: { appRole: input.role },
+          select: publicAdminUser,
+        });
+        return { updated, previousRole: lockedTarget.appRole };
       }),
-    ]);
-    if (!target) throw new AppError('USER_001');
-
-    if (ROLE_RANK[input.role] > ROLE_RANK[actor.appRole]) {
-      throw new AppError('ADMIN_002');
-    }
-    assertCanActOn(actor, target);
-    // Lockout protection — refuse to demote the last super-admin.
-    if (target.appRole === 'SUPER_ADMIN' && input.role !== 'SUPER_ADMIN') {
-      const remaining = await prisma.user.count({
-        where: { appRole: 'SUPER_ADMIN', id: { not: targetUserId } },
-      });
-      if (remaining === 0) throw new AppError('ADMIN_001');
-    }
-
-    const updated = await prisma.user.update({
-      where: { id: targetUserId },
-      data: { appRole: input.role },
-      select: publicAdminUser,
-    });
-
+    );
     await auditLogService.record({
       actorId,
       action: 'USER_ROLE_CHANGED',
       targetUserId,
       targetType: 'user',
       targetId: targetUserId,
-      metadata: { from: target.appRole, to: input.role },
+      metadata: { from: atomicMutation.previousRole, to: input.role },
       ip: ctx.ip,
       userAgent: ctx.userAgent,
     });
-
-    return updated;
+    return atomicMutation.updated;
   },
-
   /**
    * Suspend a user. Permanent ban when durationMinutes is omitted/zero;
    * temporary suspension otherwise. The suspension cache key is invalidated
@@ -276,25 +503,40 @@ export const adminService = {
         ? new Date(Date.now() + input.durationMinutes * 60_000)
         : PERMANENT_BAN_DATE;
 
-    const [, updated] = await prisma.$transaction([
-      prisma.refreshToken.updateMany({
-        where: { userId: targetUserId, revokedAt: null },
-        data: { revokedAt: new Date() },
-      }),
-      prisma.user.update({
-        where: { id: targetUserId },
-        data: {
-          suspendedUntil: expiresAt,
-          suspensionReason: input.reason,
-          isOnline: false,
-          isVisible: false,
-          latitude: null,
-          longitude: null,
-          tokenVersion: { increment: 1 },
+    const suspendedAt = new Date();
+    const mutation = await runWriteWithRetry(() =>
+      prisma.$transaction(
+        async tx => {
+          const revocations = await revokeActiveRoomPresence(
+            tx,
+            targetUserId,
+            suspendedAt,
+            actorId,
+          );
+          await tx.refreshToken.updateMany({
+            where: { userId: targetUserId, revokedAt: null },
+            data: { revokedAt: suspendedAt },
+          });
+          const updated = await tx.user.update({
+            where: { id: targetUserId },
+            data: {
+              suspendedUntil: expiresAt,
+              suspensionReason: input.reason,
+              isOnline: false,
+              isVisible: false,
+              latitude: null,
+              longitude: null,
+              currentRoomId: null,
+              tokenVersion: { increment: 1 },
+            },
+            select: publicAdminUser,
+          });
+          return { updated, revocations };
         },
-        select: publicAdminUser,
-      }),
-    ]);
+        { maxWait: 5_000, timeout: 15_000 },
+      ),
+    );
+    const { updated } = mutation;
 
     // Force the lockout to land within the cache TTL window. We mark the
     // cache "suspended" up to the same expiry so requireAuth doesn't even
@@ -305,6 +547,8 @@ export const adminService = {
     );
     await redis.setEx(`user:susp:${targetUserId}`, ttlSec, '1');
     disconnectUserSockets(targetUserId, 'account_suspended');
+    await wakeAdminPresenceRevocations('admin.suspend', mutation.revocations);
+    await finalizeAdminHostedRoomClosures('admin.suspend', mutation.revocations.rooms);
 
     await auditLogService.record({
       actorId,
@@ -325,26 +569,44 @@ export const adminService = {
   },
 
   async unsuspend(actorId: string, targetUserId: string, ctx: ActorContext) {
-    const [actor, target] = await Promise.all([
-      fetchActor(actorId),
-      prisma.user.findUnique({
-        where: { id: targetUserId },
-        select: { id: true, appRole: true, suspendedUntil: true, suspensionReason: true },
+    if (actorId === targetUserId) throw new AppError('ADMIN_002');
+    const atomicMutation: {
+      updated: Prisma.UserGetPayload<{ select: typeof publicAdminUser }>;
+      previousUntil: Date | null;
+      previousReason: string | null;
+    } = await runWriteWithRetry(() =>
+      prisma.$transaction(async tx => {
+        const ids = [actorId, targetUserId].sort();
+        await tx.$queryRaw(
+          Prisma.sql`SELECT id FROM "User" WHERE id IN (${Prisma.join(ids)}) ORDER BY id FOR UPDATE`,
+        );
+        const [lockedActor, lockedTarget] = await Promise.all([
+          tx.user.findUnique({
+            where: { id: actorId },
+            select: { appRole: true, deletedAt: true, suspendedUntil: true },
+          }),
+          tx.user.findUnique({
+            where: { id: targetUserId },
+            select: { appRole: true, suspendedUntil: true, suspensionReason: true },
+          }),
+        ]);
+        if (!lockedActor) throw new AppError('AUTH_003');
+        if (!lockedTarget) throw new AppError('USER_001');
+        assertActiveAdminActor(lockedActor, 'MODERATOR');
+        assertCanActOn(lockedActor, lockedTarget);
+        const updated = await tx.user.update({
+          where: { id: targetUserId },
+          data: { suspendedUntil: null, suspensionReason: null },
+          select: publicAdminUser,
+        });
+        return {
+          updated,
+          previousUntil: lockedTarget.suspendedUntil,
+          previousReason: lockedTarget.suspensionReason,
+        };
       }),
-    ]);
-    if (!target) throw new AppError('USER_001');
-    // Mirror suspend/setRole/deleteUser: you cannot act on a peer or a
-    // higher-ranked account. Without this a moderator could lift a sanction
-    // an admin/super-admin placed on someone at or above the moderator's tier.
-    assertCanActOn(actor, target);
-
-    const updated = await prisma.user.update({
-      where: { id: targetUserId },
-      data: { suspendedUntil: null, suspensionReason: null },
-      select: publicAdminUser,
-    });
+    );
     await redis.del(`user:susp:${targetUserId}`);
-
     await auditLogService.record({
       actorId,
       action: 'USER_UNSUSPENDED',
@@ -352,13 +614,13 @@ export const adminService = {
       targetType: 'user',
       targetId: targetUserId,
       metadata: {
-        previousUntil: target.suspendedUntil?.toISOString() ?? null,
-        previousReason: target.suspensionReason,
+        previousUntil: atomicMutation.previousUntil?.toISOString() ?? null,
+        previousReason: atomicMutation.previousReason,
       },
       ip: ctx.ip,
       userAgent: ctx.userAgent,
     });
-    return updated;
+    return atomicMutation.updated;
   },
 
   /**
@@ -380,33 +642,44 @@ export const adminService = {
     if (target.deletedAt) return { deleted: true as const };
 
     const deletedAt = new Date();
-    await prisma.$transaction([
-      prisma.user.update({
-        where: { id: targetUserId },
-        data: {
-          deletedAt,
-          suspendedUntil: PERMANENT_BAN_DATE,
-          suspensionReason: 'Account scheduled for deletion (admin)',
-          isOnline: false,
-          isVisible: false,
-          latitude: null,
-          longitude: null,
-          currentRoomId: null,
-          tokenVersion: { increment: 1 },
+    const revocations = await runWriteWithRetry(() =>
+      prisma.$transaction(
+        async tx => {
+          const transitions = await revokeActiveRoomPresence(
+            tx,
+            targetUserId,
+            deletedAt,
+            actorId,
+            'SUPER_ADMIN',
+          );
+          await tx.user.update({
+            where: { id: targetUserId },
+            data: {
+              deletedAt,
+              suspendedUntil: PERMANENT_BAN_DATE,
+              suspensionReason: 'Account scheduled for deletion (admin)',
+              isOnline: false,
+              isVisible: false,
+              latitude: null,
+              longitude: null,
+              currentRoomId: null,
+              tokenVersion: { increment: 1 },
+            },
+          });
+          await tx.refreshToken.updateMany({
+            where: { userId: targetUserId, revokedAt: null },
+            data: { revokedAt: deletedAt },
+          });
+          await tx.pushToken.deleteMany({ where: { userId: targetUserId } });
+          return transitions;
         },
-      }),
-      prisma.refreshToken.updateMany({
-        where: { userId: targetUserId, revokedAt: null },
-        data: { revokedAt: deletedAt },
-      }),
-      prisma.pushToken.deleteMany({ where: { userId: targetUserId } }),
-      prisma.participant.updateMany({
-        where: { userId: targetUserId, leftAt: null },
-        data: { leftAt: deletedAt },
-      }),
-    ]);
+        { maxWait: 5_000, timeout: 15_000 },
+      ),
+    );
     await redis.setEx(`user:susp:${targetUserId}`, SUSPENSION_CACHE_TTL_SEC, '1');
     disconnectUserSockets(targetUserId, 'account_deleted');
+    await wakeAdminPresenceRevocations('admin.deleteUser', revocations);
+    await finalizeAdminHostedRoomClosures('admin.deleteUser', revocations.rooms);
 
     await auditLogService.record({
       actorId,
@@ -519,45 +792,61 @@ export const adminService = {
    * with a system message via their personal user channel.
    */
   async forceEndRoom(actorId: string, roomId: string, input: ForceEndRoomInput, ctx: ActorContext) {
-    const room = await prisma.room.findUnique({ where: { id: roomId } });
-    if (!room) throw new AppError('ROOM_001');
-    if (room.endedAt) return { ended: true as const };
+    const closure = await runWriteWithRetry(() =>
+      prisma.$transaction(
+        async tx => {
+          await tx.$queryRaw`SELECT "id" FROM "Room" WHERE "id" = ${roomId} FOR UPDATE`;
+          const room = await tx.room.findUnique({ where: { id: roomId } });
+          if (!room) throw new AppError('ROOM_001');
+          if (room.endedAt) return { room, closed: false as const, userIds: [] as string[] };
 
-    const active = await prisma.participant.findMany({
-      where: { roomId, leftAt: null },
-      select: { userId: true },
-    });
-    const userIds = active.map(p => p.userId);
+          const active = await tx.participant.findMany({
+            where: { roomId, leftAt: null },
+            select: { userId: true },
+          });
+          const userIds = active.map(participant => participant.userId).sort();
+          const lockIds = [...new Set([...userIds, actorId])].sort();
+          await tx.$queryRaw(
+            Prisma.sql`SELECT id FROM "User" WHERE id IN (${Prisma.join(lockIds)}) ORDER BY id FOR UPDATE`,
+          );
+          const lockedActor = await tx.user.findUnique({
+            where: { id: actorId },
+            select: { appRole: true, deletedAt: true, suspendedUntil: true },
+          });
+          if (!lockedActor) throw new AppError('AUTH_003');
+          assertActiveAdminActor(lockedActor, 'ADMIN');
+          await tx.participant.updateMany({
+            where: { roomId, leftAt: null },
+            data: { leftAt: new Date() },
+          });
+          await tx.room.update({
+            where: { id: roomId },
+            data: { isLive: false, endedAt: new Date(), participantCount: 0 },
+          });
+          if (userIds.length > 0) {
+            await tx.user.updateMany({
+              where: { id: { in: userIds }, currentRoomId: roomId },
+              data: { currentRoomId: null },
+            });
+          }
+          await tx.roomHandRaise.deleteMany({ where: { roomId } });
+          const transitionId = randomUUID();
+          await tx.outboxEvent.create({
+            data: livekitRoomRevocationOutboxData(roomId, transitionId),
+          });
+          return { room, closed: true as const, userIds };
+        },
+        { maxWait: 5_000, timeout: 15_000 },
+      ),
+    );
+    if (!closure.closed) return { ended: true as const };
+    const { room, userIds } = closure;
     // ROOM-07: notify RSVPs (typically the SCHEDULED case where there are no
     // active participants yet) that the event was cancelled by moderation.
     const rsvps = await prisma.roomRsvp.findMany({
       where: { roomId },
       select: { userId: true },
     });
-
-    // MODE-04: close the room conditionally (WHERE endedAt IS NULL) and only run
-    // the side effects when this call actually closed it. Two concurrent
-    // force-ends would otherwise both pass the read-then-write check above and
-    // duplicate the teardown/notifications/audit-log.
-    const [, closed] = await prisma.$transaction([
-      prisma.participant.updateMany({
-        where: { roomId, leftAt: null },
-        data: { leftAt: new Date() },
-      }),
-      prisma.room.updateMany({
-        where: { id: roomId, endedAt: null },
-        data: { isLive: false, endedAt: new Date(), participantCount: 0 },
-      }),
-      ...(userIds.length > 0
-        ? [
-            prisma.user.updateMany({
-              where: { id: { in: userIds } },
-              data: { currentRoomId: null },
-            }),
-          ]
-        : []),
-    ]);
-    if (closed.count !== 1) return { ended: true as const };
 
     // ROOM-03: drop the room's pending BullMQ jobs (reminder + go-live) so a
     // force-ended scheduled room doesn't auto-open / fire a reminder later.
@@ -569,6 +858,9 @@ export const adminService = {
       );
     }
     await closeSfuRoom(roomId);
+    await scheduleBackgroundTask(wakeLivekitRoomRevocation(roomId), err =>
+      logger.warn('admin.forceEndRoom: LiveKit room revocation wake failed', { err, roomId }),
+    );
     // RECO-01: finalize any running Replay egress (gated/no-op when egress is
     // off). Without this the LiveKit egress keeps billing/uploading until a
     // spontaneous webhook — and for a private room it could stay orphaned.
@@ -744,27 +1036,7 @@ export const adminService = {
   // Hand-rolled CSV: avoids pulling a parser dep for ~30 LoC. RFC 4180:
   // wrap every cell in quotes, escape inner quotes by doubling. Newlines
   // and commas inside cells are then safe.
-  exportUsersCsv: async (): Promise<string> => {
-    const rows = await prisma.user.findMany({
-      select: {
-        id: true,
-        username: true,
-        displayName: true,
-        email: true,
-        phoneNumber: true,
-        appRole: true,
-        suspendedUntil: true,
-        suspensionReason: true,
-        deletedAt: true,
-        followerCount: true,
-        followingCount: true,
-        createdAt: true,
-        lastSeenAt: true,
-      },
-      orderBy: { createdAt: 'desc' },
-      take: CSV_EXPORT_LIMIT,
-    });
-    warnIfCsvTruncated('exportUsersCsv', rows.length);
+  exportUsersCsv: (): AsyncGenerator<string> => {
     const header = [
       'id',
       'username',
@@ -780,34 +1052,34 @@ export const adminService = {
       'createdAt',
       'lastSeenAt',
     ];
-    return toCsv(header, rows);
+    return streamCsv(
+      header,
+      cursor =>
+        prisma.user.findMany({
+          where: cursor ? csvCursorWhere(cursor) : undefined,
+          select: {
+            id: true,
+            username: true,
+            displayName: true,
+            email: true,
+            phoneNumber: true,
+            appRole: true,
+            suspendedUntil: true,
+            suspensionReason: true,
+            deletedAt: true,
+            followerCount: true,
+            followingCount: true,
+            createdAt: true,
+            lastSeenAt: true,
+          },
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          take: CSV_EXPORT_BATCH_SIZE,
+        }),
+      row => ({ ...row }),
+    );
   },
 
-  exportAuditLogCsv: async (): Promise<string> => {
-    const rows = await prisma.auditLog.findMany({
-      orderBy: { createdAt: 'desc' },
-      take: CSV_EXPORT_LIMIT,
-      include: {
-        actor: { select: { username: true, displayName: true } },
-        targetUser: { select: { username: true, displayName: true } },
-      },
-    });
-    warnIfCsvTruncated('exportAuditLogCsv', rows.length);
-    const flat = rows.map(r => ({
-      id: r.id,
-      createdAt: r.createdAt.toISOString(),
-      action: r.action,
-      actorId: r.actorId,
-      actorUsername: r.actor?.username ?? null,
-      targetUserId: r.targetUserId,
-      targetUsername: r.targetUser?.username ?? null,
-      targetRoomId: r.targetRoomId,
-      targetType: r.targetType,
-      targetId: r.targetId,
-      metadata: r.metadata ? JSON.stringify(r.metadata) : null,
-      ip: r.ip,
-      userAgent: r.userAgent,
-    }));
+  exportAuditLogCsv: (): AsyncGenerator<string> => {
     const header = [
       'id',
       'createdAt',
@@ -823,47 +1095,37 @@ export const adminService = {
       'ip',
       'userAgent',
     ];
-    return toCsv(header, flat);
+    return streamCsv(
+      header,
+      cursor =>
+        prisma.auditLog.findMany({
+          where: cursor ? csvCursorWhere(cursor) : undefined,
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          take: CSV_EXPORT_BATCH_SIZE,
+          include: {
+            actor: { select: { username: true, displayName: true } },
+            targetUser: { select: { username: true, displayName: true } },
+          },
+        }),
+      row => ({
+        id: row.id,
+        createdAt: row.createdAt.toISOString(),
+        action: row.action,
+        actorId: row.actorId,
+        actorUsername: row.actor?.username ?? null,
+        targetUserId: row.targetUserId,
+        targetUsername: row.targetUser?.username ?? null,
+        targetRoomId: row.targetRoomId,
+        targetType: row.targetType,
+        targetId: row.targetId,
+        metadata: row.metadata ? JSON.stringify(row.metadata) : null,
+        ip: row.ip,
+        userAgent: row.userAgent,
+      }),
+    );
   },
 
-  exportReportsCsv: async (): Promise<string> => {
-    const rows = await prisma.report.findMany({
-      orderBy: { createdAt: 'desc' },
-      take: CSV_EXPORT_LIMIT,
-      include: {
-        reporter: { select: { username: true } },
-        reported: { select: { username: true } },
-        reportedRoom: { select: { title: true } },
-        contentAuthor: { select: { username: true } },
-      },
-    });
-    warnIfCsvTruncated('exportReportsCsv', rows.length);
-    const flat = rows.map(r => ({
-      id: r.id,
-      createdAt: r.createdAt.toISOString(),
-      targetKind: r.targetKind,
-      reason: r.reason,
-      details: r.details,
-      reporterId: r.reporterId,
-      reporterUsername: r.reporter.username,
-      targetUserId: r.reportedId,
-      targetUsername: r.reported?.username ?? null,
-      targetRoomId: r.reportedRoomId,
-      targetRoomTitle: r.reportedRoom?.title ?? null,
-      contentAuthorId: r.contentAuthorId,
-      contentAuthorUsername: r.contentAuthor?.username ?? null,
-      reportedMessageId: r.reportedMessageId,
-      reportedGroupMessageId: r.reportedGroupMessageId,
-      reportedRoomMessageId: r.reportedRoomMessageId,
-      contentKind: r.contentKind,
-      contentSnapshot: r.contentSnapshot,
-      contentAudioUrl: r.contentAudioUrl,
-      contentAudioDurationMs: r.contentAudioDurationMs,
-      contentCreatedAt: r.contentCreatedAt?.toISOString() ?? null,
-      contentContextId: r.contentContextId,
-      contentContextSnapshot: r.contentContextSnapshot,
-      resolvedAt: r.resolvedAt?.toISOString() ?? null,
-    }));
+  exportReportsCsv: (): AsyncGenerator<string> => {
     const header = [
       'id',
       'createdAt',
@@ -890,7 +1152,47 @@ export const adminService = {
       'contentContextSnapshot',
       'resolvedAt',
     ];
-    return toCsv(header, flat);
+    return streamCsv(
+      header,
+      cursor =>
+        prisma.report.findMany({
+          where: cursor ? csvCursorWhere(cursor) : undefined,
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          take: CSV_EXPORT_BATCH_SIZE,
+          include: {
+            reporter: { select: { username: true } },
+            reported: { select: { username: true } },
+            reportedRoom: { select: { title: true } },
+            contentAuthor: { select: { username: true } },
+          },
+        }),
+      row => ({
+        id: row.id,
+        createdAt: row.createdAt.toISOString(),
+        targetKind: row.targetKind,
+        reason: row.reason,
+        details: row.details,
+        reporterId: row.reporterId,
+        reporterUsername: row.reporter.username,
+        targetUserId: row.reportedId,
+        targetUsername: row.reported?.username ?? null,
+        targetRoomId: row.reportedRoomId,
+        targetRoomTitle: row.reportedRoom?.title ?? null,
+        contentAuthorId: row.contentAuthorId,
+        contentAuthorUsername: row.contentAuthor?.username ?? null,
+        reportedMessageId: row.reportedMessageId,
+        reportedGroupMessageId: row.reportedGroupMessageId,
+        reportedRoomMessageId: row.reportedRoomMessageId,
+        contentKind: row.contentKind,
+        contentSnapshot: row.contentSnapshot,
+        contentAudioUrl: row.contentAudioUrl,
+        contentAudioDurationMs: row.contentAudioDurationMs,
+        contentCreatedAt: row.contentCreatedAt?.toISOString() ?? null,
+        contentContextId: row.contentContextId,
+        contentContextSnapshot: row.contentContextSnapshot,
+        resolvedAt: row.resolvedAt?.toISOString() ?? null,
+      }),
+    );
   },
 
   // ──────────────────── Audit log ────────────────────

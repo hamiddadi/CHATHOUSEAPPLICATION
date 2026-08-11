@@ -4,18 +4,21 @@ import { roomService } from './roomService';
 import {
   connectLiveKitRoom,
   disconnectLiveKitRoom,
+  mapLiveKitConnectionState,
   setLiveKitMuted,
   startLiveKitAudioSession,
   stopLiveKitAudioSession,
 } from './livekit/LiveKitEngine';
 import { startRoomForeground, stopRoomForeground } from './foregroundAudio';
 import { MIC_PERMISSION_DENIED_ERROR, startRoomAudio } from './roomAudioService';
+import { ensureRoomSocketAdmission } from './roomSocketAdmission';
 
 const mockRoom = {
   on: jest.fn(),
   off: jest.fn(),
   remoteParticipants: new Map(),
 };
+const mockStoreSetMuted = jest.fn();
 
 jest.mock('../../../shared/utils/permissions', () => ({
   requestAudioPermission: jest.fn(),
@@ -29,7 +32,7 @@ jest.mock('../../auth/store/authStore', () => ({
 
 jest.mock('../store/currentRoomStore', () => ({
   useCurrentRoomStore: {
-    getState: () => ({ isMuted: true }),
+    getState: () => ({ isMuted: true, setMuted: mockStoreSetMuted }),
   },
 }));
 
@@ -63,12 +66,22 @@ jest.mock('./foregroundAudio', () => ({
   stopRoomForeground: jest.fn().mockResolvedValue(undefined),
 }));
 
+jest.mock('./roomSocketAdmission', () => ({
+  ensureRoomSocketAdmission: jest.fn().mockResolvedValue(undefined),
+}));
+
 const mockPermission = requestAudioPermission as jest.MockedFunction<typeof requestAudioPermission>;
 const mockToken = roomService.getLivekitToken as jest.MockedFunction<
   typeof roomService.getLivekitToken
 >;
 const mockConnect = connectLiveKitRoom as jest.MockedFunction<typeof connectLiveKitRoom>;
+const mockMapConnectionState = mapLiveKitConnectionState as jest.MockedFunction<
+  typeof mapLiveKitConnectionState
+>;
 const mockSetLiveKitMuted = setLiveKitMuted as jest.MockedFunction<typeof setLiveKitMuted>;
+const mockEnsureAdmission = ensureRoomSocketAdmission as jest.MockedFunction<
+  typeof ensureRoomSocketAdmission
+>;
 
 const socket = {
   on: jest.fn(),
@@ -100,7 +113,25 @@ describe('startRoomAudio microphone capability', () => {
     jest.clearAllMocks();
     mockPermission.mockResolvedValue(true);
     mockConnect.mockResolvedValue(undefined);
+    mockMapConnectionState.mockReturnValue('connected');
     mockSetLiveKitMuted.mockReset().mockResolvedValue(undefined);
+    mockEnsureAdmission.mockReset().mockResolvedValue(undefined);
+  });
+
+  it('does not request a LiveKit token before Socket.IO admission is acknowledged', async () => {
+    const admission = deferred<void>();
+    mockEnsureAdmission.mockReturnValueOnce(admission.promise);
+    mockToken.mockResolvedValue(tokenResponse(false));
+
+    const pending = startRoomAudio({ socket, roomId: 'room-1' });
+    await Promise.resolve();
+    expect(mockToken).not.toHaveBeenCalled();
+
+    admission.resolve();
+    const handle = await pending;
+    expect(mockEnsureAdmission).toHaveBeenCalledWith(socket, 'room-1');
+    expect(mockToken).toHaveBeenCalledTimes(1);
+    await handle.close();
   });
 
   it('connects a receive-only listener without requesting RECORD_AUDIO', async () => {
@@ -115,16 +146,19 @@ describe('startRoomAudio microphone capability', () => {
     await handle.close();
   });
 
-  it('requests the microphone only for a publisher and fails before connect when denied', async () => {
+  it('keeps a publisher connected receive-only when initial microphone permission is denied', async () => {
     mockToken.mockResolvedValue(tokenResponse(true));
     mockPermission.mockResolvedValue(false);
 
-    await expect(startRoomAudio({ socket, roomId: 'room-1' })).rejects.toThrow(
-      MIC_PERMISSION_DENIED_ERROR,
-    );
+    const handle = await startRoomAudio({ socket, roomId: 'room-1' });
 
     expect(mockPermission).toHaveBeenCalledTimes(1);
-    expect(mockConnect).not.toHaveBeenCalled();
+    expect(mockConnect).toHaveBeenCalledWith(mockRoom, 'ws://127.0.0.1:7880', 'signed-token');
+    expect(mockSetLiveKitMuted).not.toHaveBeenCalled();
+    expect(handle.initialMicPermissionDenied).toBe(true);
+    expect(stopLiveKitAudioSession).not.toHaveBeenCalled();
+
+    await handle.close();
     expect(stopLiveKitAudioSession).toHaveBeenCalledTimes(1);
   });
 
@@ -166,10 +200,58 @@ describe('startRoomAudio microphone capability', () => {
 
     await roleChanged?.({ userId: 'viewer-1', role: 'SPEAKER', roomId: 'room-1' });
 
+    expect(disconnectLiveKitRoom).toHaveBeenCalledTimes(1);
+    expect(mockConnect).toHaveBeenCalledTimes(2);
+    expect(mockStoreSetMuted).toHaveBeenCalledWith(true);
     expect(onError).toHaveBeenCalledWith(
       expect.objectContaining({ message: MIC_PERMISSION_DENIED_ERROR }),
     );
+
+    // The denied promotion retained the new publisher token receive-only. Once
+    // permission is available, unmute can publish without another role event.
+    mockPermission.mockResolvedValueOnce(true);
+    await handle.setMuted(false);
+    expect(mockSetLiveKitMuted).toHaveBeenCalledWith(mockRoom, false);
+
     await handle.close();
+  });
+
+  it('schedules another bounded rejoin when the first connect retry rejects', async () => {
+    jest.useFakeTimers();
+    try {
+      mockToken.mockResolvedValue(tokenResponse(false));
+      const onStatusChange = jest.fn();
+      const onError = jest.fn();
+      const handle = await startRoomAudio({
+        socket,
+        roomId: 'room-1',
+        onStatusChange,
+        onError,
+      });
+      mockMapConnectionState.mockImplementation(state =>
+        state === 'disconnected' ? 'failed' : 'connected',
+      );
+      mockConnect
+        .mockRejectedValueOnce(new Error('first manual rejoin failed'))
+        .mockResolvedValueOnce(undefined);
+      const disconnected = mockRoom.on.mock.calls.find(
+        ([event]) => event === 'disconnected',
+      )?.[1] as (() => void) | undefined;
+
+      disconnected?.();
+      expect(onStatusChange).toHaveBeenCalledWith('failed');
+
+      await jest.advanceTimersByTimeAsync(2_000);
+      expect(mockConnect).toHaveBeenCalledTimes(2);
+      await jest.advanceTimersByTimeAsync(4_000);
+
+      expect(mockConnect).toHaveBeenCalledTimes(3);
+      expect(onStatusChange).toHaveBeenCalledWith('connected');
+      expect(onError).not.toHaveBeenCalled();
+      await handle.close();
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('rolls back a token failure and lets a retry own one clean listener/session set', async () => {

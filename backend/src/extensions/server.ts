@@ -3,8 +3,8 @@
  * extension entry point. Both commands now execute the same mono-server
  * bootstrap; there is no second HTTP stack or lifecycle implementation.
  */
-import { startServer } from '../app';
+import { startServerOrExit } from '../app';
 
 if (require.main === module) {
-  void startServer();
+  startServerOrExit();
 }

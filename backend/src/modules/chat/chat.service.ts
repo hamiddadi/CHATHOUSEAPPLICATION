@@ -2,14 +2,18 @@ import { MediaKind, Prisma, type MessageKind } from '@prisma/client';
 import { prisma } from '../../config/database';
 import { logger } from '../../config/logger';
 import { AppError } from '../../middlewares/error.middleware';
-import { notificationsService } from '../notifications/notifications.service';
-import { emitChatMessage } from '../../socket/realtime';
 import { mediaService } from '../media/media.service';
 import { scheduleBackgroundTask } from '../../utils/backgroundTasks';
+import { runIdempotentCreate } from '../../utils/idempotency';
+import {
+  notificationDeliveryOutboxData,
+  wakeNotificationDelivery,
+} from '../notifications/notification.outbox';
 import { sendMessageSchema } from './chat.schema';
 import type { ListMessagesInput, SendMessageInput, SendVoiceMessageInput } from './chat.schema';
-import { assertCanDirectMessage } from './chat.policy';
+import { assertCanDirectMessageWithinTransaction } from './chat.policy';
 import { decodeChatCursor, encodeChatCursor } from './chat.cursor';
+import { messageDeliveryOutboxData, wakeMessageDelivery } from './message.outbox';
 
 const publicUser = {
   id: true,
@@ -212,69 +216,114 @@ export const chatService = {
     });
     if (!peer) throw new AppError('USER_001');
     const [lo, hi] = conversationPair(userId, peerId);
-    const messages = await prisma.message.findMany({
+    const decodedCursor = input.before ? decodeChatCursor(input.before) : null;
+    if (input.before && !decodedCursor) throw new AppError('VALIDATION_001');
+    const cursorWhere: Prisma.MessageWhereInput = decodedCursor
+      ? decodedCursor.messageId
+        ? {
+            OR: [
+              { createdAt: { lt: decodedCursor.createdAt } },
+              { createdAt: decodedCursor.createdAt, id: { lt: decodedCursor.messageId } },
+            ],
+          }
+        : { createdAt: { lt: decodedCursor.createdAt } }
+      : {};
+    const rows = await prisma.message.findMany({
       where: {
         roomId: null,
-        OR: [
-          { senderId: lo, receiverId: hi },
-          { senderId: hi, receiverId: lo },
+        AND: [
+          {
+            OR: [
+              { senderId: lo, receiverId: hi },
+              { senderId: hi, receiverId: lo },
+            ],
+          },
+          cursorWhere,
         ],
-        ...(input.before ? { createdAt: { lt: new Date(input.before) } } : {}),
       },
-      orderBy: { createdAt: 'desc' },
-      take: input.limit,
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: input.limit + 1,
       include: { sender: { select: publicUser } },
     });
-    return messages.reverse();
+    const hasMore = rows.length > input.limit;
+    const newestFirst = hasMore ? rows.slice(0, input.limit) : rows;
+    const oldest = newestFirst[newestFirst.length - 1];
+    const data = [...newestFirst].reverse();
+    return {
+      data,
+      hasMore,
+      nextCursor: hasMore && oldest ? encodeChatCursor(oldest.createdAt, oldest.id) : null,
+    };
   },
 
-  async send(senderId: string, receiverId: string, input: SendMessageInput) {
+  async send(
+    senderId: string,
+    receiverId: string,
+    input: SendMessageInput,
+    idempotencyKey?: string,
+  ) {
     // `chat:send` reaches the service directly (without the REST controller),
     // so validate again at the shared persistence boundary. This keeps the
     // pre-publication content guard effective for both transports.
     const validatedInput = sendMessageSchema.parse(input);
 
     if (senderId === receiverId) throw new AppError('CHAT_001');
-    const peer = await prisma.user.findFirst({
-      where: { id: receiverId, deletedAt: null },
-      select: { id: true, username: true, displayName: true },
-    });
-    if (!peer) throw new AppError('USER_001');
-
-    await assertCanDirectMessage(senderId, receiverId);
-
     const sender = await prisma.user.findUnique({
       where: { id: senderId },
       select: { username: true, displayName: true },
     });
     const handle = sender?.displayName ?? sender?.username ?? 'Someone';
 
-    const msg = await prisma.message.create({
-      data: {
-        senderId,
-        receiverId,
-        content: validatedInput.content,
+    const creation = await runIdempotentCreate({
+      userId: senderId,
+      scope: `chat.message:${receiverId}`,
+      key: idempotencyKey,
+      payload: { kind: 'TEXT', ...validatedInput },
+      create: async tx => {
+        await assertCanDirectMessageWithinTransaction(tx, senderId, receiverId);
+        const created = await tx.message.create({
+          data: {
+            senderId,
+            receiverId,
+            content: validatedInput.content,
+          },
+          select: { id: true },
+        });
+        const notification = await tx.notification.create({
+          data: {
+            userId: receiverId,
+            actorId: senderId,
+            type: 'NEW_MESSAGE',
+            title: handle,
+            body: validatedInput.content.slice(0, 160),
+            data: { messageId: created.id, senderId, conversation: 'dm' },
+            targetId: created.id,
+            targetType: 'message',
+          },
+          select: { id: true },
+        });
+        await tx.outboxEvent.createMany({
+          data: [
+            messageDeliveryOutboxData('direct', created.id),
+            notificationDeliveryOutboxData(notification.id, created.id),
+          ],
+        });
+        return created.id;
       },
+    });
+    const msg = await prisma.message.findUnique({
+      where: { id: creation.resourceId },
       include: { sender: { select: publicUser } },
     });
+    if (!msg) throw new AppError('CHAT_002');
 
-    // Push the message to both parties in realtime. REST is the only send path
-    // the clients use (they never emit `chat:send`), so this is what makes the
-    // recipient's conversation list / unread badge / open thread update live.
-    emitChatMessage(senderId, receiverId, msg);
-
-    // The notification remains non-blocking in production, while the task
-    // registry guarantees graceful shutdown and deterministic tests.
+    // Both the first response and an Idempotency-Key replay repair the same
+    // durable aggregate. Stable outbox keys prevent duplicate database rows;
+    // downstream socket/push delivery is explicitly at-least-once.
     await scheduleBackgroundTask(
-      notificationsService.create({
-        userId: receiverId,
-        type: 'NEW_MESSAGE',
-        title: handle,
-        body: validatedInput.content.slice(0, 160),
-        data: { messageId: msg.id, senderId, conversation: 'dm' },
-      }),
+      Promise.all([wakeMessageDelivery('direct', msg.id), wakeNotificationDelivery(msg.id)]),
       err =>
-        logger.warn('chat message notification failed', { err, receiverId, messageId: msg.id }),
+        logger.warn('chat message delivery wake failed', { err, receiverId, messageId: msg.id }),
     );
 
     return msg;
@@ -286,16 +335,13 @@ export const chatService = {
    * {@link send} (same mutual-follow gate, same realtime emit), with a 🎤
    * notification body instead of the text preview.
    */
-  async sendVoice(senderId: string, receiverId: string, input: SendVoiceMessageInput) {
+  async sendVoice(
+    senderId: string,
+    receiverId: string,
+    input: SendVoiceMessageInput,
+    idempotencyKey?: string,
+  ) {
     if (senderId === receiverId) throw new AppError('CHAT_001');
-    const peer = await prisma.user.findFirst({
-      where: { id: receiverId, deletedAt: null },
-      select: { id: true, username: true, displayName: true },
-    });
-    if (!peer) throw new AppError('USER_001');
-
-    await assertCanDirectMessage(senderId, receiverId);
-    await mediaService.assertOwnedMediaUrl(senderId, input.audioUrl, MediaKind.VOICE);
 
     const sender = await prisma.user.findUnique({
       where: { id: senderId },
@@ -303,28 +349,61 @@ export const chatService = {
     });
     const handle = sender?.displayName ?? sender?.username ?? 'Someone';
 
-    const msg = await prisma.message.create({
-      data: {
-        senderId,
-        receiverId,
-        kind: 'VOICE',
-        audioUrl: input.audioUrl,
-        audioDurationMs: input.durationMs,
+    const creation = await runIdempotentCreate({
+      userId: senderId,
+      scope: `chat.message:${receiverId}`,
+      key: idempotencyKey,
+      payload: { kind: 'VOICE', ...input },
+      create: async tx => {
+        await assertCanDirectMessageWithinTransaction(tx, senderId, receiverId);
+        const mediaObjectId = await mediaService.assertOwnedMediaUrlWithinTransaction(
+          tx,
+          senderId,
+          input.audioUrl,
+          MediaKind.VOICE,
+        );
+        const created = await tx.message.create({
+          data: {
+            senderId,
+            receiverId,
+            kind: 'VOICE',
+            audioUrl: input.audioUrl,
+            audioDurationMs: input.durationMs,
+            mediaObjectId,
+          },
+          select: { id: true },
+        });
+        const notification = await tx.notification.create({
+          data: {
+            userId: receiverId,
+            actorId: senderId,
+            type: 'NEW_MESSAGE',
+            title: handle,
+            body: '🎤 Voice message',
+            data: { messageId: created.id, senderId, conversation: 'dm' },
+            targetId: created.id,
+            targetType: 'message',
+          },
+          select: { id: true },
+        });
+        await tx.outboxEvent.createMany({
+          data: [
+            messageDeliveryOutboxData('direct', created.id),
+            notificationDeliveryOutboxData(notification.id, created.id),
+          ],
+        });
+        return created.id;
       },
+    });
+    const msg = await prisma.message.findUnique({
+      where: { id: creation.resourceId },
       include: { sender: { select: publicUser } },
     });
-
-    emitChatMessage(senderId, receiverId, msg);
+    if (!msg) throw new AppError('CHAT_002');
 
     await scheduleBackgroundTask(
-      notificationsService.create({
-        userId: receiverId,
-        type: 'NEW_MESSAGE',
-        title: handle,
-        body: '🎤 Voice message',
-        data: { messageId: msg.id, senderId, conversation: 'dm' },
-      }),
-      err => logger.warn('chat voice notification failed', { err, receiverId, messageId: msg.id }),
+      Promise.all([wakeMessageDelivery('direct', msg.id), wakeNotificationDelivery(msg.id)]),
+      err => logger.warn('chat voice delivery wake failed', { err, receiverId, messageId: msg.id }),
     );
 
     return msg;

@@ -6,8 +6,13 @@ import compression from 'compression';
 import morgan, { token as registerMorganToken } from 'morgan';
 import { env } from './config/env';
 import { logger } from './config/logger';
-import { connectRedis, disconnectRedis } from './config/redis';
+import { connectRedis, disconnectRedis, redis } from './config/redis';
 import { disconnectDatabase } from './config/database';
+import {
+  shutdownParticipantAdmissionCleanup,
+  startParticipantAdmissionCleanup,
+} from './queues/participantAdmissionCleanup';
+import { beginSocketServerDrain } from './socket/server-drain';
 import { globalLimiter } from './middlewares/rateLimit.middleware';
 import { errorMiddleware, notFoundHandler } from './middlewares/error.middleware';
 import { healthRouter } from './routes/health';
@@ -45,9 +50,13 @@ import {
   startLocationPurgeWorker,
   shutdownLocationPurge,
 } from './queues/locationPurge';
+import {
+  getMediaCleanupQueue,
+  startMediaCleanupWorker,
+  shutdownMediaCleanup,
+} from './queues/mediaCleanup';
 import { registerGdprPurgeWorker, shutdownGdprPurge } from './workers/gdpr-purge.worker';
 import { getGdprPurgeQueue } from './workers/gdpr-purge.queue';
-import { ensureSearchIndexes } from './config/searchIndexes';
 import { initSentry } from './monitoring/sentry';
 import { httpMetricsMiddleware, metricsHandler } from './monitoring/metrics';
 import {
@@ -58,6 +67,12 @@ import { createMetricsAuthMiddleware } from './monitoring/metricsAuth';
 import { drainBackgroundTasks } from './utils/backgroundTasks';
 import { initializePush } from './modules/push/push.service';
 import { getReminder15Queue } from './extensions/queues/reminder15';
+import { sanitizeRequestUrl } from './utils/sanitizeRequestUrl';
+import {
+  startRedisMemoryMetricsCollector,
+  stopRedisMemoryMetricsCollector,
+} from './monitoring/redisMetrics';
+import { shutdownOutboxWorker, startOutboxWorker } from './workers/outbox.worker';
 
 // Grace period before a hung Socket.IO/HTTP shutdown is hard-killed.
 const SHUTDOWN_GRACE_MS = 10_000;
@@ -67,7 +82,7 @@ const SHUTDOWN_GRACE_MS = 10_000;
 // discarded before it reaches the logger.
 registerMorganToken('safe-url', request => {
   const req = request as http.IncomingMessage & { originalUrl?: string };
-  return (req.originalUrl ?? req.url ?? '').split('?', 1)[0] ?? '';
+  return sanitizeRequestUrl(req.originalUrl ?? req.url);
 });
 
 const ACCESS_LOG_FORMAT =
@@ -197,7 +212,6 @@ export const startServer = async (): Promise<void> => {
   // of silently dropping the first notifications.
   await initializePush();
   await connectRedis();
-  await ensureSearchIndexes();
   // mediasoup boots best-effort: if the native build is unavailable the rest
   // of the API keeps working and rtc:* events return RTC_DISABLED.
   await initMediasoup().catch(err => {
@@ -211,6 +225,7 @@ export const startServer = async (): Promise<void> => {
   // docs/rgpd/data-retention-policy.md: hard-deletes soft-deleted accounts past
   // the grace window and purges expired tokens/OTPs/audit logs.
   await registerGdprPurgeWorker();
+  await startMediaCleanupWorker();
   const app = createApp();
   if (env.EXTENSIONS_ENABLED) {
     startExtensionWorkers();
@@ -219,15 +234,22 @@ export const startServer = async (): Promise<void> => {
     getRemindersQueue(),
     getLocationPurgeQueue(),
     getGdprPurgeQueue(),
+    getMediaCleanupQueue(),
     ...(env.EXTENSIONS_ENABLED ? [getReminder15Queue()] : []),
   ]);
+  startRedisMemoryMetricsCollector(redis);
   const server = http.createServer(app);
   const io = await createSocketServer(server);
+  startParticipantAdmissionCleanup(io);
   // Bind the alias emitter so extension realtime events publish under their
   // Clubhouse-spec names (e.g. `room_title_updated`).
   if (env.EXTENSIONS_ENABLED) {
     setRealtimeAliasServer(io);
   }
+  // Outbox consumers emit through Socket.IO. Start claiming only after the
+  // realtime server/Redis adapter is fully bound, otherwise a boot backlog
+  // could be marked delivered while ioRef is still absent.
+  startOutboxWorker();
 
   server.listen(env.PORT, env.HOST, () => {
     logger.info(
@@ -247,14 +269,25 @@ export const startServer = async (): Promise<void> => {
       process.exit(1);
     }, SHUTDOWN_GRACE_MS).unref();
 
+    // Set before any awaited shutdown work. Only Socket.IO's explicit
+    // `server shutting down` reason consults this flag; ordinary transport and
+    // client disconnects continue to close durable participation normally.
+    beginSocketServerDrain();
     try {
+      await shutdownParticipantAdmissionCleanup();
+      // Stop new claims and drain any active delivery while Socket.IO and push
+      // transports are still available. Events committed by a final in-flight
+      // request after this point remain PENDING for the next process.
+      await shutdownOutboxWorker();
       await io.close();
       await drainRoomDisconnectCleanups();
       await shutdownMediasoup();
       stopBullMqMetricsCollector();
+      stopRedisMemoryMetricsCollector();
       await shutdownReminders();
       await shutdownLocationPurge();
       await shutdownGdprPurge();
+      await shutdownMediaCleanup();
       if (env.EXTENSIONS_ENABLED) {
         await shutdownExtensionWorkers();
       }
@@ -285,13 +318,20 @@ export const startServer = async (): Promise<void> => {
   });
 };
 
-if (require.main === module) {
+export const startServerOrExit = (): void => {
   void startServer().catch(err => {
     // Startup errors can contain provider response fragments or credential
     // paths in nested causes. Emit only the controlled top-level reason.
     logger.error('server startup failed', {
       reason: err instanceof Error ? err.message : 'unknown startup failure',
     });
-    process.exitCode = 1;
+    // Startup may already have opened Redis/BullMQ/native handles. Exit now so
+    // the orchestrator can restart a clean process instead of leaving an
+    // unhealthy container alive indefinitely with no listening HTTP server.
+    process.exit(1);
   });
+};
+
+if (require.main === module) {
+  startServerOrExit();
 }

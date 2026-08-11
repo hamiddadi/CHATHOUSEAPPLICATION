@@ -40,6 +40,12 @@ enum NotificationType {
   FOLLOW_REQUEST
 }
 
+enum OutboxEventStatus {
+  PENDING
+  PROCESSING
+  DELIVERED
+}
+
 // FOLL-01: a Follow is PENDING when it targets a private account (awaiting the
 // target's approval) and ACCEPTED otherwise. Default ACCEPTED so every existing
 // edge (public follows) stays a real follow with no backfill.
@@ -251,6 +257,12 @@ model User {
   @@index([createdAt, id])
   // Covers getOnlineLocations (map): visible + online + recently-seen.
   @@index([isVisible, isOnline, lastSeenAt])
+  // PostgreSQL pg_trgm indexes installed by the controlled search migration.
+  // Keeping them in the data model prevents migrate-diff from treating the
+  // production search indexes as drift to remove.
+  @@index([username(ops: raw("gin_trgm_ops"))], type: Gin, map: "user_username_trgm")
+  @@index([displayName(ops: raw("gin_trgm_ops"))], type: Gin, map: "user_displayName_trgm")
+  @@index([bio(ops: raw("gin_trgm_ops"))], type: Gin, map: "user_bio_trgm")
 }
 
 // ─── ProfileView (who viewed my profile — premium) ──────
@@ -261,17 +273,28 @@ model User {
 // (or an unserved local directory in development/test). Retrieval is exposed
 // only through an API-signed capability URL.
 model MediaObject {
-  id         String    @id @default(cuid())
-  ownerId    String
-  storageKey String    @unique @db.VarChar(512)
-  kind       MediaKind
-  mimeType   String    @db.VarChar(100)
-  sizeBytes  Int
-  createdAt  DateTime  @default(now())
+  id                String    @id @default(cuid())
+  ownerId           String
+  storageKey        String    @unique @db.VarChar(512)
+  kind              MediaKind
+  mimeType          String    @db.VarChar(100)
+  sizeBytes         Int
+  createdAt         DateTime  @default(now())
+  // Null only while a metadata-first upload still needs its object bytes.
+  // Existing rows are backfilled to createdAt by the lifecycle migration.
+  // The database default preserves writes from rollback images that stored
+  // bytes before inserting metadata. New metadata-first writes pass NULL.
+  uploadCompletedAt DateTime? @default(now())
+  // Two-phase orphan cleanup claim. While set, new voice attachments are
+  // rejected; a stale claim is recoverable after a crashed storage deletion.
+  deletionClaimedAt DateTime?
 
-  owner User @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  owner          User           @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  directMessages Message[]      @relation("DirectMessageMedia")
+  groupMessages  GroupMessage[] @relation("GroupMessageMedia")
 
   @@index([ownerId, kind, createdAt])
+  @@index([kind, deletionClaimedAt, createdAt])
 }
 
 // Deduplicates retryable mutation requests across devices/network retries.
@@ -417,6 +440,8 @@ model Room {
   @@index([participantCount])
   @@index([isLive, endedAt, createdAt])
   @@index([hostId, isLive, endedAt])
+  @@index([title(ops: raw("gin_trgm_ops"))], type: Gin, map: "room_title_trgm")
+  @@index([topic(ops: raw("gin_trgm_ops"))], type: Gin, map: "room_topic_trgm")
 }
 
 // ─── RoomHandRaise (listener queued to speak) ──────────
@@ -530,16 +555,20 @@ model RoomRsvp {
 
 // ─── Participant ────────────────────────────────────────
 model Participant {
-  id       String    @id @default(cuid())
-  userId   String
-  roomId   String
-  role     Role      @default(LISTENER)
-  isMuted  Boolean   @default(false)
+  id                   String    @id @default(cuid())
+  userId               String
+  roomId               String
+  role                 Role      @default(LISTENER)
+  isMuted              Boolean   @default(false)
   // #32: "ghost" mode — when true the participant is hidden from the audience
   // list shown to OTHERS (they still see themselves). Host/mods aren't hidden.
-  isHidden Boolean   @default(false)
-  joinedAt DateTime  @default(now())
-  leftAt   DateTime?
+  isHidden             Boolean   @default(false)
+  joinedAt             DateTime  @default(now())
+  leftAt               DateTime?
+  // Set only after Socket.IO has actually joined the room channel. A nullable
+  // value is a short-lived admission lease that crash recovery can expire
+  // without touching participants whose realtime admission completed.
+  admissionConfirmedAt DateTime?
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
   room Room @relation(fields: [roomId], references: [id], onDelete: Cascade)
@@ -550,6 +579,7 @@ model Participant {
   @@index([roomId, leftAt])
   @@index([userId, leftAt])
   @@index([roomId, leftAt, role])
+  @@index([leftAt, admissionConfirmedAt, joinedAt, id])
 }
 
 // Discriminates a text message from an async voice note (Clubhouse-style
@@ -568,21 +598,24 @@ model Message {
   kind            MessageKind @default(TEXT)
   audioUrl        String?     @db.VarChar(2048) // public URL of the stored voice clip
   audioDurationMs Int? // clip length in ms, captured client-side at record time
+  mediaObjectId   String?
   senderId        String
   roomId          String?
   receiverId      String?
   isRead          Boolean     @default(false)
   createdAt       DateTime    @default(now())
 
-  sender   User  @relation("MessageSender", fields: [senderId], references: [id], onDelete: Cascade)
-  room     Room? @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  sender      User         @relation("MessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+  room        Room?        @relation(fields: [roomId], references: [id], onDelete: Cascade)
   // receiverId now has a real FK + relation (was a dangling string) so DMs
   // enforce referential integrity and cascade-clean on user deletion.
-  receiver User? @relation("MessageReceiver", fields: [receiverId], references: [id], onDelete: Cascade)
+  receiver    User?        @relation("MessageReceiver", fields: [receiverId], references: [id], onDelete: Cascade)
+  mediaObject MediaObject? @relation("DirectMessageMedia", fields: [mediaObjectId], references: [id], onDelete: SetNull)
 
   @@index([senderId])
   @@index([receiverId])
   @@index([roomId])
+  @@index([mediaObjectId])
   @@index([createdAt])
   // Serve exact DM peer discovery and the indexed per-peer last-message
   // lookups used by chat.service listConversations.
@@ -636,14 +669,17 @@ model GroupMessage {
   kind            MessageKind @default(TEXT)
   audioUrl        String?     @db.VarChar(2048)
   audioDurationMs Int?
+  mediaObjectId   String?
   createdAt       DateTime    @default(now())
 
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   sender       User         @relation("GroupMsgSender", fields: [senderId], references: [id], onDelete: Cascade)
+  mediaObject  MediaObject? @relation("GroupMessageMedia", fields: [mediaObjectId], references: [id], onDelete: SetNull)
 
   @@index([conversationId, createdAt])
   @@index([conversationId, createdAt, senderId])
   @@index([senderId])
+  @@index([mediaObjectId])
 }
 
 // ─── Follow ─────────────────────────────────────────────
@@ -659,11 +695,10 @@ model Follow {
   following User @relation("Following", fields: [followingId], references: [id], onDelete: Cascade)
 
   @@unique([followerId, followingId])
-  @@index([followerId])
-  @@index([followingId])
-  @@index([followerId, status])
-  // Pending requests TO a user are listed/paginated by (followingId, status).
-  @@index([followingId, status])
+  // Total-order pagination indexes also cover the shorter follower/status
+  // lookup prefixes; retaining both would double every follow write.
+  @@index([followerId, status, createdAt, id])
+  @@index([followingId, status, createdAt, id])
 }
 
 // ─── Notification ───────────────────────────────────────
@@ -684,11 +719,38 @@ model Notification {
   actor User? @relation("NotifActor", fields: [actorId], references: [id], onDelete: SetNull)
 
   @@index([userId, isRead])
-  @@index([userId, type])
-  @@index([userId, createdAt])
-  @@index([userId, type, createdAt])
+  // These total-order indexes also serve their user/type lookup prefixes.
+  @@index([userId, createdAt, id])
+  @@index([userId, type, createdAt, id])
   @@index([createdAt])
   @@index([actorId])
+}
+
+// Durable hand-off between domain transactions and external side effects.
+// Delivery is at-least-once: consumers must use eventKey/payload identifiers
+// to make their own writes idempotent.
+model OutboxEvent {
+  id              String            @id @default(cuid())
+  eventKey        String            @unique
+  topic           String            @db.VarChar(100)
+  aggregateId     String?
+  payload         Json
+  status          OutboxEventStatus @default(PENDING)
+  attempts        Int               @default(0)
+  availableAt     DateTime          @default(now())
+  claimedAt       DateTime?
+  // First confirmed success of an external security effect. Revocation
+  // consumers keep retrying through the provider refresh-token horizon from
+  // this point, then perform one final action before acknowledging delivery.
+  effectStartedAt DateTime?
+  deliveredAt     DateTime?
+  lastError       String?           @db.VarChar(1000)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  @@index([status, availableAt, claimedAt])
+  @@index([topic, aggregateId, deliveredAt])
+  @@index([deliveredAt])
 }
 
 // ─── Notification Preferences (per-type toggles) ───────
@@ -734,6 +796,8 @@ model Club {
   @@index([privacy])
   @@index([createdAt])
   @@index([slug])
+  @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "club_name_trgm")
+  @@index([description(ops: raw("gin_trgm_ops"))], type: Gin, map: "club_description_trgm")
 }
 
 model ClubMember {

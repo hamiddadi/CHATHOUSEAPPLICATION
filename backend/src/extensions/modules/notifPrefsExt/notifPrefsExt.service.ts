@@ -21,6 +21,8 @@ const freqKey = (userId: string) => `ext:notif:freq:${userId}`;
 const clubMuteKey = (userId: string) => `ext:notif:mute:club:${userId}`;
 const userMuteKey = (userId: string) => `ext:notif:mute:user:${userId}`;
 const lastDeliveredKey = (userId: string, kind: string) => `ext:notif:lastdel:${kind}:${userId}`;
+const durableDeliveryClaimKey = (userId: string, kind: string, deliveryId: string) =>
+  `ext:notif:deliveryclaim:${kind}:${userId}:${deliveryId}`;
 
 const FREQ_THROTTLE_MS: Record<FrequencyTier, number> = {
   frequent: 0, // no throttling
@@ -66,6 +68,49 @@ if lastMs and (nowMs - lastMs) < throttleMs then
 end
 
 redis.call('SET', KEYS[3], tostring(nowMs), 'PX', throttleMs)
+return 1
+`;
+
+/**
+ * Durable variant of the frequency claim. A notification-specific claim is
+ * written atomically with the shared quiet-window timestamp. Retries for that
+ * same notification remain eligible after a provider failure, while a
+ * different notification is still throttled. Mutes are intentionally checked
+ * before the replay claim so a newly-muted actor/club takes effect at once.
+ */
+const CAN_DELIVER_DURABLY_SCRIPT = `
+local actorId = ARGV[1]
+local clubId = ARGV[2]
+local throttleMs = tonumber(ARGV[3])
+
+if actorId ~= '' and redis.call('SISMEMBER', KEYS[1], actorId) == 1 then
+  return 0
+end
+if clubId ~= '' and redis.call('SISMEMBER', KEYS[2], clubId) == 1 then
+  return 0
+end
+if redis.call('EXISTS', KEYS[4]) == 1 then
+  return 1
+end
+if throttleMs <= 0 then
+  return 1
+end
+
+local nowParts = redis.call('TIME')
+local nowMs = (tonumber(nowParts[1]) * 1000) + math.floor(tonumber(nowParts[2]) / 1000)
+local lastRaw = redis.call('GET', KEYS[3])
+local lastMs = tonumber(lastRaw)
+
+if lastMs and (nowMs - lastMs) < throttleMs then
+  local remainingMs = throttleMs - (nowMs - lastMs)
+  if redis.call('PTTL', KEYS[3]) < 0 then
+    redis.call('PEXPIRE', KEYS[3], remainingMs)
+  end
+  return 0
+end
+
+redis.call('SET', KEYS[3], tostring(nowMs), 'PX', throttleMs)
+redis.call('SET', KEYS[4], '1', 'PX', throttleMs)
 return 1
 `;
 
@@ -122,6 +167,34 @@ export const notifPrefsExtService = {
     const throttle = FREQ_THROTTLE_MS[tier];
     const result = await redis.eval(CAN_DELIVER_SCRIPT, {
       keys: [userMuteKey(userId), clubMuteKey(userId), lastDeliveredKey(userId, kind)],
+      arguments: [actorId ?? '', clubId ?? '', String(throttle)],
+    });
+    return Number(result) === 1;
+  },
+
+  /**
+   * Outbox-safe gate. A failed provider attempt may retry with `deliveryId`
+   * without losing the frequency slot it already claimed.
+   */
+  async canDeliverDurably(
+    userId: string,
+    kind: string,
+    opts: {
+      deliveryId: string;
+      clubId?: string | null;
+      actorId?: string | null;
+    },
+  ): Promise<boolean> {
+    const { clubId, actorId, deliveryId } = opts;
+    const tier = await this.getFrequency(userId);
+    const throttle = FREQ_THROTTLE_MS[tier];
+    const result = await redis.eval(CAN_DELIVER_DURABLY_SCRIPT, {
+      keys: [
+        userMuteKey(userId),
+        clubMuteKey(userId),
+        lastDeliveredKey(userId, kind),
+        durableDeliveryClaimKey(userId, kind, deliveryId),
+      ],
       arguments: [actorId ?? '', clubId ?? '', String(throttle)],
     });
     return Number(result) === 1;

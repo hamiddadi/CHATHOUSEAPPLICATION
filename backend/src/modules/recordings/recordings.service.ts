@@ -6,11 +6,12 @@ import {
   S3Upload,
   WebhookReceiver,
 } from 'livekit-server-sdk';
-import type { EgressInfo } from 'livekit-server-sdk';
+import type { EgressInfo, WebhookEvent } from 'livekit-server-sdk';
 import type { Prisma, RecordingStatus } from '@prisma/client';
 import { prisma } from '../../config/database';
 import { env } from '../../config/env';
 import { logger } from '../../config/logger';
+import { enforceParticipantPolicyLocked } from '../rooms/livekit-revocation.outbox';
 import { roomMetadataAccessWhere } from '../rooms/rooms.access';
 import { getBlockedIdSet } from '../social/blocks';
 
@@ -82,6 +83,32 @@ const webhook = (): WebhookReceiver => {
   return webhookRef;
 };
 
+export class LivekitWebhookAuthenticationError extends Error {
+  constructor(cause: unknown) {
+    super('Invalid LiveKit webhook authentication', { cause });
+    this.name = 'LivekitWebhookAuthenticationError';
+  }
+}
+
+export class LivekitWebhookUnavailableError extends Error {
+  constructor(message = 'LiveKit webhook processing is unavailable') {
+    super(message);
+    this.name = 'LivekitWebhookUnavailableError';
+  }
+}
+
+export const verifyLivekitWebhook = async (
+  body: string,
+  authHeader: string | undefined,
+): Promise<WebhookEvent> => {
+  if (!hasLivekitKeys()) throw new LivekitWebhookUnavailableError();
+  try {
+    return await webhook().receive(body, authHeader);
+  } catch (cause) {
+    throw new LivekitWebhookAuthenticationError(cause);
+  }
+};
+
 const mapStatus = (status: EgressStatus): RecordingStatus => {
   switch (status) {
     case EgressStatus.EGRESS_STARTING:
@@ -146,6 +173,19 @@ const reconcileRoom = async (roomId: string): Promise<void> => {
       logger.warn('recording reconcile failed', { roomId, egressId: row.egressId, err });
     }
   }
+};
+
+export const dispatchVerifiedLivekitWebhook = async (event: WebhookEvent): Promise<void> => {
+  if (event.event === 'participant_joined') {
+    const roomId = event.room?.name.trim() ?? '';
+    const userId = event.participant?.identity.trim() ?? '';
+    if (!roomId || !userId) {
+      throw new LivekitWebhookUnavailableError('LiveKit participant webhook is incomplete');
+    }
+    const effect = await enforceParticipantPolicyLocked(roomId, userId);
+    if (effect.kind === 'unconfigured') throw new LivekitWebhookUnavailableError();
+  }
+  if (event.egressInfo) await applyEgressInfo(event.egressInfo);
 };
 
 interface RecordingRow {
@@ -246,9 +286,8 @@ export const recordingsService = {
    * Throws on signature failure so the route can answer 401.
    */
   async handleWebhook(body: string, authHeader: string | undefined): Promise<void> {
-    if (!hasLivekitKeys()) return;
-    const event = await webhook().receive(body, authHeader);
-    if (event.egressInfo) await applyEgressInfo(event.egressInfo);
+    const event = await verifyLivekitWebhook(body, authHeader);
+    await dispatchVerifiedLivekitWebhook(event);
   },
 
   /** Completed, playable replays for a room (newest first). */

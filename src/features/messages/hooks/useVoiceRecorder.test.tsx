@@ -1,4 +1,5 @@
 import { act, renderHook } from '@testing-library/react-native';
+import { permissions as mediaPermissions } from '@livekit/react-native-webrtc';
 import { PermissionsAndroid, Platform } from 'react-native';
 import {
   audioRecorderPlayer,
@@ -12,6 +13,8 @@ describe('useVoiceRecorder microphone permission', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    jest.mocked(mediaPermissions.query).mockResolvedValue(mediaPermissions.RESULT.GRANTED);
+    jest.mocked(mediaPermissions.request).mockResolvedValue(true);
     useVoicePlayback.setState({
       activeUrl: null,
       playing: false,
@@ -53,7 +56,7 @@ describe('useVoiceRecorder microphone permission', () => {
     unmount();
   });
 
-  it('starts through the native iOS prompt without calling PermissionsAndroid', async () => {
+  it('starts after the native iOS permission check without calling PermissionsAndroid', async () => {
     Object.defineProperty(Platform, 'OS', { value: 'ios', configurable: true });
     const request = jest.spyOn(PermissionsAndroid, 'request');
     const startRecorder = jest.mocked(audioRecorderPlayer.startRecorder);

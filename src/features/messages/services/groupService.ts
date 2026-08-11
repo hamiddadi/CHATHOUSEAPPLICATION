@@ -1,5 +1,4 @@
 import { apiClient } from '../../../shared/services/api/apiClient';
-import { createIdempotencyKey } from '../../../shared/utils/idempotency';
 import type { Envelope } from '../../../shared/types/api';
 import type { MessageKind, UserSummary } from '../../../shared/types/domain';
 import type { ContentReportReason, ContentReportResult } from '../../../shared/types/moderation';
@@ -11,7 +10,8 @@ import type { ContentReportReason, ContentReportResult } from '../../../shared/t
  *   GET   /groups                 → GroupConversation[]
  *   POST  /groups                 → GroupConversation   { title?, memberIds[] }
  *   GET   /groups/:id             → GroupConversation
- *   GET   /groups/:id/messages?limit&before → GroupMessage[]
+ *   GET   /groups/:id/messages?limit&before&paginated=true
+ *                                      → { data: GroupMessage[], nextCursor, hasMore }
  *   POST  /groups/:id/messages    → GroupMessage        { content }
  *   PATCH /groups/:id/read        → { read: true }
  */
@@ -54,6 +54,12 @@ interface RawGroupConversation {
   updatedAt: string;
 }
 
+interface RawPage<T> {
+  data: T[];
+  nextCursor: string | null;
+  hasMore: boolean;
+}
+
 export interface GroupMessage {
   id: string;
   conversationId: string;
@@ -83,6 +89,11 @@ export interface GroupConversation {
   lastMessage: GroupLastMessage | null;
   unreadCount: number;
   updatedAt: string;
+}
+
+export interface GroupMessagePage {
+  items: GroupMessage[];
+  nextCursor: string | null;
 }
 
 const toSummary = (u: RawUser): UserSummary => ({
@@ -139,30 +150,33 @@ export const groupService = {
   },
 
   /**
-   * One page of the group thread, newest page first. `before` is an ISO
-   * createdAt cursor — the backend returns messages strictly older than it
-   * (see groups.schema listGroupMessagesSchema), each page sorted ascending.
+   * One page of the group thread, newest page first. `before` is the opaque
+   * `nextCursor` from the previous envelope; each returned page is sorted
+   * ascending for display.
    */
   async messages(
     id: string,
     opts: { before?: string; limit?: number } = {},
-  ): Promise<GroupMessage[]> {
-    const params: Record<string, string | number> = {};
+  ): Promise<GroupMessagePage> {
+    const params: Record<string, string | number | boolean> = { paginated: true };
     if (opts.before) params.before = opts.before;
     if (opts.limit) params.limit = opts.limit;
-    const res = await apiClient.get<Envelope<RawGroupMessage[]>>(`/groups/${id}/messages`, {
+    const res = await apiClient.get<Envelope<RawPage<RawGroupMessage>>>(`/groups/${id}/messages`, {
       params,
     });
-    return res.data.data.map(toMessage);
+    return {
+      items: res.data.data.data.map(toMessage),
+      nextCursor: res.data.data.nextCursor,
+    };
   },
 
-  async send(id: string, content: string): Promise<GroupMessage> {
+  async send(id: string, content: string, idempotencyKey: string): Promise<GroupMessage> {
     const trimmed = content.trim();
     if (trimmed.length === 0) throw new Error('Message cannot be empty');
     const res = await apiClient.post<Envelope<RawGroupMessage>>(
       `/groups/${id}/messages`,
       { content: trimmed },
-      { headers: { 'Idempotency-Key': createIdempotencyKey() } },
+      { headers: { 'Idempotency-Key': idempotencyKey } },
     );
     return toMessage(res.data.data);
   },
@@ -171,23 +185,32 @@ export const groupService = {
    * Send a voice note to a group. The clip must already be uploaded (see
    * voiceService); we post the stored URL + clip length to /groups/:id/voice.
    */
-  async sendVoice(id: string, audioUrl: string, durationMs: number): Promise<GroupMessage> {
+  async sendVoice(
+    id: string,
+    audioUrl: string,
+    durationMs: number,
+    idempotencyKey: string,
+  ): Promise<GroupMessage> {
     const res = await apiClient.post<Envelope<RawGroupMessage>>(
       `/groups/${id}/voice`,
       { audioUrl, durationMs },
-      { headers: { 'Idempotency-Key': createIdempotencyKey() } },
+      { headers: { 'Idempotency-Key': idempotencyKey } },
     );
     return toMessage(res.data.data);
   },
 
-  async create(memberIds: string[], title?: string): Promise<GroupConversation> {
+  async create(
+    memberIds: string[],
+    title: string | undefined,
+    idempotencyKey: string,
+  ): Promise<GroupConversation> {
     const res = await apiClient.post<Envelope<RawGroupConversation>>(
       '/groups',
       {
         memberIds,
         ...(title && title.trim() ? { title: title.trim() } : {}),
       },
-      { headers: { 'Idempotency-Key': createIdempotencyKey() } },
+      { headers: { 'Idempotency-Key': idempotencyKey } },
     );
     return toConversation(res.data.data);
   },
@@ -204,11 +227,15 @@ export const groupService = {
     return toConversation(res.data.data);
   },
 
-  async addMembers(id: string, userIds: string[]): Promise<GroupConversation> {
+  async addMembers(
+    id: string,
+    userIds: string[],
+    idempotencyKey: string,
+  ): Promise<GroupConversation> {
     const res = await apiClient.post<Envelope<RawGroupConversation>>(
       `/groups/${id}/members`,
       { userIds },
-      { headers: { 'Idempotency-Key': createIdempotencyKey() } },
+      { headers: { 'Idempotency-Key': idempotencyKey } },
     );
     return toConversation(res.data.data);
   },

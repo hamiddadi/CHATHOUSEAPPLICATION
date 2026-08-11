@@ -60,7 +60,9 @@ export const roomsController = {
 
   async join(req: Request, res: Response) {
     const room = await roomsService.join(paramId(req, 'id'), requireUserId(req));
-    sendOk(res, room);
+    // The lease identity is used only by the Socket.IO handler for exact
+    // failure compensation; never expose internal lifecycle metadata over REST.
+    sendOk(res, { ...room, admission: undefined });
   },
 
   async leave(req: Request, res: Response) {

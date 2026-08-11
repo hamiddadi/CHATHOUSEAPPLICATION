@@ -12,8 +12,8 @@ export const createRoomSchema = z
       .array(publicContentString(z.string().min(1).max(32)))
       .max(5)
       .default([]),
-    // User ids promoted to SPEAKER on room creation. Host + co-hosts
-    // collectively cap at 6 speakers before the audience queue kicks in.
+    // User ids offered a durable SPEAKER grant on room creation. Invited
+    // co-hosts remain inactive until they explicitly join the room.
     coHostIds: z.array(z.string().min(1)).max(5).default([]),
     isPrivate: z.boolean().default(false),
     roomType: z.enum(['OPEN', 'SOCIAL', 'CLOSED']).default('OPEN'),

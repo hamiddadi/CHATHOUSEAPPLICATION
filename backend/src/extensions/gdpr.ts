@@ -1,5 +1,6 @@
 import { prisma } from '../config/database';
 import { redis } from '../config/redis';
+import { purgeLivekitRevocationsForUser } from '../modules/rooms/livekit-revocation.outbox';
 
 const DIRECT_USER_KEY_PREFIXES = [
   'ext:audio:prefs:',
@@ -262,12 +263,19 @@ export const purgeExtensionDataForUser = async (userId: string): Promise<void> =
     redis.lRange(`ext:nominator:history:${userId}`, 0, -1),
   ]);
 
+  // OutboxEvent intentionally has no User FK so provider retries survive a
+  // normal domain transition. Remove its embedded userId explicitly before
+  // the account cascade; a failed query aborts this purge and remains retryable.
+  await purgeLivekitRevocationsForUser(userId);
+
   const directKeys = DIRECT_USER_KEY_PREFIXES.map(prefix => `${prefix}${userId}`);
   const patternGroups = await Promise.all([
     scanKeys(`ext:notif:lastdel:*:${userId}`),
     scanKeys(`ext:netq:*:${userId}`),
     scanKeys(`ext:clubreq:*:${userId}`),
     scanKeys(`ext:speakinv:*:${userId}`),
+    scanKeys(`ext:fanout:v2:claim:*:${userId}`),
+    scanKeys(`ext:notif:deliveryclaim:*:${userId}:*`),
   ]);
 
   for (const requestKey of patternGroups[2] ?? []) {
@@ -286,11 +294,13 @@ export const purgeExtensionDataForUser = async (userId: string): Promise<void> =
     const roomKeys = await Promise.all([
       scanKeys(`ext:netq:${roomId}:*`),
       scanKeys(`ext:speakinv:${roomId}:*`),
+      scanKeys(`ext:fanout:v2:claim:${roomId}:*`),
     ]);
     await deleteKeys([
       `ext:roomset:${roomId}`,
       `ext:captions:enabled:${roomId}`,
       `ext:fanout:notified:${roomId}`,
+      `ext:fanout:v2:notified:${roomId}`,
       ...roomKeys.flat(),
     ]);
   }
@@ -312,15 +322,18 @@ export const purgeExtensionDataForUser = async (userId: string): Promise<void> =
   await removeUserFromReactionIndexes(userId);
   await anonymizeNominatorHistoryReferences(userId);
 
-  const [muteSets, featuredLists, speakInviteKeys, twitterStateKeys] = await Promise.all([
-    scanKeys('ext:notif:mute:user:*'),
-    scanKeys('ext:clubmeta:featured:*'),
-    scanKeys('ext:speakinv:*'),
-    scanKeys('ext:twitter:pkce:*'),
-  ]);
+  const [muteSets, featuredLists, speakInviteKeys, twitterStateKeys, fanoutRecipientSets] =
+    await Promise.all([
+      scanKeys('ext:notif:mute:user:*'),
+      scanKeys('ext:clubmeta:featured:*'),
+      scanKeys('ext:speakinv:*'),
+      scanKeys('ext:twitter:pkce:*'),
+      scanKeys('ext:fanout:v2:notified:*'),
+    ]);
   await Promise.all([
     ...muteSets.map(key => redis.sRem(key, userId)),
     ...featuredLists.map(key => redis.lRem(key, 0, userId)),
+    ...fanoutRecipientSets.map(key => redis.sRem(key, userId)),
   ]);
 
   const embeddedKeysToDelete: string[] = [];

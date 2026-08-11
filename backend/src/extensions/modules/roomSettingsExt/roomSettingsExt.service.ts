@@ -1,5 +1,6 @@
 import { prisma } from '../../../config/database';
 import { roomsService } from '../../../modules/rooms/rooms.service';
+import { withLockedRoomState } from '../../../modules/rooms/room-state-lock';
 import { extError } from '../../utils/ExtAppError';
 import { writeJson } from '../../utils/redisJson';
 import {
@@ -32,23 +33,6 @@ export interface ExtRoomSettings {
   handRaiseRestriction: HandRaiseRestriction;
   coHostIds: string[];
 }
-
-const requireHostOrMod = async (roomId: string, userId: string): Promise<void> => {
-  const room = await prisma.room.findUnique({
-    where: { id: roomId },
-    select: { hostId: true, endedAt: true, isLive: true },
-  });
-  if (!room) throw extError('CLUB_REQ_NOT_FOUND', 'Room not found');
-  if (room.endedAt || !room.isLive) throw extError('CLUB_REQ_NOT_FOUND', 'Room not found');
-  if (room.hostId === userId) return;
-  const part = await prisma.participant.findUnique({
-    where: { userId_roomId: { userId, roomId } },
-    select: { role: true, leftAt: true },
-  });
-  if (!part || part.leftAt || part.role !== 'MODERATOR') {
-    throw extError('PAY_INVALID', 'Not allowed');
-  }
-};
 
 export const roomSettingsExtService = {
   async get(roomId: string): Promise<ExtRoomSettings> {
@@ -86,10 +70,23 @@ export const roomSettingsExtService = {
     callerId: string,
     restriction: HandRaiseRestriction,
   ): Promise<ExtRoomSettings> {
-    await requireHostOrMod(roomId, callerId);
-    // Only the preference belongs in Redis; co-hosts are derived from the
-    // authoritative Participant rows on read.
-    await writeJson(key(roomId), { handRaiseRestriction: restriction }, TTL_S);
+    await withLockedRoomState(roomId, async (tx, room) => {
+      if (!room || room.endedAt || !room.isLive) {
+        throw extError('CLUB_REQ_NOT_FOUND', 'Room not found');
+      }
+      if (room.hostId !== callerId) {
+        const participant = await tx.participant.findUnique({
+          where: { userId_roomId: { userId: callerId, roomId } },
+          select: { role: true, leftAt: true },
+        });
+        if (!participant || participant.leftAt || participant.role !== 'MODERATOR') {
+          throw extError('PAY_INVALID', 'Not allowed');
+        }
+      }
+      // Only the preference belongs in Redis; co-hosts are derived from the
+      // authoritative Participant rows on read.
+      await writeJson(key(roomId), { handRaiseRestriction: restriction }, TTL_S);
+    });
     return this.get(roomId);
   },
 

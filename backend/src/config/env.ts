@@ -225,6 +225,14 @@ const envSchema = z.object({
   MEDIA_S3_ACCESS_KEY: z.string().min(1).optional(),
   MEDIA_S3_SECRET_KEY: z.string().min(1).optional(),
   MEDIA_S3_FORCE_PATH_STYLE: boolFromString(false),
+  // Uploads remain replayable for the full 24h idempotency window. Afterwards,
+  // incomplete avatar/voice objects and unattached completed voices may be
+  // reclaimed; completed avatars remain durable profile/club assets.
+  VOICE_MEDIA_ABANDONED_TTL_HOURS: z.coerce.number().int().min(25).max(720).default(48),
+  VOICE_MEDIA_DELETE_CLAIM_TTL_MINUTES: z.coerce.number().int().min(5).max(1440).default(60),
+  VOICE_MEDIA_CLEANUP_BATCH_SIZE: z.coerce.number().int().min(1).max(500).default(100),
+  VOICE_MEDIA_CLEANUP_CONCURRENCY: z.coerce.number().int().min(1).max(20).default(5),
+  VOICE_MEDIA_CLEANUP_CRON: z.string().trim().min(1).default('17 * * * *'),
 
   RATE_LIMIT_WINDOW_MS: z.coerce
     .number()

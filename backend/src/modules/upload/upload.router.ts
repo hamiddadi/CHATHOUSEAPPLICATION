@@ -41,7 +41,12 @@ uploadRouter.post(
     // Request-derived origin; the service prefers PUBLIC_URL when set so the
     // returned link is correct behind a proxy/CDN in production.
     const origin = `${req.protocol}://${req.get('host')}`;
-    const result = await uploadService.uploadAvatar(authedUserId(req), body, origin);
+    const result = await uploadService.uploadAvatar(
+      authedUserId(req),
+      body,
+      origin,
+      req.get('Idempotency-Key'),
+    );
     sendOk(res, result, 201);
   }),
 );
@@ -53,7 +58,12 @@ uploadRouter.post(
   asyncHandler(async (req: Request, res: Response) => {
     const body = uploadBodySchema.parse(req.body);
     const origin = `${req.protocol}://${req.get('host')}`;
-    const result = await uploadService.uploadVoice(authedUserId(req), body, origin);
+    const result = await uploadService.uploadVoice(
+      authedUserId(req),
+      body,
+      origin,
+      req.get('Idempotency-Key'),
+    );
     sendOk(res, result, 201);
   }),
 );

@@ -190,12 +190,13 @@ export const contentReportsService = {
             {
               OR: [
                 { chatVisibility: 'ALL' },
+                { hostId: reporterId },
                 {
                   participants: {
                     some: {
                       userId: reporterId,
                       leftAt: null,
-                      role: { in: ['HOST', 'MODERATOR'] },
+                      role: 'MODERATOR',
                     },
                   },
                 },

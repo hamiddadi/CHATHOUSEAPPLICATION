@@ -10,9 +10,11 @@ import type { ContentReportReason, ContentReportResult } from '../../../shared/t
  * hooks' call-shape intact while collapsing the two concepts.
  *
  * Backend contract (see backend/src/modules/chat) :
- *  GET    /chat/conversations            → [{ peer, lastMessage, unreadCount }]
+ *  GET    /chat/conversations?limit&cursor
+ *                                            → { data: RawConversation[], nextCursor, hasMore }
  *  GET    /chat/unread-count             → { count }
- *  GET    /chat/:peerId?limit&before     → [RawMessage]
+ *  GET    /chat/:peerId?limit&before&paginated=true
+ *                                            → { data: RawMessage[], nextCursor, hasMore }
  *  POST   /chat/:peerId                  → RawMessage
  *  PATCH  /chat/:peerId/read             → { updated }
  *  PATCH  /chat/messages/:msgId/read     → RawMessage
@@ -50,6 +52,22 @@ interface RawConversation {
   unreadCount: number;
 }
 
+interface RawPage<T> {
+  data: T[];
+  nextCursor: string | null;
+  hasMore: boolean;
+}
+
+export interface ConversationPage {
+  items: Conversation[];
+  nextCursor: string | null;
+}
+
+export interface MessagePage {
+  items: Message[];
+  nextCursor: string | null;
+}
+
 const toSummary = (u: RawUser): UserSummary => ({
   id: u.id,
   username: u.username ?? '',
@@ -84,10 +102,15 @@ const toConversation = (raw: RawConversation, viewerId: string): Conversation =>
 };
 
 export const messageService = {
-  async conversations(): Promise<Conversation[]> {
-    const res = await apiClient.get<Envelope<RawConversation[]>>('/chat/conversations');
+  async conversations(cursor?: string, limit = 50): Promise<ConversationPage> {
+    const res = await apiClient.get<Envelope<RawPage<RawConversation>>>('/chat/conversations', {
+      params: { limit, ...(cursor ? { cursor } : {}) },
+    });
     const me = currentUserId();
-    return res.data.data.map(c => toConversation(c, me));
+    return {
+      items: res.data.data.data.map(c => toConversation(c, me)),
+      nextCursor: res.data.data.nextCursor,
+    };
   },
 
   async conversation(
@@ -117,28 +140,33 @@ export const messageService = {
   },
 
   /**
-   * One page of the thread, newest page first. `before` is an ISO createdAt
-   * cursor — the backend returns messages strictly older than it (see
-   * chat.schema listMessagesSchema), each page sorted ascending.
+   * One page of the thread, newest page first. `before` is the opaque
+   * `nextCursor` from the previous envelope; each returned page is sorted
+   * ascending for display.
    */
   async messages(
     peerId: string,
     opts: { before?: string; limit?: number } = {},
-  ): Promise<Message[]> {
-    const params: Record<string, string | number> = {};
+  ): Promise<MessagePage> {
+    const params: Record<string, string | number | boolean> = { paginated: true };
     if (opts.before) params.before = opts.before;
     if (opts.limit) params.limit = opts.limit;
-    const res = await apiClient.get<Envelope<RawMessage[]>>(`/chat/${peerId}`, { params });
+    const res = await apiClient.get<Envelope<RawPage<RawMessage>>>(`/chat/${peerId}`, { params });
     const me = currentUserId();
-    return res.data.data.map(m => toMessage(m, me, peerId));
+    return {
+      items: res.data.data.data.map(m => toMessage(m, me, peerId)),
+      nextCursor: res.data.data.nextCursor,
+    };
   },
 
-  async send(peerId: string, text: string): Promise<Message> {
+  async send(peerId: string, text: string, idempotencyKey: string): Promise<Message> {
     const trimmed = text.trim();
     if (trimmed.length === 0) throw new Error('Message cannot be empty');
-    const res = await apiClient.post<Envelope<RawMessage>>(`/chat/${peerId}`, {
-      content: trimmed,
-    });
+    const res = await apiClient.post<Envelope<RawMessage>>(
+      `/chat/${peerId}`,
+      { content: trimmed },
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    );
     return toMessage(res.data.data, currentUserId(), peerId);
   },
 
@@ -147,11 +175,17 @@ export const messageService = {
    * we post the stored URL + clip length. DM privacy is still enforced
    * server-side (403 CHAT_004), surfaced to the caller verbatim.
    */
-  async sendVoice(peerId: string, audioUrl: string, durationMs: number): Promise<Message> {
-    const res = await apiClient.post<Envelope<RawMessage>>(`/chat/${peerId}/voice`, {
-      audioUrl,
-      durationMs,
-    });
+  async sendVoice(
+    peerId: string,
+    audioUrl: string,
+    durationMs: number,
+    idempotencyKey: string,
+  ): Promise<Message> {
+    const res = await apiClient.post<Envelope<RawMessage>>(
+      `/chat/${peerId}/voice`,
+      { audioUrl, durationMs },
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    );
     return toMessage(res.data.data, currentUserId(), peerId);
   },
 

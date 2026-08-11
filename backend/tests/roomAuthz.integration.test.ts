@@ -13,6 +13,8 @@ const { connectRedis, disconnectRedis } =
   require('../src/config/redis') as typeof import('../src/config/redis');
 const { isActiveRoomParticipant } =
   require('../src/webrtc/roomAuthz') as typeof import('../src/webrtc/roomAuthz');
+const { roomsService } =
+  require('../src/modules/rooms/rooms.service') as typeof import('../src/modules/rooms/rooms.service');
 /* eslint-enable @typescript-eslint/no-require-imports */
 
 const rand = () => Math.random().toString(36).slice(2, 10);
@@ -49,7 +51,7 @@ describe('isActiveRoomParticipant (RTC authz)', () => {
     await disconnectRedis();
   });
 
-  it('host is a member from creation; outsider is not; leaver becomes non-member', async () => {
+  it('requires socket admission confirmation; outsider and leaver remain non-members', async () => {
     const host = await registerUser(app);
     const outsider = await registerUser(app);
     const rejoiner = await registerUser(app);
@@ -62,6 +64,11 @@ describe('isActiveRoomParticipant (RTC authz)', () => {
     const roomId = created.body.data.id as string;
     createdRoomIds.push(roomId);
 
+    // A REST create/join only reserves admission. RTC authority begins after
+    // the Socket.IO channel confirms the lease, preventing REST-only ghosts
+    // from opening transports or publishing media.
+    expect(await isActiveRoomParticipant(roomId, host.id)).toBe(false);
+    await expect(roomsService.confirmSocketAdmission(roomId, host.id)).resolves.toBe(true);
     expect(await isActiveRoomParticipant(roomId, host.id)).toBe(true);
     expect(await isActiveRoomParticipant(roomId, outsider.id)).toBe(false);
 
@@ -69,6 +76,8 @@ describe('isActiveRoomParticipant (RTC authz)', () => {
     await request(app)
       .post(`/api/rooms/${roomId}/join`)
       .set('Authorization', `Bearer ${rejoiner.token}`);
+    expect(await isActiveRoomParticipant(roomId, rejoiner.id)).toBe(false);
+    await expect(roomsService.confirmSocketAdmission(roomId, rejoiner.id)).resolves.toBe(true);
     expect(await isActiveRoomParticipant(roomId, rejoiner.id)).toBe(true);
 
     await request(app)

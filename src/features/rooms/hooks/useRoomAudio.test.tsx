@@ -29,6 +29,7 @@ jest.mock('../services/roomAudioSession', () => {
     useRoomAudioStore: (selector: (value: typeof state) => unknown) => selector(state),
     roomAudioSession: {
       start: jest.fn().mockResolvedValue(undefined),
+      retry: jest.fn().mockResolvedValue(undefined),
       stop: jest.fn().mockResolvedValue(undefined),
       setMuted: jest.fn().mockResolvedValue(undefined),
       setPeerVolume: jest.fn(),
@@ -53,7 +54,7 @@ describe('useRoomAudio retry', () => {
       await result.current.retry();
     });
 
-    expect(roomAudioSession.start).toHaveBeenCalledWith('room-1');
+    expect(roomAudioSession.retry).toHaveBeenCalledWith('room-1');
   });
 
   it('does nothing when no room is selected', async () => {
@@ -63,7 +64,7 @@ describe('useRoomAudio retry', () => {
       await result.current.retry();
     });
 
-    expect(roomAudioSession.start).not.toHaveBeenCalled();
+    expect(roomAudioSession.retry).not.toHaveBeenCalled();
   });
 
   it('waits for cold-start auth hydration, then starts the room once the user appears', async () => {

@@ -1,4 +1,5 @@
 import type { Request, Response } from 'express';
+import { streamResponseChunks } from '../../utils/streamResponse';
 import { sendOk } from '../../utils/response';
 import { AppError } from '../../middlewares/error.middleware';
 import { authedUserId as requireUserId } from '../../utils/authedUserId';
@@ -14,6 +15,7 @@ import {
   visibilitySchema,
 } from './users.schema';
 import { usersService } from './users.service';
+import { createUserDataExportStream } from './userDataExport.service';
 
 export const usersController = {
   async getMe(req: Request, res: Response) {
@@ -129,12 +131,16 @@ export const usersController = {
    */
   async exportData(req: Request, res: Response) {
     const origin = `${req.protocol}://${req.get('host')}`;
-    const data = await usersService.exportData(requireUserId(req), origin);
+    // Profile existence is checked before headers are committed. The remaining
+    // collections are fetched lazily after the download starts.
+    const chunks = await createUserDataExportStream(requireUserId(req), origin);
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader(
       'Content-Disposition',
       `attachment; filename="chathouse-export-${new Date().toISOString().slice(0, 10)}.json"`,
     );
-    res.send(JSON.stringify(data, null, 2));
+    await streamResponseChunks(res, chunks);
   },
 };

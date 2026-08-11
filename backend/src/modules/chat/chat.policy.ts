@@ -1,5 +1,7 @@
+import type { Prisma } from '@prisma/client';
 import { prisma } from '../../config/database';
 import { AppError } from '../../middlewares/error.middleware';
+import { hasBlockBetween, lockRelationshipUsers } from '../social/relationship-lock';
 
 /**
  * Compute whether `senderId` may start a direct message with each recipient.
@@ -88,4 +90,57 @@ export const assertCanDirectMessage = async (
   const eligibility = await directMessageEligibility(senderId, [recipientId]);
   if (!eligibility.has(recipientId)) throw new AppError('USER_001');
   if (!eligibility.get(recipientId)) throw new AppError('CHAT_004');
+};
+
+/**
+ * Authoritative, linearizable DM guard used by message insertion. Follow,
+ * block and privacy mutations all write one of these two User rows; taking the
+ * same ordered locks makes the authorization decision and Message insert one
+ * atomic point in that order. A preflight policy read alone cannot provide
+ * this guarantee because its relationship may disappear before the insert.
+ */
+export const assertCanDirectMessageWithinTransaction = async (
+  tx: Prisma.TransactionClient,
+  senderId: string,
+  recipientId: string,
+): Promise<void> => {
+  const lockedIds = await lockRelationshipUsers(tx, senderId, recipientId);
+  if (lockedIds.length !== 2) throw new AppError('USER_001');
+
+  const users = await tx.user.findMany({
+    where: { id: { in: [senderId, recipientId] }, deletedAt: null },
+    select: { id: true, dmPrivacy: true },
+  });
+  if (users.length !== 2) throw new AppError('USER_001');
+  const recipient = users.find(user => user.id === recipientId);
+  if (!recipient) throw new AppError('USER_001');
+
+  if (await hasBlockBetween(tx, senderId, recipientId)) {
+    throw new AppError('CHAT_004');
+  }
+
+  if (recipient.dmPrivacy === 'everyone') return;
+  if (recipient.dmPrivacy === 'nobody') throw new AppError('CHAT_004');
+
+  const accepted = await tx.follow.findMany({
+    where: {
+      status: 'ACCEPTED',
+      OR: [
+        { followerId: senderId, followingId: recipientId },
+        { followerId: recipientId, followingId: senderId },
+      ],
+    },
+    select: { followerId: true, followingId: true },
+  });
+  const senderFollowsRecipient = accepted.some(
+    follow => follow.followerId === senderId && follow.followingId === recipientId,
+  );
+  const recipientFollowsSender = accepted.some(
+    follow => follow.followerId === recipientId && follow.followingId === senderId,
+  );
+  const allowed =
+    recipient.dmPrivacy === 'followers'
+      ? senderFollowsRecipient
+      : senderFollowsRecipient && recipientFollowsSender;
+  if (!allowed) throw new AppError('CHAT_004');
 };

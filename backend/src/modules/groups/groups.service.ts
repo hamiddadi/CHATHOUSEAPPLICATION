@@ -1,13 +1,19 @@
+import { randomUUID } from 'node:crypto';
 import { MediaKind, Prisma, type MessageKind } from '@prisma/client';
 import { prisma } from '../../config/database';
 import { logger } from '../../config/logger';
 import { AppError } from '../../middlewares/error.middleware';
-import { notificationsService } from '../notifications/notifications.service';
 import { mediaService } from '../media/media.service';
 import { lockUserRows } from '../social/relationship-lock';
-import { emitGroupMessage } from '../../socket/realtime';
 import { runIdempotentCreate } from '../../utils/idempotency';
 import { scheduleBackgroundTask } from '../../utils/backgroundTasks';
+import { decodeChatCursor, encodeChatCursor } from '../chat/chat.cursor';
+import { messageDeliveryOutboxData, wakeMessageDelivery } from '../chat/message.outbox';
+import {
+  notificationDeliveryOutboxData,
+  wakeNotificationDelivery,
+} from '../notifications/notification.outbox';
+import { MAX_GROUP_MEMBERS } from './groups.schema';
 import type {
   AddGroupMembersInput,
   CreateGroupInput,
@@ -88,30 +94,106 @@ const countUnreadByConversation = async (
   return new Map(rows.map(row => [row.conversationId, Number(row.unreadCount)]));
 };
 
+interface GroupSendAuthorization {
+  memberIds: string[];
+  title: string | null;
+}
+
 /**
- * Groups must honour the Block table the same way DMs do (see
- * chat.service `assertCanMessage`): a block is a symmetric cut, so a blocked
- * user must not be able to reach their blocker through a group either. This
- * asserts that `userId` shares no block (in EITHER direction) with any id in
- * `others`. Throws GROUP_006 on the first offending pair.
- *
- * Without this, groups were a documented blocking bypass (audit 28/06): a
- * blocked user could create a group with, be added to, or message their
- * blocker. One indexed read over the Block table covers every candidate id.
+ * Linearize group sends with membership edits and block mutations. Every
+ * membership mutation first locks Conversation, while every block mutation
+ * locks the involved User rows in lexical order. Taking those locks in that
+ * same order before re-reading membership/block state prevents a removed or
+ * newly-blocked sender from inserting from a stale preflight decision.
  */
-const assertNoBlockBetween = async (userId: string, others: string[]): Promise<void> => {
-  const candidates = others.filter(id => id !== userId);
-  if (candidates.length === 0) return;
-  const blocked = await prisma.block.findFirst({
-    where: {
-      OR: [
-        { blockerId: userId, blockedId: { in: candidates } },
-        { blockedId: userId, blockerId: { in: candidates } },
-      ],
+const lockAndAuthorizeGroupSend = async (
+  tx: Prisma.TransactionClient,
+  userId: string,
+  conversationId: string,
+): Promise<GroupSendAuthorization> => {
+  const lockedConversation = await tx.$queryRaw<{ id: string }[]>`
+    SELECT id FROM "Conversation" WHERE id = ${conversationId} FOR UPDATE`;
+  if (lockedConversation.length === 0) throw new AppError('GROUP_001');
+
+  const conversation = await tx.conversation.findUnique({
+    where: { id: conversationId },
+    select: {
+      title: true,
+      members: {
+        where: { user: { deletedAt: null } },
+        select: { userId: true },
+      },
     },
-    select: { id: true },
   });
-  if (blocked) throw new AppError('GROUP_006');
+  if (!conversation) throw new AppError('GROUP_001');
+  const memberIds = conversation.members.map(member => member.userId);
+  if (!memberIds.includes(userId)) throw new AppError('GROUP_002');
+
+  const lockedUsers = await lockUserRows(tx, memberIds);
+  if (lockedUsers.length !== memberIds.length) throw new AppError('USER_001');
+
+  const candidates = memberIds.filter(memberId => memberId !== userId);
+  if (candidates.length > 0) {
+    const blocked = await tx.block.findFirst({
+      where: {
+        OR: [
+          { blockerId: userId, blockedId: { in: candidates } },
+          { blockedId: userId, blockerId: { in: candidates } },
+        ],
+      },
+      select: { id: true },
+    });
+    if (blocked) throw new AppError('GROUP_006');
+  }
+
+  return { memberIds, title: conversation.title };
+};
+
+interface DurableGroupDeliveryInput {
+  messageId: string;
+  conversationId: string;
+  senderId: string;
+  memberIds: string[];
+  title: string;
+  body: string;
+}
+
+/** Persist realtime + per-recipient notification hand-offs with the message. */
+const queueGroupDeliveryWithinTransaction = async (
+  tx: Prisma.TransactionClient,
+  input: DurableGroupDeliveryInput,
+): Promise<void> => {
+  const notifications = input.memberIds
+    .filter(memberId => memberId !== input.senderId)
+    .map(userId => ({ id: randomUUID(), userId }));
+
+  if (notifications.length > 0) {
+    await tx.notification.createMany({
+      data: notifications.map(({ id, userId }) => ({
+        id,
+        userId,
+        actorId: input.senderId,
+        type: 'NEW_MESSAGE' as const,
+        title: input.title,
+        body: input.body,
+        data: {
+          messageId: input.messageId,
+          conversationId: input.conversationId,
+          senderId: input.senderId,
+          conversation: 'group',
+        },
+        targetId: input.messageId,
+        targetType: 'groupMessage',
+      })),
+    });
+  }
+
+  await tx.outboxEvent.createMany({
+    data: [
+      messageDeliveryOutboxData('group', input.messageId),
+      ...notifications.map(({ id }) => notificationDeliveryOutboxData(id, input.messageId)),
+    ],
+  });
 };
 
 /**
@@ -218,6 +300,7 @@ export const groupsService = {
     if (others.length < 2) throw new AppError('GROUP_003');
 
     const allMemberIds = [userId, ...others];
+    if (allMemberIds.length > MAX_GROUP_MEMBERS) throw new AppError('GROUP_008');
 
     const creation = await runIdempotentCreate({
       userId,
@@ -304,17 +387,37 @@ export const groupsService = {
 
   async listMessages(userId: string, conversationId: string, input: ListGroupMessagesInput) {
     await this.requireMembership(userId, conversationId);
-    const messages = await prisma.groupMessage.findMany({
+    const decodedCursor = input.before ? decodeChatCursor(input.before) : null;
+    if (input.before && !decodedCursor) throw new AppError('VALIDATION_001');
+    const cursorWhere: Prisma.GroupMessageWhereInput = decodedCursor
+      ? decodedCursor.messageId
+        ? {
+            OR: [
+              { createdAt: { lt: decodedCursor.createdAt } },
+              { createdAt: decodedCursor.createdAt, id: { lt: decodedCursor.messageId } },
+            ],
+          }
+        : { createdAt: { lt: decodedCursor.createdAt } }
+      : {};
+    const rows = await prisma.groupMessage.findMany({
       where: {
         conversationId,
         sender: { deletedAt: null },
-        ...(input.before ? { createdAt: { lt: new Date(input.before) } } : {}),
+        ...cursorWhere,
       },
-      orderBy: { createdAt: 'desc' },
-      take: input.limit,
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: input.limit + 1,
       include: { sender: { select: publicUser } },
     });
-    return messages.reverse().map(toMessagePayload);
+    const hasMore = rows.length > input.limit;
+    const newestFirst = hasMore ? rows.slice(0, input.limit) : rows;
+    const oldest = newestFirst[newestFirst.length - 1];
+    const data = [...newestFirst].reverse().map(toMessagePayload);
+    return {
+      data,
+      hasMore,
+      nextCursor: hasMore && oldest ? encodeChatCursor(oldest.createdAt, oldest.id) : null,
+    };
   },
 
   async send(
@@ -323,18 +426,13 @@ export const groupsService = {
     input: SendGroupMessageInput,
     idempotencyKey?: string,
   ) {
-    const conv = await this.requireMembership(userId, conversationId);
-    const memberIds = conv.members.map(m => m.userId);
-
-    // A blocked user must not reach their blocker via a shared group message.
-    await assertNoBlockBetween(userId, memberIds);
-
     const creation = await runIdempotentCreate({
       userId,
       scope: `groups.message:${conversationId}`,
       key: idempotencyKey,
       payload: { kind: 'TEXT', ...input },
       create: async tx => {
+        const authorization = await lockAndAuthorizeGroupSend(tx, userId, conversationId);
         const created = await tx.groupMessage.create({
           data: { conversationId, senderId: userId, content: input.content },
           select: { id: true },
@@ -342,6 +440,19 @@ export const groupsService = {
         await tx.conversation.update({
           where: { id: conversationId },
           data: { updatedAt: new Date() },
+        });
+        const sender = await tx.user.findUnique({
+          where: { id: userId },
+          select: { username: true, displayName: true },
+        });
+        const handle = sender?.displayName ?? sender?.username ?? 'Someone';
+        await queueGroupDeliveryWithinTransaction(tx, {
+          messageId: created.id,
+          conversationId,
+          senderId: userId,
+          memberIds: authorization.memberIds,
+          title: authorization.title ?? handle,
+          body: `${handle}: ${input.content.slice(0, 140)}`,
         });
         return created.id;
       },
@@ -353,35 +464,14 @@ export const groupsService = {
     if (!msg) throw new AppError('GROUP_001');
 
     const payload = toMessagePayload(msg);
-    if (creation.replayed) return payload;
-
-    // Realtime fan-out to every member (sender included, so their other
-    // devices stay in sync).
-    emitGroupMessage(memberIds, payload);
-
-    // Offline fallback: a NEW_MESSAGE notification for every OTHER member.
-    const handle = msg.sender.displayName ?? msg.sender.username ?? 'Someone';
-    const title = conv.title ?? handle;
-    await Promise.all(
-      memberIds
-        .filter(memberId => memberId !== userId)
-        .map(memberId =>
-          scheduleBackgroundTask(
-            notificationsService.create({
-              userId: memberId,
-              type: 'NEW_MESSAGE',
-              title,
-              body: `${handle}: ${input.content.slice(0, 140)}`,
-              data: { conversationId, senderId: userId, conversation: 'group' },
-            }),
-            err =>
-              logger.warn('group message notification failed', {
-                err,
-                conversationId,
-                memberId,
-              }),
-          ),
-        ),
+    await scheduleBackgroundTask(
+      Promise.all([wakeMessageDelivery('group', msg.id), wakeNotificationDelivery(msg.id)]),
+      err =>
+        logger.warn('group message delivery wake failed', {
+          err,
+          conversationId,
+          messageId: msg.id,
+        }),
     );
 
     return payload;
@@ -399,19 +489,19 @@ export const groupsService = {
     input: SendGroupVoiceInput,
     idempotencyKey?: string,
   ) {
-    const conv = await this.requireMembership(userId, conversationId);
-    const memberIds = conv.members.map(m => m.userId);
-
-    // A blocked user must not reach their blocker via a shared group voice note.
-    await assertNoBlockBetween(userId, memberIds);
-    await mediaService.assertOwnedMediaUrl(userId, input.audioUrl, MediaKind.VOICE);
-
     const creation = await runIdempotentCreate({
       userId,
       scope: `groups.message:${conversationId}`,
       key: idempotencyKey,
       payload: { kind: 'VOICE', ...input },
       create: async tx => {
+        const authorization = await lockAndAuthorizeGroupSend(tx, userId, conversationId);
+        const mediaObjectId = await mediaService.assertOwnedMediaUrlWithinTransaction(
+          tx,
+          userId,
+          input.audioUrl,
+          MediaKind.VOICE,
+        );
         const created = await tx.groupMessage.create({
           data: {
             conversationId,
@@ -419,12 +509,26 @@ export const groupsService = {
             kind: 'VOICE',
             audioUrl: input.audioUrl,
             audioDurationMs: input.durationMs,
+            mediaObjectId,
           },
           select: { id: true },
         });
         await tx.conversation.update({
           where: { id: conversationId },
           data: { updatedAt: new Date() },
+        });
+        const sender = await tx.user.findUnique({
+          where: { id: userId },
+          select: { username: true, displayName: true },
+        });
+        const handle = sender?.displayName ?? sender?.username ?? 'Someone';
+        await queueGroupDeliveryWithinTransaction(tx, {
+          messageId: created.id,
+          conversationId,
+          senderId: userId,
+          memberIds: authorization.memberIds,
+          title: authorization.title ?? handle,
+          body: `${handle}: 🎤 Voice message`,
         });
         return created.id;
       },
@@ -436,31 +540,14 @@ export const groupsService = {
     if (!msg) throw new AppError('GROUP_001');
 
     const payload = toMessagePayload(msg);
-    if (creation.replayed) return payload;
-    emitGroupMessage(memberIds, payload);
-
-    const handle = msg.sender.displayName ?? msg.sender.username ?? 'Someone';
-    const title = conv.title ?? handle;
-    await Promise.all(
-      memberIds
-        .filter(memberId => memberId !== userId)
-        .map(memberId =>
-          scheduleBackgroundTask(
-            notificationsService.create({
-              userId: memberId,
-              type: 'NEW_MESSAGE',
-              title,
-              body: `${handle}: 🎤 Voice message`,
-              data: { conversationId, senderId: userId, conversation: 'group' },
-            }),
-            err =>
-              logger.warn('group voice notification failed', {
-                err,
-                conversationId,
-                memberId,
-              }),
-          ),
-        ),
+    await scheduleBackgroundTask(
+      Promise.all([wakeMessageDelivery('group', msg.id), wakeNotificationDelivery(msg.id)]),
+      err =>
+        logger.warn('group voice delivery wake failed', {
+          err,
+          conversationId,
+          messageId: msg.id,
+        }),
     );
 
     return payload;
@@ -505,6 +592,9 @@ export const groupsService = {
         if (toAdd.length === 0) return conversationId;
 
         const resultingIds = [...existingIds, ...toAdd];
+        // Conversation is already row-locked above: concurrent admissions
+        // serialize here, so only the request that still fits can commit.
+        if (resultingIds.length > MAX_GROUP_MEMBERS) throw new AppError('GROUP_008');
         const lockedUsers = await lockUserRows(tx, resultingIds);
         if (lockedUsers.length !== resultingIds.length) throw new AppError('USER_001');
         const activeTargets = await tx.user.count({

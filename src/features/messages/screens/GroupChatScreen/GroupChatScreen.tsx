@@ -108,6 +108,7 @@ export const GroupChatScreen: React.FC = () => {
 
   const [draft, setDraft] = useState('');
   const listRef = useRef<FlatList<GroupMessage>>(null);
+  const sendInFlightRef = useRef(false);
 
   // Mark the thread read when there's something unread — on open and whenever
   // new messages land. Guarded so we don't fire a redundant PATCH every render.
@@ -140,21 +141,22 @@ export const GroupChatScreen: React.FC = () => {
   // so new messages pin to the bottom without an onContentSizeChange→scrollToEnd hack.
   const data = useMemo(() => [...(messages ?? [])].reverse(), [messages]);
 
-  const handleSend = useCallback(() => {
+  const handleSend = useCallback(async () => {
+    if (sendInFlightRef.current) return;
     const text = draft.trim();
     if (text.length === 0) return;
+    sendInFlightRef.current = true;
     setDraft('');
-    send.mutate(
-      { conversationId, text },
-      {
-        // On failure, restore the text so the user doesn't silently lose their
-        // message, and surface the error.
-        onError: err => {
-          setDraft(text);
-          toastError(err);
-        },
-      },
-    );
+    try {
+      await send.mutateAsync({ conversationId, text });
+    } catch (err) {
+      // Preserve anything typed while the failed request was in flight; only
+      // restore the sent text when the composer is still empty.
+      setDraft(current => (current.trim().length === 0 ? text : current));
+      toastError(err);
+    } finally {
+      sendInFlightRef.current = false;
+    }
   }, [conversationId, draft, send, toastError]);
 
   const handleBack = useCallback(() => navigation.goBack(), [navigation]);

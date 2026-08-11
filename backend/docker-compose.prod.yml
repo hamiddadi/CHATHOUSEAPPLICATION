@@ -3,15 +3,15 @@
 #
 # This is the file the CD pipeline (.github/workflows/cd-production.yml) drives:
 # it sets CHATHOUSE_API_IMAGE to the freshly-built GHCR image and runs
-#   docker compose -f docker-compose.prod.yml up -d --no-deps --pull always api
+#   scripts/deploy/deploy-image.sh <immutable-api-image-digest>
 #
 # Unlike the dev `docker-compose.yml`, this file:
 #   • pulls a built image instead of `build: .`
 #   • REQUIRES every secret via ${VAR:?required} so boot fails loudly if a
 #     secret is missing (no silent fallback to dev defaults)
 #   • enables Redis AUTH and does NOT publish Postgres/Redis to the public NIC
-#   • applies DB migrations automatically (the api image entrypoint runs
-#     `prisma migrate deploy` before starting — see backend/Dockerfile)
+#   • runs role bootstrap, Prisma migrations and post-migration grants as
+#     one-shot services before starting the restricted long-lived API
 #
 # TLS: the api listens on 127.0.0.1:4000 only — put a TLS-terminating reverse
 # proxy (Caddy/nginx/Traefik) in front for https://api.chathouse.app +
@@ -29,16 +29,88 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       POSTGRES_DB: ${POSTGRES_DB:-chathouse}
+      POSTGRES_APP_USER: ${POSTGRES_APP_USER:?POSTGRES_APP_USER is required}
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:?POSTGRES_APP_PASSWORD is required}
     # Bind to loopback only — the API reaches it over the compose network.
     ports:
       - '127.0.0.1:5433:5432'
     volumes:
       - postgres-data:/var/lib/postgresql/data
+      # Fresh clusters create the restricted API role during init. Existing
+      # clusters are upgraded by the one-shot services below.
+      - ./scripts/deploy/bootstrap-app-role.sh:/docker-entrypoint-initdb.d/20-bootstrap-app-role.sh:ro
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER}']
       interval: 5s
       timeout: 3s
       retries: 10
+
+  # POSTGRES_USER is the bootstrap/migration owner created by the official
+  # Postgres image. It is intentionally never passed to the long-lived API.
+  db-role-bootstrap:
+    image: postgres:16-alpine
+    restart: 'no'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-chathouse}
+      POSTGRES_APP_USER: ${POSTGRES_APP_USER:?POSTGRES_APP_USER is required}
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:?POSTGRES_APP_PASSWORD is required}
+    volumes:
+      - ./scripts/deploy/bootstrap-app-role.sh:/usr/local/bin/bootstrap-app-role.sh:ro
+    entrypoint: ['/bin/sh', '/usr/local/bin/bootstrap-app-role.sh']
+
+  migrate:
+    image: ${CHATHOUSE_API_IMAGE:?CHATHOUSE_API_IMAGE is required (set by the CD pipeline)}
+    restart: 'no'
+    depends_on:
+      db-role-bootstrap:
+        condition: service_completed_successfully
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-chathouse}?schema=public
+    command: ['npx', 'prisma', 'migrate', 'deploy']
+
+  # Used by deploy-image.sh to stop the API only while a known transactional,
+  # write-blocking migration is pending. Exit 3 means no maintenance is necessary.
+  db-maintenance-check:
+    image: postgres:16-alpine
+    profiles: ['ops']
+    restart: 'no'
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-chathouse}
+    volumes:
+      - ./scripts/deploy/migration-maintenance-required.sh:/usr/local/bin/migration-maintenance-required.sh:ro
+    entrypoint: ['/bin/sh', '/usr/local/bin/migration-maintenance-required.sh']
+
+  # Reapply current-object grants after migrations. Default privileges cover
+  # future tables; this pass also upgrades databases created before role split.
+  db-role-grants:
+    image: postgres:16-alpine
+    restart: 'no'
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:-chathouse}
+      POSTGRES_APP_USER: ${POSTGRES_APP_USER:?POSTGRES_APP_USER is required}
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:?POSTGRES_APP_PASSWORD is required}
+    volumes:
+      - ./scripts/deploy/bootstrap-app-role.sh:/usr/local/bin/bootstrap-app-role.sh:ro
+    entrypoint: ['/bin/sh', '/usr/local/bin/bootstrap-app-role.sh']
 
   redis:
     image: redis:7-alpine
@@ -80,6 +152,10 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      db-role-grants:
+        condition: service_completed_successfully
+      livekit-revocation-worker:
+        condition: service_healthy
     environment:
       NODE_ENV: production
       # Extension routers remain enabled by default. Stripe is a separately
@@ -87,7 +163,7 @@ services:
       EXTENSIONS_ENABLED: ${EXTENSIONS_ENABLED:-true}
       PORT: 4000
       HOST: 0.0.0.0
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-chathouse}?schema=public
+      DATABASE_URL: postgresql://${POSTGRES_APP_USER}:${POSTGRES_APP_PASSWORD}@postgres:5432/${POSTGRES_DB:-chathouse}?schema=public
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?JWT_ACCESS_SECRET is required}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET is required}
@@ -186,12 +262,59 @@ services:
       # its value never enters the container environment or this repository.
       SENTRY_DSN: ${SENTRY_DSN:-}
       METRICS_TOKEN_FILE: /run/secrets/chathouse_metrics_token
+    # Override the image default explicitly so even an older rollback image
+    # cannot execute migrations with the restricted runtime DSN.
+    command: ['node', 'dist/app.js']
     secrets:
       - source: metrics_token
         target: chathouse_metrics_token
     # Loopback only — the reverse proxy terminates TLS and forwards here.
     ports:
       - '127.0.0.1:4000:4000'
+
+  # Security-critical LiveKit revocations and signed provider webhooks must
+  # remain available even when the HTTP API has a deterministic boot failure.
+  # This service deliberately uses the same immutable contract-v1 image as API.
+  livekit-revocation-worker:
+    image: ${CHATHOUSE_API_IMAGE:?CHATHOUSE_API_IMAGE is required (set by the CD pipeline)}
+    container_name: chathouse-livekit-revocation-worker
+    restart: unless-stopped
+    stop_grace_period: 30s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      db-role-grants:
+        condition: service_completed_successfully
+    # Deliberately minimal: this process does not import the API env parser and
+    # receives no Redis, JWT, delivery, Firebase, Stripe or media credentials.
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_APP_USER}:${POSTGRES_APP_PASSWORD}@postgres:5432/${POSTGRES_DB:-chathouse}?schema=public&connect_timeout=5&pool_timeout=5&statement_timeout=20000
+      LIVEKIT_URL: ${LIVEKIT_URL:?LIVEKIT_URL is required (wss://...)}
+      LIVEKIT_INTERNAL_URL: ${LIVEKIT_INTERNAL_URL:-}
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?LIVEKIT_API_KEY is required}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?LIVEKIT_API_SECRET is required}
+      LIVEKIT_TOKEN_TTL_SECONDS: ${LIVEKIT_TOKEN_TTL_SECONDS:-300}
+      LIVEKIT_REVOCATION_CONTRACT_VERSION: 'v1'
+      LEGAL_DOCUMENT_VERSION: ${LEGAL_DOCUMENT_VERSION:?LEGAL_DOCUMENT_VERSION is required}
+      RECORDING_PUBLIC_BASE_URL: ${RECORDING_PUBLIC_BASE_URL:-}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      LIVEKIT_SECURITY_WORKER_HOST: 0.0.0.0
+      LIVEKIT_SECURITY_WORKER_PORT: 4010
+    command: ['node', 'dist/workers/livekitSecurity.worker.js']
+    expose:
+      - '4010'
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:4010/health/live').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 3s
+      timeout: 2s
+      retries: 3
+      start_period: 5s
 
   # ─── TLS-terminating reverse proxy (Caddy, automatic HTTPS) ──────────────
   # Serves https://api.chathouse.app + wss://api.chathouse.app (and LiveKit
@@ -229,12 +352,27 @@ services:
     container_name: chathouse-livekit
     profiles: ['selfhost']
     restart: unless-stopped
-    command: ['--config', '/etc/livekit.yaml']
     environment:
       # `key: secret` — must match LIVEKIT_API_KEY / LIVEKIT_API_SECRET above.
       LIVEKIT_KEYS: '${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}'
-    volumes:
-      - ./livekit/livekit.yaml:/etc/livekit.yaml:ro
+      # LiveKit accepts the complete YAML body through LIVEKIT_CONFIG. The
+      # signing key is interpolated at deploy time; no API secret is embedded.
+      LIVEKIT_CONFIG: |
+        port: 7880
+        room:
+          auto_create: false
+        rtc:
+          tcp_port: 7881
+          port_range_start: 50000
+          port_range_end: 50100
+          use_external_ip: true
+        webhook:
+          api_key: '${LIVEKIT_API_KEY}'
+          urls:
+            - 'http://livekit-revocation-worker:4010/webhooks/livekit'
+        logging:
+          level: info
+          json: true
     # LiveKit needs the signalling port + a UDP range for media. Put :7880
     # behind the TLS proxy as wss; open the UDP range on the firewall.
     ports:

@@ -37,6 +37,11 @@ describe('notification open deep links', () => {
     ],
     ['a follower', { type: 'NEW_FOLLOWER', followerId: 'user-2' }, 'chathouse://u/user-2'],
     [
+      'a follow request',
+      { type: 'FOLLOW_REQUEST', followerId: 'user-5' },
+      'chathouse://notifications/follow-requests',
+    ],
+    [
       'an inbound house invitation',
       { type: 'CLUB_INVITE', clubId: 'house-1', inviterId: 'user-3' },
       'chathouse://house/house-1/invite',

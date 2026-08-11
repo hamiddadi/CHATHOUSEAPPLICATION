@@ -156,6 +156,9 @@ jobs:
           SOURCE_SHA: ${{ needs.source-gate.outputs.sha }}
           VERSION_NAME: ${{ inputs.version_name }}
           VERSION_CODE: ${{ inputs.android_version_code }}
+          UPLOAD_KEYSTORE: ${{ runner.temp }}/chathouse-upload.jks
+          UPLOAD_KEY_ALIAS: ${{ secrets.ANDROID_UPLOAD_KEY_ALIAS }}
+          CHATHOUSE_UPLOAD_STORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_STORE_PASSWORD }}
         run: |
           set -euo pipefail
           source_aab="android/app/build/outputs/bundle/release/app-release.aab"
@@ -163,11 +166,16 @@ jobs:
             echo "Production AAB is missing" >&2
             exit 1
           }
-          jarsigner -verify -verbose -certs "$source_aab" > "$RUNNER_TEMP/aab-signing.txt"
-          if grep -Eqi 'CN=Android Debug|androiddebugkey' "$RUNNER_TEMP/aab-signing.txt"; then
-            echo "Debug-signed AAB is forbidden" >&2
+          upload_cert_sha256="$(
+            node scripts/verify-android-jar-signature.mjs \
+              "$source_aab" \
+              "$UPLOAD_KEYSTORE" \
+              "$UPLOAD_KEY_ALIAS"
+          )"
+          [[ "$upload_cert_sha256" =~ ^[a-f0-9]{64}$ ]] || {
+            echo "Upload-certificate fingerprint is invalid" >&2
             exit 1
-          fi
+          }
           mkdir -p artifacts
           cp "$source_aab" artifacts/android-production.aab
           sha256="$(sha256sum artifacts/android-production.aab | awk '{print $1}')"
@@ -177,12 +185,14 @@ jobs:
             --arg version_name "$VERSION_NAME" \
             --arg version_code "$VERSION_CODE" \
             --arg sha256 "$sha256" \
+            --arg upload_cert_sha256 "$upload_cert_sha256" \
             '{
               platform: $platform,
               source_sha: $source_sha,
               version_name: $version_name,
               version_code: $version_code,
-              sha256: $sha256
+              sha256: $sha256,
+              upload_cert_sha256: $upload_cert_sha256
             }' > artifacts/android-production-manifest.json
 
       - name: Upload signed Android evidence
@@ -408,6 +418,7 @@ jobs:
               version_name: $version_name,
               build_number: $build_number,
               team_id: $team_id,
+              artifact_sha256: $sha256,
               archive_tar_sha256: $sha256
             }' > artifacts/ios-production-manifest.json
 

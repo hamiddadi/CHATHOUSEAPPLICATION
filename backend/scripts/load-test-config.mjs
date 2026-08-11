@@ -33,6 +33,15 @@ export function parseBoundedRatio(name, rawValue, defaultValue) {
   return value;
 }
 
+export function parseOptionalIsoDate(name, rawValue) {
+  const value = String(rawValue ?? '').trim();
+  if (!value) return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/u.test(value)) {
+    throw new Error(`${name} must be an ISO date (YYYY-MM-DD)`);
+  }
+  return value;
+}
+
 export function parseDuration(name, rawValue, defaultValue = '30s') {
   const value = String(rawValue ?? defaultValue).trim();
   const match = value.match(/^(\d+)(ms|s|m)$/u);
@@ -263,6 +272,10 @@ export function createFunctionalLoadConfig(env = {}) {
       'LOAD_TEST_MAX_FAILURE_RATE',
       env.LOAD_TEST_MAX_FAILURE_RATE,
       0,
+    ),
+    legalDocumentVersion: parseOptionalIsoDate(
+      'LOAD_TEST_LEGAL_DOCUMENT_VERSION',
+      env.LOAD_TEST_LEGAL_DOCUMENT_VERSION,
     ),
     resetRateLimits,
     redisUrl,

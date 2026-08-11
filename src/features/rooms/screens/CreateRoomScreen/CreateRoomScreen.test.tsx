@@ -13,7 +13,8 @@
  *    we assert it does not crash and stays on-screen).
  */
 import React from 'react';
-import { fireEvent, waitFor } from '@testing-library/react-native';
+import { Alert } from 'react-native';
+import { act, fireEvent, waitFor } from '@testing-library/react-native';
 import { renderScreen, mockAuthenticated, resetAuth } from '../../../../test-utils/renderScreen';
 import { roomService } from '../../services/roomService';
 import type { Room } from '../../../../shared/types/domain';
@@ -47,6 +48,7 @@ describe('CreateRoomScreen', () => {
   });
   afterEach(() => {
     resetAuth();
+    jest.restoreAllMocks();
   });
 
   const mount = () => renderScreen(<CreateRoomScreen />, { route: { name: 'CreateRoom' } });
@@ -99,7 +101,50 @@ describe('CreateRoomScreen', () => {
     await waitFor(() => {
       expect(createSpy).toHaveBeenCalledWith(
         expect.objectContaining({ title: 'A valid room title' }),
+        expect.stringMatching(/^rn-/),
       );
+      expect(navigation.replace).toHaveBeenCalledWith('Room', { roomId: 'room-created' });
+    });
+  });
+
+  it('coalesces two presses in the same tick into one room creation action', async () => {
+    let resolveCreate!: (room: Room) => void;
+    const createSpy = jest
+      .spyOn(roomService, 'create')
+      .mockReturnValue(new Promise(resolve => (resolveCreate = resolve)));
+    const { getByText, getByPlaceholderText } = mount();
+    fireEvent.changeText(
+      getByPlaceholderText('What do you want to talk about?'),
+      'One tap, one room',
+    );
+
+    act(() => {
+      fireEvent.press(getByText('Start Room'));
+      fireEvent.press(getByText('Start Room'));
+    });
+    await waitFor(() => expect(createSpy).toHaveBeenCalledTimes(1));
+
+    await act(async () => resolveCreate(createdRoom()));
+  });
+
+  it('releases the submission latch after an error so the user can try again', async () => {
+    jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
+    const createSpy = jest
+      .spyOn(roomService, 'create')
+      .mockRejectedValueOnce({ kind: 'validation', message: 'Invalid room' })
+      .mockResolvedValue(createdRoom());
+    const { getByText, getByPlaceholderText, navigation } = mount();
+    fireEvent.changeText(
+      getByPlaceholderText('What do you want to talk about?'),
+      'Retry this room',
+    );
+
+    fireEvent.press(getByText('Start Room'));
+    await waitFor(() => expect(createSpy).toHaveBeenCalledTimes(1));
+    fireEvent.press(getByText('Start Room'));
+
+    await waitFor(() => {
+      expect(createSpy).toHaveBeenCalledTimes(2);
       expect(navigation.replace).toHaveBeenCalledWith('Room', { roomId: 'room-created' });
     });
   });

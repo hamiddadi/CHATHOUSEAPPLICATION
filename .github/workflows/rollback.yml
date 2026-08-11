@@ -21,7 +21,6 @@ concurrency:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}/api
 
 jobs:
   rollback:
@@ -41,10 +40,23 @@ jobs:
       TARGET_SSH_KEY: ${{ (inputs.environment == 'production' && secrets.PROD_SSH_KEY) || (inputs.environment == 'staging' && secrets.STAGING_SSH_KEY) || '' }}
       TARGET_HOST_FINGERPRINT: ${{ (inputs.environment == 'production' && secrets.PROD_HOST_FINGERPRINT) || (inputs.environment == 'staging' && secrets.STAGING_HOST_FINGERPRINT) || '' }}
     steps:
+      - name: Normalize image coordinates
+        id: coordinates
+        shell: bash
+        run: |
+          set -euo pipefail
+          image_name="${GITHUB_REPOSITORY,,}/api"
+          if [[ ! "$image_name" =~ ^[a-z0-9][a-z0-9._/-]+$ ]]; then
+            echo "Invalid lowercase image name: ${image_name}" >&2
+            exit 1
+          fi
+          echo "image_name=${image_name}" >> "$GITHUB_OUTPUT"
+
       - name: Validate and resolve immutable release
         id: resolve
         env:
           INPUT_IMAGE_DIGEST: ${{ inputs.image_digest }}
+          IMAGE_NAME: ${{ steps.coordinates.outputs.image_name }}
         run: |
           set -euo pipefail
           prefix="${REGISTRY}/${IMAGE_NAME}@"
@@ -79,7 +91,7 @@ jobs:
         env:
           ROLLBACK_IMAGE: ${{ steps.resolve.outputs.image }}
           REGISTRY: ${{ env.REGISTRY }}
-          IMAGE_NAME: ${{ env.IMAGE_NAME }}
+          IMAGE_NAME: ${{ steps.coordinates.outputs.image_name }}
           REGISTRY_USER: ${{ github.actor }}
           REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DEPLOY_DIR: ${{ vars.DEPLOY_DIR || '/opt/chathouse/backend' }}

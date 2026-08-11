@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import type { Express } from 'express';
 
@@ -11,6 +12,14 @@ const { createApp } = require('../src/app') as typeof import('../src/app');
 const { prisma } = require('../src/config/database') as typeof import('../src/config/database');
 const { redis, connectRedis, disconnectRedis } =
   require('../src/config/redis') as typeof import('../src/config/redis');
+const { notificationsService } =
+  require('../src/modules/notifications/notifications.service') as typeof import('../src/modules/notifications/notifications.service');
+const { notifPrefsExtService } =
+  require('../src/extensions/modules/notifPrefsExt/notifPrefsExt.service') as typeof import('../src/extensions/modules/notifPrefsExt/notifPrefsExt.service');
+const { pushService } =
+  require('../src/modules/push/push.service') as typeof import('../src/modules/push/push.service');
+const { LIVEKIT_REVOCATION_TOPIC } =
+  require('../src/modules/rooms/livekit-revocation.outbox') as typeof import('../src/modules/rooms/livekit-revocation.outbox');
 /* eslint-enable @typescript-eslint/no-require-imports */
 
 const rand = () => Math.random().toString(36).slice(2, 10);
@@ -145,6 +154,96 @@ describe('Social actions — wave + block + report', () => {
     expect(follows).toHaveLength(0);
   });
 
+  it('block: revokes a large scheduled co-host backlog with one bounded transaction', async () => {
+    const blocker = await register(app);
+    const host = await register(app);
+    createdIds.push(blocker.id, host.id);
+
+    const scheduledRoomIds = Array.from({ length: 120 }, () => randomUUID());
+    const scheduledFor = new Date(Date.now() + 2 * 60 * 60 * 1000);
+    await prisma.room.createMany({
+      data: scheduledRoomIds.map((id, index) => ({
+        id,
+        title: `Scheduled grant ${index}`,
+        hostId: host.id,
+        isLive: false,
+        scheduledFor,
+        participantCount: 0,
+      })),
+    });
+    await prisma.participant.createMany({
+      data: scheduledRoomIds.map(roomId => ({
+        roomId,
+        userId: blocker.id,
+        role: 'SPEAKER' as const,
+        leftAt: new Date(),
+      })),
+    });
+
+    const activeRoomId = randomUUID();
+    await prisma.room.create({
+      data: {
+        id: activeRoomId,
+        title: 'Active co-host grant',
+        hostId: host.id,
+        participantCount: 2,
+        participants: {
+          create: [
+            { userId: host.id, role: 'HOST' },
+            { userId: blocker.id, role: 'SPEAKER' },
+          ],
+        },
+      },
+    });
+    await prisma.user.updateMany({
+      where: { id: { in: [blocker.id, host.id] } },
+      data: { currentRoomId: activeRoomId },
+    });
+
+    const response = await request(app)
+      .post(`/api/users/${host.id}/block`)
+      .set('Authorization', `Bearer ${blocker.token}`);
+
+    expect(response.status).toBe(200);
+    expect(
+      await prisma.participant.count({
+        where: { userId: blocker.id, roomId: { in: [...scheduledRoomIds, activeRoomId] } },
+      }),
+    ).toBe(0);
+    expect(
+      await prisma.room.findUniqueOrThrow({
+        where: { id: activeRoomId },
+        select: { participantCount: true },
+      }),
+    ).toEqual({ participantCount: 1 });
+    expect(
+      await prisma.user.findUniqueOrThrow({
+        where: { id: blocker.id },
+        select: { currentRoomId: true },
+      }),
+    ).toEqual({ currentRoomId: null });
+
+    const revocationRows = await prisma.outboxEvent.findMany({
+      where: { topic: LIVEKIT_REVOCATION_TOPIC },
+    });
+    const transition = revocationRows.filter(row => {
+      const payload = row.payload as { roomId?: string; userId?: string };
+      return payload.roomId === activeRoomId && payload.userId === blocker.id;
+    });
+    expect(transition).toHaveLength(1);
+    expect(transition[0]).toEqual(
+      expect.objectContaining({
+        eventKey: expect.stringMatching(
+          /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+        ),
+      }),
+    );
+    expect(transition[0]?.aggregateId).toBe(transition[0]?.eventKey);
+    await prisma.outboxEvent.deleteMany({
+      where: { id: { in: transition.map(row => row.id) } },
+    });
+  });
+
   it('block: wins concurrent follow retries without leaving an edge or drifting counters', async () => {
     const follower = await register(app);
     const blocker = await register(app);
@@ -174,12 +273,199 @@ describe('Social actions — wave + block + report', () => {
         where: { followerId: follower.id, followingId: blocker.id },
       }),
     ).toBe(0);
+    expect(
+      await prisma.notification.count({
+        where: {
+          type: { in: ['FOLLOW_REQUEST', 'NEW_FOLLOWER'] },
+          OR: [
+            { userId: blocker.id, actorId: follower.id },
+            { userId: follower.id, actorId: blocker.id },
+          ],
+        },
+      }),
+    ).toBe(0);
     const [freshFollower, freshBlocker] = await Promise.all([
       prisma.user.findUniqueOrThrow({ where: { id: follower.id } }),
       prisma.user.findUniqueOrThrow({ where: { id: blocker.id } }),
     ]);
     expect(freshFollower.followingCount).toBe(0);
     expect(freshBlocker.followerCount).toBe(0);
+  });
+
+  it('block: deletes a committed private request before delayed fanout resumes', async () => {
+    const requester = await register(app);
+    const owner = await register(app);
+    createdIds.push(requester.id, owner.id);
+    await prisma.user.update({
+      where: { id: owner.id },
+      data: { isPrivateAccount: true },
+    });
+
+    let signalDeliveryStarted!: () => void;
+    let releaseDelivery!: () => void;
+    const deliveryStarted = new Promise<void>(resolve => {
+      signalDeliveryStarted = resolve;
+    });
+    const deliveryGate = new Promise<void>(resolve => {
+      releaseDelivery = resolve;
+    });
+    const originalDelivery = notificationsService.deliverPersisted.bind(notificationsService);
+    const delayedDelivery = jest
+      .spyOn(notificationsService, 'deliverPersisted')
+      .mockImplementation(async (row, options) => {
+        signalDeliveryStarted();
+        await deliveryGate;
+        return originalDelivery(row, options);
+      });
+
+    try {
+      const followPromise = request(app)
+        .post(`/api/follow/${owner.id}`)
+        .set('Authorization', `Bearer ${requester.token}`)
+        .then(response => response);
+      await deliveryStarted;
+
+      const block = await request(app)
+        .post(`/api/users/${requester.id}/block`)
+        .set('Authorization', `Bearer ${owner.token}`);
+      expect(block.status).toBe(200);
+
+      releaseDelivery();
+      const follow = await followPromise;
+      expect(follow.status).toBe(200);
+      expect(delayedDelivery).toHaveBeenCalledWith(expect.any(Object), { verifyExists: true });
+      expect(
+        await prisma.follow.count({
+          where: { followerId: requester.id, followingId: owner.id },
+        }),
+      ).toBe(0);
+      expect(
+        await prisma.notification.count({
+          where: { userId: owner.id, actorId: requester.id, type: 'FOLLOW_REQUEST' },
+        }),
+      ).toBe(0);
+    } finally {
+      releaseDelivery();
+      delayedDelivery.mockRestore();
+    }
+  });
+
+  it('block: exact badge recount wins when deletion commits after delivery revalidation', async () => {
+    const requester = await register(app);
+    const owner = await register(app);
+    createdIds.push(requester.id, owner.id);
+    await prisma.user.update({
+      where: { id: owner.id },
+      data: { isPrivateAccount: true },
+    });
+    await redis.set(`notif:unread:${owner.id}`, '0', { EX: 60 });
+
+    let signalDeliveryBadge!: () => void;
+    let releaseDeliveryBadge!: () => void;
+    const deliveryReachedBadge = new Promise<void>(resolve => {
+      signalDeliveryBadge = resolve;
+    });
+    const deliveryBadgeGate = new Promise<void>(resolve => {
+      releaseDeliveryBadge = resolve;
+    });
+    const originalRefresh = notificationsService.refreshUnreadCount.bind(notificationsService);
+    let interceptedDeliveryRefresh = false;
+    const refresh = jest
+      .spyOn(notificationsService, 'refreshUnreadCount')
+      .mockImplementation(async userId => {
+        if (userId === owner.id && !interceptedDeliveryRefresh) {
+          interceptedDeliveryRefresh = true;
+          signalDeliveryBadge();
+          await deliveryBadgeGate;
+        }
+        return originalRefresh(userId);
+      });
+
+    try {
+      const followPromise = request(app)
+        .post(`/api/follow/${owner.id}`)
+        .set('Authorization', `Bearer ${requester.token}`)
+        .then(response => response);
+      await deliveryReachedBadge;
+      expect(
+        await prisma.notification.count({
+          where: { userId: owner.id, actorId: requester.id, type: 'FOLLOW_REQUEST' },
+        }),
+      ).toBe(1);
+
+      const block = await request(app)
+        .post(`/api/users/${requester.id}/block`)
+        .set('Authorization', `Bearer ${owner.token}`);
+      expect(block.status).toBe(200);
+      expect(await redis.get(`notif:unread:${owner.id}`)).toBe('0');
+
+      releaseDeliveryBadge();
+      expect((await followPromise).status).toBe(200);
+      expect(await redis.get(`notif:unread:${owner.id}`)).toBe('0');
+      const unread = await request(app)
+        .get('/api/notifications/unread-count')
+        .set('Authorization', `Bearer ${owner.token}`);
+      expect(unread.body.data.count).toBe(0);
+      expect(refresh.mock.calls.filter(([userId]) => userId === owner.id).length).toBeGreaterThan(
+        1,
+      );
+    } finally {
+      releaseDeliveryBadge();
+      refresh.mockRestore();
+    }
+  });
+
+  it('block: suppresses push when it commits during follow-notification preference checks', async () => {
+    const requester = await register(app);
+    const owner = await register(app);
+    createdIds.push(requester.id, owner.id);
+    await prisma.user.update({
+      where: { id: owner.id },
+      data: { isPrivateAccount: true },
+    });
+
+    let signalPreferenceCheck!: () => void;
+    let releasePreferenceCheck!: () => void;
+    const preferenceCheckStarted = new Promise<void>(resolve => {
+      signalPreferenceCheck = resolve;
+    });
+    const preferenceGate = new Promise<void>(resolve => {
+      releasePreferenceCheck = resolve;
+    });
+    const preference = jest
+      .spyOn(notifPrefsExtService, 'canDeliver')
+      .mockImplementation(async () => {
+        signalPreferenceCheck();
+        await preferenceGate;
+        return true;
+      });
+    const dispatch = jest.spyOn(pushService, 'dispatchToUser');
+
+    try {
+      const followPromise = request(app)
+        .post(`/api/follow/${owner.id}`)
+        .set('Authorization', `Bearer ${requester.token}`)
+        .then(response => response);
+      await preferenceCheckStarted;
+
+      const block = await request(app)
+        .post(`/api/users/${requester.id}/block`)
+        .set('Authorization', `Bearer ${owner.token}`);
+      expect(block.status).toBe(200);
+
+      releasePreferenceCheck();
+      expect((await followPromise).status).toBe(200);
+      expect(preference).toHaveBeenCalledWith(
+        owner.id,
+        'FOLLOW_REQUEST',
+        expect.objectContaining({ actorId: requester.id }),
+      );
+      expect(dispatch).not.toHaveBeenCalled();
+    } finally {
+      releasePreferenceCheck();
+      preference.mockRestore();
+      dispatch.mockRestore();
+    }
   });
 
   it('block: serializes against accepting a PENDING request', async () => {

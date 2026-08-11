@@ -12,6 +12,7 @@ import { presenceAvailableKey } from '../../../extensions/hooks/usePresenceAvail
 import { renderScreen, mockAuthenticated, resetAuth } from '../../../../test-utils/renderScreen';
 import type { Conversation } from '../../../../shared/types/domain';
 import type { GroupConversation } from '../../services/groupService';
+import { messageService } from '../../services/messageService';
 import { MessagesScreen } from './MessagesScreen';
 
 const conversation = (overrides: Partial<Conversation> = {}): Conversation => ({
@@ -50,11 +51,17 @@ const group = (overrides: Partial<GroupConversation> = {}): GroupConversation =>
   ...overrides,
 });
 
+const seededConversations = (items: Conversation[], nextCursor: string | null = null) => ({
+  pages: [{ items, nextCursor }],
+  pageParams: [undefined],
+});
+
 describe('MessagesScreen', () => {
   beforeEach(() => {
     mockAuthenticated();
   });
   afterEach(() => {
+    jest.restoreAllMocks();
     resetAuth();
   });
 
@@ -62,7 +69,7 @@ describe('MessagesScreen', () => {
     const { getByText, getByLabelText } = renderScreen(<MessagesScreen />, {
       route: { name: 'MessagesList' },
       seedQueryData: [
-        { key: [...messageKeys.conversations()], data: [conversation()] },
+        { key: [...messageKeys.conversations()], data: seededConversations([conversation()]) },
         { key: [...groupKeys.list()], data: [group()] },
       ],
     });
@@ -78,7 +85,7 @@ describe('MessagesScreen', () => {
   it('header new-chat button navigates to NewMessage', () => {
     const { navigation, getByLabelText } = renderScreen(<MessagesScreen />, {
       route: { name: 'MessagesList' },
-      seedQueryData: [{ key: [...messageKeys.conversations()], data: [] }],
+      seedQueryData: [{ key: [...messageKeys.conversations()], data: seededConversations([]) }],
     });
     // accessibilityLabel resolves from i18n key messages.newChatA11y.
     const newChat = getByLabelText(/new|message|nouveau|conversation/i);
@@ -90,7 +97,7 @@ describe('MessagesScreen', () => {
     const { navigation, getByLabelText } = renderScreen(<MessagesScreen />, {
       route: { name: 'MessagesList' },
       seedQueryData: [
-        { key: [...messageKeys.conversations()], data: [conversation()] },
+        { key: [...messageKeys.conversations()], data: seededConversations([conversation()]) },
         { key: [...groupKeys.list()], data: [] },
       ],
     });
@@ -103,7 +110,7 @@ describe('MessagesScreen', () => {
     const { navigation, getByLabelText } = renderScreen(<MessagesScreen />, {
       route: { name: 'MessagesList' },
       seedQueryData: [
-        { key: [...messageKeys.conversations()], data: [] },
+        { key: [...messageKeys.conversations()], data: seededConversations([]) },
         { key: [...groupKeys.list()], data: [group()] },
       ],
     });
@@ -116,7 +123,7 @@ describe('MessagesScreen', () => {
     const { navigation, getByLabelText, queryByLabelText } = renderScreen(<MessagesScreen />, {
       route: { name: 'MessagesList' },
       seedQueryData: [
-        { key: [...messageKeys.conversations()], data: [] },
+        { key: [...messageKeys.conversations()], data: seededConversations([]) },
         { key: [...groupKeys.list()], data: [] },
         {
           key: [...presenceAvailableKey(20)],
@@ -159,5 +166,33 @@ describe('MessagesScreen', () => {
     expect(navigation.navigate).toHaveBeenCalledWith('ChatDetail', {
       conversationId: 'usr_backend_9',
     });
+  });
+
+  it('loads the next conversation page when the list reaches its end', async () => {
+    const alice = conversation();
+    const bob = conversation({
+      id: 'peer-2',
+      participants: [{ id: 'peer-2', username: 'bob', displayName: 'Bob', avatarUrl: null }],
+      lastMessage: {
+        ...conversation().lastMessage!,
+        id: 'message-bob',
+        conversationId: 'peer-2',
+        authorId: 'peer-2',
+        text: 'Second page',
+      },
+    });
+    const service = jest
+      .spyOn(messageService, 'conversations')
+      .mockResolvedValueOnce({ items: [alice], nextCursor: 'v1.page-two' })
+      .mockResolvedValueOnce({ items: [bob], nextCursor: null });
+    const { getByTestId, getByText } = renderScreen(<MessagesScreen />, {
+      route: { name: 'MessagesList' },
+      seedQueryData: [{ key: [...groupKeys.list()], data: [] }],
+    });
+
+    expect(await waitFor(() => getByText('Alice'))).toBeTruthy();
+    fireEvent(getByTestId('messages-list'), 'onEndReached');
+    expect(await waitFor(() => getByText('Bob'))).toBeTruthy();
+    expect(service).toHaveBeenNthCalledWith(2, 'v1.page-two');
   });
 });

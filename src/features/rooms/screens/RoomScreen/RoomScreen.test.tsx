@@ -110,6 +110,14 @@ const mountRoom = (room: Room) =>
     seedQueryData: [{ key: [...roomKeys.detail(ROOM_ID)], data: room }],
   });
 
+const deferred = <T,>() => {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>(res => {
+    resolve = res;
+  });
+  return { promise, resolve };
+};
+
 describe('RoomScreen', () => {
   beforeEach(() => {
     mockAudioSetMuted.mockReset().mockResolvedValue(undefined);
@@ -340,6 +348,33 @@ describe('RoomScreen', () => {
       // The mute flag — and therefore the "Unmute" button — must persist.
       expect(useCurrentRoomStore.getState().isMuted).toBe(true);
       expect(getByLabelText('Unmute microphone')).toBeTruthy();
+    });
+
+    it('serializes rapid microphone taps until LiveKit and the backend settle', async () => {
+      const liveKitUpdate = deferred<void>();
+      mockAudioSetMuted.mockReturnValueOnce(liveKitUpdate.promise);
+      const setMuteSpy = jest.spyOn(roomService, 'setMute').mockResolvedValue(undefined as never);
+      jest.spyOn(roomService, 'get').mockImplementation(() => new Promise(() => undefined));
+      const { getByLabelText } = mountRoom(hostRoom());
+      const muteButton = getByLabelText('Mute microphone');
+
+      fireEvent.press(muteButton);
+      fireEvent.press(muteButton);
+
+      expect(mockAudioSetMuted).toHaveBeenCalledTimes(1);
+      expect(getByLabelText('Unmute microphone').props.accessibilityState).toMatchObject({
+        disabled: true,
+        busy: true,
+      });
+
+      liveKitUpdate.resolve();
+      await waitFor(() => {
+        expect(setMuteSpy).toHaveBeenCalledTimes(1);
+        expect(getByLabelText('Unmute microphone').props.accessibilityState).toMatchObject({
+          disabled: false,
+          busy: false,
+        });
+      });
     });
 
     // Hydration: entering a room whose own participant row is already muted

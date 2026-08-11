@@ -1,6 +1,10 @@
 import type { OpenAPIRegistry } from '@asteasolutions/zod-to-openapi';
 import { z } from 'zod';
-import { sendMessageSchema, listMessagesSchema } from '../../modules/chat/chat.schema';
+import {
+  sendMessageSchema,
+  sendVoiceMessageSchema,
+  listMessagesSchema,
+} from '../../modules/chat/chat.schema';
 import {
   contentReportResultSchema,
   contentReportSchema,
@@ -11,6 +15,25 @@ export const registerChatPaths = (
   registry: OpenAPIRegistry,
   { ErrorBody }: OpenApiComponents,
 ): void => {
+  const idempotencyHeaders = z.object({
+    'Idempotency-Key': z.string().min(8).max(128).optional(),
+  });
+  const genericMessage = z.object({ id: z.string() }).passthrough();
+  const messageListResponse = z.union([
+    z.object({
+      success: z.literal(true),
+      data: z.array(genericMessage),
+    }),
+    z.object({
+      success: z.literal(true),
+      data: z.object({
+        data: z.array(genericMessage),
+        nextCursor: z.string().nullable(),
+        hasMore: z.boolean(),
+      }),
+    }),
+  ]);
+
   registry.registerPath({
     method: 'get',
     path: '/api/chat/{userId}',
@@ -19,13 +42,11 @@ export const registerChatPaths = (
     request: { params: z.object({ userId: z.string() }), query: listMessagesSchema },
     responses: {
       200: {
-        description: 'Direct-message thread with a peer.',
+        description:
+          'Direct-message thread with a peer. Returns the legacy message array by default, or a { data, nextCursor, hasMore } page when paginated=true.',
         content: {
           'application/json': {
-            schema: z.object({
-              success: z.literal(true),
-              data: z.array(z.object({}).passthrough()),
-            }),
+            schema: messageListResponse,
           },
         },
       },
@@ -39,11 +60,13 @@ export const registerChatPaths = (
     security: [{ bearerAuth: [] }],
     request: {
       params: z.object({ userId: z.string() }),
+      headers: idempotencyHeaders,
       body: { content: { 'application/json': { schema: sendMessageSchema } } },
     },
     responses: {
       201: {
-        description: 'Message sent.',
+        description:
+          'Persists the text message exactly once per Idempotency-Key. Realtime and push delivery are at least once; consumers must deduplicate with messageId and notificationId.',
         content: {
           'application/json': {
             schema: z.object({ success: z.literal(true), data: z.object({}).passthrough() }),
@@ -52,6 +75,41 @@ export const registerChatPaths = (
       },
       403: {
         description: 'Blocked / not allowed',
+        content: { 'application/json': { schema: ErrorBody } },
+      },
+      409: {
+        description: 'Idempotency key reused with another payload or DM kind',
+        content: { 'application/json': { schema: ErrorBody } },
+      },
+    },
+  });
+
+  registry.registerPath({
+    method: 'post',
+    path: '/api/chat/{userId}/voice',
+    tags: ['Chat'],
+    security: [{ bearerAuth: [] }],
+    request: {
+      params: z.object({ userId: z.string() }),
+      headers: idempotencyHeaders,
+      body: { content: { 'application/json': { schema: sendVoiceMessageSchema } } },
+    },
+    responses: {
+      201: {
+        description:
+          'Persists the voice message exactly once per Idempotency-Key. Realtime and push delivery are at least once; consumers must deduplicate with messageId and notificationId.',
+        content: {
+          'application/json': {
+            schema: z.object({ success: z.literal(true), data: z.object({}).passthrough() }),
+          },
+        },
+      },
+      403: {
+        description: 'Blocked / not allowed',
+        content: { 'application/json': { schema: ErrorBody } },
+      },
+      409: {
+        description: 'Idempotency key reused with another payload or DM kind',
         content: { 'application/json': { schema: ErrorBody } },
       },
     },

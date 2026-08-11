@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -58,6 +58,7 @@ export const NewMessageScreen: React.FC = () => {
   const [query, setQuery] = useState('');
   // Selected peers, keyed by id so toggling is O(1) and order-stable enough.
   const [selected, setSelected] = useState<Map<string, User>>(new Map());
+  const groupCreationInFlightRef = useRef(false);
 
   const results = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -85,7 +86,7 @@ export const NewMessageScreen: React.FC = () => {
     if (hasNextPage && !isFetchingNextPage) void fetchNextPage();
   }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
-  const handleStart = useCallback(() => {
+  const handleStart = useCallback(async () => {
     const ids = [...selected.keys()];
     const first = ids[0];
     if (ids.length === 1 && first) {
@@ -97,14 +98,16 @@ export const NewMessageScreen: React.FC = () => {
       return;
     }
     if (ids.length >= 2) {
-      createGroup.mutate(
-        { memberIds: ids },
-        {
-          onSuccess: group => navigation.replace('GroupChat', { conversationId: group.id }),
-          onError: () =>
-            Alert.alert(t('messages.groupError', 'Impossible de créer le groupe. Réessaie.')),
-        },
-      );
+      if (groupCreationInFlightRef.current) return;
+      groupCreationInFlightRef.current = true;
+      try {
+        const group = await createGroup.mutateAsync({ memberIds: ids });
+        navigation.replace('GroupChat', { conversationId: group.id });
+      } catch {
+        Alert.alert(t('messages.groupError', 'Impossible de créer le groupe. Réessaie.'));
+      } finally {
+        groupCreationInFlightRef.current = false;
+      }
     }
   }, [createGroup, navigation, selected, t]);
 

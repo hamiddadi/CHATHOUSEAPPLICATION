@@ -76,7 +76,7 @@ export const useRoomAudio = ({
     await roomAudioSession.setMuted(muted);
   }, []);
   const retry = useCallback(async () => {
-    if (roomId && authenticatedUserId) await roomAudioSession.start(roomId);
+    if (roomId && authenticatedUserId) await roomAudioSession.retry(roomId);
   }, [roomId, authenticatedUserId]);
   const setPeerVolume = useCallback((userId: string, volume: number) => {
     roomAudioSession.setPeerVolume(userId, volume);

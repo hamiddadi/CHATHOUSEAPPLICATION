@@ -5,6 +5,7 @@ import {
   createGroupSchema,
   listGroupMessagesSchema,
   sendGroupMessageSchema,
+  sendGroupVoiceSchema,
 } from '../../modules/groups/groups.schema';
 import {
   contentReportResultSchema,
@@ -21,6 +22,20 @@ export const registerGroupsPaths = (
     'Idempotency-Key': z.string().min(8).max(128).optional(),
   });
   const genericResource = z.object({ id: z.string() }).passthrough();
+  const messageListResponse = z.union([
+    z.object({
+      success: z.literal(true),
+      data: z.array(genericResource),
+    }),
+    z.object({
+      success: z.literal(true),
+      data: z.object({
+        data: z.array(genericResource),
+        nextCursor: z.string().nullable(),
+        hasMore: z.boolean(),
+      }),
+    }),
+  ]);
 
   registry.registerPath({
     method: 'get',
@@ -107,13 +122,11 @@ export const registerGroupsPaths = (
     request: { params: idParams, query: listGroupMessagesSchema },
     responses: {
       200: {
-        description: 'Messages visible to a current group member.',
+        description:
+          'Messages visible to a current group member. Returns the legacy message array by default, or a { data, nextCursor, hasMore } page when paginated=true.',
         content: {
           'application/json': {
-            schema: z.object({
-              success: z.literal(true),
-              data: z.array(genericResource),
-            }),
+            schema: messageListResponse,
           },
         },
       },
@@ -134,7 +147,8 @@ export const registerGroupsPaths = (
     },
     responses: {
       201: {
-        description: 'Persists and fans out a text message exactly once for an idempotency key.',
+        description:
+          'Persists the text message exactly once per Idempotency-Key. Realtime and push delivery are at least once; consumers must deduplicate with messageId and notificationId.',
         content: {
           'application/json': {
             schema: z.object({
@@ -146,6 +160,46 @@ export const registerGroupsPaths = (
       },
       403: {
         description: 'Not a member, or a block exists within the group',
+        content: { 'application/json': { schema: ErrorBody } },
+      },
+      409: {
+        description: 'Idempotency key reused with another payload or group-message kind',
+        content: { 'application/json': { schema: ErrorBody } },
+      },
+    },
+  });
+
+  registry.registerPath({
+    method: 'post',
+    path: '/api/groups/{id}/voice',
+    tags: ['Groups'],
+    security: [{ bearerAuth: [] }],
+    request: {
+      params: idParams,
+      headers: idempotencyHeaders,
+      body: {
+        content: { 'application/json': { schema: sendGroupVoiceSchema } },
+      },
+    },
+    responses: {
+      201: {
+        description:
+          'Persists the voice message exactly once per Idempotency-Key. Realtime and push delivery are at least once; consumers must deduplicate with messageId and notificationId.',
+        content: {
+          'application/json': {
+            schema: z.object({
+              success: z.literal(true),
+              data: genericResource,
+            }),
+          },
+        },
+      },
+      403: {
+        description: 'Not a member, or a block exists within the group',
+        content: { 'application/json': { schema: ErrorBody } },
+      },
+      409: {
+        description: 'Idempotency key reused with another payload or group-message kind',
         content: { 'application/json': { schema: ErrorBody } },
       },
     },

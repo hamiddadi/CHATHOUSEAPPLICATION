@@ -8,6 +8,7 @@ import {
 } from '../../realtime/aliases';
 import { notificationsService } from '../../../modules/notifications/notifications.service';
 import { roomsService } from '../../../modules/rooms/rooms.service';
+import { withLockedRoomState } from '../../../modules/rooms/room-state-lock';
 import { logger } from '../../../config/logger';
 
 /**
@@ -51,21 +52,32 @@ const isHostOrMod = async (roomId: string, userId: string): Promise<boolean> => 
 
 export const speakInviteService = {
   async invite(roomId: string, hostId: string, invitedUserId: string) {
-    if (!(await isHostOrMod(roomId, hostId))) {
-      throw extError('SPEAK_001', 'Only host or moderator can invite');
-    }
-    // PART-09: only invite a user who is actually present in the room.
-    // Otherwise the invite (notification + socket) fires for someone who is
-    // not there, and respond() would later promote a non-participant.
-    const invitee = await prisma.participant.findUnique({
-      where: { userId_roomId: { userId: invitedUserId, roomId } },
-      select: { leftAt: true },
-    });
-    if (!invitee || invitee.leftAt) {
-      throw extError('SPEAK_002', 'User is not in the room');
-    }
     const payload = JSON.stringify({ hostId, sentAt: new Date().toISOString() });
-    await redis.setEx(inviteKey(roomId, invitedUserId), INVITE_TTL_S, payload);
+    await withLockedRoomState(roomId, async (tx, room) => {
+      if (!room || room.endedAt || !room.isLive) {
+        throw extError('SPEAK_001', 'Only host or moderator can invite');
+      }
+      if (room.hostId !== hostId) {
+        const inviter = await tx.participant.findUnique({
+          where: { userId_roomId: { userId: hostId, roomId } },
+          select: { role: true, leftAt: true },
+        });
+        if (!inviter || inviter.leftAt || inviter.role !== 'MODERATOR') {
+          throw extError('SPEAK_001', 'Only host or moderator can invite');
+        }
+      }
+      // PART-09: only invite a user who is actually present in the room.
+      // Otherwise the invite (notification + socket) fires for someone who is
+      // not there, and respond() would later promote a non-participant.
+      const invitee = await tx.participant.findUnique({
+        where: { userId_roomId: { userId: invitedUserId, roomId } },
+        select: { leftAt: true },
+      });
+      if (!invitee || invitee.leftAt) {
+        throw extError('SPEAK_002', 'User is not in the room');
+      }
+      await redis.setEx(inviteKey(roomId, invitedUserId), INVITE_TTL_S, payload);
+    });
 
     try {
       await notificationsService.create({
@@ -116,14 +128,14 @@ export const speakInviteService = {
       // HAND_ACCEPTED). The validated inviter acts as the host/mod caller.
       const part = await prisma.participant.findUnique({
         where: { userId_roomId: { userId, roomId } },
-        select: { role: true, leftAt: true },
+        select: { role: true, leftAt: true, room: { select: { hostId: true } } },
       });
       // HAND-03: a departed invitee (leftAt set, possibly with a stale SPEAKER
       // role) is not in the room — reject rather than report a phantom accept.
       if (!part || part.leftAt) throw extError('SPEAK_002', 'Not in room');
       // HAND-09: already on stage → no-op. Skip setRole's side effects AND skip
       // broadcasting a fresh promotion for someone who was already a speaker.
-      if (part.role !== 'SPEAKER' && part.role !== 'HOST') {
+      if (part.role !== 'SPEAKER' && part.room.hostId !== userId) {
         await roomsService.setRole(roomId, hostId, { userId, role: 'SPEAKER' });
       } else {
         await redis.del(inviteKey(roomId, userId));
@@ -156,10 +168,10 @@ export const speakInviteService = {
     }
     const part = await prisma.participant.findUnique({
       where: { userId_roomId: { userId, roomId } },
-      select: { role: true, leftAt: true },
+      select: { role: true, leftAt: true, room: { select: { hostId: true } } },
     });
     if (!part || part.leftAt) throw extError('SPEAK_002', 'Not in room');
-    if (part.role !== 'MODERATOR' && part.role !== 'HOST') {
+    if (part.role !== 'MODERATOR' && part.room.hostId !== userId) {
       await roomsService.setRole(roomId, hostId, {
         userId,
         role: 'MODERATOR',

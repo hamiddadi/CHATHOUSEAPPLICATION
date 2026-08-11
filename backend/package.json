@@ -21,6 +21,7 @@
     "test:infra:up": "docker compose -f docker-compose.test.yml up -d --wait",
     "test:infra:down": "docker compose -f docker-compose.test.yml down -v",
     "test:db:prepare": "node scripts/run-prisma-test.cjs migrate deploy",
+    "test:db:runtime-role-boot": "node scripts/verify-runtime-role-boot.mjs",
     "test:local": "npm run test:infra:up && npm run test:db:prepare && npm test",
     "test:load-tools": "node --test tests/load/load-tools.test.mjs",
     "load:check": "npm run test:load-tools && node scripts/load-50-users.mjs --check",

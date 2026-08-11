@@ -1,5 +1,9 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { notificationService, type NotificationFilter } from '../services/notificationService';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  notificationService,
+  type NotificationFilter,
+  type NotificationPage,
+} from '../services/notificationService';
 import type { AppNotification } from '../../../shared/types/domain';
 
 export const notificationKeys = {
@@ -9,9 +13,19 @@ export const notificationKeys = {
 };
 
 export const useNotifications = (filter: NotificationFilter = 'all') =>
-  useQuery<AppNotification[]>({
+  useInfiniteQuery<
+    NotificationPage,
+    Error,
+    AppNotification[],
+    readonly string[],
+    string | undefined
+  >({
     queryKey: notificationKeys.list(filter),
-    queryFn: () => notificationService.list(filter),
+    queryFn: ({ pageParam }) => notificationService.list(filter, pageParam),
+    initialPageParam: undefined,
+    getNextPageParam: lastPage =>
+      lastPage.hasMore ? (lastPage.nextCursor ?? undefined) : undefined,
+    select: result => result.pages.flatMap(page => page.items),
   });
 
 export const useUnreadNotificationCount = () =>

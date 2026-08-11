@@ -2,7 +2,7 @@ import { Router, raw } from 'express';
 import type { Request, Response } from 'express';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { logger } from '../../config/logger';
-import { recordingsService } from './recordings.service';
+import { LivekitWebhookAuthenticationError, recordingsService } from './recordings.service';
 
 export const livekitWebhookRouter: Router = Router();
 
@@ -19,8 +19,13 @@ livekitWebhookRouter.post(
     try {
       await recordingsService.handleWebhook(body, req.get('Authorization'));
     } catch (err) {
-      logger.warn('livekit webhook rejected', { err });
-      res.status(401).json({ ok: false });
+      if (err instanceof LivekitWebhookAuthenticationError) {
+        logger.warn('livekit webhook authentication rejected', { err });
+        res.status(401).json({ ok: false });
+        return;
+      }
+      logger.error('livekit webhook processing failed', { err });
+      res.set('Retry-After', '1').status(503).json({ ok: false });
       return;
     }
     res.status(200).json({ ok: true });

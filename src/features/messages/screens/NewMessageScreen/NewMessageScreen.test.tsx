@@ -8,10 +8,11 @@
  * `replace`s into ChatDetail or switches to the group-create label.
  */
 import React from 'react';
-import { fireEvent, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, waitFor } from '@testing-library/react-native';
 import { profileKeys } from '../../../profile/hooks/useProfile';
 import type { User } from '../../../../shared/types/domain';
 import { renderScreen, mockAuthenticated, resetAuth } from '../../../../test-utils/renderScreen';
+import { groupService, type GroupConversation } from '../../services/groupService';
 import { NewMessageScreen } from './NewMessageScreen';
 
 const ME = 'user-test-1';
@@ -40,7 +41,7 @@ const followUser = (id: string, username: string, canDirectMessage = true): User
 // useFollowing is now a useInfiniteQuery → the cache holds
 // { pages: FollowPage[], pageParams }, not a flat User[].
 const page = (following: User[]) => ({
-  pages: [{ items: following, nextCursor: null }],
+  pages: [{ items: following, nextCursor: null, hasMore: false }],
   pageParams: [undefined],
 });
 
@@ -121,6 +122,32 @@ describe('NewMessageScreen', () => {
     expect(getByText(/create group/i)).toBeTruthy();
   });
 
+  it('turns a same-tick double press into one group creation', async () => {
+    let resolveCreate!: (group: GroupConversation) => void;
+    const createSpy = jest
+      .spyOn(groupService, 'create')
+      .mockReturnValue(new Promise(resolve => (resolveCreate = resolve)));
+    const { getByText, getByLabelText, navigation } = renderNew([
+      followUser('peer-42', 'alice'),
+      followUser('peer-43', 'bob'),
+    ]);
+    fireEvent.press(getByLabelText('alice'));
+    fireEvent.press(getByLabelText('bob'));
+    const createButton = getByText(/create group/i);
+
+    act(() => {
+      fireEvent.press(createButton);
+      fireEvent.press(createButton);
+    });
+    await waitFor(() => expect(createSpy).toHaveBeenCalledTimes(1));
+    await act(async () => resolveCreate({ id: 'group-once' } as unknown as GroupConversation));
+    await waitFor(() =>
+      expect(navigation.replace).toHaveBeenCalledWith('GroupChat', {
+        conversationId: 'group-once',
+      }),
+    );
+  });
+
   it('filters the following list by the query', () => {
     const { getByPlaceholderText, getByLabelText, queryByLabelText } = renderNew([
       followUser('peer-42', 'alice'),
@@ -155,9 +182,11 @@ describe('NewMessageScreen', () => {
 
   it('loads the next page of followees when the list end is reached', async () => {
     const { profileService } = require('../../../profile/services/profileService');
-    const spy = jest
-      .spyOn(profileService, 'following')
-      .mockResolvedValue({ items: [followUser('peer-99', 'zoe')], nextCursor: null });
+    const spy = jest.spyOn(profileService, 'following').mockResolvedValue({
+      items: [followUser('peer-99', 'zoe')],
+      nextCursor: null,
+      hasMore: false,
+    });
 
     const { UNSAFE_getByType } = renderScreen(<NewMessageScreen />, {
       route: { name: 'NewMessage' },
@@ -165,7 +194,13 @@ describe('NewMessageScreen', () => {
         {
           key: [...profileKeys.following(ME)],
           data: {
-            pages: [{ items: [followUser('peer-42', 'alice')], nextCursor: 'cursor-1' }],
+            pages: [
+              {
+                items: [followUser('peer-42', 'alice')],
+                nextCursor: 'cursor-1',
+                hasMore: true,
+              },
+            ],
             pageParams: [undefined],
           },
         },

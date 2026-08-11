@@ -32,6 +32,7 @@ import {
   trackSocketDisconnectCleanup,
 } from './disconnect-cleanup';
 import { isSocketOriginAllowed } from './socket.origin';
+import { shouldPreserveParticipationForReconnect } from './server-drain';
 
 // Backward-compatible name used by integration teardown and app shutdown.
 export { drainSocketDisconnectCleanups as drainRoomDisconnectCleanups } from './disconnect-cleanup';
@@ -164,20 +165,38 @@ export const createSocketServer = async (httpServer: HttpServer): Promise<Server
         );
       }
 
-      for (const channel of disconnectingRoomChannels) {
-        const roomId = channel.slice('room:'.length);
-        enqueueSocketDisconnectCleanup(`${roomId}:${userId}`, async () => {
-          try {
-            const peers = await io.in(channel).fetchSockets();
-            const userHasAnotherSocket = peers.some(
-              s => (s.data as { userId?: string }).userId === userId,
-            );
-            if (userHasAnotherSocket) return;
-            await roomsService.leave(roomId, userId);
-          } catch (err) {
-            logger.warn('socket disconnect room cleanup failed', { err, roomId, userId });
-          }
-        });
+      // A transport failure or io.close() is not user intent. Preserve durable
+      // Participant rows so reconnect can reattach, then let the bounded
+      // admission reconciler expire only clients that never return. Explicit
+      // client/server namespace disconnects still leave immediately.
+      const preserveForReconnect = shouldPreserveParticipationForReconnect(reason);
+      if (preserveForReconnect) {
+        for (const channel of disconnectingRoomChannels) {
+          const roomId = channel.slice('room:'.length);
+          enqueueSocketDisconnectCleanup(`${roomId}:${userId}`, async () => {
+            try {
+              await roomsService.refreshSocketAdmissionForReconnect(roomId, userId);
+            } catch (err) {
+              logger.warn('socket reconnect admission refresh failed', { err, roomId, userId });
+            }
+          });
+        }
+      } else {
+        for (const channel of disconnectingRoomChannels) {
+          const roomId = channel.slice('room:'.length);
+          enqueueSocketDisconnectCleanup(`${roomId}:${userId}`, async () => {
+            try {
+              const peers = await io.in(channel).fetchSockets();
+              const userHasAnotherSocket = peers.some(
+                s => (s.data as { userId?: string }).userId === userId,
+              );
+              if (userHasAnotherSocket) return;
+              await roomsService.leave(roomId, userId);
+            } catch (err) {
+              logger.warn('socket disconnect room cleanup failed', { err, roomId, userId });
+            }
+          });
+        }
       }
 
       // Only the last device may close account-level producers. Previously one

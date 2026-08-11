@@ -22,19 +22,21 @@ public release.
 
 ## Retention matrix
 
-| Data                                                | Retention                                                                          | Automated mechanism                                                                    |
-| --------------------------------------------------- | ---------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| Self-deleted account and related relational content | 30-day recovery window, then purge                                                 | `gdpr-purge` + database cascades                                                       |
-| Private avatars and voice messages                  | Account lifetime                                                                   | Private S3-compatible objects are deleted before user metadata                         |
-| Optional map coordinates                            | Until visibility is disabled/deletion is requested, or about 30 days of inactivity | Visibility/deletion paths clear immediately; `location-purge` clears stale coordinates |
-| Push notification tokens                            | Active device/account only                                                         | Removed immediately on deletion request and by user cascade                            |
-| Refresh tokens                                      | Until expiry/revocation plus one day                                               | Daily `gdpr-purge` sweep                                                               |
-| OTP records                                         | Until expiry plus one hour                                                         | Daily `gdpr-purge` sweep; only bcrypt hashes are stored                                |
-| Password-reset records                              | Until expiry plus one day                                                          | Daily `gdpr-purge` sweep; raw tokens are never stored                                  |
-| Idempotency records                                 | 24 hours                                                                           | Daily expiry sweep and user cascade                                                    |
-| Database audit log                                  | `AUDIT_LOG_RETENTION_DAYS` (default 90)                                            | Daily age-based deletion; user references become null when needed for trail integrity  |
-| Stripe/customer data                                | Until account purge, subject to narrow legal/payment retention at the processor    | Subscription cancellation and customer deletion before database purge                  |
-| Redis extension preferences/history                 | Account lifetime; pending phone capability 30 days; invitation history 1 year      | Included in export; erased/anonymized before relational account purge                  |
+| Data                                                | Retention                                                                          | Automated mechanism                                                                                                                               |
+| --------------------------------------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Self-deleted account and related relational content | 30-day recovery window, then purge                                                 | `gdpr-purge` + database cascades                                                                                                                  |
+| Private avatars and voice messages                  | Account lifetime                                                                   | Private S3-compatible objects are deleted before user metadata                                                                                    |
+| Optional map coordinates                            | Until visibility is disabled/deletion is requested, or about 30 days of inactivity | Visibility/deletion paths clear immediately; `location-purge` clears stale coordinates                                                            |
+| Push notification tokens                            | Active device/account only                                                         | Removed immediately on deletion request and by user cascade                                                                                       |
+| Refresh tokens                                      | Until expiry/revocation plus one day                                               | Daily `gdpr-purge` sweep                                                                                                                          |
+| OTP records                                         | Until expiry plus one hour                                                         | Daily `gdpr-purge` sweep; only bcrypt hashes are stored                                                                                           |
+| Password-reset records                              | Until expiry plus one day                                                          | Daily `gdpr-purge` sweep; raw tokens are never stored                                                                                             |
+| Idempotency records                                 | 24 hours                                                                           | Daily expiry sweep and user cascade                                                                                                               |
+| Transactional delivery outbox                       | Undelivered until successful; delivered envelopes 30 days                          | In-process worker retries with leases; bounded minute cleanup; account purge removes FK-free LiveKit revocation envelopes containing that user id |
+| Unattached voice/incomplete media uploads           | At least the 24-hour replay window, default cleanup after 48 hours                 | `media-cleanup` verifies no message reference before deleting private bytes                                                                       |
+| Database audit log                                  | `AUDIT_LOG_RETENTION_DAYS` (default 90)                                            | Daily age-based deletion; user references become null when needed for trail integrity                                                             |
+| Stripe/customer data                                | Until account purge, subject to narrow legal/payment retention at the processor    | Subscription cancellation and customer deletion before database purge                                                                             |
+| Redis extension preferences/history                 | Account lifetime; pending phone capability 30 days; invitation history 1 year      | Included in export; erased/anonymized before relational account purge                                                                             |
 
 Runtime console/infrastructure logs must be configured by the production
 platform with access controls and a maximum retention no longer than the stated
@@ -71,6 +73,13 @@ Authenticated users receive a structured JSON v4 archive from
 
 Password hashes, OTPs, access/refresh/reset tokens, raw push tokens, private
 storage keys and reports filed by other people are deliberately excluded.
+
+The HTTP response is emitted as chunked JSON. Large relational collections use
+stable 250-row cursor pages and Node stream backpressure, keeping server memory
+bounded while preserving the v4 URL and archive shape. The current React Native
+Axios client requests `responseType: text`, so it still buffers the completed
+archive on the device before sharing it. Removing that mobile-side limit will
+require a native direct-to-file transport; it is not a server protocol change.
 
 Operators may also run:
 

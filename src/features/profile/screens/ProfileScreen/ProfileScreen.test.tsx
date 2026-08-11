@@ -8,8 +8,9 @@
  */
 import React from 'react';
 import { Alert, Share } from 'react-native';
-import { fireEvent } from '@testing-library/react-native';
+import { fireEvent, waitFor } from '@testing-library/react-native';
 import { profileKeys } from '../../hooks/useProfile';
+import { profileService } from '../../services/profileService';
 import type { User } from '../../../../shared/types/domain';
 import { renderScreen, mockAuthenticated, resetAuth } from '../../../../test-utils/renderScreen';
 import { ProfileScreen } from './ProfileScreen';
@@ -144,6 +145,23 @@ describe('ProfileScreen', () => {
     // Fires follow.mutate — the network layer is not mocked, but the mutation
     // dispatch itself must not throw synchronously.
     expect(() => fireEvent.press(getByText('Follow'))).not.toThrow();
+  });
+
+  it('shows Requested after refetch and lets the requester cancel with DELETE', async () => {
+    const other = makeUser({
+      id: OTHER_ID,
+      username: 'private-user',
+      isFollowedByMe: false,
+      followRequestedByMe: true,
+    });
+    const unfollow = jest.spyOn(profileService, 'unfollow').mockResolvedValue({ unfollowed: true });
+    const { getByText } = renderScreen(<ProfileScreen />, {
+      route: { name: 'Profile', params: { userId: OTHER_ID } },
+      seedQueryData: seedProfile(other),
+    });
+
+    fireEvent.press(getByText('Requested'));
+    await waitFor(() => expect(unfollow).toHaveBeenCalledWith(OTHER_ID));
   });
 
   it('wave button (other user) fires without throwing', () => {

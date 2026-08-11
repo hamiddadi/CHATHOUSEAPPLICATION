@@ -10,10 +10,10 @@
     - `join_request` -> entree `type: 'CLUB_INVITE'` (onglets `all` ou `clubs`).
     - `ping_user` -> entree `type: 'WAVE'` (onglets `all` ou `social`).
   - Les entrees live ont un id prefixe `live-` ; elles ne sont PAS persistees serveur, donc un tap dessus N'appelle PAS `markRead` (gate `!isLiveId(item.id)`). Au prochain fetch, le merge dedupe par `targetType:targetId` (l'entree serveur remplace son double live).
-  - Liste plafonnee a `MAX_ITEMS = 200` (cap memoire pour session longue / flux dense).
-- **Pre-conditions globales** : session valide (token en `tokenStorage`), backend joignable pour `/notifications` (GET liste, PATCH read, PATCH read-all). i18n charge (FR/EN). Socket joignable pour les cas temps-reel. L'audio LiveKit n'est PAS implique sur cet ecran.
+  - Seules les entrees live non persistees sont plafonnees (`MAX_PENDING_LIVE_ITEMS = 50`) ; les pages serveur ne sont jamais tronquees, afin de rendre tout l'historique accessible.
+- **Pre-conditions globales** : session valide (token en `tokenStorage`), backend joignable pour `/notifications` (GET pagine avec `nextCursor`/`hasMore`, PATCH read, PATCH read-all). `onEndReached` retransmet le curseur opaque fourni par le serveur. i18n charge (FR/EN). Socket joignable pour les cas temps-reel. L'audio LiveKit n'est PAS implique sur cet ecran.
 - **Etats de donnees pertinents** :
-  - **Liste vide** : `activityApi.list` renvoie `[]` -> `ListEmptyComponent` affiche `t('extensions.activity.empty')` ("Aucune activite pour le moment.").
+  - **Liste vide** : `activityApi.list` renvoie `{ items: [], nextCursor: null, hasMore: false }` -> `ListEmptyComponent` affiche `t('extensions.activity.empty')` ("Aucune activite pour le moment.").
   - **Non lus** : `item.isRead === false` -> ligne surlignee (`rowUnread`) + point indicateur (`styles.dot`) a droite. Le tap ou "Tout marquer lu" repasse `isRead: true` (optimiste, immediat en UI).
   - **Chargement** : `loading === true` -> `ActivityIndicator` (pas de FlatList, donc pas de tabs masques ; les tabs et le header restent visibles, seul le corps liste est remplace).
   - **Hors-ligne / fetch en echec** : `fetchItems` catch silencieux -> la liste stale est conservee, `loading` repasse a false (donc empty si liste etait vide). `markRead`/`markAllRead` echouent en silence (`.catch(() => undefined)`) mais l'UI optimiste reste appliquee.

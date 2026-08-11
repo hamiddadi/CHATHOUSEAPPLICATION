@@ -9,11 +9,17 @@ export const registerFollowPaths = (
   const params = z.object({ userId: z.string().min(1) });
   const query = z.object({
     limit: z.coerce.number().int().min(1).max(50).default(50),
-    cursor: z.string().datetime().optional(),
+    cursor: z.string().max(1024).optional(),
   });
   const page = z.object({
-    data: z.array(UserPublic.extend({ isFollowedByMe: z.boolean().optional() })),
+    data: z.array(
+      UserPublic.extend({
+        isFollowedByMe: z.boolean().optional(),
+        followRequestedByMe: z.boolean().optional(),
+      }),
+    ),
     nextCursor: z.string().nullable(),
+    hasMore: z.boolean(),
   });
 
   for (const path of ['/api/follow/followers', '/api/follow/following'] as const) {
@@ -123,7 +129,8 @@ export const registerFollowPaths = (
         },
       },
       404: {
-        description: 'No pending or already accepted relation exists',
+        description:
+          'No follow relation exists. An already accepted relation is an idempotent 200.',
         content: { 'application/json': { schema: ErrorBody } },
       },
     },

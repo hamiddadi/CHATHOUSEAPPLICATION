@@ -98,6 +98,46 @@ describe('pushService.dispatchToUser — FCM path (mocked firebase-admin)', () =
     expect(remaining).toHaveLength(0);
   });
 
+  it('surfaces a resolved batch with transient per-token failures for outbox retry', async () => {
+    const liveToken = `fcm_${rand()}`;
+    const user = await seedUserWithToken(liveToken);
+    mockSendEachForMulticast.mockResolvedValue({
+      successCount: 0,
+      failureCount: 1,
+      responses: [
+        {
+          success: false,
+          error: { code: 'messaging/internal-error', message: 'provider unavailable' },
+        },
+      ],
+    });
+
+    await expect(pushService.dispatchToUser(user.id, { title: 't', body: 'b' })).rejects.toThrow(
+      'messaging/internal-error',
+    );
+    expect(await prisma.pushToken.count({ where: { token: liveToken } })).toBe(1);
+  });
+
+  it('does not prune an ambiguous invalid-argument response', async () => {
+    const liveToken = `fcm_${rand()}`;
+    const user = await seedUserWithToken(liveToken);
+    mockSendEachForMulticast.mockResolvedValue({
+      successCount: 0,
+      failureCount: 1,
+      responses: [
+        {
+          success: false,
+          error: { code: 'messaging/invalid-argument', message: 'bad payload or token' },
+        },
+      ],
+    });
+
+    await expect(pushService.dispatchToUser(user.id, { title: 't', body: 'b' })).rejects.toThrow(
+      'messaging/invalid-argument',
+    );
+    expect(await prisma.pushToken.count({ where: { token: liveToken } })).toBe(1);
+  });
+
   it('keeps tokens on a successful send', async () => {
     const liveToken = `fcm_${rand()}`;
     const user = await seedUserWithToken(liveToken);
@@ -108,6 +148,24 @@ describe('pushService.dispatchToUser — FCM path (mocked firebase-admin)', () =
 
     const remaining = await prisma.pushToken.findMany({ where: { token: liveToken } });
     expect(remaining).toHaveLength(1);
+  });
+
+  it('sets Android/APNs collapse identifiers from the stable notification id', async () => {
+    const user = await seedUserWithToken(`fcm_${rand()}`);
+    mockSendEachForMulticast.mockResolvedValue(okBatch(1));
+
+    await pushService.dispatchToUser(user.id, {
+      title: 't',
+      body: 'b',
+      data: { notificationId: 'notification-stable-id' },
+    });
+
+    expect(mockSendEachForMulticast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        android: expect.objectContaining({ collapseKey: 'notification-stable-id' }),
+        apns: { headers: { 'apns-collapse-id': 'notification-stable-id' } },
+      }),
+    );
   });
 
   it('no-ops when the user has no registered tokens (no send)', async () => {

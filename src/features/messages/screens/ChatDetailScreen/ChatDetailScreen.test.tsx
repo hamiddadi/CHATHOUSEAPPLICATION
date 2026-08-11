@@ -50,7 +50,7 @@ const messages = (): Message[] => [
 // The thread is now a useInfiniteQuery, so its cache is InfiniteData (pages +
 // pageParams), not a flat array. Wrap a single ascending page as page 0.
 const seededThread = (msgs: Message[]) => ({
-  pages: [msgs],
+  pages: [{ items: msgs, nextCursor: null }],
   pageParams: [undefined],
 });
 
@@ -102,15 +102,18 @@ describe('ChatDetailScreen', () => {
     fireEvent.press(getByLabelText('Call'));
 
     await waitFor(() => {
-      expect(createSpy).toHaveBeenCalledWith({
-        title: 'Private call with Alice',
-        visibility: 'closed',
-        topics: [],
-        coHostIds: [PEER_ID],
-        chatEnabled: false,
-        recordingEnabled: false,
-        maxSpeakers: 2,
-      });
+      expect(createSpy).toHaveBeenCalledWith(
+        {
+          title: 'Private call with Alice',
+          visibility: 'closed',
+          topics: [],
+          coHostIds: [PEER_ID],
+          chatEnabled: false,
+          recordingEnabled: false,
+          maxSpeakers: 2,
+        },
+        expect.stringMatching(/^rn-/),
+      );
     });
 
     const busyCallButton = getByLabelText('Call');
@@ -252,7 +255,36 @@ describe('ChatDetailScreen', () => {
     const send = await waitFor(() => getByLabelText('Send message'));
     fireEvent.press(send);
     await waitFor(() => {
-      expect(sendSpy).toHaveBeenCalledWith(PEER_ID, 'Hello world');
+      expect(sendSpy).toHaveBeenCalledWith(PEER_ID, 'Hello world', expect.stringMatching(/^rn-/));
+    });
+  });
+
+  it('synchronously blocks a double send while the first DM is pending', async () => {
+    const sent: Message = {
+      ...messages()[0]!,
+      id: 'm-sent-once',
+      authorId: 'user-test-1',
+      text: 'Only once',
+      isMine: true,
+    };
+    let resolveSend!: (message: Message) => void;
+    const pendingSend = new Promise<Message>(resolve => {
+      resolveSend = resolve;
+    });
+    const sendSpy = jest.spyOn(messageService, 'send').mockReturnValue(pendingSend);
+    const { getByLabelText, getByPlaceholderText } = renderChat();
+
+    fireEvent.changeText(getByPlaceholderText('Type a message…'), 'Only once');
+    const sendButton = getByLabelText('Send message');
+    fireEvent.press(sendButton);
+    fireEvent.press(sendButton);
+
+    await waitFor(() => expect(sendSpy).toHaveBeenCalledTimes(1));
+    expect(sendSpy).toHaveBeenCalledWith(PEER_ID, 'Only once', expect.stringMatching(/^rn-/));
+
+    await act(async () => {
+      resolveSend(sent);
+      await pendingSend;
     });
   });
 
@@ -279,17 +311,20 @@ describe('ChatDetailScreen', () => {
     const messagesSpy = jest
       .spyOn(messageService, 'messages')
       .mockRejectedValueOnce(new Error('offline'))
-      .mockResolvedValueOnce([]);
+      .mockResolvedValueOnce({ items: [], nextCursor: null });
     const { getByText } = renderScreen(<ChatDetailScreen />, {
       route: { name: 'ChatDetail', params: { conversationId: PEER_ID } },
       seedQueryData: [{ key: [...messageKeys.conversation(PEER_ID)], data: conversation() }],
     });
-    await waitFor(() => {
-      // Copy is fully localized via t(); the test harness runs in English
-      // (react-native-localize mock → 'en'), so the error title resolves to the
-      // en.json value (chat.loadErrorTitle), not the French inline default.
-      expect(getByText("Couldn't load messages")).toBeTruthy();
-    });
+    await waitFor(
+      () => {
+        // Copy is fully localized via t(); the test harness runs in English
+        // (react-native-localize mock → 'en'), so the error title resolves to the
+        // en.json value (chat.loadErrorTitle), not the French inline default.
+        expect(getByText("Couldn't load messages")).toBeTruthy();
+      },
+      { timeout: 5_000 },
+    );
     // Retry re-runs the query (second call resolves) → error clears. The
     // EmptyState action button renders its label as child text (no a11y label).
     fireEvent.press(getByText('Retry'));
@@ -298,7 +333,9 @@ describe('ChatDetailScreen', () => {
   });
 
   it('shows a "new chat" empty state when the thread is empty', async () => {
-    const messagesSpy = jest.spyOn(messageService, 'messages').mockResolvedValue([]);
+    const messagesSpy = jest
+      .spyOn(messageService, 'messages')
+      .mockResolvedValue({ items: [], nextCursor: null });
     const { getByText } = renderScreen(<ChatDetailScreen />, {
       route: { name: 'ChatDetail', params: { conversationId: PEER_ID } },
       seedQueryData: [{ key: [...messageKeys.conversation(PEER_ID)], data: conversation() }],
@@ -338,8 +375,8 @@ describe('ChatDetailScreen', () => {
     ];
     const messagesSpy = jest
       .spyOn(messageService, 'messages')
-      .mockResolvedValueOnce(fullPage)
-      .mockResolvedValueOnce(olderPage);
+      .mockResolvedValueOnce({ items: fullPage, nextCursor: 'v1.older-dm-page' })
+      .mockResolvedValueOnce({ items: olderPage, nextCursor: null });
     const { getByTestId } = renderScreen(<ChatDetailScreen />, {
       route: { name: 'ChatDetail', params: { conversationId: PEER_ID } },
       seedQueryData: [{ key: [...messageKeys.conversation(PEER_ID)], data: conversation() }],

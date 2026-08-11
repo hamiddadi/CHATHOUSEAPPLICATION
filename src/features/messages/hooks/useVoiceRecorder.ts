@@ -78,8 +78,8 @@ export const useVoiceRecorder = (): VoiceRecorder => {
     setIsPreparing(true);
     const isCurrent = (): boolean => mountedRef.current && operationRef.current === operation;
     try {
-      // Android needs an explicit runtime request. On iOS, the native recorder
-      // owns the system prompt described by NSMicrophoneUsageDescription.
+      // Android uses the runtime permission API. On iOS, the WebRTC native
+      // bridge owns the system prompt described by NSMicrophoneUsageDescription.
       if (!(await requestAudioPermission())) {
         preparingRef.current = false;
         if (isCurrent()) {

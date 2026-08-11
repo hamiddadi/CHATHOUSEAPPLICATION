@@ -23,7 +23,6 @@ import { colors, spacing } from '../../../../shared/constants/theme';
 import type { MessageStackParamList } from '../../../../core/navigation/types';
 import type { Message, UserSummary } from '../../../../shared/types/domain';
 import type { ContentReportReason } from '../../../../shared/types/moderation';
-import { CURRENT_USER } from '../../../../shared/mocks/users.mock';
 import { useAuthStore } from '../../../auth/store/authStore';
 import {
   useConversation,
@@ -104,10 +103,9 @@ export const ChatDetailScreen: React.FC = () => {
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const reportApiError = useApiErrorToast();
   const { t } = useTranslation();
-  // Identify "me" from the authenticated session, not a mock. Fall back to
-  // the CURRENT_USER mock id only when there is no live session (tests /
-  // unauthenticated render) so the participant resolution stays stable.
-  const myId = useAuthStore(s => s.user?.id) ?? CURRENT_USER.id;
+  // Identify "me" exclusively from the authenticated session. A missing user
+  // during auth hydration must never substitute a fictitious production id.
+  const myId = useAuthStore(s => s.user?.id ?? '');
 
   // Subscribe to realtime chat events for as long as THIS screen is mounted,
   // so the thread stays live regardless of the entry point (deep link, Room,
@@ -157,6 +155,7 @@ export const ChatDetailScreen: React.FC = () => {
   const reportUser = useReport();
   const [reportMessageId, setReportMessageId] = useState<string | null>(null);
   const [reportUserVisible, setReportUserVisible] = useState(false);
+  const sendInFlightRef = useRef(false);
   const { isPeerTyping, notifyTyping } = useTypingIndicator(peerId);
   // Keep an immediate lock in addition to the mutation state: two taps can
   // arrive before React has rendered `isPending=true`.
@@ -208,13 +207,16 @@ export const ChatDetailScreen: React.FC = () => {
 
   const handleBack = useCallback(() => navigation.goBack(), [navigation]);
   const handleSend = useCallback(async () => {
-    if (!draft.trim() || sendMessage.isPending) return;
+    if (!draft.trim() || sendInFlightRef.current || sendMessage.isPending) return;
+    const submittedDraft = draft;
+    sendInFlightRef.current = true;
     try {
       await sendMessage.mutateAsync({
         conversationId: route.params.conversationId,
-        text: draft,
+        text: submittedDraft,
       });
-      setDraft('');
+      // Preserve text entered while the previous message was in flight.
+      setDraft(current => (current === submittedDraft ? '' : current));
       scrollToBottom();
     } catch (err) {
       // Privacy/follows can change after the compose eligibility snapshot.
@@ -231,6 +233,8 @@ export const ChatDetailScreen: React.FC = () => {
         return;
       }
       reportApiError(err);
+    } finally {
+      sendInFlightRef.current = false;
     }
   }, [draft, reportApiError, route.params.conversationId, scrollToBottom, sendMessage, t]);
 

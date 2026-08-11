@@ -156,6 +156,7 @@ export const uploadService = {
     ownerId: string,
     input: UploadInput,
     requestOrigin: string,
+    idempotencyKey?: string,
   ): Promise<{ id: string; url: string }> {
     const media = decodeAvatar(input);
     return mediaService.store({
@@ -165,6 +166,7 @@ export const uploadService = {
       mimeType: media.mime,
       body: media.buffer,
       requestOrigin,
+      idempotencyKey,
     });
   },
 
@@ -172,6 +174,7 @@ export const uploadService = {
     ownerId: string,
     input: UploadInput,
     requestOrigin: string,
+    idempotencyKey?: string,
   ): Promise<{ id: string; url: string }> {
     const media = decodeAudio(input);
     return mediaService.store({
@@ -181,6 +184,7 @@ export const uploadService = {
       mimeType: media.mime,
       body: media.buffer,
       requestOrigin,
+      idempotencyKey,
     });
   },
 };

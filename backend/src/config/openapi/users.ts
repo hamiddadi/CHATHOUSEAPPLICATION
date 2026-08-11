@@ -25,6 +25,35 @@ export const registerUsersPaths = (
   });
 
   registry.registerPath({
+    method: 'get',
+    path: '/api/users/{id}',
+    tags: ['Users'],
+    security: [{ bearerAuth: [] }],
+    request: { params: z.object({ id: z.string().min(1) }) },
+    responses: {
+      200: {
+        description:
+          "Public profile enriched with only the authenticated viewer's own follow state.",
+        content: {
+          'application/json': {
+            schema: z.object({
+              success: z.literal(true),
+              data: UserPublic.extend({
+                isFollowedByMe: z.boolean(),
+                followRequestedByMe: z.boolean(),
+              }).passthrough(),
+            }),
+          },
+        },
+      },
+      404: {
+        description: 'User unavailable, deleted or blocked',
+        content: { 'application/json': { schema: ErrorBody } },
+      },
+    },
+  });
+
+  registry.registerPath({
     method: 'post',
     path: '/api/users/me/request-deletion',
     tags: ['Users', 'Privacy'],
@@ -84,18 +113,26 @@ export const registerUsersPaths = (
     responses: {
       200: {
         description:
-          'GDPR access/portability archive. Secrets, raw push tokens and object-storage keys are excluded.',
+          'Chunked GDPR access/portability archive. Secrets, raw push tokens and object-storage keys are excluded.',
         headers: {
           'Content-Disposition': {
             description: 'Attachment filename for the JSON archive.',
             schema: { type: 'string' },
+          },
+          'Cache-Control': {
+            description: 'Prevents storage of the private archive by shared or local caches.',
+            schema: { type: 'string', example: 'private, no-store' },
+          },
+          'X-Content-Type-Options': {
+            description: 'Disables response MIME sniffing.',
+            schema: { type: 'string', example: 'nosniff' },
           },
         },
         content: {
           'application/json': {
             schema: z
               .object({
-                exportVersion: z.string(),
+                exportFormat: z.literal('chathouse-user-export-v4'),
                 generatedAt: z.string().datetime(),
               })
               .passthrough(),

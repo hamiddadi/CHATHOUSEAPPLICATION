@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "exceptions": [
+    {
+      "package": "image-size",
+      "version": "1.2.1",
+      "nodes": ["node_modules/image-size"],
+      "advisories": [
+        "https://github.com/advisories/GHSA-w3rx-r6r6-pgpr",
+        "https://github.com/advisories/GHSA-5p2g-fcmc-qvqq"
+      ],
+      "patch": "patches/image-size+1.2.1.patch",
+      "patchSha256": "91c21926887493be48e27c61c2754c267dc2112ddb977bdc1f0bd0594bfa1b73",
+      "regressionTest": "src/security/imageSizeBackport.test.ts",
+      "expiresOn": "2026-11-10",
+      "rationale": "No patched upstream release exists; the repository backports bounds/progress checks and tests malformed plus valid ICNS/JXL/HEIF inputs."
+    }
+  ]
+}

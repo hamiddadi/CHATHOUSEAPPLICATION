@@ -42,7 +42,7 @@ const following = [makeUser('following-x', { isFollowedByMe: true })];
 // { pages: FollowPage[], pageParams } rather than a flat User[]. Wrap each
 // roster as a single page with no further cursor.
 const page = (items: User[]) => ({
-  pages: [{ items, nextCursor: null }],
+  pages: [{ items, nextCursor: null, hasMore: false }],
   pageParams: [undefined],
 });
 
@@ -107,6 +107,24 @@ describe('FollowersScreen', () => {
     expect(() => fireEvent.press(followButtons[0])).not.toThrow();
   });
 
+  it('shows a pending private request and cancels it instead of following twice', async () => {
+    const pending = makeUser('private-user', { followRequestedByMe: true });
+    const unfollow = jest.spyOn(profileService, 'unfollow').mockResolvedValue({ unfollowed: true });
+    jest
+      .spyOn(profileService, 'followers')
+      .mockResolvedValue({ items: [], nextCursor: null, hasMore: false });
+    const { getByText } = renderScreen(<FollowersScreen />, {
+      route: baseRoute,
+      seedQueryData: [
+        { key: [...profileKeys.followers(TARGET_ID)], data: page([pending]) },
+        { key: [...profileKeys.following(TARGET_ID)], data: page(following) },
+      ],
+    });
+
+    fireEvent.press(getByText('Requested'));
+    await waitFor(() => expect(unfollow).toHaveBeenCalledWith('private-user'));
+  });
+
   it('renders the empty state when a list is empty', () => {
     const { getByText } = renderScreen(<FollowersScreen />, {
       route: baseRoute,
@@ -141,14 +159,17 @@ describe('FollowersScreen', () => {
     // the end must call the service with that cursor and append its rows.
     const spy = jest
       .spyOn(profileService, 'followers')
-      .mockResolvedValue({ items: [makeUser('follower-c')], nextCursor: null });
+      .mockResolvedValue({ items: [makeUser('follower-c')], nextCursor: null, hasMore: false });
 
     const { UNSAFE_getByType } = renderScreen(<FollowersScreen />, {
       route: baseRoute,
       seedQueryData: [
         {
           key: [...profileKeys.followers(TARGET_ID)],
-          data: { pages: [{ items: followers, nextCursor: 'cursor-1' }], pageParams: [undefined] },
+          data: {
+            pages: [{ items: followers, nextCursor: 'cursor-1', hasMore: true }],
+            pageParams: [undefined],
+          },
         },
         { key: [...profileKeys.following(TARGET_ID)], data: page(following) },
       ],

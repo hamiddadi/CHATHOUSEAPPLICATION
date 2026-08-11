@@ -1,4 +1,30 @@
 import * as Sentry from '@sentry/node';
+import type { ErrorEvent } from '@sentry/node';
+import { sanitizeRequestUrl } from '../utils/sanitizeRequestUrl';
+
+/**
+ * Strip request identity and bearer-like URL capabilities before an error
+ * leaves the process. Exported as a pure helper so the privacy contract stays
+ * directly testable without initializing a real Sentry client.
+ */
+export const sanitizeSentryEvent = (event: ErrorEvent): ErrorEvent => {
+  event.user = undefined;
+  if (event.request) {
+    event.request.cookies = undefined;
+    event.request.data = undefined;
+    event.request.headers = undefined;
+    event.request.query_string = undefined;
+    if (event.request.url) event.request.url = sanitizeRequestUrl(event.request.url);
+  }
+  for (const breadcrumb of event.breadcrumbs ?? []) {
+    if (!breadcrumb.data) continue;
+    delete breadcrumb.data['headers'];
+    delete breadcrumb.data['request_body'];
+    const url = breadcrumb.data['url'];
+    if (typeof url === 'string') breadcrumb.data['url'] = sanitizeRequestUrl(url);
+  }
+  return event;
+};
 
 /**
  * Sentry error monitoring (SDK v10).
@@ -29,28 +55,7 @@ export function initSentry(): void {
     tracesSampleRate: 0,
     sendDefaultPii: false,
     integrations: [Sentry.httpIntegration()],
-    beforeSend(event) {
-      // Defense in depth: never send user identity, request bodies, cookies,
-      // authorization headers or query strings to Sentry.
-      event.user = undefined;
-      if (event.request) {
-        event.request.cookies = undefined;
-        event.request.data = undefined;
-        event.request.headers = undefined;
-        event.request.query_string = undefined;
-        if (event.request.url) {
-          event.request.url = event.request.url.split('?', 1)[0] ?? event.request.url;
-        }
-      }
-      for (const breadcrumb of event.breadcrumbs ?? []) {
-        if (!breadcrumb.data) continue;
-        delete breadcrumb.data['headers'];
-        delete breadcrumb.data['request_body'];
-        const url = breadcrumb.data['url'];
-        if (typeof url === 'string') breadcrumb.data['url'] = url.split('?', 1)[0] ?? url;
-      }
-      return event;
-    },
+    beforeSend: sanitizeSentryEvent,
   });
 }
 

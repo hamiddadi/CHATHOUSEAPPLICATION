@@ -12,6 +12,8 @@ import type { Room, RoomSummary } from '../../../shared/types/domain';
 import type { ContentReportReason } from '../../../shared/types/moderation';
 import { useCurrentRoomStore } from '../store/currentRoomStore';
 import { roomAudioSession } from '../services/roomAudioSession';
+import { createIdempotencyKey } from '../../../shared/utils/idempotency';
+import { retryTransientMutation } from '../../../shared/services/api/retryPolicy';
 
 export const roomKeys = {
   all: ['rooms'] as const,
@@ -69,12 +71,22 @@ export const useUserUpcomingEvents = (userId: string) =>
 
 export const useCreateRoom = () => {
   const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (input: CreateRoomInput) => roomService.create(input),
+  const mutation = useMutation({
+    mutationFn: ({ input, idempotencyKey }: { input: CreateRoomInput; idempotencyKey: string }) =>
+      roomService.create(input, idempotencyKey),
+    retry: retryTransientMutation,
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: roomKeys.list() });
     },
   });
+  const withKey = (input: CreateRoomInput) => ({ input, idempotencyKey: createIdempotencyKey() });
+  return {
+    ...mutation,
+    mutate: (input: CreateRoomInput, options?: Parameters<typeof mutation.mutate>[1]) =>
+      mutation.mutate(withKey(input), options),
+    mutateAsync: (input: CreateRoomInput, options?: Parameters<typeof mutation.mutateAsync>[1]) =>
+      mutation.mutateAsync(withKey(input), options),
+  };
 };
 
 export const useJoinRoom = () =>

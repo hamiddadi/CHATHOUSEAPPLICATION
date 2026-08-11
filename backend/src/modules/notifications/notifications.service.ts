@@ -1,4 +1,9 @@
-import type { NotificationPreference, NotificationType, Prisma } from '@prisma/client';
+import type {
+  Notification,
+  NotificationPreference,
+  NotificationType,
+  Prisma,
+} from '@prisma/client';
 import { prisma } from '../../config/database';
 import { redis } from '../../config/redis';
 import { logger } from '../../config/logger';
@@ -7,6 +12,7 @@ import { pushService } from '../push/push.service';
 import { emitNotification, emitNotificationCount } from '../../socket/realtime';
 import { notifPrefsExtService } from '../../extensions/modules/notifPrefsExt/notifPrefsExt.service';
 import { scheduleBackgroundTask } from '../../utils/backgroundTasks';
+import { decodeTimeIdCursor, encodeTimeIdCursor } from '../../utils/timeIdCursor';
 
 /**
  * Maps a NotificationType to the matching boolean field on
@@ -18,6 +24,7 @@ import { scheduleBackgroundTask } from '../../utils/backgroundTasks';
  */
 const PREF_FIELD_BY_TYPE: Partial<Record<NotificationType, keyof NotificationPreference>> = {
   NEW_FOLLOWER: 'newFollower',
+  FOLLOW_REQUEST: 'newFollower',
   WAVE: 'wave',
   ROOM_INVITE: 'roomInvite',
   CLUB_INVITE: 'clubInvite',
@@ -36,7 +43,7 @@ const PREF_FIELD_BY_TYPE: Partial<Record<NotificationType, keyof NotificationPre
  * inbound invitation. These are reused under the CLUB_INVITE type by the
  * clubreq extension but carry a `kind` discriminator in their data payload.
  */
-const isOwnClubRequestOutcome = (type: NotificationType, data?: Prisma.InputJsonValue): boolean => {
+const isOwnClubRequestOutcome = (type: NotificationType, data?: unknown): boolean => {
   if (type !== 'CLUB_INVITE') return false;
   if (!data || typeof data !== 'object' || Array.isArray(data)) return false;
   const kind = (data as Record<string, unknown>).kind;
@@ -48,7 +55,7 @@ const isOwnClubRequestOutcome = (type: NotificationType, data?: Prisma.InputJson
  * notifPrefsExt per-club mute can be consulted. Producers stash it as
  * `data.clubId` (see clubs.service). Returns null when absent or non-string.
  */
-const extractClubId = (data?: Prisma.InputJsonValue): string | null => {
+const extractClubId = (data?: unknown): string | null => {
   if (!data || typeof data !== 'object' || Array.isArray(data)) return null;
   const clubId = (data as Record<string, unknown>).clubId;
   return typeof clubId === 'string' ? clubId : null;
@@ -57,7 +64,7 @@ const extractClubId = (data?: Prisma.InputJsonValue): string | null => {
 const isPushAllowed = async (
   userId: string,
   type: NotificationType,
-  data?: Prisma.InputJsonValue,
+  data?: unknown,
 ): Promise<boolean> => {
   // CLUB-08: the result of one's own join request is not an "invitation" —
   // it must not be silenced by the clubInvite push preference. Treat it as a
@@ -81,8 +88,16 @@ const isPushAllowed = async (
  * the UI don't drift.
  */
 const FILTER_GROUPS = {
-  rooms: ['ROOM_INVITE', 'ROOM_STARTED', 'HAND_ACCEPTED', 'RSVP_REMINDER', 'SPEAKER_REQUEST'],
-  social: ['NEW_FOLLOWER', 'WAVE', 'NEW_MESSAGE', 'MENTION'],
+  rooms: [
+    'ROOM_INVITE',
+    'ROOM_STARTED',
+    'ROOM_CANCELED',
+    'ROOM_ENDED_BY_ADMIN',
+    'HAND_ACCEPTED',
+    'RSVP_REMINDER',
+    'SPEAKER_REQUEST',
+  ],
+  social: ['NEW_FOLLOWER', 'FOLLOW_REQUEST', 'WAVE', 'NEW_MESSAGE', 'MENTION'],
   clubs: ['CLUB_INVITE'],
 } satisfies Record<string, NotificationType[]>;
 
@@ -112,21 +127,73 @@ export const parseFilter = (raw: unknown): NotificationFilter =>
 const unreadCacheKey = (userId: string) => `notif:unread:${userId}`;
 const UNREAD_CACHE_TTL = 60; // 60s
 
+const persistedNotificationStillExists = async (row: Notification): Promise<boolean> => {
+  try {
+    const stillExists = await prisma.notification.findUnique({
+      where: { id: row.id },
+      select: { id: true },
+    });
+    return stillExists !== null;
+  } catch (err) {
+    logger.warn('notification delivery revalidation failed; suppressing fanout', {
+      err,
+      notificationId: row.id,
+      userId: row.userId,
+    });
+    return false;
+  }
+};
+
+// The durable outbox must distinguish a genuinely revoked row from a
+// transient database failure. Unlike the best-effort helper above, errors are
+// allowed to propagate so the lease is retried instead of marked DELIVERED.
+const persistedNotificationStillExistsStrict = async (row: Notification): Promise<boolean> => {
+  const stillExists = await prisma.notification.findUnique({
+    where: { id: row.id },
+    select: { id: true },
+  });
+  return stillExists !== null;
+};
+
+const refreshUnreadCountStrict = async (userId: string): Promise<{ count: number }> => {
+  const count = await prisma.notification.count({
+    where: { userId, isRead: false },
+  });
+  await redis.set(unreadCacheKey(userId), String(count), { EX: UNREAD_CACHE_TTL });
+  emitNotificationCount(userId, count);
+  return { count };
+};
+
 export const notificationsService = {
   async list(userId: string, filter: NotificationFilter = 'all', limit = 50, cursor?: string) {
+    const decodedCursor = cursor ? decodeTimeIdCursor(cursor) : null;
+    if (cursor && !decodedCursor) throw new AppError('VALIDATION_001');
+    const cursorWhere: Prisma.NotificationWhereInput = decodedCursor
+      ? decodedCursor.id
+        ? {
+            OR: [
+              { createdAt: { lt: decodedCursor.createdAt } },
+              { createdAt: decodedCursor.createdAt, id: { lt: decodedCursor.id } },
+            ],
+          }
+        : { createdAt: { lt: decodedCursor.createdAt } }
+      : {};
     const where: Prisma.NotificationWhereInput = {
       userId,
       ...(filter !== 'all' ? { type: { in: FILTER_GROUPS[filter] } } : {}),
-      ...(cursor ? { createdAt: { lt: new Date(cursor) } } : {}),
+      ...cursorWhere,
     };
     const rows = await prisma.notification.findMany({
       where,
-      orderBy: { createdAt: 'desc' },
+      // A timestamp alone is not unique. The id tie-breaker makes the order
+      // total so equal-time rows are neither skipped nor repeated.
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: limit + 1, // Fetch 1 extra for next-cursor detection
     });
     const hasMore = rows.length > limit;
     const data = hasMore ? rows.slice(0, limit) : rows;
-    const nextCursor = hasMore ? data[data.length - 1]?.createdAt.toISOString() : null;
+    const last = data[data.length - 1];
+    const nextCursor = hasMore && last ? encodeTimeIdCursor(last.createdAt, last.id) : null;
     return { data, nextCursor, hasMore };
   },
 
@@ -140,6 +207,33 @@ export const notificationsService = {
     });
     await redis.set(unreadCacheKey(userId), String(count), { EX: UNREAD_CACHE_TTL });
     return { count };
+  },
+
+  /**
+   * Rebuild and broadcast the unread badge after another domain deletes
+   * notification rows in its own transaction (follow accept/reject/cancel).
+   * Calling this after commit prevents a stale Redis value on other devices.
+   */
+  async refreshUnreadCount(userId: string) {
+    try {
+      const count = await prisma.notification.count({
+        where: { userId, isRead: false },
+      });
+      try {
+        await redis.set(unreadCacheKey(userId), String(count), { EX: UNREAD_CACHE_TTL });
+      } catch (err) {
+        // The relationship mutation is already committed. A cache outage must
+        // not turn that success into a client-visible 500/retry ambiguity.
+        logger.warn('notification unread cache refresh failed', { err, userId });
+      }
+      emitNotificationCount(userId, count);
+      return { count };
+    } catch (err) {
+      logger.warn('notification unread recount failed after committed mutation', { err, userId });
+      // Best effort: remove a possibly stale value if Redis itself is healthy.
+      await redis.del(unreadCacheKey(userId)).catch(() => undefined);
+      return null;
+    }
   },
 
   async markOneRead(userId: string, id: string) {
@@ -172,10 +266,164 @@ export const notificationsService = {
     const n = await prisma.notification.findUnique({ where: { id } });
     if (!n || n.userId !== userId) throw new AppError('NOT_FOUND_001');
     await prisma.notification.delete({ where: { id } });
-    if (!n.isRead) {
-      await redis.del(unreadCacheKey(userId));
-    }
+    if (!n.isRead) await this.refreshUnreadCount(userId);
     return { deleted: true };
+  },
+
+  /**
+   * Fans out a notification row that is already committed. `verifyExists` is
+   * used by relationship transactions: if a later block/unfollow deleted the
+   * row while delivery was queued, no stale socket/push is emitted. Delivery
+   * is deliberately non-throwing because the durable row is the source of
+   * truth and its creating transaction must never become an ambiguous 500.
+   */
+  async deliverPersisted(row: Notification, options: { verifyExists?: boolean } = {}) {
+    if (options.verifyExists && !(await persistedNotificationStillExists(row))) return;
+
+    try {
+      emitNotification(row.userId, {
+        id: row.id,
+        type: row.type,
+        title: row.title,
+        body: row.body,
+        data: row.data ?? undefined,
+        createdAt: row.createdAt.toISOString(),
+      });
+    } catch (err) {
+      logger.warn('notification socket fanout failed', {
+        err,
+        notificationId: row.id,
+        userId: row.userId,
+      });
+    }
+
+    if (options.verifyExists) {
+      // Relationship notifications can be deleted by block/unfollow after the
+      // existence check above. INCR would then resurrect a stale N+1 badge
+      // after the deleting transaction had already published the exact N.
+      // Recount instead. Revalidate once more after the DB-count/Redis-set
+      // window; if deletion raced that window, a final recount repairs it and
+      // the now-obsolete delivery stops here.
+      await this.refreshUnreadCount(row.userId);
+      if (!(await persistedNotificationStillExists(row))) {
+        await this.refreshUnreadCount(row.userId);
+        return;
+      }
+    } else {
+      try {
+        const key = unreadCacheKey(row.userId);
+        let count = await redis.incr(key);
+        if (count === 1) {
+          count = await prisma.notification.count({
+            where: { userId: row.userId, isRead: false },
+          });
+          await redis.set(key, String(count), { EX: UNREAD_CACHE_TTL });
+        } else {
+          await redis.expire(key, UNREAD_CACHE_TTL);
+        }
+        emitNotificationCount(row.userId, count);
+      } catch (err) {
+        logger.warn('notification badge fanout failed; rebuilding best effort', {
+          err,
+          notificationId: row.id,
+          userId: row.userId,
+        });
+        await this.refreshUnreadCount(row.userId);
+      }
+    }
+
+    try {
+      await scheduleBackgroundTask(
+        (async () => {
+          if (!(await isPushAllowed(row.userId, row.type, row.data))) return;
+          let extAllows = true;
+          try {
+            extAllows = await notifPrefsExtService.canDeliver(row.userId, row.type, {
+              clubId: extractClubId(row.data),
+              actorId: row.actorId ?? undefined,
+            });
+          } catch (err) {
+            logger.warn('notifPrefsExt canDeliver failed; pushing anyway', {
+              err,
+              userId: row.userId,
+            });
+          }
+          if (!extAllows) return;
+          // Preference checks may involve Redis/DB I/O. A block or unfollow
+          // can commit during that window, so close it with a final existence
+          // check immediately before the external push dispatch.
+          if (options.verifyExists && !(await persistedNotificationStillExists(row))) return;
+          await pushService.dispatchToUser(row.userId, {
+            title: row.title,
+            body: row.body,
+            data: {
+              notificationId: row.id,
+              type: row.type,
+              ...(row.data && typeof row.data === 'object' && !Array.isArray(row.data)
+                ? (row.data as Record<string, unknown>)
+                : {}),
+            },
+          });
+        })(),
+        err => logger.warn('notif push dispatch failed', { err, userId: row.userId }),
+      );
+    } catch (err) {
+      logger.warn('notification delivery scheduling failed', {
+        err,
+        notificationId: row.id,
+        userId: row.userId,
+      });
+    }
+  },
+
+  /**
+   * Outbox-only delivery path. Unlike the regular best-effort API, provider
+   * and realtime errors propagate so the durable outbox can retry them. A
+   * false result means the source row was revoked/deleted and is therefore a
+   * successful no-op. External delivery remains at-least-once across crashes.
+   */
+  async deliverPersistedStrict(
+    row: Notification,
+    options: { verifyExists?: boolean } = {},
+  ): Promise<boolean> {
+    if (options.verifyExists && !(await persistedNotificationStillExistsStrict(row))) return false;
+
+    emitNotification(row.userId, {
+      id: row.id,
+      type: row.type,
+      title: row.title,
+      body: row.body,
+      data: row.data ?? undefined,
+      createdAt: row.createdAt.toISOString(),
+    });
+
+    await refreshUnreadCountStrict(row.userId);
+    if (options.verifyExists && !(await persistedNotificationStillExistsStrict(row))) {
+      await refreshUnreadCountStrict(row.userId);
+      return false;
+    }
+
+    if (!(await isPushAllowed(row.userId, row.type, row.data))) return true;
+    const extAllows = await notifPrefsExtService.canDeliverDurably(row.userId, row.type, {
+      deliveryId: row.id,
+      clubId: extractClubId(row.data),
+      actorId: row.actorId ?? undefined,
+    });
+    if (!extAllows) return true;
+    if (options.verifyExists && !(await persistedNotificationStillExistsStrict(row))) return false;
+
+    await pushService.dispatchToUser(row.userId, {
+      title: row.title,
+      body: row.body,
+      data: {
+        notificationId: row.id,
+        type: row.type,
+        ...(row.data && typeof row.data === 'object' && !Array.isArray(row.data)
+          ? (row.data as Record<string, unknown>)
+          : {}),
+      },
+    });
+    return true;
   },
 
   /**

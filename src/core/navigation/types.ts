@@ -69,6 +69,7 @@ export type RoomStackParamList = {
   Explore: { topic?: string } | undefined;
   Events: undefined;
   Notifications: undefined;
+  FollowRequests: undefined;
   // Room Replays — recent recorded rooms (audio-only) you can play back.
   Replays: undefined;
 

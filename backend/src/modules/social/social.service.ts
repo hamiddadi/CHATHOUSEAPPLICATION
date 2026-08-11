@@ -1,10 +1,24 @@
-import type { ReportReason } from '@prisma/client';
+import { randomUUID } from 'node:crypto';
+import { Prisma, type ReportReason } from '@prisma/client';
 import { prisma, runWriteWithRetry } from '../../config/database';
 import { redis } from '../../config/redis';
+import { logger } from '../../config/logger';
 import { AppError } from '../../middlewares/error.middleware';
-import { emitUserFollowerCount, hideMapUsersFromEachOther } from '../../socket/realtime';
+import {
+  emitHallwayRoomUpdated,
+  emitRoomUserLeft,
+  emitUserFollowerCount,
+  forceUserSocketsLeaveRoom,
+  hideMapUsersFromEachOther,
+} from '../../socket/realtime';
+import { closeTransportsForUserInRoom } from '../../webrtc/mediasoup.manager';
+import { scheduleBackgroundTask } from '../../utils/backgroundTasks';
 import { notificationsService } from '../notifications/notifications.service';
 import { assertRoomMetadataAccess } from '../rooms/rooms.access';
+import {
+  livekitRevocationOutboxData,
+  wakeLivekitRevocation,
+} from '../rooms/livekit-revocation.outbox';
 import { getBlockedIdSet } from './blocks';
 import { lockRelationshipUsers } from './relationship-lock';
 import type { ReportInput, ReportRoomInput } from './social.schema';
@@ -47,6 +61,33 @@ const reasonToEnum = (reason: ReportInput['reason']): ReportReason => {
       return 'OTHER';
   }
 };
+
+const hostedPairParticipantWhere = (
+  firstUserId: string,
+  secondUserId: string,
+): Prisma.ParticipantWhereInput => ({
+  OR: [
+    { userId: firstUserId, room: { hostId: secondUserId, endedAt: null } },
+    { userId: secondUserId, room: { hostId: firstUserId, endedAt: null } },
+  ],
+});
+
+const lockRoomRows = async (tx: Prisma.TransactionClient, roomIds: string[]): Promise<void> => {
+  const ids = [...new Set(roomIds)].sort();
+  if (ids.length === 0) return;
+  await tx.$queryRaw(
+    Prisma.sql`SELECT id FROM "Room" WHERE id IN (${Prisma.join(ids)}) ORDER BY id FOR UPDATE`,
+  );
+};
+
+interface RevokedActiveRoomAccess {
+  roomId: string;
+  userId: string;
+  participantCount: number;
+  isPrivate: boolean;
+  roomType: 'OPEN' | 'SOCIAL' | 'CLOSED';
+  revocationTransitionId: string;
+}
 
 export const socialService = {
   // ──────────────────── Wave ────────────────────
@@ -114,12 +155,42 @@ export const socialService = {
     const counts = await runWriteWithRetry(() =>
       prisma.$transaction(
         async tx => {
+          // Room lifecycle code locks Room -> User -> Participant. Discover and
+          // lock the pair's existing ACTIVE hosted rooms first to preserve that
+          // order. Scheduled/inactive grants are removed later by one set-based
+          // statement and do not affect room presence counters.
+          const beforeUserLock = await tx.participant.findMany({
+            where: {
+              AND: [hostedPairParticipantWhere(blockerId, targetId), { leftAt: null }],
+            },
+            select: { roomId: true },
+          });
+          const prelockedRoomIds = new Set(beforeUserLock.map(row => row.roomId));
+          await lockRoomRows(tx, [...prelockedRoomIds]);
+
           const lockedIds = await lockRelationshipUsers(tx, blockerId, targetId);
           if (lockedIds.length !== 2) throw new AppError('USER_001');
           const activeUsers = await tx.user.count({
             where: { id: { in: [blockerId, targetId] }, deletedAt: null },
           });
           if (activeUsers !== 2) throw new AppError('USER_001');
+
+          // A room can be committed while this transaction waits for the User
+          // locks (create-room takes those same locks). Re-read after locking
+          // and cover any newly-visible room before revoking its participant.
+          const activeHostedPairParticipants = await tx.participant.findMany({
+            where: {
+              AND: [hostedPairParticipantWhere(blockerId, targetId), { leftAt: null }],
+            },
+            select: {
+              roomId: true,
+              userId: true,
+            },
+          });
+          const newlyVisibleRoomIds = activeHostedPairParticipants
+            .map(row => row.roomId)
+            .filter(roomId => !prelockedRoomIds.has(roomId));
+          await lockRoomRows(tx, newlyVisibleRoomIds);
 
           await tx.block.upsert({
             where: { blockerId_blockedId: { blockerId, blockedId: targetId } },
@@ -167,18 +238,117 @@ export const socialService = {
             blockerFollowerCount = rows[0]?.followerCount ?? 0;
           }
 
+          // Revoke every active or scheduled co-host grant in one statement.
+          // A user can accumulate many scheduled invitations over time; doing
+          // 2+ Prisma round-trips per grant made the safety-critical block path
+          // exceed its transaction deadline and left the relationship intact.
+          // The data-modifying CTEs also clear active presence and decrement
+          // each affected room by the exact number of removed active rows.
+          const revokedActiveRows = await tx.$queryRaw<
+            Omit<RevokedActiveRoomAccess, 'revocationTransitionId'>[]
+          >(Prisma.sql`
+            WITH grants AS MATERIALIZED (
+              SELECT
+                participant.id,
+                participant."roomId",
+                participant."userId",
+                participant."leftAt"
+              FROM "Participant" AS participant
+              INNER JOIN "Room" AS room ON room.id = participant."roomId"
+              WHERE room."endedAt" IS NULL
+                AND (
+                  (participant."userId" = ${blockerId} AND room."hostId" = ${targetId})
+                  OR
+                  (participant."userId" = ${targetId} AND room."hostId" = ${blockerId})
+                )
+            ),
+            deleted_hand_raises AS (
+              DELETE FROM "RoomHandRaise" AS hand_raise
+              USING grants
+              WHERE hand_raise."roomId" = grants."roomId"
+                AND hand_raise."userId" = grants."userId"
+              RETURNING hand_raise.id
+            ),
+            removed AS (
+              DELETE FROM "Participant" AS participant
+              USING grants
+              WHERE participant.id = grants.id
+              RETURNING participant."roomId", participant."userId", participant."leftAt"
+            ),
+            cleared_users AS (
+              UPDATE "User" AS user_account
+              SET "currentRoomId" = NULL, "updatedAt" = NOW()
+              FROM removed
+              WHERE removed."leftAt" IS NULL
+                AND user_account.id = removed."userId"
+                AND user_account."currentRoomId" = removed."roomId"
+              RETURNING user_account.id
+            ),
+            active_counts AS (
+              SELECT removed."roomId", COUNT(*)::integer AS removed_count
+              FROM removed
+              WHERE removed."leftAt" IS NULL
+              GROUP BY removed."roomId"
+            ),
+            updated_rooms AS (
+              UPDATE "Room" AS room
+              SET "participantCount" = GREATEST(
+                room."participantCount" - active_counts.removed_count,
+                0
+              )
+              FROM active_counts
+              WHERE room.id = active_counts."roomId"
+              RETURNING
+                room.id AS "roomId",
+                room."participantCount",
+                room."isPrivate",
+                room."roomType"
+            )
+            SELECT
+              updated_rooms."roomId",
+              removed."userId",
+              updated_rooms."participantCount",
+              updated_rooms."isPrivate",
+              updated_rooms."roomType"
+            FROM updated_rooms
+            INNER JOIN removed ON removed."roomId" = updated_rooms."roomId"
+            WHERE removed."leftAt" IS NULL
+            ORDER BY updated_rooms."roomId", removed."userId"
+          `);
+
+          // Only rows that changed from active to revoked get an external
+          // hand-off. Scheduled/inactive grants are removed above but have no
+          // live provider session to disconnect.
+          const revokedActiveRoomAccess = revokedActiveRows.map(revoked => ({
+            ...revoked,
+            revocationTransitionId: randomUUID(),
+          }));
+          if (revokedActiveRoomAccess.length > 0) {
+            await tx.outboxEvent.createMany({
+              data: revokedActiveRoomAccess.map(revoked =>
+                livekitRevocationOutboxData(
+                  { roomId: revoked.roomId, userId: revoked.userId },
+                  revoked.revocationTransitionId,
+                ),
+              ),
+            });
+          }
+
           await tx.notification.deleteMany({
             where: {
-              type: { in: ['FOLLOW_REQUEST', 'NEW_FOLLOWER'] },
+              // Relationship notifications must disappear in the same commit
+              // as the block. The outbox consumer treats their now-orphaned
+              // delivery envelopes as successful no-ops.
+              type: { in: ['FOLLOW_REQUEST', 'NEW_FOLLOWER', 'ROOM_INVITE', 'NEW_MESSAGE'] },
               OR: [
                 { userId: blockerId, actorId: targetId },
                 { userId: targetId, actorId: blockerId },
               ],
             },
           });
-          return { blockerFollowerCount, targetFollowerCount };
+          return { blockerFollowerCount, targetFollowerCount, revokedActiveRoomAccess };
         },
-        { maxWait: 5_000, timeout: 10_000 },
+        { maxWait: 5_000, timeout: 30_000 },
       ),
     );
 
@@ -187,6 +357,26 @@ export const socialService = {
     }
     if (counts.blockerFollowerCount !== null) {
       emitUserFollowerCount(blockerId, counts.blockerFollowerCount);
+    }
+    await Promise.all([
+      notificationsService.refreshUnreadCount(blockerId),
+      notificationsService.refreshUnreadCount(targetId),
+    ]);
+    for (const revoked of counts.revokedActiveRoomAccess) {
+      forceUserSocketsLeaveRoom(revoked.roomId, revoked.userId);
+      closeTransportsForUserInRoom(revoked.roomId, revoked.userId);
+      await scheduleBackgroundTask(wakeLivekitRevocation(revoked.revocationTransitionId), err =>
+        logger.warn('social.block: LiveKit revocation wake failed', {
+          err,
+          roomId: revoked.roomId,
+        }),
+      );
+      emitRoomUserLeft(revoked.roomId, revoked.userId);
+      if (!revoked.isPrivate && revoked.roomType === 'OPEN') {
+        emitHallwayRoomUpdated(revoked.roomId, {
+          participantCount: revoked.participantCount,
+        });
+      }
     }
     hideMapUsersFromEachOther(blockerId, targetId);
     return { blocked: true as const };

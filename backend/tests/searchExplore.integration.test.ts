@@ -11,8 +11,6 @@ const { createApp } = require('../src/app') as typeof import('../src/app');
 const { prisma } = require('../src/config/database') as typeof import('../src/config/database');
 const { connectRedis, disconnectRedis } =
   require('../src/config/redis') as typeof import('../src/config/redis');
-const { ensureSearchIndexes } =
-  require('../src/config/searchIndexes') as typeof import('../src/config/searchIndexes');
 /* eslint-enable @typescript-eslint/no-require-imports */
 
 const rand = () => Math.random().toString(36).slice(2, 10);
@@ -47,7 +45,6 @@ describe('Search + Explore integration', () => {
     await connectRedis();
     // Ensure pg_trgm extension + indexes exist for this suite. Idempotent,
     // so repeated runs are safe.
-    await ensureSearchIndexes();
     app = createApp();
   });
 

@@ -1,4 +1,6 @@
+import { createIdempotencyKey } from '../../utils/idempotency';
 import { apiClient } from './apiClient';
+import { retryIdempotentMutationOnce } from './retryPolicy';
 
 /**
  * Uploads a recorded voice clip to the backend and returns the remote URL the
@@ -62,13 +64,16 @@ export const voiceService = {
    * Given a generous 60s timeout like the avatar upload, since a base64 audio
    * body is large and slow on a poor connection.
    */
-  async upload(uri: string): Promise<string> {
+  async upload(uri: string, attemptKey?: string): Promise<string> {
     const base64 = await fileToBase64(uri);
     const mime = mimeForUri(uri);
-    const res = await apiClient.post<VoiceUploadEnvelope>(
-      '/upload/voice',
-      { base64, mime },
-      { timeout: 60_000 },
+    const idempotencyKey = attemptKey ?? createIdempotencyKey();
+    const payload = { base64, mime };
+    const res = await retryIdempotentMutationOnce(() =>
+      apiClient.post<VoiceUploadEnvelope>('/upload/voice', payload, {
+        timeout: 60_000,
+        headers: { 'Idempotency-Key': idempotencyKey },
+      }),
     );
     const url = res.data?.data?.url ?? res.data?.url;
     if (!url) {

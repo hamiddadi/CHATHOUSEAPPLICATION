@@ -73,11 +73,16 @@ export const HostActionsSheet: React.FC<HostActionsSheetProps> = memo(
       nominate.mutate(target.id, {
         onSuccess: () => {
           closeAfterSuccess();
-          Alert.alert('Invitation envoyée', `@${target.username} est invité·e à parler.`);
+          Alert.alert(
+            t('room.hostActions.inviteSentTitle'),
+            t('room.hostActions.inviteSentBody', {
+              handle: target.username || target.displayName,
+            }),
+          );
         },
         onError: handleActionError,
       });
-    }, [beginAction, closeAfterSuccess, handleActionError, nominate, target]);
+    }, [beginAction, closeAfterSuccess, handleActionError, nominate, t, target]);
 
     const handleMute = useCallback(() => {
       if (!target || !beginAction()) return;
@@ -101,12 +106,14 @@ export const HostActionsSheet: React.FC<HostActionsSheetProps> = memo(
     const handleTransferHost = useCallback(() => {
       if (!target || actionInFlight.current || isPending) return;
       Alert.alert(
-        'Transférer la room',
-        `Donner le rôle d'hôte à @${target.username} ? Vous deviendrez speaker.`,
+        t('room.hostActions.transferTitle'),
+        t('room.hostActions.transferBody', {
+          handle: target.username || target.displayName,
+        }),
         [
-          { text: 'Annuler', style: 'cancel' },
+          { text: t('common.cancel'), style: 'cancel' },
           {
-            text: 'Transférer',
+            text: t('room.hostActions.transferConfirm'),
             style: 'destructive',
             onPress: () => {
               if (!beginAction()) return;
@@ -118,17 +125,19 @@ export const HostActionsSheet: React.FC<HostActionsSheetProps> = memo(
           },
         ],
       );
-    }, [beginAction, closeAfterSuccess, handleActionError, isPending, roomId, setRole, target]);
+    }, [beginAction, closeAfterSuccess, handleActionError, isPending, roomId, setRole, t, target]);
 
     const handleKick = useCallback(() => {
       if (!target || actionInFlight.current || isPending) return;
       Alert.alert(
-        'Expulser cet utilisateur',
-        `@${target.username} sera retiré de la room et banni 30 minutes.`,
+        t('room.hostActions.kickTitle'),
+        t('room.hostActions.kickBody', {
+          handle: target.username || target.displayName,
+        }),
         [
-          { text: 'Annuler', style: 'cancel' },
+          { text: t('common.cancel'), style: 'cancel' },
           {
-            text: 'Expulser',
+            text: t('room.hostActions.kickConfirm'),
             style: 'destructive',
             onPress: () => {
               if (!beginAction()) return;
@@ -140,7 +149,7 @@ export const HostActionsSheet: React.FC<HostActionsSheetProps> = memo(
           },
         ],
       );
-    }, [beginAction, closeAfterSuccess, handleActionError, isPending, kick, roomId, target]);
+    }, [beginAction, closeAfterSuccess, handleActionError, isPending, kick, roomId, t, target]);
 
     if (!target) return null;
 
@@ -149,8 +158,14 @@ export const HostActionsSheet: React.FC<HostActionsSheetProps> = memo(
 
     return (
       <Modal visible transparent animationType="slide" onRequestClose={handleClose}>
-        <Pressable style={styles.backdrop} onPress={handleClose} accessibilityLabel="Fermer">
-          <Pressable style={styles.sheet} onPress={() => undefined}>
+        <Pressable style={styles.backdrop} onPress={handleClose} accessible={false}>
+          <Pressable
+            style={styles.sheet}
+            onPress={() => undefined}
+            accessible={false}
+            accessibilityViewIsModal
+            importantForAccessibility="yes"
+          >
             <View style={styles.handle} />
             <View style={styles.header}>
               <Avatar
@@ -167,7 +182,11 @@ export const HostActionsSheet: React.FC<HostActionsSheetProps> = memo(
             {isOnStage && (
               <ActionRow
                 icon={muted ? 'mic' : 'mic-off'}
-                label={muted ? 'Réactiver son micro' : 'Couper son micro'}
+                label={
+                  muted
+                    ? t('room.hostActions.unmuteParticipant')
+                    : t('room.hostActions.muteParticipant')
+                }
                 onPress={handleMute}
                 disabled={isPending}
               />
@@ -175,7 +194,7 @@ export const HostActionsSheet: React.FC<HostActionsSheetProps> = memo(
             {!isOnStage && (
               <ActionRow
                 icon="mic"
-                label="Inviter à parler"
+                label={t('room.hostActions.promoteSpeaker')}
                 onPress={() => handlePromote('SPEAKER')}
                 disabled={isPending}
               />
@@ -183,7 +202,7 @@ export const HostActionsSheet: React.FC<HostActionsSheetProps> = memo(
             {!isOnStage && (
               <ActionRow
                 icon="record-voice-over"
-                label="Nominer pour parler (demande)"
+                label={t('room.hostActions.nominateSpeaker')}
                 onPress={handleNominate}
                 disabled={isPending}
               />
@@ -191,28 +210,28 @@ export const HostActionsSheet: React.FC<HostActionsSheetProps> = memo(
             {isOnStage && (
               <ActionRow
                 icon="mic-off"
-                label="Renvoyer dans le public"
+                label={t('room.hostActions.moveToAudience')}
                 onPress={() => handlePromote('LISTENER')}
                 disabled={isPending}
               />
             )}
             <ActionRow
               icon="shield"
-              label="Nommer modérateur"
+              label={t('room.hostActions.makeModerator')}
               onPress={() => handlePromote('MODERATOR')}
               disabled={isPending}
             />
             {viewerIsHost && (
               <ActionRow
                 icon="star"
-                label="Transférer le rôle d'hôte"
+                label={t('room.hostActions.transferHost')}
                 onPress={handleTransferHost}
                 disabled={isPending}
               />
             )}
             <ActionRow
               icon="block"
-              label="Expulser (ban 30 min)"
+              label={t('room.hostActions.kickBan')}
               onPress={handleKick}
               destructive
               disabled={isPending}
@@ -221,11 +240,11 @@ export const HostActionsSheet: React.FC<HostActionsSheetProps> = memo(
               onPress={handleClose}
               style={[styles.cancel, isPending ? styles.disabled : null]}
               accessibilityRole="button"
-              accessibilityLabel="Annuler"
+              accessibilityLabel={t('common.cancel')}
               accessibilityState={{ disabled: isPending }}
               disabled={isPending}
             >
-              <Text style={styles.cancelLabel}>Annuler</Text>
+              <Text style={styles.cancelLabel}>{t('common.cancel')}</Text>
             </Pressable>
           </Pressable>
         </Pressable>

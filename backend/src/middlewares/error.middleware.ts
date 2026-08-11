@@ -5,6 +5,7 @@ import { logger } from '../config/logger';
 import { env } from '../config/env';
 import { sendError } from '../utils/response';
 import { Sentry } from '../monitoring/sentry';
+import { sanitizeRequestUrl } from '../utils/sanitizeRequestUrl';
 
 /**
  * Standardised error codes. Format: DOMAIN_NNN so clients can branch on a
@@ -95,6 +96,7 @@ export const ERROR_CODES = {
     status: 403,
     message: 'An accepted follow is required to add this user',
   },
+  GROUP_008: { status: 400, message: 'Group member limit reached' },
 
   REPORT_001: { status: 403, message: 'You cannot report your own content' },
   REPORT_002: { status: 404, message: 'Reportable content not found' },
@@ -234,10 +236,10 @@ const describe = (
   };
 };
 
-export const errorMiddleware: ErrorRequestHandler = (err, req: Request, res, _next) => {
+export const errorMiddleware: ErrorRequestHandler = (err, req: Request, res, next) => {
   const { code, message, status, details } = describe(err);
 
-  logger.error(`${req.method} ${req.originalUrl} → ${code} ${status}`, {
+  logger.error(`${req.method} ${sanitizeRequestUrl(req.originalUrl)} → ${code} ${status}`, {
     err: err instanceof Error ? err.message : err,
     stack: err instanceof Error && env.NODE_ENV !== 'production' ? err.stack : undefined,
     details,
@@ -248,6 +250,14 @@ export const errorMiddleware: ErrorRequestHandler = (err, req: Request, res, _ne
   // keep the issue stream signal-rich. No-op when SENTRY_DSN is unset.
   if (status >= 500) {
     Sentry.captureException(err);
+  }
+
+  // A streamed response may fail after its status and headers are already on
+  // the wire. Delegate to Express' final handler so the socket is terminated;
+  // attempting to send our JSON envelope here would raise ERR_HTTP_HEADERS_SENT.
+  if (res.headersSent) {
+    next(err);
+    return;
   }
 
   sendError(res, code, message, status, env.NODE_ENV === 'production' ? undefined : details);

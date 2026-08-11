@@ -1,11 +1,14 @@
+import { randomUUID } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
 import { prisma, runWriteWithRetry } from '../../config/database';
 import { env } from '../../config/env';
 import { AppError } from '../../middlewares/error.middleware';
 import { notificationsService } from '../notifications/notifications.service';
+import { legalAcceptanceSelect, legalAcceptanceStatus } from '../auth/legal-acceptance';
 import { recordingsService } from '../recordings/recordings.service';
 import { auditLogService } from '../admin/auditLog.service';
 import { getBlockedIdSet } from '../social/blocks';
+import { lockUserRows } from '../social/relationship-lock';
 import { cancelEventReminder, scheduleEventReminder } from '../../queues/eventReminders';
 import { fanoutOne } from '../../extensions/queues/followFanout';
 import { emitRoomJoinedByFollowing } from '../../extensions/realtime/aliases';
@@ -13,6 +16,10 @@ import { canRaiseHandUnderRoomSettings } from '../../extensions/modules/roomSett
 import { logger } from '../../config/logger';
 import { runIdempotentCreate } from '../../utils/idempotency';
 import { scheduleBackgroundTask } from '../../utils/backgroundTasks';
+import {
+  notificationDeliveryOutboxData,
+  wakeRoomInviteDelivery,
+} from '../notifications/notification.outbox';
 import {
   closeRoom as closeSfuRoom,
   closeTransportsForUserInRoom,
@@ -37,6 +44,11 @@ import {
   forceLeaveRoom,
   forceUserSocketsLeaveRoom,
 } from '../../socket/realtime';
+import { livekitRevocationOutboxData, wakeLivekitRevocation } from './livekit-revocation.outbox';
+import {
+  livekitRoomRevocationOutboxData,
+  wakeLivekitRoomRevocation,
+} from './livekit-room-revocation.outbox';
 import type {
   CreateRoomInput,
   InviteToRoomInput,
@@ -56,6 +68,7 @@ import {
   roomMetadataAccessWhere,
 } from './rooms.access';
 import { getPersonalizedRoomFeed } from './room-feed.service';
+import { canRefreshReconnectAdmission } from './participant-admission.policy';
 
 const publicUser = {
   id: true,
@@ -69,6 +82,29 @@ const MS_PER_MINUTE = 60_000;
 // enough to discourage immediate re-join, short enough to forgive a mistake.
 const DEFAULT_KICK_BAN_MINUTES = 30;
 
+export interface ParticipantAdmissionIdentity {
+  participantId: string;
+  joinedAt: Date;
+  admissionConfirmedAt: Date | null;
+}
+
+interface LeaveOptions {
+  /**
+   * Crash/failed-socket cleanup may leave only the exact admission snapshot it
+   * observed. A newer rejoin or confirmation makes the conditional update a
+   * no-op and therefore cannot be evicted by a stale reconciliation cycle.
+   */
+  admission?: ParticipantAdmissionIdentity & {
+    staleBefore?: Date;
+    /**
+     * Reconciliation snapshots have a finite lifetime. Re-check this while
+     * holding the Room lock so lock waits/retries cannot apply an expired
+     * cluster view when selecting a host successor or closing the room.
+     */
+    snapshotStillValid?: () => boolean;
+  };
+}
+
 const roomInclude = {
   host: { select: publicUser },
   participants: {
@@ -78,14 +114,6 @@ const roomInclude = {
   club: { select: { id: true, name: true, iconUrl: true } },
   _count: { select: { rsvps: true } },
 } satisfies Prisma.RoomInclude;
-
-const requireHost = async (roomId: string, userId: string) => {
-  const room = await prisma.room.findUnique({ where: { id: roomId } });
-  if (!room) throw new AppError('ROOM_001');
-  if (room.endedAt) throw new AppError('ROOM_004');
-  if (room.hostId !== userId) throw new AppError('ROOM_003');
-  return room;
-};
 
 /**
  * Same as requireHost but also allows MODERATOR role. Used for actions
@@ -100,9 +128,46 @@ const requireHostOrMod = async (roomId: string, userId: string) => {
     where: { userId_roomId: { userId, roomId } },
     select: { role: true, leftAt: true },
   });
-  if (!p || p.leftAt || (p.role !== 'MODERATOR' && p.role !== 'HOST')) {
+  // Room.hostId is the sole HOST authority. Accepting a stale Participant
+  // role=HOST would let a former host regain moderation after a hand-off.
+  if (!p || p.leftAt || p.role !== 'MODERATOR') {
     throw new AppError('ROOM_003');
   }
+  return room;
+};
+
+/**
+ * Transactional authority check for privileged mutations. Every room role,
+ * leave, kick and hand-off path takes the Room lock first, so keeping that
+ * same lock through the write gives the authorization decision a real
+ * linearization point instead of a check-then-mutate race.
+ */
+const requireHostOrModLocked = async (
+  tx: Prisma.TransactionClient,
+  roomId: string,
+  userId: string,
+) => {
+  await tx.$queryRaw`SELECT "id" FROM "Room" WHERE "id" = ${roomId} FOR UPDATE`;
+  const room = await tx.room.findUnique({ where: { id: roomId } });
+  if (!room) throw new AppError('ROOM_001');
+  if (room.endedAt || !room.isLive) throw new AppError('ROOM_004');
+  if (room.hostId === userId) return room;
+  const participant = await tx.participant.findUnique({
+    where: { userId_roomId: { userId, roomId } },
+    select: { role: true, leftAt: true },
+  });
+  if (!participant || participant.leftAt || participant.role !== 'MODERATOR') {
+    throw new AppError('ROOM_003');
+  }
+  return room;
+};
+
+const requireHostLocked = async (tx: Prisma.TransactionClient, roomId: string, userId: string) => {
+  await tx.$queryRaw`SELECT "id" FROM "Room" WHERE "id" = ${roomId} FOR UPDATE`;
+  const room = await tx.room.findUnique({ where: { id: roomId } });
+  if (!room) throw new AppError('ROOM_001');
+  if (room.endedAt || !room.isLive) throw new AppError('ROOM_004');
+  if (room.hostId !== userId) throw new AppError('ROOM_003');
   return room;
 };
 
@@ -114,26 +179,127 @@ export const roomsService = {
    * ended room retained leftAt = null.
    */
   async issueLivekitToken(roomId: string, userId: string) {
-    const participant = await prisma.participant.findUnique({
+    // Cheap fail-closed preflight prevents arbitrary authenticated room ids
+    // from provisioning orphaned LiveKit rooms. Every decision is re-read
+    // under locks below; this first read is only an allocation guard.
+    const preflight = await prisma.participant.findUnique({
       where: { userId_roomId: { userId, roomId } },
       select: {
-        role: true,
         leftAt: true,
-        room: { select: { isLive: true, endedAt: true } },
+        admissionConfirmedAt: true,
+        room: { select: { isLive: true, endedAt: true, hostId: true } },
+        user: { select: { deletedAt: true, suspendedUntil: true } },
       },
     });
-
-    if (!participant) throw new AppError('ROOM_005');
-    if (!participant.room.isLive || participant.room.endedAt) {
-      throw new AppError('ROOM_004');
+    if (!preflight) throw new AppError('ROOM_005');
+    if (!preflight.room.isLive || preflight.room.endedAt) throw new AppError('ROOM_004');
+    if (preflight.leftAt || preflight.admissionConfirmedAt === null) {
+      throw new AppError('ROOM_005');
     }
-    if (participant.leftAt) throw new AppError('ROOM_005');
+    if (
+      preflight.user.deletedAt ||
+      (preflight.user.suspendedUntil && preflight.user.suspendedUntil > new Date())
+    ) {
+      throw new AppError('AUTH_007');
+    }
+    if (preflight.room.hostId !== userId) {
+      const blocked = await prisma.block.findFirst({
+        where: {
+          OR: [
+            { blockerId: userId, blockedId: preflight.room.hostId },
+            { blockerId: preflight.room.hostId, blockedId: userId },
+          ],
+        },
+        select: { id: true },
+      });
+      if (blocked) throw new AppError('ROOM_007');
+    }
 
-    return livekitService.issueRoomToken({
-      roomId,
-      userId,
-      role: participant.role as LivekitParticipantRole,
-    });
+    // Provision before taking a database lock. Room-revocation events repeat
+    // through the full token horizon, so a concurrent close still converges.
+    await livekitService.ensureRoom(roomId);
+
+    return runWriteWithRetry(() =>
+      prisma.$transaction(
+        async tx => {
+          // Signing is inside the Room -> User -> Participant serialization
+          // boundary shared by join/leave/block/end. A revocation therefore
+          // linearizes strictly before or after this capability is issued.
+          await tx.$queryRaw`SELECT "id" FROM "Room" WHERE "id" = ${roomId} FOR UPDATE`;
+          await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${userId} FOR UPDATE`;
+          const [room, participant, user] = await Promise.all([
+            tx.room.findUnique({
+              where: { id: roomId },
+              select: { isLive: true, endedAt: true, hostId: true },
+            }),
+            tx.participant.findUnique({
+              where: { userId_roomId: { userId, roomId } },
+              select: {
+                role: true,
+                isMuted: true,
+                leftAt: true,
+                admissionConfirmedAt: true,
+              },
+            }),
+            tx.user.findUnique({
+              where: { id: userId },
+              select: {
+                deletedAt: true,
+                suspendedUntil: true,
+                ...legalAcceptanceSelect,
+              },
+            }),
+          ]);
+          if (!room) throw new AppError('ROOM_001');
+          if (!room.isLive || room.endedAt) throw new AppError('ROOM_004');
+          if (!participant || participant.leftAt || participant.admissionConfirmedAt === null) {
+            throw new AppError('ROOM_005');
+          }
+          if (!user || user.deletedAt) throw new AppError('USER_001');
+          if (user.suspendedUntil && user.suspendedUntil > new Date()) {
+            throw new AppError('AUTH_007');
+          }
+          if (room.hostId !== userId) {
+            const block = await tx.block.findFirst({
+              where: {
+                OR: [
+                  { blockerId: userId, blockedId: room.hostId },
+                  { blockerId: room.hostId, blockedId: userId },
+                ],
+              },
+              select: { id: true },
+            });
+            if (block) throw new AppError('ROOM_007');
+          }
+
+          // Room.hostId is authoritative for host capability. Historical
+          // Participant rows may contain HOST after an older hand-off, so
+          // never turn that stale label into a publish grant or HOST token.
+          const effectiveRole: LivekitParticipantRole =
+            room.hostId === userId
+              ? 'HOST'
+              : participant.role === 'HOST'
+                ? 'LISTENER'
+                : (participant.role as LivekitParticipantRole);
+          const stageRole =
+            effectiveRole === 'HOST' ||
+            effectiveRole === 'MODERATOR' ||
+            effectiveRole === 'SPEAKER';
+          const canPublish =
+            stageRole &&
+            !participant.isMuted &&
+            !legalAcceptanceStatus(user).legalAcceptanceRequired;
+          return livekitService.issueRoomToken({
+            roomId,
+            userId,
+            role: effectiveRole,
+            canPublish,
+            roomReady: true,
+          });
+        },
+        { maxWait: 5_000, timeout: 10_000 },
+      ),
+    );
   },
 
   async list(viewerId: string, input: ListRoomsInput) {
@@ -188,25 +354,6 @@ export const roomsService = {
       throw new AppError('ROOM_011');
     }
 
-    // If the room is attached to a club, the host must be a member.
-    if (input.clubId) {
-      const membership = await prisma.clubMember.findFirst({
-        where: {
-          clubId: input.clubId,
-          userId: hostId,
-          user: { deletedAt: null },
-          club: {
-            owner: {
-              deletedAt: null,
-              blocksCreated: { none: { blockedId: hostId } },
-              blocksReceived: { none: { blockerId: hostId } },
-            },
-          },
-        },
-      });
-      if (!membership) throw new AppError('CLUB_002');
-    }
-
     const scheduledFor = input.scheduledFor ? new Date(input.scheduledFor) : null;
     const isLive = scheduledFor === null;
     // CLOSED and isPrivate are two representations of the same access mode.
@@ -221,40 +368,11 @@ export const roomsService = {
       ...new Set(input.topics.map(t => t.trim().toLowerCase()).filter(Boolean)),
     ];
 
-    // Drop the host id + duplicates from the co-host list. Validate the
-    // users actually exist — silently prune unknown ids so an outdated
-    // client can't crash the request.
+    // Drop the host id + duplicates from the requested co-host list. Their
+    // active/block/follow eligibility is resolved under transaction locks
+    // below, at the same linearization point as Room insertion.
     const requestedCoHosts = [...new Set(input.coHostIds.filter(id => id !== hostId))];
     let coHostIds: string[] = [];
-    if (requestedCoHosts.length > 0) {
-      const [found, blocked] = await Promise.all([
-        prisma.user.findMany({
-          where: { id: { in: requestedCoHosts }, deletedAt: null },
-          select: { id: true },
-        }),
-        getBlockedIdSet(hostId),
-      ]);
-      coHostIds = found.map(user => user.id).filter(userId => !blocked.has(userId));
-      if (roomType === 'SOCIAL' && coHostIds.length > 0) {
-        const accepted = await prisma.follow.findMany({
-          where: {
-            followerId: { in: coHostIds },
-            followingId: hostId,
-            status: 'ACCEPTED',
-          },
-          select: { followerId: true },
-        });
-        const acceptedIds = new Set(accepted.map(follow => follow.followerId));
-        coHostIds = coHostIds.filter(userId => acceptedIds.has(userId));
-      }
-    }
-    // PART-06 fix: co-hosts are seated as SPEAKER, so the same maxSpeakers cap
-    // that setRole enforces must apply here — otherwise a host can overshoot
-    // the speaker limit at creation time. Trim the surplus (the host holds the
-    // HOST role and isn't counted against the SPEAKER cap).
-    if (coHostIds.length > input.maxSpeakers) {
-      coHostIds = coHostIds.slice(0, input.maxSpeakers);
-    }
 
     // Room + initial participants + idempotency claim commit atomically.
     const creation = await runIdempotentCreate({
@@ -263,22 +381,94 @@ export const roomsService = {
       key: idempotencyKey,
       payload: input,
       create: async tx => {
-        // A user may host only one live room at a time. Lock the account in
-        // the SAME transaction as room + participant creation so concurrent
-        // requests with different idempotency keys cannot both observe an
-        // empty currentRoomId and create two live rooms.
-        if (isLive) {
-          await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${hostId} FOR UPDATE`;
-          const lockedHost = await tx.user.findUnique({
-            where: { id: hostId },
-            select: { currentRoomId: true, deletedAt: true, suspendedUntil: true },
-          });
-          if (!lockedHost || lockedHost.deletedAt) throw new AppError('USER_001');
-          if (lockedHost.suspendedUntil && lockedHost.suspendedUntil > new Date()) {
-            throw new AppError('AUTH_007');
-          }
-          if (lockedHost.currentRoomId) throw new AppError('ROOM_012');
+        // Lock the optional Club before its membership read. Club member
+        // removal/deletion writes this same Club row, so whichever transaction
+        // commits first determines whether the room may still be attached.
+        let clubOwnerId: string | null = null;
+        if (input.clubId) {
+          const lockedClub = await tx.$queryRaw<{ ownerId: string }[]>`
+            SELECT "ownerId" FROM "Club" WHERE id = ${input.clubId} FOR UPDATE`;
+          clubOwnerId = lockedClub[0]?.ownerId ?? null;
+          if (!clubOwnerId) throw new AppError('CLUB_002');
         }
+
+        // Block/follow mutations share these ordered User locks. Re-resolving
+        // every social fact after the lock closes the old window where a block,
+        // unfollow, suspension or deletion committed after the preflight read
+        // but before Room/Participant insertion.
+        const relationshipIds = [
+          hostId,
+          ...requestedCoHosts,
+          ...(clubOwnerId ? [clubOwnerId] : []),
+        ];
+        await lockUserRows(tx, relationshipIds);
+        const users = await tx.user.findMany({
+          where: { id: { in: relationshipIds }, deletedAt: null },
+          select: { id: true, currentRoomId: true, suspendedUntil: true },
+        });
+        const activeById = new Map(users.map(user => [user.id, user]));
+        const lockedHost = activeById.get(hostId);
+        const eligibilityNow = new Date();
+        if (!lockedHost) throw new AppError('USER_001');
+        if (lockedHost.suspendedUntil && lockedHost.suspendedUntil > eligibilityNow) {
+          throw new AppError('AUTH_007');
+        }
+        if (isLive && lockedHost.currentRoomId) throw new AppError('ROOM_012');
+
+        const relationshipTargets = [
+          ...new Set([...requestedCoHosts, ...(clubOwnerId ? [clubOwnerId] : [])]),
+        ].filter(userId => userId !== hostId);
+        const blockRows =
+          relationshipTargets.length === 0
+            ? []
+            : await tx.block.findMany({
+                where: {
+                  OR: [
+                    { blockerId: hostId, blockedId: { in: relationshipTargets } },
+                    { blockedId: hostId, blockerId: { in: relationshipTargets } },
+                  ],
+                },
+                select: { blockerId: true, blockedId: true },
+              });
+        const blockedIds = new Set(
+          blockRows.map(block => (block.blockerId === hostId ? block.blockedId : block.blockerId)),
+        );
+
+        if (input.clubId) {
+          if (!clubOwnerId || !activeById.has(clubOwnerId) || blockedIds.has(clubOwnerId)) {
+            throw new AppError('CLUB_002');
+          }
+          const membership = await tx.clubMember.findUnique({
+            where: { clubId_userId: { clubId: input.clubId, userId: hostId } },
+            select: { id: true },
+          });
+          if (!membership) throw new AppError('CLUB_002');
+        }
+
+        coHostIds = requestedCoHosts.filter(userId => {
+          const coHost = activeById.get(userId);
+          if (!coHost || blockedIds.has(userId)) return false;
+          if (coHost.suspendedUntil && coHost.suspendedUntil > eligibilityNow) return false;
+          // An invitation is a durable role grant, never an active presence.
+          // A user already in another room may therefore receive it safely;
+          // the explicit join path still prevents two simultaneous presences.
+          return true;
+        });
+        if (roomType === 'SOCIAL' && coHostIds.length > 0) {
+          const accepted = await tx.follow.findMany({
+            where: {
+              followerId: { in: coHostIds },
+              followingId: hostId,
+              status: 'ACCEPTED',
+            },
+            select: { followerId: true },
+          });
+          const acceptedIds = new Set(accepted.map(follow => follow.followerId));
+          coHostIds = coHostIds.filter(userId => acceptedIds.has(userId));
+        }
+        // Bound durable SPEAKER grants at the authoritative transaction
+        // boundary. A grant only becomes active after consent via join.
+        coHostIds = coHostIds.slice(0, input.maxSpeakers);
 
         const created = await tx.room.create({
           data: {
@@ -298,42 +488,74 @@ export const roomsService = {
             clubId: input.clubId ?? null,
             scheduledFor,
             isLive,
-            participantCount: isLive ? 1 + coHostIds.length : 0,
+            participantCount: isLive ? 1 : 0,
           },
         });
-        // Scheduled rooms don't auto-add the host as participant — the host
-        // joins when the room goes live like anyone else. Same for co-hosts:
-        // they get the invite notification either way, but only get seated
-        // as SPEAKER participants when the room is live.
+        // Scheduled rooms don't auto-add the host. A live creation seats only
+        // its host; invited co-hosts must explicitly join before they are live.
         if (isLive) {
           await tx.participant.create({
-            data: { roomId: created.id, userId: hostId, role: 'HOST' },
+            data: {
+              roomId: created.id,
+              userId: hostId,
+              role: 'HOST',
+              admissionConfirmedAt: null,
+            },
           });
-          await tx.user.update({
-            where: { id: hostId },
+          const seatedHost = await tx.user.updateMany({
+            where: { id: hostId, deletedAt: null },
             data: { currentRoomId: created.id },
           });
-          if (coHostIds.length > 0) {
-            await tx.participant.createMany({
-              data: coHostIds.map(userId => ({
-                roomId: created.id,
-                userId,
-                role: 'SPEAKER' as const,
-              })),
-              skipDuplicates: true,
-            });
+          // The host row was locked and revalidated above. A mismatch rolls the
+          // Room and Participant back instead of committing phantom presence.
+          if (seatedHost.count !== 1) {
+            throw new AppError('SERVER_001', 'Could not atomically seat the room host');
           }
-        } else if (coHostIds.length > 0) {
-          // Scheduled co-hosts are authorised invitees, not active listeners.
-          // A leftAt value keeps them out of live counts while preserving the
-          // durable access proof used when they open or eventually join.
+        }
+        if (coHostIds.length > 0) {
+          // Live and scheduled co-hosts are grants, not active listeners.
+          // leftAt keeps them out of counts while join preserves SPEAKER.
+          const grantedAt = new Date();
           await tx.participant.createMany({
             data: coHostIds.map(userId => ({
               roomId: created.id,
               userId,
               role: 'SPEAKER' as const,
-              leftAt: new Date(),
+              leftAt: grantedAt,
             })),
+            skipDuplicates: true,
+          });
+        }
+
+        // Persist the in-app invite and its delivery hand-off in the same
+        // transaction as Room/Participant. Stable ids/event keys make both
+        // database records replay-safe without relying on request-local state.
+        if (coHostIds.length > 0) {
+          const invites = coHostIds.map(userId => {
+            // Keep personal identifiers out of the outbox event key/logs. The
+            // transaction itself is the idempotency boundary, so an opaque id
+            // remains perfectly replay-safe.
+            const notificationId = randomUUID();
+            return { userId, notificationId };
+          });
+          await tx.notification.createMany({
+            data: invites.map(({ userId, notificationId }) => ({
+              id: notificationId,
+              userId,
+              actorId: hostId,
+              type: 'ROOM_INVITE' as const,
+              title: 'Co-host invite',
+              body: `"${input.title}" — you're invited to co-host`,
+              data: { roomId: created.id, hostId, coHost: true },
+              targetId: created.id,
+              targetType: 'room',
+            })),
+            skipDuplicates: true,
+          });
+          await tx.outboxEvent.createMany({
+            data: invites.map(({ notificationId }) =>
+              notificationDeliveryOutboxData(notificationId, created.id),
+            ),
             skipDuplicates: true,
           });
         }
@@ -341,21 +563,15 @@ export const roomsService = {
       },
     });
 
-    // Fire ROOM_INVITE notifications to every co-host so they can jump
-    // in immediately (or open the scheduled event's detail view).
-    if (!creation.replayed && coHostIds.length > 0) {
-      await Promise.all(
-        coHostIds.map(userId =>
-          notificationsService.create({
-            userId,
-            type: 'ROOM_INVITE',
-            title: 'Co-host invite',
-            body: `"${input.title}" — you're invited to co-host`,
-            data: { roomId: creation.resourceId, hostId },
-          }),
-        ),
-      );
-    }
+    // Initial response and Idempotency-Key replay both drive the same durable
+    // aggregate. A failed PENDING event is made immediately eligible; a fresh
+    // PROCESSING lease is left alone so concurrent replays cannot double-send.
+    await scheduleBackgroundTask(wakeRoomInviteDelivery(creation.resourceId), err =>
+      logger.warn('room co-host invite delivery wake failed', {
+        err,
+        roomId: creation.resourceId,
+      }),
+    );
     const room = await prisma.room.findUnique({
       where: { id: creation.resourceId },
       include: roomInclude,
@@ -572,6 +788,7 @@ export const roomsService = {
             isPrivate: true,
             isLocked: true,
             roomType: true,
+            maxSpeakers: true,
           },
         });
         if (!fresh || fresh.endedAt || !fresh.isLive) throw new AppError('ROOM_004');
@@ -636,25 +853,79 @@ export const roomsService = {
         // a re-join (un-leave) doesn't count again.
         const isNewParticipant = !lockedExisting;
         let wasAlreadyActive = false;
+        let admission: ParticipantAdmissionIdentity | null = null;
         if (lockedExisting) {
+          // Normalize authority on every re-entry. Room.hostId is the source
+          // of truth; legacy rows that still say HOST after a transfer return
+          // as muted listeners and cannot resurrect old privileges.
+          const reentryRole =
+            fresh.hostId === userId
+              ? ('HOST' as const)
+              : lockedExisting.role === 'HOST' || lockedExisting.role === 'MODERATOR'
+                ? ('LISTENER' as const)
+                : lockedExisting.role;
           if (lockedExisting.leftAt) {
+            if (reentryRole === 'SPEAKER') {
+              const activeSpeakers = await tx.participant.count({
+                where: { roomId, leftAt: null, role: 'SPEAKER' },
+              });
+              if (activeSpeakers >= fresh.maxSpeakers) throw new AppError('ROOM_002');
+            }
+            const joinedAt = new Date();
             await tx.participant.update({
               where: { id: lockedExisting.id },
-              data: { leftAt: null, joinedAt: new Date() },
+              data: {
+                leftAt: null,
+                joinedAt,
+                admissionConfirmedAt: null,
+                role: reentryRole,
+                ...(reentryRole === 'LISTENER' &&
+                (lockedExisting.role === 'HOST' || lockedExisting.role === 'MODERATOR')
+                  ? { isMuted: true }
+                  : {}),
+              },
             });
+            admission = {
+              participantId: lockedExisting.id,
+              joinedAt,
+              admissionConfirmedAt: null,
+            };
           } else {
             wasAlreadyActive = true;
+            // REST admission normally precedes the Socket.IO admission. Let
+            // the socket attempt own the same unconfirmed lease so a failed
+            // channel join can compensate it exactly. A confirmed participant
+            // is never reset by an idempotent join.
+            if (lockedExisting.admissionConfirmedAt === null) {
+              admission = {
+                participantId: lockedExisting.id,
+                joinedAt: lockedExisting.joinedAt,
+                admissionConfirmedAt: null,
+              };
+            }
           }
         } else {
-          await tx.participant.create({
-            data: { roomId, userId, role: 'LISTENER' },
+          const joinedAt = new Date();
+          const createdParticipant = await tx.participant.create({
+            data: {
+              roomId,
+              userId,
+              role: 'LISTENER',
+              joinedAt,
+              admissionConfirmedAt: null,
+            },
           });
+          admission = {
+            participantId: createdParticipant.id,
+            joinedAt,
+            admissionConfirmedAt: null,
+          };
         }
 
         // Track current room + bump denormalized count
         await tx.user.update({ where: { id: userId }, data: { currentRoomId: roomId } });
         if (wasAlreadyActive) {
-          return { changed: false, participantCount: fresh.participantCount };
+          return { changed: false, participantCount: fresh.participantCount, admission };
         }
         // Broadcast the COMMITTED count (read back from the atomic increment),
         // not `room.participantCount + 1` — the latter is a pre-mutation snapshot
@@ -668,7 +939,7 @@ export const roomsService = {
           },
           select: { participantCount: true },
         });
-        return { changed: true, participantCount: updatedRoom.participantCount };
+        return { changed: true, participantCount: updatedRoom.participantCount, admission };
       }),
     );
     if (joinResult.changed) {
@@ -718,21 +989,210 @@ export const roomsService = {
     // late navigation. A cancelled screen must only POST /leave when this
     // request actually activated the Participant row; otherwise a quick
     // mini-bar resume/back cycle would evict an already-active session.
-    return { ...joinedRoom, changed: joinResult.changed };
+    return {
+      ...joinedRoom,
+      changed: joinResult.changed,
+      // Internal lifecycle identity. The REST controller strips this field;
+      // the Socket.IO handler uses it only for exact failure compensation.
+      admission: joinResult.admission,
+    };
   },
 
-  async leave(roomId: string, userId: string) {
+  /**
+   * Confirm realtime admission only after Socket.IO has joined room:<id>.
+   * Refreshing the timestamp on every successful attach also gives crash
+   * recovery a bounded heartbeat for rows whose disconnect callback was lost.
+   */
+  async confirmSocketAdmission(roomId: string, userId: string): Promise<boolean> {
+    return runWriteWithRetry(() =>
+      prisma.$transaction(
+        async tx => {
+          await tx.$queryRaw`SELECT "id" FROM "Room" WHERE "id" = ${roomId} FOR UPDATE`;
+          await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${userId} FOR UPDATE`;
+          const [room, user] = await Promise.all([
+            tx.room.findUnique({
+              where: { id: roomId },
+              select: { isLive: true, endedAt: true },
+            }),
+            tx.user.findUnique({
+              where: { id: userId },
+              select: { currentRoomId: true, deletedAt: true, suspendedUntil: true },
+            }),
+          ]);
+          const now = new Date();
+          if (!room?.isLive || room.endedAt) return false;
+          if (
+            !user ||
+            user.deletedAt ||
+            (user.suspendedUntil !== null && user.suspendedUntil > now) ||
+            user.currentRoomId !== roomId
+          ) {
+            return false;
+          }
+          const confirmed = await tx.participant.updateMany({
+            where: { roomId, userId, leftAt: null },
+            data: { admissionConfirmedAt: now },
+          });
+          return confirmed.count === 1;
+        },
+        { maxWait: 5_000, timeout: 10_000 },
+      ),
+    );
+  },
+
+  /**
+   * Start a bounded reconnect grace window after an involuntary transport
+   * loss. The Room -> User -> Participant locks serialize this heartbeat with
+   * leave/end/block/admin revocation. The conditional write can only refresh
+   * the exact active, already-confirmed lease observed under those locks.
+   */
+  async refreshSocketAdmissionForReconnect(roomId: string, userId: string): Promise<boolean> {
+    return runWriteWithRetry(() =>
+      prisma.$transaction(
+        async tx => {
+          await tx.$queryRaw`SELECT "id" FROM "Room" WHERE "id" = ${roomId} FOR UPDATE`;
+          await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${userId} FOR UPDATE`;
+          await tx.$queryRaw`SELECT "id" FROM "Participant" WHERE "roomId" = ${roomId} AND "userId" = ${userId} FOR UPDATE`;
+
+          const [room, user, participant] = await Promise.all([
+            tx.room.findUnique({
+              where: { id: roomId },
+              select: { isLive: true, endedAt: true },
+            }),
+            tx.user.findUnique({
+              where: { id: userId },
+              select: { currentRoomId: true, deletedAt: true, suspendedUntil: true },
+            }),
+            tx.participant.findUnique({
+              where: { userId_roomId: { userId, roomId } },
+              select: { id: true, leftAt: true, admissionConfirmedAt: true },
+            }),
+          ]);
+          const now = new Date();
+          const state = { room, user, participant };
+          if (!canRefreshReconnectAdmission(roomId, state, now)) return false;
+
+          const refreshed = await tx.participant.updateMany({
+            where: {
+              id: state.participant.id,
+              roomId,
+              userId,
+              leftAt: null,
+              admissionConfirmedAt: state.participant.admissionConfirmedAt,
+            },
+            data: { admissionConfirmedAt: now },
+          });
+          return refreshed.count === 1;
+        },
+        { maxWait: 5_000, timeout: 10_000 },
+      ),
+    );
+  },
+
+  async compensateUnconfirmedAdmission(
+    roomId: string,
+    userId: string,
+    admission: ParticipantAdmissionIdentity,
+  ) {
+    if (admission.admissionConfirmedAt !== null) {
+      return { left: true, changed: false, roomClosed: false };
+    }
+    return roomsService.leave(roomId, userId, { admission });
+  },
+
+  async expireStaleAdmission(
+    roomId: string,
+    userId: string,
+    admission: ParticipantAdmissionIdentity,
+    staleBefore: Date,
+    snapshotStillValid?: () => boolean,
+  ) {
+    return roomsService.leave(roomId, userId, {
+      admission: { ...admission, staleBefore, snapshotStillValid },
+    });
+  },
+
+  async leave(roomId: string, userId: string, options: LeaveOptions = {}) {
+    const admissionWhere: Prisma.ParticipantWhereInput = options.admission
+      ? {
+          id: options.admission.participantId,
+          AND: [
+            { joinedAt: options.admission.joinedAt },
+            { admissionConfirmedAt: options.admission.admissionConfirmedAt },
+            ...(options.admission.staleBefore
+              ? options.admission.admissionConfirmedAt === null
+                ? [{ joinedAt: { lte: options.admission.staleBefore } }]
+                : [{ admissionConfirmedAt: { lte: options.admission.staleBefore } }]
+              : []),
+          ],
+        }
+      : {};
     let autoClosed = false;
+    let roomRevocationTransitionId: string | null = null;
     const res = await runWriteWithRetry(() =>
       prisma.$transaction(async tx => {
         // Keep the same Room -> User -> Participant lock order as join() and
         // host promotion. Concurrent device disconnects are then serialized
         // on the room row instead of forming a Room/Participant lock cycle.
         await tx.$queryRaw`SELECT "id" FROM "Room" WHERE "id" = ${roomId} FOR UPDATE`;
-        await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${userId} FOR UPDATE`;
+        const lockedRoom = await tx.room.findUnique({ where: { id: roomId } });
+        if (!lockedRoom) throw new AppError('ROOM_001');
+        if (options.admission?.snapshotStillValid && !options.admission.snapshotStillValid()) {
+          return {
+            count: 0,
+            revocationTransitionId: null,
+            successorUserId: null,
+            roomClosed: false,
+            roomRevocationTransitionId: null,
+            successorPermissionTransitionId: null,
+            room: lockedRoom,
+          };
+        }
+        const leavingHost = lockedRoom.hostId === userId && !lockedRoom.endedAt;
+        const successor = leavingHost
+          ? await tx.participant.findFirst({
+              where: {
+                roomId,
+                leftAt: null,
+                userId: { not: userId },
+                role: { in: ['MODERATOR', 'SPEAKER'] },
+                user: {
+                  deletedAt: null,
+                  OR: [{ suspendedUntil: null }, { suspendedUntil: { lt: new Date() } }],
+                },
+                // During crash reconciliation only a participant observed as
+                // recently attached may inherit the host role. Present peers
+                // are heartbeated before absent admissions are expired.
+                ...(options.admission?.staleBefore
+                  ? { admissionConfirmedAt: { gt: options.admission.staleBefore } }
+                  : {}),
+              },
+              orderBy: [{ role: 'asc' }, { joinedAt: 'asc' }],
+            })
+          : null;
+        const remaining = leavingHost
+          ? await tx.participant.findMany({
+              where: { roomId, leftAt: null, userId: { not: userId } },
+              select: { userId: true },
+            })
+          : [];
+        await lockUserRows(tx, [userId, ...remaining.map(row => row.userId)]);
+        const leavingParticipant = await tx.participant.findUnique({
+          where: { userId_roomId: { userId, roomId } },
+          select: { role: true },
+        });
+        const revokeSessionAuthority =
+          leavingHost ||
+          leavingParticipant?.role === 'HOST' ||
+          leavingParticipant?.role === 'MODERATOR';
         const left = await tx.participant.updateMany({
-          where: { roomId, userId, leftAt: null },
-          data: { leftAt: new Date() },
+          where: { roomId, userId, leftAt: null, ...admissionWhere },
+          data: {
+            leftAt: new Date(),
+            // A host hand-off transfers authority; the historical row must not
+            // retain HOST and regain moderation/publish rights on a later join.
+            ...(revokeSessionAuthority ? { role: 'LISTENER' as const, isMuted: true } : {}),
+          },
         });
         if (left.count > 0) {
           await tx.user.updateMany({
@@ -741,10 +1201,73 @@ export const roomsService = {
           });
           await tx.$executeRaw`UPDATE "Room" SET "participantCount" = GREATEST("participantCount" - 1, 0) WHERE id = ${roomId}`;
           await tx.roomHandRaise.deleteMany({ where: { roomId, userId } });
+          const revocationTransitionId = randomUUID();
+          await tx.outboxEvent.create({
+            data: livekitRevocationOutboxData({ roomId, userId }, revocationTransitionId),
+          });
+          let roomRevocationTransitionId: string | null = null;
+          let successorPermissionTransitionId: string | null = null;
+          if (leavingHost && successor) {
+            await tx.room.update({
+              where: { id: roomId },
+              data: { hostId: successor.userId },
+            });
+            await tx.participant.update({
+              where: { id: successor.id },
+              data: { role: 'HOST', isMuted: false },
+            });
+            successorPermissionTransitionId = randomUUID();
+            await tx.outboxEvent.create({
+              data: livekitRevocationOutboxData(
+                { roomId, userId: successor.userId },
+                successorPermissionTransitionId,
+              ),
+            });
+          } else if (leavingHost) {
+            const remainingUserIds = remaining.map(row => row.userId);
+            await tx.room.update({
+              where: { id: roomId },
+              data: { isLive: false, endedAt: new Date(), participantCount: 0 },
+            });
+            await tx.participant.updateMany({
+              where: { roomId, leftAt: null },
+              data: { leftAt: new Date() },
+            });
+            if (remainingUserIds.length > 0) {
+              await tx.user.updateMany({
+                where: { id: { in: remainingUserIds }, currentRoomId: roomId },
+                data: { currentRoomId: null },
+              });
+            }
+            await tx.roomHandRaise.deleteMany({ where: { roomId } });
+            roomRevocationTransitionId = randomUUID();
+            await tx.outboxEvent.create({
+              data: livekitRoomRevocationOutboxData(roomId, roomRevocationTransitionId),
+            });
+          }
+          return {
+            count: left.count,
+            revocationTransitionId,
+            successorUserId: successor?.userId ?? null,
+            roomClosed: leavingHost && !successor,
+            roomRevocationTransitionId,
+            successorPermissionTransitionId,
+            room: lockedRoom,
+          };
         }
-        return left;
+        return {
+          count: 0,
+          revocationTransitionId: null,
+          successorUserId: null,
+          roomClosed: false,
+          roomRevocationTransitionId: null,
+          successorPermissionTransitionId: null,
+          room: lockedRoom,
+        };
       }),
     );
+    autoClosed = res.roomClosed;
+    roomRevocationTransitionId = res.roomRevocationTransitionId;
     if (res.count > 0) {
       // ANO-09 fix: floor participantCount at 0 to prevent negative values
       // from concurrent leave/kick races.
@@ -753,107 +1276,27 @@ export const roomsService = {
       // otherwise be unpromotable → USER_001). Only kick/lowerHand/setRole
       // cleared it before, never a plain leave.
       // ── Auto-promote: if the leaving user is the host, hand off ──
-      const room = await prisma.room.findUnique({ where: { id: roomId } });
-      if (room && !room.endedAt && room.hostId === userId) {
-        // ANO-01 fix: exclude platform-suspended users from the successor pool
-        // so a sanctioned participant never inherits the host role.
-        const successor = await prisma.participant.findFirst({
-          where: {
-            roomId,
-            leftAt: null,
-            userId: { not: userId },
-            role: { in: ['MODERATOR', 'SPEAKER'] },
-            user: {
-              deletedAt: null,
-              OR: [{ suspendedUntil: null }, { suspendedUntil: { lt: new Date() } }],
-            },
-          },
-          orderBy: [{ role: 'asc' }, { joinedAt: 'asc' }],
-        });
-        // ROOM-05/PART-10 fix: promote atomically with compare-and-swap guards
-        // that must BOTH match, or the whole promotion rolls back. The room
-        // update only matches while Room.hostId still equals the departing host
-        // (so two concurrent host-leaves can't both promote / overwrite hostId);
-        // the participant update only matches while the successor is still
-        // active (leftAt:null) so we never crown a user who left in the race
-        // window. Gating both in one interactive transaction (throw → rollback
-        // on either miss) prevents the split where hostId moves to a departed
-        // successor with no active HOST participant. The new host is unmuted.
-        const HOST_CAS_MISS = 'HOST_CAS_MISS';
-        const promoted = successor
-          ? await runWriteWithRetry(() =>
-              prisma.$transaction(async tx => {
-                const hostSwap = await tx.room.updateMany({
-                  where: { id: roomId, hostId: userId, endedAt: null },
-                  data: { hostId: successor.userId },
-                });
-                const partSwap = await tx.participant.updateMany({
-                  where: { id: successor.id, leftAt: null },
-                  data: { role: 'HOST', isMuted: false },
-                });
-                if (hostSwap.count !== 1 || partSwap.count !== 1) {
-                  throw new Error(HOST_CAS_MISS);
-                }
-                return true;
-              }),
-            ).catch((err: unknown) => {
-              if (err instanceof Error && err.message === HOST_CAS_MISS) return false;
-              throw err;
-            })
-          : false;
-        if (promoted && successor) {
-          emitRoomRoleChanged(roomId, { userId: successor.userId, role: 'HOST' });
-        } else {
-          // A live room cannot remain owned by a departed host. When no
-          // moderator/speaker can inherit ownership, close the room and evict
-          // any remaining listeners atomically. The old behavior left a live,
-          // hostless room whenever listeners were still connected.
-          const closed = await runWriteWithRetry(() =>
-            prisma.$transaction(async tx => {
-              const roomClose = await tx.room.updateMany({
-                where: { id: roomId, hostId: userId, endedAt: null },
-                data: { isLive: false, endedAt: new Date(), participantCount: 0 },
-              });
-              if (roomClose.count !== 1) return false;
-
-              const remaining = await tx.participant.findMany({
-                where: { roomId, leftAt: null },
-                select: { userId: true },
-              });
-              const remainingUserIds = remaining.map(participant => participant.userId);
-              await tx.participant.updateMany({
-                where: { roomId, leftAt: null },
-                data: { leftAt: new Date() },
-              });
-              if (remainingUserIds.length > 0) {
-                await tx.user.updateMany({
-                  where: { id: { in: remainingUserIds }, currentRoomId: roomId },
-                  data: { currentRoomId: null },
-                });
-              }
-              await tx.roomHandRaise.deleteMany({ where: { roomId } });
-              return true;
-            }),
+      const room = res.room;
+      if (res.successorUserId) {
+        emitRoomRoleChanged(roomId, { userId: res.successorUserId, role: 'HOST' });
+      }
+      if (res.successorPermissionTransitionId) {
+        await scheduleBackgroundTask(
+          wakeLivekitRevocation(res.successorPermissionTransitionId),
+          err => logger.warn('rooms.leave: successor permission wake failed', { err, roomId }),
+        );
+      }
+      if (res.roomClosed) {
+        if (room.scheduledFor) {
+          await cancelEventReminder(roomId).catch(err =>
+            logger.warn('rooms.leave: cancel reminder failed', { err, roomId }),
           );
-          if (closed) {
-            autoClosed = true;
-            // Best-effort: a Redis/BullMQ hiccup must not skip the room:ended
-            // emit + teardown below for a room that already closed.
-            if (room.scheduledFor) {
-              await cancelEventReminder(roomId).catch(err =>
-                logger.warn('rooms.leave: cancel reminder failed', { err, roomId }),
-              );
-            }
-            if (!room.isPrivate && room.roomType === 'OPEN') {
-              emitHallwayRoomClosed(roomId);
-            }
-            emitRoomEnded(roomId);
-            // Finalize the Replay when the room auto-closes (gated/no-op).
-            void recordingsService
-              .stopForRoom(roomId)
-              .catch(err => logger.warn('rooms.leave: recording stop failed', { err, roomId }));
-          }
         }
+        if (!room.isPrivate && room.roomType === 'OPEN') emitHallwayRoomClosed(roomId);
+        emitRoomEnded(roomId);
+        await scheduleBackgroundTask(recordingsService.stopForRoom(roomId), err =>
+          logger.warn('rooms.leave: recording stop failed', { err, roomId }),
+        );
       }
 
       // A room Participant is account-scoped. Once its committed row is left,
@@ -862,17 +1305,21 @@ export const roomsService = {
       // follows it.
       forceUserSocketsLeaveRoom(roomId, userId);
       closeTransportsForUserInRoom(roomId, userId);
-      await scheduleBackgroundTask(livekitService.removeParticipant(roomId, userId), err =>
-        logger.warn('rooms.leave: LiveKit participant removal failed', { err, roomId, userId }),
-      );
+      if (res.revocationTransitionId) {
+        await scheduleBackgroundTask(wakeLivekitRevocation(res.revocationTransitionId), err =>
+          logger.warn('rooms.leave: LiveKit revocation wake failed', { err, roomId }),
+        );
+      }
       emitRoomUserLeft(roomId, userId);
       await emitMapUserUpdate({ userId, isInRoom: false });
 
       if (autoClosed) {
         await closeSfuRoom(roomId);
-        await scheduleBackgroundTask(livekitService.deleteRoom(roomId), err =>
-          logger.warn('rooms.leave: LiveKit room deletion failed', { err, roomId }),
-        );
+        if (roomRevocationTransitionId) {
+          await scheduleBackgroundTask(wakeLivekitRoomRevocation(roomId), err =>
+            logger.warn('rooms.leave: LiveKit room revocation wake failed', { err, roomId }),
+          );
+        }
         forceAllSocketsLeaveRoom(roomId);
       } else {
         const current = await prisma.room.findUnique({
@@ -888,33 +1335,46 @@ export const roomsService = {
   },
 
   async end(roomId: string, userId: string) {
-    const room = await requireHost(roomId, userId);
-    // Collect active participant user ids before closing so we can clear currentRoomId
-    const activeParticipants = await prisma.participant.findMany({
-      where: { roomId, leftAt: null },
-      select: { userId: true },
-    });
-    const userIds = activeParticipants.map(p => p.userId);
+    const closure = await runWriteWithRetry(() =>
+      prisma.$transaction(
+        async tx => {
+          await tx.$queryRaw`SELECT "id" FROM "Room" WHERE "id" = ${roomId} FOR UPDATE`;
+          const room = await tx.room.findUnique({ where: { id: roomId } });
+          if (!room) throw new AppError('ROOM_001');
+          if (room.endedAt) throw new AppError('ROOM_004');
+          if (room.hostId !== userId) throw new AppError('ROOM_003');
 
-    await prisma.$transaction([
-      prisma.participant.updateMany({
-        where: { roomId, leftAt: null },
-        data: { leftAt: new Date() },
-      }),
-      prisma.room.update({
-        where: { id: roomId },
-        data: { isLive: false, endedAt: new Date(), participantCount: 0 },
-      }),
-      // Clear currentRoomId for all participants
-      ...(userIds.length > 0
-        ? [
-            prisma.user.updateMany({
-              where: { id: { in: userIds } },
+          const activeParticipants = await tx.participant.findMany({
+            where: { roomId, leftAt: null },
+            select: { userId: true },
+          });
+          const userIds = activeParticipants.map(participant => participant.userId);
+          await lockUserRows(tx, userIds);
+          await tx.participant.updateMany({
+            where: { roomId, leftAt: null },
+            data: { leftAt: new Date() },
+          });
+          await tx.room.update({
+            where: { id: roomId },
+            data: { isLive: false, endedAt: new Date(), participantCount: 0 },
+          });
+          if (userIds.length > 0) {
+            await tx.user.updateMany({
+              where: { id: { in: userIds }, currentRoomId: roomId },
               data: { currentRoomId: null },
-            }),
-          ]
-        : []),
-    ]);
+            });
+          }
+          await tx.roomHandRaise.deleteMany({ where: { roomId } });
+          const revocationTransitionId = randomUUID();
+          await tx.outboxEvent.create({
+            data: livekitRoomRevocationOutboxData(roomId, revocationTransitionId),
+          });
+          return { room, revocationTransitionId };
+        },
+        { maxWait: 5_000, timeout: 10_000 },
+      ),
+    );
+    const room = closure.room;
     // Drop any pending reminder — the room is over.
     if (room.scheduledFor) await cancelEventReminder(roomId);
     if (!room.isPrivate && room.roomType === 'OPEN') {
@@ -931,8 +1391,8 @@ export const roomsService = {
     // callers; lifecycle fan-out is centralized here to avoid duplicate emits.
     emitRoomEnded(roomId, { endedBy: userId, endedByName });
     await closeSfuRoom(roomId);
-    await scheduleBackgroundTask(livekitService.deleteRoom(roomId), err =>
-      logger.warn('rooms.end: LiveKit room deletion failed', { err, roomId }),
+    await scheduleBackgroundTask(wakeLivekitRoomRevocation(roomId), err =>
+      logger.warn('rooms.end: LiveKit room revocation wake failed', { err, roomId }),
     );
     forceAllSocketsLeaveRoom(roomId);
     // Stop + finalize the Replay recording if one is running (gated/no-op).
@@ -943,103 +1403,139 @@ export const roomsService = {
   },
 
   async setRole(roomId: string, hostUserId: string, input: UpdateRoleInput) {
-    const room = await requireHostOrMod(roomId, hostUserId);
-
-    // ROOM-01/PART-01 fix: the host can never be demoted via setRole. Without
-    // this a moderator could write role=SPEAKER/LISTENER on the host, leaving
-    // Room.hostId out of sync and (for LISTENER) cutting the host's audio.
-    // Mirrors the host protection in kick (ROOM_003) and setMute (ROOM_009).
-    if (input.userId === room.hostId && input.role !== 'HOST') {
-      throw new AppError('ROOM_003');
-    }
-
-    // Only the actual host can transfer ownership.
-    if (input.role === 'HOST' && room.hostId !== hostUserId) {
-      throw new AppError('ROOM_003');
-    }
-
-    // ANO-02 fix: only the HOST may promote to MODERATOR. Without this guard a
-    // moderator could escalate another listener to moderator, creating an
-    // uncontrolled privilege chain.
-    if (input.role === 'MODERATOR' && room.hostId !== hostUserId) {
-      throw new AppError('ROOM_003');
-    }
-
-    // HAND-01/HAND-08 fix: short-circuit when the target's role is unchanged.
-    // Re-promoting a user who is already a SPEAKER must be a no-op — otherwise
-    // it re-fires HAND_ACCEPTED + room:hand_lowered on every double-click, and
-    // (in a full room) the capacity check below would wrongly throw ROOM_002
-    // for someone who already holds a speaker seat.
-    const current = await prisma.participant.findUnique({
-      where: { userId_roomId: { userId: input.userId, roomId } },
-      select: { role: true, leftAt: true },
-    });
-    if (current && !current.leftAt && current.role === input.role) {
-      return { userId: input.userId, role: input.role };
-    }
-
-    // SPEAKER promotion: the capacity check + the role write must be atomic,
-    // otherwise two concurrent promotions can both read activeSpeakers < max and
-    // both succeed, overshooting maxSpeakers (TOCTOU). Serializable isolation
-    // makes the DB abort one racer (rare; the client just retries). Other roles
-    // have no cap, so they take the plain single-statement path.
-    let updatedCount: number;
-    if (input.role === 'SPEAKER') {
-      updatedCount = await prisma.$transaction(
+    const atomicMutation: {
+      changed: boolean;
+      room: { title: string; hostId: string; maxSpeakers: number };
+      transitionIds: string[];
+      previousHostId: string | null;
+    } = await runWriteWithRetry(() =>
+      prisma.$transaction(
         async tx => {
-          const activeSpeakers = await tx.participant.count({
-            where: { roomId, leftAt: null, role: 'SPEAKER' },
+          await tx.$queryRaw`SELECT "id" FROM "Room" WHERE "id" = ${roomId} FOR UPDATE`;
+          const lockedRoom = await tx.room.findUnique({
+            where: { id: roomId },
+            select: {
+              title: true,
+              hostId: true,
+              maxSpeakers: true,
+              endedAt: true,
+              isLive: true,
+            },
           });
-          if (activeSpeakers >= room.maxSpeakers) throw new AppError('ROOM_002');
-          const res = await tx.participant.updateMany({
-            where: { roomId, userId: input.userId, leftAt: null },
-            data: { role: input.role },
+          if (!lockedRoom) throw new AppError('ROOM_001');
+          if (lockedRoom.endedAt || !lockedRoom.isLive) throw new AppError('ROOM_004');
+          await lockUserRows(tx, [hostUserId, input.userId, lockedRoom.hostId]);
+          const [caller, target] = await Promise.all([
+            tx.participant.findUnique({
+              where: { userId_roomId: { userId: hostUserId, roomId } },
+              select: { role: true, leftAt: true },
+            }),
+            tx.participant.findUnique({
+              where: { userId_roomId: { userId: input.userId, roomId } },
+              select: { id: true, role: true, leftAt: true },
+            }),
+          ]);
+          const callerAuthorized =
+            lockedRoom.hostId === hostUserId ||
+            (!!caller && !caller.leftAt && caller.role === 'MODERATOR');
+          if (!callerAuthorized) throw new AppError('ROOM_003');
+          if (!target || target.leftAt) throw new AppError('USER_001');
+          if (input.userId === lockedRoom.hostId && input.role !== 'HOST') {
+            throw new AppError('ROOM_003');
+          }
+          if (
+            (input.role === 'HOST' || input.role === 'MODERATOR') &&
+            lockedRoom.hostId !== hostUserId
+          ) {
+            throw new AppError('ROOM_003');
+          }
+          const roomResult = {
+            title: lockedRoom.title,
+            hostId: lockedRoom.hostId,
+            maxSpeakers: lockedRoom.maxSpeakers,
+          };
+          if (
+            target.role === input.role &&
+            (input.role !== 'HOST' || lockedRoom.hostId === input.userId)
+          ) {
+            return {
+              changed: false,
+              room: roomResult,
+              transitionIds: [] as string[],
+              previousHostId: null,
+            };
+          }
+          if (input.role === 'SPEAKER') {
+            const activeSpeakers = await tx.participant.count({
+              where: { roomId, leftAt: null, role: 'SPEAKER' },
+            });
+            if (activeSpeakers >= lockedRoom.maxSpeakers) throw new AppError('ROOM_002');
+          }
+
+          let previousHostId: string | null = null;
+          if (input.role === 'HOST') {
+            previousHostId = lockedRoom.hostId;
+            await tx.room.update({ where: { id: roomId }, data: { hostId: input.userId } });
+            await tx.participant.update({
+              where: { id: target.id },
+              data: { role: 'HOST', isMuted: false },
+            });
+            if (previousHostId !== input.userId) {
+              await tx.participant.updateMany({
+                where: { roomId, userId: previousHostId, leftAt: null },
+                data: { role: 'SPEAKER' },
+              });
+            }
+          } else {
+            await tx.participant.update({
+              where: { id: target.id },
+              data: {
+                role: input.role,
+                ...(input.role === 'LISTENER' ? { isMuted: true } : {}),
+              },
+            });
+          }
+          if (input.role === 'SPEAKER') {
+            await tx.roomHandRaise.deleteMany({ where: { roomId, userId: input.userId } });
+          }
+          const affectedUserIds = [
+            input.userId,
+            ...(previousHostId && previousHostId !== input.userId ? [previousHostId] : []),
+          ];
+          const transitionIds = affectedUserIds.map(() => randomUUID());
+          await tx.outboxEvent.createMany({
+            data: affectedUserIds.map((affectedUserId, index) =>
+              livekitRevocationOutboxData(
+                { roomId, userId: affectedUserId },
+                transitionIds[index] as string,
+              ),
+            ),
           });
-          return res.count;
+          return {
+            changed: true,
+            room: roomResult,
+            transitionIds,
+            previousHostId,
+          };
         },
-        { isolationLevel: 'Serializable' },
-      );
-    } else {
-      const res = await prisma.participant.updateMany({
-        where: { roomId, userId: input.userId, leftAt: null },
-        data: { role: input.role },
+        { maxWait: 5_000, timeout: 10_000, isolationLevel: 'Serializable' },
+      ),
+    );
+    if (!atomicMutation.changed) return { userId: input.userId, role: input.role };
+    if (atomicMutation.previousHostId && atomicMutation.previousHostId !== input.userId) {
+      emitRoomRoleChanged(roomId, {
+        userId: atomicMutation.previousHostId,
+        role: 'SPEAKER',
       });
-      updatedCount = res.count;
     }
-    if (updatedCount === 0) throw new AppError('USER_001');
-
-    // Transferring HOST must also flip Room.hostId and demote the previous
-    // host to SPEAKER, otherwise requireHost() keeps protecting the old user
-    // and the room ends up with two HOST participants.
-    if (input.role === 'HOST' && room.hostId !== input.userId) {
-      await prisma.$transaction([
-        prisma.room.update({
-          where: { id: roomId },
-          data: { hostId: input.userId },
-        }),
-        prisma.participant.updateMany({
-          where: { roomId, userId: room.hostId, leftAt: null },
-          data: { role: 'SPEAKER' },
-        }),
-      ]);
-      emitRoomRoleChanged(roomId, { userId: room.hostId, role: 'SPEAKER' });
-    }
-
-    // Promoting a listener to SPEAKER clears their hand-raise entry so
-    // the queue doesn't grow stale, and fires a HAND_ACCEPTED
-    // notification so the promoted user sees it if they happen to be
-    // mid-scroll outside the room.
     if (input.role === 'SPEAKER') {
-      await prisma.roomHandRaise.deleteMany({
-        where: { roomId, userId: input.userId },
-      });
       emitRoomHandLowered(roomId, input.userId);
       await scheduleBackgroundTask(
         notificationsService.create({
           userId: input.userId,
           type: 'HAND_ACCEPTED',
           title: 'You are on stage',
-          body: `"${room.title}" — tap to unmute`,
+          body: `"${atomicMutation.room.title}" â€” tap to unmute`,
           data: { roomId },
         }),
         err =>
@@ -1050,8 +1546,12 @@ export const roomsService = {
           }),
       );
     }
-
     emitRoomRoleChanged(roomId, { userId: input.userId, role: input.role });
+    for (const transitionId of atomicMutation.transitionIds) {
+      await scheduleBackgroundTask(wakeLivekitRevocation(transitionId), err =>
+        logger.warn('rooms.role: LiveKit permission wake failed', { err, roomId }),
+      );
+    }
     return { userId: input.userId, role: input.role };
   },
 
@@ -1074,11 +1574,46 @@ export const roomsService = {
       if (!room) throw new AppError('ROOM_001');
       if (room.endedAt || !room.isLive) throw new AppError('ROOM_004');
     }
-    const updated = await prisma.participant.updateMany({
-      where: { roomId, userId: targetUserId, leftAt: null },
-      data: { isMuted: input.isMuted },
-    });
-    if (updated.count === 0) throw new AppError('ROOM_005');
+    const mutation = await runWriteWithRetry(() =>
+      prisma.$transaction(async tx => {
+        await tx.$queryRaw`SELECT "id" FROM "Room" WHERE "id" = ${roomId} FOR UPDATE`;
+        const lockedRoom = await tx.room.findUnique({
+          where: { id: roomId },
+          select: { hostId: true, endedAt: true, isLive: true },
+        });
+        if (!lockedRoom) throw new AppError('ROOM_001');
+        if (lockedRoom.endedAt || !lockedRoom.isLive) throw new AppError('ROOM_004');
+        await lockUserRows(tx, [callerUserId, targetUserId, lockedRoom.hostId]);
+        if (targetUserId !== callerUserId) {
+          const caller = await tx.participant.findUnique({
+            where: { userId_roomId: { userId: callerUserId, roomId } },
+            select: { role: true, leftAt: true },
+          });
+          const authorized =
+            lockedRoom.hostId === callerUserId ||
+            (!!caller && !caller.leftAt && caller.role === 'MODERATOR');
+          if (!authorized) throw new AppError('ROOM_003');
+          if (lockedRoom.hostId === targetUserId) throw new AppError('ROOM_009');
+        }
+        const participant = await tx.participant.findUnique({
+          where: { userId_roomId: { userId: targetUserId, roomId } },
+          select: { leftAt: true, isMuted: true },
+        });
+        if (!participant || participant.leftAt) throw new AppError('ROOM_005');
+        if (participant.isMuted === input.isMuted) {
+          return { transitionId: null };
+        }
+        await tx.participant.update({
+          where: { userId_roomId: { userId: targetUserId, roomId } },
+          data: { isMuted: input.isMuted },
+        });
+        const transitionId = randomUUID();
+        await tx.outboxEvent.create({
+          data: livekitRevocationOutboxData({ roomId, userId: targetUserId }, transitionId),
+        });
+        return { transitionId };
+      }),
+    );
     emitRoomMuteChanged(roomId, { userId: targetUserId, isMuted: input.isMuted });
     // Bridge the mic state to the map: a muted participant shows the red
     // mic-off badge, an unmuted one the green speaking badge. Only stage
@@ -1089,6 +1624,11 @@ export const roomsService = {
       isSpeaking: !input.isMuted,
       isListener: false,
     });
+    if (mutation.transitionId) {
+      await scheduleBackgroundTask(wakeLivekitRevocation(mutation.transitionId), err =>
+        logger.warn('rooms.mute: LiveKit permission wake failed', { err, roomId }),
+      );
+    }
     return { userId: targetUserId, isMuted: input.isMuted };
   },
 
@@ -1270,10 +1810,12 @@ export const roomsService = {
   // which only ever lowers the caller's *own* hand — this is the moderator-side
   // "refuse" that mirrors the "accept" path (promote to SPEAKER).
   async dismissHandRaise(roomId: string, callerUserId: string, targetUserId: string) {
-    await requireHostOrMod(roomId, callerUserId);
-    const res = await prisma.roomHandRaise.deleteMany({
-      where: { roomId, userId: targetUserId },
-    });
+    const res = await runWriteWithRetry(() =>
+      prisma.$transaction(async tx => {
+        await requireHostOrModLocked(tx, roomId, callerUserId);
+        return tx.roomHandRaise.deleteMany({ where: { roomId, userId: targetUserId } });
+      }),
+    );
     if (res.count > 0) emitRoomHandLowered(roomId, targetUserId);
     return { dismissed: res.count > 0 };
   },
@@ -1307,7 +1849,7 @@ export const roomsService = {
         where: { userId_roomId: { userId, roomId } },
         select: { role: true },
       });
-      if (!me || (me.role !== 'HOST' && me.role !== 'MODERATOR')) {
+      if (room.hostId !== userId && (!me || me.role !== 'MODERATOR')) {
         throw new AppError('ROOM_006');
       }
     }
@@ -1359,7 +1901,7 @@ export const roomsService = {
     await requireActiveParticipant(roomId, viewerId);
     const room = await prisma.room.findUnique({
       where: { id: roomId },
-      select: { chatVisibility: true },
+      select: { chatVisibility: true, hostId: true },
     });
     if (!room) throw new AppError('ROOM_001');
     // Mirror the send-side gate: MODS_ONLY hides the history from
@@ -1370,7 +1912,7 @@ export const roomsService = {
         where: { userId_roomId: { userId: viewerId, roomId } },
         select: { role: true },
       });
-      if (!me || (me.role !== 'HOST' && me.role !== 'MODERATOR')) {
+      if (room.hostId !== viewerId && (!me || me.role !== 'MODERATOR')) {
         return [];
       }
     }
@@ -1421,45 +1963,87 @@ export const roomsService = {
     targetUserId: string,
     options: { banMinutes?: number; reason?: string } = {},
   ) {
-    const room = await requireHostOrMod(roomId, callerUserId);
-    if (room.hostId === targetUserId) throw new AppError('ROOM_003');
-    // Can't kick yourself
-    if (callerUserId === targetUserId) throw new AppError('USER_003');
-
-    const res = await prisma.participant.updateMany({
-      where: { roomId, userId: targetUserId, leftAt: null },
-      data: { leftAt: new Date() },
-    });
-    if (res.count === 0) throw new AppError('ROOM_005');
-
-    // ANO-09/ANO-10 fix: floor count at 0 and capture the post-commit value
-    // for an accurate hallway broadcast (was using a stale pre-mutation snapshot).
-    await prisma.$transaction([
-      prisma.user.update({ where: { id: targetUserId }, data: { currentRoomId: null } }),
-      prisma.$executeRaw`UPDATE "Room" SET "participantCount" = GREATEST("participantCount" - 1, 0) WHERE id = ${roomId}`,
-    ]);
-    // Also clear any hand-raise
-    await prisma.roomHandRaise.deleteMany({ where: { roomId, userId: targetUserId } });
+    const minutes = options.banMinutes ?? DEFAULT_KICK_BAN_MINUTES;
+    const expiresAt = minutes === 0 ? null : new Date(Date.now() + minutes * MS_PER_MINUTE);
 
     // Install ban so they can't bounce right back. banMinutes=0 → permanent.
     // Default 30 min keeps the friction proportionate to the offense.
-    const minutes = options.banMinutes ?? DEFAULT_KICK_BAN_MINUTES;
-    const expiresAt = minutes === 0 ? null : new Date(Date.now() + minutes * MS_PER_MINUTE);
-    await prisma.roomBan.upsert({
-      where: { roomId_userId: { roomId, userId: targetUserId } },
-      create: {
-        roomId,
-        userId: targetUserId,
-        bannedBy: callerUserId,
-        reason: options.reason ?? null,
-        expiresAt,
-      },
-      update: {
-        bannedBy: callerUserId,
-        reason: options.reason ?? null,
-        expiresAt,
-      },
-    });
+    const mutation = await runWriteWithRetry(() =>
+      prisma.$transaction(
+        async tx => {
+          // Join, leave and kick serialize in the same Room -> User order.
+          // Presence, count, ban and provider hand-off commit together.
+          await tx.$queryRaw`SELECT "id" FROM "Room" WHERE "id" = ${roomId} FOR UPDATE`;
+          await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${targetUserId} FOR UPDATE`;
+          const lockedRoom = await tx.room.findUnique({
+            where: { id: roomId },
+            select: { hostId: true, endedAt: true, isPrivate: true, roomType: true },
+          });
+          if (!lockedRoom) throw new AppError('ROOM_001');
+          if (lockedRoom.endedAt) throw new AppError('ROOM_004');
+
+          if (lockedRoom.hostId !== callerUserId) {
+            const caller = await tx.participant.findUnique({
+              where: { userId_roomId: { userId: callerUserId, roomId } },
+              select: { role: true, leftAt: true },
+            });
+            if (!caller || caller.leftAt || caller.role !== 'MODERATOR') {
+              throw new AppError('ROOM_003');
+            }
+          }
+          if (lockedRoom.hostId === targetUserId) throw new AppError('ROOM_003');
+          if (callerUserId === targetUserId) throw new AppError('USER_003');
+
+          const revoked = await tx.participant.updateMany({
+            where: { roomId, userId: targetUserId, leftAt: null },
+            // A punitive removal always revokes stage/moderation authority.
+            // When a finite ban expires, rejoin must start as a muted listener.
+            data: { leftAt: new Date(), role: 'LISTENER', isMuted: true },
+          });
+          if (revoked.count === 0) throw new AppError('ROOM_005');
+
+          await tx.user.updateMany({
+            where: { id: targetUserId, currentRoomId: roomId },
+            data: { currentRoomId: null },
+          });
+          const updatedRooms = await tx.$queryRaw<{ participantCount: number }[]>`
+            UPDATE "Room"
+            SET "participantCount" = GREATEST("participantCount" - 1, 0)
+            WHERE id = ${roomId}
+            RETURNING "participantCount"`;
+          await tx.roomHandRaise.deleteMany({ where: { roomId, userId: targetUserId } });
+          await tx.roomBan.upsert({
+            where: { roomId_userId: { roomId, userId: targetUserId } },
+            create: {
+              roomId,
+              userId: targetUserId,
+              bannedBy: callerUserId,
+              reason: options.reason ?? null,
+              expiresAt,
+            },
+            update: {
+              bannedBy: callerUserId,
+              reason: options.reason ?? null,
+              expiresAt,
+            },
+          });
+
+          const revocationTransitionId = randomUUID();
+          await tx.outboxEvent.create({
+            data: livekitRevocationOutboxData(
+              { roomId, userId: targetUserId },
+              revocationTransitionId,
+            ),
+          });
+          return {
+            ...lockedRoom,
+            participantCount: updatedRooms[0]?.participantCount ?? 0,
+            revocationTransitionId,
+          };
+        },
+        { maxWait: 5_000, timeout: 10_000 },
+      ),
+    );
 
     // MODE-06: audit the moderation action. record() swallows persistence
     // errors itself, so a failed write never breaks the kick.
@@ -1488,32 +2072,27 @@ export const roomsService = {
     // client that ignores the event can't keep receiving room broadcasts.
     forceLeaveRoom(roomId, targetUserId, callerUserId, kickedByName);
     closeTransportsForUserInRoom(roomId, targetUserId);
-    await scheduleBackgroundTask(livekitService.removeParticipant(roomId, targetUserId), err =>
-      logger.warn('rooms.kick: LiveKit participant removal failed', {
-        err,
-        roomId,
-        userId: targetUserId,
-      }),
-    );
-    // ANO-10 fix: read the committed count rather than using a stale snapshot.
-    const updatedRoom = await prisma.room.findUnique({
-      where: { id: roomId },
-      select: { participantCount: true },
+    await scheduleBackgroundTask(wakeLivekitRevocation(mutation.revocationTransitionId), err => {
+      logger.warn('rooms.kick: LiveKit revocation wake failed', { err, roomId });
     });
-    if (!room.isPrivate && room.roomType === 'OPEN') {
-      emitHallwayRoomUpdated(roomId, { participantCount: updatedRoom?.participantCount ?? 0 });
+    if (!mutation.isPrivate && mutation.roomType === 'OPEN') {
+      emitHallwayRoomUpdated(roomId, { participantCount: mutation.participantCount });
     }
     return { kicked: true as const };
   },
 
   // ──────────────────── Live room metadata ────────────────────────────
   async updateTitle(roomId: string, callerUserId: string, input: UpdateRoomTitleInput) {
-    await requireHostOrMod(roomId, callerUserId);
-    const updated = await prisma.room.update({
-      where: { id: roomId },
-      data: { title: input.title },
-      select: { id: true, title: true, isPrivate: true, roomType: true },
-    });
+    const updated = await runWriteWithRetry(() =>
+      prisma.$transaction(async tx => {
+        await requireHostOrModLocked(tx, roomId, callerUserId);
+        return tx.room.update({
+          where: { id: roomId },
+          data: { title: input.title },
+          select: { id: true, title: true, isPrivate: true, roomType: true },
+        });
+      }),
+    );
     emitRoomMetaUpdated(roomId, { title: updated.title });
     if (!updated.isPrivate && updated.roomType === 'OPEN') {
       emitHallwayRoomUpdated(roomId, { title: updated.title });
@@ -1524,8 +2103,12 @@ export const roomsService = {
   // #34: lock/unlock the room. Host/mod only. Broadcast so every client can
   // reflect the locked badge; the join guard enforces it server-side.
   async setLock(roomId: string, callerUserId: string, locked: boolean) {
-    await requireHostOrMod(roomId, callerUserId);
-    await prisma.room.update({ where: { id: roomId }, data: { isLocked: locked } });
+    await runWriteWithRetry(() =>
+      prisma.$transaction(async tx => {
+        await requireHostOrModLocked(tx, roomId, callerUserId);
+        await tx.room.update({ where: { id: roomId }, data: { isLocked: locked } });
+      }),
+    );
     emitRoomMetaUpdated(roomId, { isLocked: locked });
     return { isLocked: locked };
   },
@@ -1536,27 +2119,32 @@ export const roomsService = {
   // there: going private removes it, going public (re)adds it. Members of the
   // room learn via room:meta_updated so they can reflect the privacy badge.
   async setPrivacy(roomId: string, callerUserId: string, isPrivate: boolean) {
-    const current = await requireHost(roomId, callerUserId);
-    const roomType = isPrivate
-      ? ('CLOSED' as const)
-      : current.roomType === 'CLOSED'
-        ? ('OPEN' as const)
-        : current.roomType;
-    const updated = await prisma.room.update({
-      where: { id: roomId },
-      data: { isPrivate, roomType },
-      select: {
-        id: true,
-        title: true,
-        hostId: true,
-        clubId: true,
-        isLive: true,
-        isPrivate: true,
-        roomType: true,
-        scheduledFor: true,
-        createdAt: true,
-      },
-    });
+    const { current, updated } = await runWriteWithRetry(() =>
+      prisma.$transaction(async tx => {
+        const current = await requireHostLocked(tx, roomId, callerUserId);
+        const roomType = isPrivate
+          ? ('CLOSED' as const)
+          : current.roomType === 'CLOSED'
+            ? ('OPEN' as const)
+            : current.roomType;
+        const updated = await tx.room.update({
+          where: { id: roomId },
+          data: { isPrivate, roomType },
+          select: {
+            id: true,
+            title: true,
+            hostId: true,
+            clubId: true,
+            isLive: true,
+            isPrivate: true,
+            roomType: true,
+            scheduledFor: true,
+            createdAt: true,
+          },
+        });
+        return { current, updated };
+      }),
+    );
     emitRoomMetaUpdated(roomId, {
       isPrivate: updated.isPrivate,
       roomType: updated.roomType,
@@ -1582,7 +2170,6 @@ export const roomsService = {
   },
 
   async toggleChat(roomId: string, callerUserId: string, input: ToggleRoomChatInput) {
-    await requireHostOrMod(roomId, callerUserId);
     const data: { chatEnabled?: boolean; chatVisibility?: 'ALL' | 'MODS_ONLY' } = {};
     if (typeof input.chatEnabled === 'boolean') data.chatEnabled = input.chatEnabled;
     if (input.chatVisibility) {
@@ -1591,11 +2178,16 @@ export const roomsService = {
     if (Object.keys(data).length === 0) {
       throw new AppError('VALIDATION_001');
     }
-    const updated = await prisma.room.update({
-      where: { id: roomId },
-      data,
-      select: { chatEnabled: true, chatVisibility: true },
-    });
+    const updated = await runWriteWithRetry(() =>
+      prisma.$transaction(async tx => {
+        await requireHostOrModLocked(tx, roomId, callerUserId);
+        return tx.room.update({
+          where: { id: roomId },
+          data,
+          select: { chatEnabled: true, chatVisibility: true },
+        });
+      }),
+    );
     emitRoomMetaUpdated(roomId, {
       chatEnabled: updated.chatEnabled,
       chatVisibility: updated.chatVisibility,
@@ -1616,18 +2208,56 @@ export const roomsService = {
     // Read-then-update on the same userIds so the broadcast list matches
     // the rows we mutated (a speaker who joined between the two calls
     // wouldn't be in `targets` AND wouldn't have been touched).
-    const targets = await prisma.participant.findMany({
-      where: { roomId, leftAt: null, isMuted: false, role: roleIn },
-      select: { userId: true },
-    });
+    const targets = await runWriteWithRetry(() =>
+      prisma.$transaction(async tx => {
+        await tx.$queryRaw`SELECT "id" FROM "Room" WHERE "id" = ${roomId} FOR UPDATE`;
+        const lockedRoom = await tx.room.findUnique({
+          where: { id: roomId },
+          select: { hostId: true, endedAt: true, isLive: true },
+        });
+        if (!lockedRoom) throw new AppError('ROOM_001');
+        if (lockedRoom.endedAt || !lockedRoom.isLive) throw new AppError('ROOM_004');
+        const rows = await tx.participant.findMany({
+          where: { roomId, leftAt: null, isMuted: false, role: roleIn },
+          select: { userId: true },
+        });
+        await lockUserRows(tx, [callerUserId, lockedRoom.hostId, ...rows.map(row => row.userId)]);
+        const caller = await tx.participant.findUnique({
+          where: { userId_roomId: { userId: callerUserId, roomId } },
+          select: { role: true, leftAt: true },
+        });
+        const authorized =
+          lockedRoom.hostId === callerUserId ||
+          (!!caller && !caller.leftAt && caller.role === 'MODERATOR');
+        if (!authorized) throw new AppError('ROOM_003');
+        if (rows.length === 0) return [];
+        await tx.participant.updateMany({
+          where: {
+            roomId,
+            userId: { in: rows.map(row => row.userId) },
+            leftAt: null,
+            isMuted: false,
+          },
+          data: { isMuted: true },
+        });
+        const transitions = rows.map(row => ({ ...row, transitionId: randomUUID() }));
+        await tx.outboxEvent.createMany({
+          data: transitions.map(transition =>
+            livekitRevocationOutboxData(
+              { roomId, userId: transition.userId },
+              transition.transitionId,
+            ),
+          ),
+        });
+        return transitions;
+      }),
+    );
     if (targets.length === 0) return { mutedCount: 0 };
-
-    await prisma.participant.updateMany({
-      where: { roomId, userId: { in: targets.map(t => t.userId) }, leftAt: null },
-      data: { isMuted: true },
-    });
     for (const t of targets) {
       emitRoomMuteChanged(roomId, { userId: t.userId, isMuted: true });
+      await scheduleBackgroundTask(wakeLivekitRevocation(t.transitionId), err =>
+        logger.warn('rooms.muteAll: LiveKit permission wake failed', { err, roomId }),
+      );
     }
     return { mutedCount: targets.length };
   },

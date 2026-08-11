@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import type { Express } from 'express';
 
@@ -13,6 +14,8 @@ const { redis, connectRedis, disconnectRedis } =
   require('../src/config/redis') as typeof import('../src/config/redis');
 const { purgeExtensionDataForUser } =
   require('../src/extensions/gdpr') as typeof import('../src/extensions/gdpr');
+const { livekitRevocationOutboxData } =
+  require('../src/modules/rooms/livekit-revocation.outbox') as typeof import('../src/modules/rooms/livekit-revocation.outbox');
 /* eslint-enable @typescript-eslint/no-require-imports */
 
 const rand = (): string => Math.random().toString(36).slice(2, 10);
@@ -71,9 +74,16 @@ describe('GDPR export and purge for Redis-backed extensions', () => {
       featured: `ext:clubmeta:featured:${clubId}`,
       joinRequest: `ext:clubreq:${clubId}:${userId}`,
       joinIndex: `ext:clubreq:club:${clubId}`,
+      fanoutDone: `ext:fanout:v2:notified:room_${rand()}`,
+      fanoutClaim: `ext:fanout:v2:claim:room_${rand()}:${userId}`,
       twitter: `ext:twitter:pkce:${rand()}`,
     };
     Object.values(keys).forEach(key => cleanupKeys.add(key));
+
+    const transitionId = randomUUID();
+    const revocationEnvelope = await prisma.outboxEvent.create({
+      data: livekitRevocationOutboxData({ roomId: `purged-room-${rand()}`, userId }, transitionId),
+    });
 
     await Promise.all([
       redis.set(keys.audio, JSON.stringify({ qualityTier: 'high' })),
@@ -119,6 +129,8 @@ describe('GDPR export and purge for Redis-backed extensions', () => {
         }),
       ),
       redis.sAdd(keys.joinIndex, userId),
+      redis.sAdd(keys.fanoutDone, userId),
+      redis.set(keys.fanoutClaim, 'processing-token'),
       redis.set(keys.twitter, JSON.stringify({ userId, codeVerifier: 'x'.repeat(43) })),
     ]);
 
@@ -154,7 +166,12 @@ describe('GDPR export and purge for Redis-backed extensions', () => {
     expect(await redis.lRange(keys.featured, 0, -1)).not.toContain(userId);
     expect(await redis.get(keys.joinRequest)).toBeNull();
     expect(Boolean(await redis.sIsMember(keys.joinIndex, userId))).toBe(false);
+    expect(Boolean(await redis.sIsMember(keys.fanoutDone, userId))).toBe(false);
+    expect(await redis.get(keys.fanoutClaim)).toBeNull();
     expect(await redis.get(keys.twitter)).toBeNull();
+    expect(
+      await prisma.outboxEvent.findUnique({ where: { id: revocationEnvelope.id } }),
+    ).toBeNull();
 
     const anonymized = JSON.parse((await redis.lIndex(keys.otherHistory, 0)) ?? '{}') as {
       acceptedUserId?: string | null;

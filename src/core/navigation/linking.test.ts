@@ -94,6 +94,12 @@ describe('linking — notification destinations', () => {
     expect(leaf?.name).toBe('Notifications');
   });
 
+  it('routes follow-request pushes to the actionable request inbox', () => {
+    const result = getState('notifications/follow-requests', options);
+    const leaf = activeRoute(result);
+    expect(leaf?.name).toBe('FollowRequests');
+  });
+
   it('routes a notification-generated DM path through the Messages tab', () => {
     const result = getState('chat/conversation-1', options);
     const leaf = activeRoute(result);

@@ -139,6 +139,12 @@ describeOrSkip('rtc:list-producers + room cleanup', () => {
 
     type Res = { ok: boolean; data?: unknown; error?: string };
 
+    // RTC access is intentionally unavailable after REST creation alone. The
+    // real client confirms its admission by joining the Socket.IO channel
+    // before starting the media handshake.
+    const joined = await emitAck<boolean>(hostSock, 'room:join', { roomId });
+    expect(joined).toBe(true);
+
     const asHost = await emitAck<Res>(hostSock, 'rtc:list-producers', { roomId });
     expect(asHost.ok).toBe(true);
     expect(asHost.data).toEqual([]);

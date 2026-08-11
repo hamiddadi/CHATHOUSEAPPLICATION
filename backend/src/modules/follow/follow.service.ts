@@ -1,3 +1,4 @@
+import type { Prisma } from '@prisma/client';
 import { prisma, runWriteWithRetry } from '../../config/database';
 import { AppError } from '../../middlewares/error.middleware';
 import { notificationsService } from '../notifications/notifications.service';
@@ -6,6 +7,8 @@ import { hasBlockBetween, lockRelationshipUsers } from '../social/relationship-l
 import { emitUserFollowerCount } from '../../socket/realtime';
 import { cursorPage } from '../../utils/paginate';
 import { directMessageEligibility } from '../chat/chat.policy';
+import { decodeTimeIdCursor, encodeTimeIdCursor } from '../../utils/timeIdCursor';
+import { logger } from '../../config/logger';
 
 const publicUser = {
   id: true,
@@ -13,31 +16,42 @@ const publicUser = {
   displayName: true,
   avatarUrl: true,
   bio: true,
+  isOnline: true,
+  createdAt: true,
 } as const;
 
-const displayName = async (userId: string): Promise<string> => {
-  const u = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { username: true, displayName: true },
-  });
-  return u?.displayName ?? u?.username ?? 'Someone';
-};
-
 /**
- * Subset of `ids` that `viewerId` actively follows (ACCEPTED only — a PENDING
- * request to a private account is not yet a follow). One query, no N+1.
+ * The viewer's own outgoing relationship state for `ids`. A PENDING request
+ * is safe to expose to its requester and is distinct from an accepted follow.
+ * One query, no N+1.
  */
-const followedSubset = async (viewerId: string, ids: string[]): Promise<Set<string>> => {
-  if (ids.length === 0) return new Set();
+const relationshipStates = async (
+  viewerId: string,
+  ids: string[],
+): Promise<Map<string, 'PENDING' | 'ACCEPTED'>> => {
+  if (ids.length === 0) return new Map();
   const rows = await prisma.follow.findMany({
     where: {
       followerId: viewerId,
       followingId: { in: ids },
-      status: 'ACCEPTED',
     },
-    select: { followingId: true },
+    select: { followingId: true, status: true },
   });
-  return new Set(rows.map(r => r.followingId));
+  return new Map(rows.map(row => [row.followingId, row.status]));
+};
+
+const followCursorWhere = (cursor?: string): Prisma.FollowWhereInput => {
+  if (!cursor) return {};
+  const decoded = decodeTimeIdCursor(cursor);
+  if (!decoded) throw new AppError('VALIDATION_001');
+  return decoded.id
+    ? {
+        OR: [
+          { createdAt: { lt: decoded.createdAt } },
+          { createdAt: decoded.createdAt, id: { lt: decoded.id } },
+        ],
+      }
+    : { createdAt: { lt: decoded.createdAt } };
 };
 
 export const followService = {
@@ -56,7 +70,7 @@ export const followService = {
           const [follower, target] = await Promise.all([
             tx.user.findFirst({
               where: { id: followerId, deletedAt: null },
-              select: { id: true },
+              select: { id: true, username: true, displayName: true },
             }),
             tx.user.findFirst({
               where: { id: followingId, deletedAt: null },
@@ -73,17 +87,43 @@ export const followService = {
             select: { status: true },
           });
           if (existing?.status === 'ACCEPTED') {
-            return { state: 'accepted-existing' as const, followerCount: null };
+            return {
+              state: 'accepted-existing' as const,
+              followerCount: null,
+              notification: null,
+            };
           }
           if (existing?.status === 'PENDING') {
-            return { state: 'pending-existing' as const, followerCount: null };
+            return {
+              state: 'pending-existing' as const,
+              followerCount: null,
+              notification: null,
+            };
           }
+
+          const handle = follower.displayName ?? follower.username ?? 'Someone';
 
           if (target.isPrivateAccount) {
             await tx.follow.create({
               data: { followerId, followingId, status: 'PENDING' },
             });
-            return { state: 'pending-created' as const, followerCount: null };
+            const notification = await tx.notification.create({
+              data: {
+                userId: followingId,
+                actorId: followerId,
+                type: 'FOLLOW_REQUEST',
+                title: 'Follow request',
+                body: `${handle} requested to follow you`,
+                data: { followerId },
+                targetId: followerId,
+                targetType: 'user',
+              },
+            });
+            return {
+              state: 'pending-created' as const,
+              followerCount: null,
+              notification,
+            };
           }
 
           await tx.follow.create({
@@ -98,39 +138,42 @@ export const followService = {
             data: { followerCount: { increment: 1 } },
             select: { followerCount: true },
           });
+          const notification = await tx.notification.create({
+            data: {
+              userId: followingId,
+              actorId: followerId,
+              type: 'NEW_FOLLOWER',
+              title: 'New follower',
+              body: `${handle} started following you`,
+              data: { followerId },
+              targetId: followerId,
+              targetType: 'user',
+            },
+          });
           return {
             state: 'accepted-created' as const,
             followerCount: updatedTarget.followerCount,
+            notification,
           };
         },
         { maxWait: 5_000, timeout: 10_000 },
       ),
     );
 
-    if (result.state === 'pending-created') {
-      await notificationsService.create({
-        userId: followingId,
-        actorId: followerId,
-        type: 'FOLLOW_REQUEST',
-        title: 'Follow request',
-        body: `${await displayName(followerId)} requested to follow you`,
-        data: { followerId },
-        targetId: followerId,
-        targetType: 'user',
-      });
-    }
     if (result.state === 'accepted-created') {
       emitUserFollowerCount(followingId, result.followerCount);
-      await notificationsService.create({
-        userId: followingId,
-        actorId: followerId,
-        type: 'NEW_FOLLOWER',
-        title: 'New follower',
-        body: `${await displayName(followerId)} started following you`,
-        data: { followerId },
-        targetId: followerId,
-        targetType: 'user',
-      });
+    }
+    if (result.notification) {
+      await notificationsService
+        .deliverPersisted(result.notification, { verifyExists: true })
+        .catch(err =>
+          logger.warn('follow notification fanout failed after atomic commit', {
+            err,
+            notificationId: result.notification?.id,
+            followerId,
+            followingId,
+          }),
+        );
     }
 
     if (result.state === 'pending-created' || result.state === 'pending-existing') {
@@ -150,33 +193,37 @@ export const followService = {
           const removed = await tx.$queryRaw<{ status: 'PENDING' | 'ACCEPTED' }[]>`
       DELETE FROM "Follow"
       WHERE "followerId" = ${followerId} AND "followingId" = ${followingId}
-      RETURNING "status"`;
+          RETURNING "status"`;
           let followerCount: number | null = null;
+          let notificationRemoved = false;
           if (removed.some(r => r.status === 'ACCEPTED')) {
             await tx.$executeRaw`UPDATE "User" SET "followingCount" = GREATEST("followingCount" - 1, 0), "updatedAt" = NOW() WHERE id = ${followerId}`;
             const rows = await tx.$queryRaw<
               { followerCount: number }[]
             >`UPDATE "User" SET "followerCount" = GREATEST("followerCount" - 1, 0), "updatedAt" = NOW() WHERE id = ${followingId} RETURNING "followerCount"`;
             followerCount = rows[0]?.followerCount ?? 0;
-            await tx.notification.deleteMany({
+            const deleted = await tx.notification.deleteMany({
               where: {
                 userId: followingId,
                 actorId: followerId,
                 type: 'NEW_FOLLOWER',
               },
             });
+            notificationRemoved = deleted.count > 0;
           } else if (removed.length > 0) {
-            await tx.notification.deleteMany({
+            const deleted = await tx.notification.deleteMany({
               where: {
                 userId: followingId,
                 actorId: followerId,
                 type: 'FOLLOW_REQUEST',
               },
             });
+            notificationRemoved = deleted.count > 0;
           }
           return {
             following: false as const,
             followerCount,
+            notificationRemoved,
           };
         },
         { maxWait: 5_000, timeout: 10_000 },
@@ -184,6 +231,9 @@ export const followService = {
     );
     if (result.followerCount !== null) {
       emitUserFollowerCount(followingId, result.followerCount);
+    }
+    if (result.notificationRemoved) {
+      await notificationsService.refreshUnreadCount(followingId);
     }
     return { following: result.following };
   },
@@ -232,7 +282,11 @@ export const followService = {
               where: { id: meId },
               select: { followerCount: true },
             });
-            return { changed: false, followerCount: me?.followerCount ?? 0 };
+            return {
+              changed: false,
+              followerCount: me?.followerCount ?? 0,
+              notificationRemoved: false,
+            };
           }
 
           await tx.user.update({
@@ -245,19 +299,24 @@ export const followService = {
             select: { followerCount: true },
           });
 
-          await tx.notification.deleteMany({
+          const deleted = await tx.notification.deleteMany({
             where: {
               userId: meId,
               actorId: requesterId,
               type: 'FOLLOW_REQUEST',
             },
           });
-          return { changed: true, followerCount: me.followerCount };
+          return {
+            changed: true,
+            followerCount: me.followerCount,
+            notificationRemoved: deleted.count > 0,
+          };
         },
         { maxWait: 5_000, timeout: 10_000 },
       ),
     );
     if (result.changed) emitUserFollowerCount(meId, result.followerCount);
+    if (result.notificationRemoved) await notificationsService.refreshUnreadCount(meId);
     return { accepted: true as const };
   },
 
@@ -274,20 +333,23 @@ export const followService = {
               status: 'PENDING',
             },
           });
+          let notificationRemoved = false;
           if (result.count > 0) {
-            await tx.notification.deleteMany({
+            const deleted = await tx.notification.deleteMany({
               where: {
                 userId: meId,
                 actorId: requesterId,
                 type: 'FOLLOW_REQUEST',
               },
             });
+            notificationRemoved = deleted.count > 0;
           }
-          return result;
+          return { count: result.count, notificationRemoved };
         },
         { maxWait: 5_000, timeout: 10_000 },
       ),
     );
+    if (removed.notificationRemoved) await notificationsService.refreshUnreadCount(meId);
     return { rejected: removed.count > 0 };
   },
 
@@ -298,16 +360,16 @@ export const followService = {
         followingId: meId,
         status: 'PENDING',
         follower: { deletedAt: null },
-        ...(cursor ? { createdAt: { lt: new Date(cursor) } } : {}),
+        ...followCursorWhere(cursor),
       },
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       include: { follower: { select: publicUser } },
       take: limit + 1,
     });
     return cursorPage(
       rows,
       limit,
-      r => r.createdAt.toISOString(),
+      r => encodeTimeIdCursor(r.createdAt, r.id),
       r => r.follower,
     );
   },
@@ -327,19 +389,19 @@ export const followService = {
         status: 'ACCEPTED',
         followerId: { notIn: [...blocked] },
         follower: { deletedAt: null },
-        ...(cursor ? { createdAt: { lt: new Date(cursor) } } : {}),
+        ...followCursorWhere(cursor),
       },
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       include: { follower: { select: publicUser } },
       take: limit + 1,
     });
     const page = cursorPage(
       rows,
       limit,
-      r => r.createdAt.toISOString(),
+      r => encodeTimeIdCursor(r.createdAt, r.id),
       r => r.follower,
     );
-    const followed = await followedSubset(
+    const relationships = await relationshipStates(
       viewerId,
       page.data.map(u => u.id),
     );
@@ -347,7 +409,8 @@ export const followService = {
       ...page,
       data: page.data.map(u => ({
         ...u,
-        isFollowedByMe: followed.has(u.id),
+        isFollowedByMe: relationships.get(u.id) === 'ACCEPTED',
+        followRequestedByMe: relationships.get(u.id) === 'PENDING',
       })),
     };
   },
@@ -367,19 +430,19 @@ export const followService = {
         status: 'ACCEPTED',
         followingId: { notIn: [...blocked] },
         following: { deletedAt: null },
-        ...(cursor ? { createdAt: { lt: new Date(cursor) } } : {}),
+        ...followCursorWhere(cursor),
       },
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       include: { following: { select: publicUser } },
       take: limit + 1,
     });
     const page = cursorPage(
       rows,
       limit,
-      r => r.createdAt.toISOString(),
+      r => encodeTimeIdCursor(r.createdAt, r.id),
       r => r.following,
     );
-    const followed = await followedSubset(
+    const relationships = await relationshipStates(
       viewerId,
       page.data.map(u => u.id),
     );
@@ -391,7 +454,8 @@ export const followService = {
       ...page,
       data: page.data.map(u => ({
         ...u,
-        isFollowedByMe: followed.has(u.id),
+        isFollowedByMe: relationships.get(u.id) === 'ACCEPTED',
+        followRequestedByMe: relationships.get(u.id) === 'PENDING',
         // Actionable compose hint only: never expose the recipient's exact
         // privacy setting or whether a block caused the denial.
         canDirectMessage: messageEligibility.get(u.id) ?? false,

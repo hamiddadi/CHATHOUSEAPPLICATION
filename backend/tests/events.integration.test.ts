@@ -95,8 +95,12 @@ describe('Events integration — scheduled rooms, RSVP, BullMQ reminder scheduli
     // Reminder job present in the queue with jobId `room-reminder:<id>`.
     const q = getRemindersQueue();
     const job = await q.getJob(`room-reminder-${roomId}`);
+    const goLiveJob = await q.getJob(`room-golive-${roomId}`);
     expect(job).toBeTruthy();
+    expect(goLiveJob).toBeTruthy();
     expect(job?.data.roomId).toBe(roomId);
+    expect(goLiveJob?.opts.attempts).toBe(5);
+    expect(goLiveJob?.opts.backoff).toMatchObject({ type: 'exponential', delay: 5_000 });
     // Delay should be roughly 55min from now (+1h minus 5min lead).
     const delay = (job?.opts.delay ?? 0) / 1000;
     expect(delay).toBeGreaterThan(50 * 60 - 30);

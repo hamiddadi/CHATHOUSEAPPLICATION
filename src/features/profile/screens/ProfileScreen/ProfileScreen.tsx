@@ -123,8 +123,9 @@ export const ProfileScreen: React.FC = () => {
     // error, but without this the button gives no feedback on a network
     // failure (mirrors EditProfileScreen's save-error Alert).
     const onError = (): void => Alert.alert(t('common.error'), t('profile.actionFailed'));
-    if (user.isFollowedByMe) unfollow.mutate(user.id, { onError });
-    else follow.mutate(user.id, { onError });
+    if (user.isFollowedByMe || user.followRequestedByMe) {
+      unfollow.mutate(user.id, { onError });
+    } else follow.mutate(user.id, { onError });
   }, [follow, t, unfollow, user]);
   const handleShare = useCallback(async () => {
     if (!user) return;
@@ -297,6 +298,7 @@ export const ProfileScreen: React.FC = () => {
           {!isSelf && (
             <ProfileActionButtons
               isFollowedByMe={user.isFollowedByMe}
+              followRequestedByMe={user.followRequestedByMe ?? false}
               followLoading={follow.isPending || unfollow.isPending}
               waveLoading={wave.isPending}
               onToggleFollow={handleToggleFollow}

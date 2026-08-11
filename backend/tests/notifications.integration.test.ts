@@ -13,6 +13,10 @@ const { redis, connectRedis, disconnectRedis } =
   require('../src/config/redis') as typeof import('../src/config/redis');
 const { notifPrefsExtService } =
   require('../src/extensions/modules/notifPrefsExt/notifPrefsExt.service') as typeof import('../src/extensions/modules/notifPrefsExt/notifPrefsExt.service');
+const { notificationsService } =
+  require('../src/modules/notifications/notifications.service') as typeof import('../src/modules/notifications/notifications.service');
+const { pushService } =
+  require('../src/modules/push/push.service') as typeof import('../src/modules/push/push.service');
 /* eslint-enable @typescript-eslint/no-require-imports */
 
 const rand = () => Math.random().toString(36).slice(2, 10);
@@ -84,6 +88,81 @@ describe('Notifications + Push integration', () => {
       n => n.type === 'NEW_FOLLOWER' && n.data?.followerId === follower.id,
     ).length;
     expect(count).toBe(1);
+  });
+
+  it('puts follow requests in Social and terminal room events in Rooms', async () => {
+    const user = await registerUser(app);
+    createdUserIds.push(user.id);
+    await prisma.notification.createMany({
+      data: [
+        {
+          userId: user.id,
+          type: 'FOLLOW_REQUEST',
+          title: 'Follow request',
+          body: 'A private follow request',
+        },
+        {
+          userId: user.id,
+          type: 'ROOM_CANCELED',
+          title: 'Room canceled',
+          body: 'A scheduled room was canceled',
+        },
+        {
+          userId: user.id,
+          type: 'ROOM_ENDED_BY_ADMIN',
+          title: 'Room ended',
+          body: 'A moderator ended this room',
+        },
+      ],
+    });
+
+    const rooms = await request(app)
+      .get('/api/notifications?filter=rooms')
+      .set('Authorization', `Bearer ${user.token}`);
+    expect(rooms.status).toBe(200);
+    expect(rooms.body.data.map((row: { type: string }) => row.type)).toEqual(
+      expect.arrayContaining(['ROOM_CANCELED', 'ROOM_ENDED_BY_ADMIN']),
+    );
+    expect(rooms.body.data).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ type: 'FOLLOW_REQUEST' })]),
+    );
+
+    const social = await request(app)
+      .get('/api/notifications?filter=social')
+      .set('Authorization', `Bearer ${user.token}`);
+    expect(social.status).toBe(200);
+    expect(social.body.data).toEqual(
+      expect.arrayContaining([expect.objectContaining({ type: 'FOLLOW_REQUEST' })]),
+    );
+  });
+
+  it('uses the new-follower push preference for FOLLOW_REQUEST fanout', async () => {
+    const user = await registerUser(app);
+    createdUserIds.push(user.id);
+    await prisma.notificationPreference.upsert({
+      where: { userId: user.id },
+      create: { userId: user.id, newFollower: false },
+      update: { newFollower: false },
+    });
+    const row = await prisma.notification.create({
+      data: {
+        userId: user.id,
+        type: 'FOLLOW_REQUEST',
+        title: 'Follow request',
+        body: 'Someone requested to follow you',
+      },
+    });
+    const extensionGate = jest.spyOn(notifPrefsExtService, 'canDeliver');
+    const dispatch = jest.spyOn(pushService, 'dispatchToUser');
+
+    try {
+      await notificationsService.deliverPersisted(row);
+      expect(extensionGate).not.toHaveBeenCalled();
+      expect(dispatch).not.toHaveBeenCalled();
+    } finally {
+      extensionGate.mockRestore();
+      dispatch.mockRestore();
+    }
   });
 
   it('PATCH /:id/read marks a single notification read; /read-all flushes the rest', async () => {
@@ -251,6 +330,54 @@ describe('Notifications + Push integration', () => {
       .get('/api/notifications')
       .set('Authorization', `Bearer ${a.token}`);
     expect(after.body.data.some((n: { id: string }) => n.id === id)).toBe(false);
+  });
+
+  it('paginates equal-timestamp notifications exactly once with an opaque cursor', async () => {
+    const user = await registerUser(app);
+    createdUserIds.push(user.id);
+    const createdAt = new Date('2030-01-01T00:00:00.000Z');
+    const suffix = rand();
+    const seeded = [`notif-a-${suffix}`, `notif-b-${suffix}`, `notif-c-${suffix}`];
+    await prisma.notification.createMany({
+      data: seeded.map(id => ({
+        id,
+        userId: user.id,
+        type: 'WAVE' as const,
+        title: 'Pagination tie',
+        body: id,
+        createdAt,
+      })),
+    });
+
+    const first = await request(app)
+      .get('/api/notifications?limit=2')
+      .set('Authorization', `Bearer ${user.token}`);
+    expect(first.status).toBe(200);
+    expect(first.body.data).toHaveLength(2);
+    expect(first.body.hasMore).toBe(true);
+    expect(first.body.nextCursor).toMatch(/^v1\./);
+
+    const second = await request(app)
+      .get('/api/notifications')
+      .query({ limit: 2, cursor: first.body.nextCursor as string })
+      .set('Authorization', `Bearer ${user.token}`);
+    expect(second.status).toBe(200);
+    expect(second.body.hasMore).toBe(false);
+
+    const ids = [...first.body.data, ...second.body.data].map((row: { id: string }) => row.id);
+    expect(ids).toEqual([...seeded].sort().reverse());
+    expect(new Set(ids).size).toBe(seeded.length);
+  });
+
+  it('rejects malformed notification cursors as validation errors instead of 500s', async () => {
+    const user = await registerUser(app);
+    createdUserIds.push(user.id);
+    const response = await request(app)
+      .get('/api/notifications?cursor=not-a-cursor')
+      .set('Authorization', `Bearer ${user.token}`);
+
+    expect(response.status).toBe(400);
+    expect(response.body.error.code).toBe('VALIDATION_001');
   });
 
   it('atomically grants only one frequency slot under concurrent push fan-out', async () => {

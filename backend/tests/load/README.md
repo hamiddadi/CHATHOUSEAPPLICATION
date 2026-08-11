@@ -13,14 +13,20 @@ npm run load:check
 `npm run load:functional` creates synthetic users and exercises REST and
 Socket.IO flows. Useful settings are:
 
-| Variable                       | Default | Allowed                  |
-| ------------------------------ | ------: | ------------------------ |
-| `LOAD_TEST_USERS`              |    `50` | `2..200`                 |
-| `LOAD_TEST_CONCURRENCY`        |    `10` | `1..50`, not above users |
-| `LOAD_TEST_REQUEST_TIMEOUT_MS` |  `5000` | `1000..30000`            |
-| `LOAD_TEST_HTTP_RETRIES`       |     `2` | `0..5`                   |
-| `LOAD_TEST_MAX_FAILURE_RATE`   |     `0` | `0..<1`                  |
-| `LOAD_TEST_RESET_RATE_LIMITS`  | `false` | strict boolean           |
+| Variable                           |  Default | Allowed                  |
+| ---------------------------------- | -------: | ------------------------ |
+| `LOAD_TEST_USERS`                  |     `50` | `2..200`                 |
+| `LOAD_TEST_CONCURRENCY`            |     `10` | `1..50`, not above users |
+| `LOAD_TEST_REQUEST_TIMEOUT_MS`     |   `5000` | `1000..30000`            |
+| `LOAD_TEST_HTTP_RETRIES`           |      `2` | `0..5`                   |
+| `LOAD_TEST_MAX_FAILURE_RATE`       |      `0` | `0..<1`                  |
+| `LOAD_TEST_RESET_RATE_LIMITS`      |  `false` | strict boolean           |
+| `LOAD_TEST_LEGAL_DOCUMENT_VERSION` | discover | `YYYY-MM-DD`             |
+
+Before creating users, the runner reads the authoritative legal-document
+version published by `/terms`. An explicit `LOAD_TEST_LEGAL_DOCUMENT_VERSION`
+acts as a fail-closed expectation: if the server publishes a different version,
+the run stops before registration.
 
 Rate-limit resets are disabled by default. Enabling them uses a bounded Redis
 `SCAN` and is accepted only for a loopback Redis URL; remote Redis mutation is

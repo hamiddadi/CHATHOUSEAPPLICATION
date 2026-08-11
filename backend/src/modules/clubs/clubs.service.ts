@@ -7,6 +7,7 @@ import { AppError } from '../../middlewares/error.middleware';
 import { notificationsService } from '../notifications/notifications.service';
 import { getBlockedIdSet } from '../social/blocks';
 import { mediaService } from '../media/media.service';
+import { runIdempotentCreate } from '../../utils/idempotency';
 import { clubInclude, privacyToDb, publicUser, toApi, toSummary } from './clubs.mapper';
 import type { ViewerMembership } from './clubs.mapper';
 import { clubInviteToken } from './clubs.invite-token';
@@ -77,6 +78,21 @@ const slugify = (name: string): string =>
     .replace(/\s+/g, '-')
     .replace(/[^a-z0-9-]/g, '')
     .slice(0, 60);
+
+/**
+ * Pick a readable, unique slug while the caller holds the club-creation
+ * advisory lock. Keeping this lookup inside the creation transaction prevents
+ * two concurrent names that slugify identically from choosing the same value.
+ */
+const uniqueClubSlug = async (tx: Prisma.TransactionClient, name: string): Promise<string> => {
+  const root = slugify(name) || 'house';
+  for (let suffix = 0; ; suffix += 1) {
+    const tail = suffix === 0 ? '' : `-${suffix + 1}`;
+    const candidate = `${root.slice(0, 60 - tail.length)}${tail}`;
+    const exists = await tx.club.findUnique({ where: { slug: candidate }, select: { id: true } });
+    if (!exists) return candidate;
+  }
+};
 
 export const clubsService = {
   async list(viewerId: string, input: ListClubsInput) {
@@ -217,45 +233,74 @@ export const clubsService = {
     return null;
   },
 
-  async create(ownerId: string, input: CreateClubInput) {
-    // Limit: one club per user unless we add premium later.
-    const existingCount = await prisma.club.count({ where: { ownerId } });
-    if (existingCount >= 3) throw new AppError('CLUB_006');
-
-    const slug = slugify(input.name);
-    // Ensure slug uniqueness by appending a suffix if needed
-    let finalSlug = slug;
-    const existing = await prisma.club.findUnique({ where: { slug } });
-    if (existing) {
-      finalSlug = `${slug}-${Date.now().toString(36)}`;
-    }
+  async create(ownerId: string, input: CreateClubInput, idempotencyKey?: string) {
     if (input.iconUrl) {
       await mediaService.assertOwnedMediaUrl(ownerId, input.iconUrl, MediaKind.AVATAR);
     }
 
-    const club = await prisma.$transaction(async tx => {
-      const created = await tx.club.create({
-        data: {
-          name: input.name.trim(),
-          slug: finalSlug,
-          description: input.description?.trim() || null,
-          rules: input.rules?.trim() || null,
-          privacy: privacyToDb(input.privacy),
-          category: input.category,
-          categoryEmoji: input.categoryEmoji,
-          iconUrl: input.iconUrl ?? null,
-          ownerId,
-          memberCount: 1,
-          members: {
-            create: { userId: ownerId, role: 'ADMIN' },
+    const name = input.name.trim();
+    const creation = await runIdempotentCreate({
+      userId: ownerId,
+      scope: 'clubs.create',
+      key: idempotencyKey,
+      payload: input,
+      create: async tx => {
+        // Club creation is intentionally rare. A transaction-scoped advisory
+        // lock gives us one serial order for the global unique name/slug checks
+        // and for each owner's quota check. The lock is released at commit or
+        // rollback, so there is no stale distributed-lock state to clean up.
+        await tx.$queryRaw`
+          SELECT pg_advisory_xact_lock(hashtextextended('clubs:create', 0))::text
+        `;
+
+        // Re-check account activity and quota only after acquiring the lock;
+        // checks performed before the transaction are vulnerable to TOCTOU
+        // races from another device using a different idempotency key.
+        const owner = await tx.user.findUnique({
+          where: { id: ownerId },
+          select: { deletedAt: true },
+        });
+        if (!owner || owner.deletedAt) throw new AppError('USER_001');
+
+        const existingCount = await tx.club.count({ where: { ownerId } });
+        if (existingCount >= 3) throw new AppError('CLUB_006');
+
+        const nameTaken = await tx.club.findUnique({ where: { name }, select: { id: true } });
+        if (nameTaken) {
+          throw new AppError('VALIDATION_001', 'A club with this name already exists');
+        }
+
+        const finalSlug = await uniqueClubSlug(tx, name);
+        const created = await tx.club.create({
+          data: {
+            name,
+            slug: finalSlug,
+            description: input.description?.trim() || null,
+            rules: input.rules?.trim() || null,
+            privacy: privacyToDb(input.privacy),
+            category: input.category,
+            categoryEmoji: input.categoryEmoji,
+            iconUrl: input.iconUrl ?? null,
+            ownerId,
+            memberCount: 1,
+            members: {
+              create: { userId: ownerId, role: 'ADMIN' },
+            },
           },
-        },
-        include: clubInclude,
-      });
-      return created;
+          select: { id: true },
+        });
+        return created.id;
+      },
     });
+
+    const club = await prisma.club.findUnique({
+      where: { id: creation.resourceId },
+      include: clubInclude,
+    });
+    if (!club) throw new AppError('CLUB_001');
     // The owner was just created as the sole ADMIN member and is always within
-    // the (single-member) slice; derive their membership from it directly.
+    // the (single-member) slice. The same holds for an idempotent replay, which
+    // loads the exact committed club instead of creating any new side effect.
     const ownerMember = club.members.find(m => m.userId === ownerId) ?? null;
     const viewerMembership: ViewerMembership = ownerMember
       ? { role: ownerMember.role, joinedAt: ownerMember.joinedAt, user: ownerMember.user }

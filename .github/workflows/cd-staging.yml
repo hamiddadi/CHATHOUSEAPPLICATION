@@ -4,6 +4,17 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      allow_one_way_livekit_revocation_upgrade:
+        description: 'Authorize the audited first v1 cutover with no pre-v1 API rollback'
+        required: true
+        default: false
+        type: boolean
+      allow_one_way_database_role_upgrade:
+        description: 'Authorize the audited first DB-role v1 cutover with no pre-v1 API rollback'
+        required: true
+        default: false
+        type: boolean
 
 concurrency:
   group: cd-staging
@@ -161,14 +172,17 @@ jobs:
           REQUIRE_PUBLIC_ENDPOINTS: 'true'
           PUBLIC_API_URL: ${{ vars.PUBLIC_API_URL }}
           PUBLIC_APP_URL: ${{ vars.PUBLIC_APP_URL }}
+          ALLOW_ONE_WAY_LIVEKIT_REVOCATION_UPGRADE: ${{ inputs.allow_one_way_livekit_revocation_upgrade || 'false' }}
+          ALLOW_ONE_WAY_DATABASE_ROLE_UPGRADE: ${{ inputs.allow_one_way_database_role_upgrade || 'false' }}
         with:
           host: ${{ secrets.STAGING_HOST }}
           username: ${{ secrets.STAGING_USER }}
           key: ${{ secrets.STAGING_SSH_KEY }}
           fingerprint: ${{ secrets.STAGING_HOST_FINGERPRINT }}
-          envs: NEW_IMAGE,REGISTRY,REGISTRY_USER,REGISTRY_TOKEN,DEPLOY_BUNDLE,DEPLOY_DIR,BASE_URL,API_SERVICE,REQUIRE_PUBLIC_ENDPOINTS,PUBLIC_API_URL,PUBLIC_APP_URL
+          envs: NEW_IMAGE,REGISTRY,REGISTRY_USER,REGISTRY_TOKEN,DEPLOY_BUNDLE,DEPLOY_DIR,BASE_URL,API_SERVICE,REQUIRE_PUBLIC_ENDPOINTS,PUBLIC_API_URL,PUBLIC_APP_URL,ALLOW_ONE_WAY_LIVEKIT_REVOCATION_UPGRADE,ALLOW_ONE_WAY_DATABASE_ROLE_UPGRADE
           script_stop: true
-          command_timeout: 15m
+          # Match production: bounded migrations retain rollback/health margin.
+          command_timeout: 60m
           script: |
             set -euo pipefail
             log() { printf '%s [deploy] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
@@ -227,6 +241,12 @@ jobs:
               rm -f "$DEPLOY_BUNDLE"
               exit "$status"
             }
+            interrupt() {
+              trap - TERM INT HUP
+              log "Deployment shell interrupted; forcing failure cleanup"
+              exit 1
+            }
+            trap interrupt TERM INT HUP
             trap cleanup EXIT
             if tar -tzf "$DEPLOY_BUNDLE" | grep -Eq '(^/|(^|/)\.\.(/|$))'; then
               log "Unsafe path found in deployment bundle"
@@ -237,6 +257,7 @@ jobs:
               docker-compose.prod.yml \
               Caddyfile \
               scripts/deploy/deploy-image.sh \
+              scripts/deploy/livekit-deploy-guard.sh \
               scripts/deploy/health-check.sh; do
               [ -f "$STAGE_DIR/$required" ] || {
                 log "Bundle is missing required file: ${required}"
@@ -270,6 +291,8 @@ jobs:
               REQUIRE_PUBLIC_ENDPOINTS="$REQUIRE_PUBLIC_ENDPOINTS" \
               PUBLIC_API_URL="$PUBLIC_API_URL" \
               PUBLIC_APP_URL="$PUBLIC_APP_URL" \
+              ALLOW_ONE_WAY_LIVEKIT_REVOCATION_UPGRADE="$ALLOW_ONE_WAY_LIVEKIT_REVOCATION_UPGRADE" \
+              ALLOW_ONE_WAY_DATABASE_ROLE_UPGRADE="$ALLOW_ONE_WAY_DATABASE_ROLE_UPGRADE" \
               "$DEPLOY_DIR/scripts/deploy/deploy-image.sh" "$NEW_IMAGE"
             COMPOSE_ACTIVATED=0
             docker image prune -f >/dev/null 2>&1 || true
