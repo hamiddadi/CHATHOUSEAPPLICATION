@@ -29,8 +29,11 @@ tags:
 - tapOn:
     id: 'auth-get-started'
 
-- assertVisible:
-    id: 'auth-phone-input'
+- extendedWaitUntil:
+    visible:
+      id: 'auth-phone-input'
+    timeout: 10000
+- hideKeyboard
 - assertVisible:
     id: 'auth-age-confirmation'
     checked: false
@@ -46,7 +49,6 @@ tags:
 
 # The legal documents must be available before authentication and offer an
 # explicit in-app return control on both platforms.
-- hideKeyboard
 - tapOn:
     id: 'auth-terms-link'
 - assertVisible:
