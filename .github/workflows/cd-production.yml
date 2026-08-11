@@ -61,7 +61,7 @@ jobs:
       image_ref: ${{ steps.candidate.outputs.ref }}
       source_sha: ${{ steps.source.outputs.sha }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -128,7 +128,7 @@ jobs:
           echo "run_id=${run_id}" >> "$GITHUB_OUTPUT"
 
       - name: Download staging acceptance evidence
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: staging-release-candidate-${{ steps.source.outputs.sha }}
           path: ${{ runner.temp }}/staging-candidate
@@ -208,7 +208,7 @@ jobs:
           fi
 
       - name: Checkout deployment files
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Build versioned infrastructure bundle
         env:

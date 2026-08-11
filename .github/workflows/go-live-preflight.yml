@@ -42,7 +42,7 @@ jobs:
     environment: production
     steps:
       - name: Checkout the explicitly requested release revision
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ inputs.release_ref }}
           fetch-depth: 0
@@ -107,7 +107,7 @@ jobs:
       - name: Download the existing signed Android artifact
         id: download-android
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: ${{ inputs.android_artifact_name }}
           path: ${{ runner.temp }}/go-live/android
@@ -118,7 +118,7 @@ jobs:
       - name: Download the existing signed iOS artifact
         id: download-ios
         continue-on-error: true
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: ${{ inputs.ios_artifact_name }}
           path: ${{ runner.temp }}/go-live/ios
@@ -126,11 +126,11 @@ jobs:
           repository: ${{ github.repository }}
           run-id: ${{ inputs.ios_artifact_run_id }}
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: '22.23.1'
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
@@ -224,7 +224,7 @@ jobs:
 
       - name: Upload the non-secret preflight report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: go-live-preflight-${{ steps.source.outputs.sha }}
           path: ${{ runner.temp }}/go-live-preflight.json

@@ -35,7 +35,7 @@ jobs:
     outputs:
       sha: ${{ steps.source.outputs.sha }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -85,16 +85,16 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ needs.source-gate.outputs.sha }}
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: '22.23.1'
           cache: npm
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
@@ -196,7 +196,7 @@ jobs:
             }' > artifacts/android-production-manifest.json
 
       - name: Upload signed Android evidence
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: android-production-aab
           path: |
@@ -211,7 +211,7 @@ jobs:
     runs-on: macos-latest
     environment: production
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ needs.source-gate.outputs.sha }}
 
@@ -226,7 +226,7 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: '22.23.1'
           cache: npm
@@ -370,10 +370,10 @@ jobs:
           set -euo pipefail
           archive_path="$RUNNER_TEMP/ChatHouse.xcarchive"
           app_path="$archive_path/Products/Applications/ChatHouse.app"
-          [ -d "$app_path" ] && [ -s "$app_path/embedded.mobileprovision" ] || {
+          if [[ ! -d "$app_path" || ! -s "$app_path/embedded.mobileprovision" ]]; then
             echo "Signed archive or embedded profile is missing" >&2
             exit 1
-          }
+          fi
           codesign --verify --deep --strict "$app_path"
           codesign -dvv "$app_path" 2> "$RUNNER_TEMP/codesign.txt"
           grep -F "TeamIdentifier=${IOS_TEAM_ID}" "$RUNNER_TEMP/codesign.txt"
@@ -395,10 +395,10 @@ jobs:
           }
           actual_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app_path/Info.plist")"
           actual_build="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app_path/Info.plist")"
-          [ "$actual_version" = "$VERSION_NAME" ] && [ "$actual_build" = "$BUILD_NUMBER" ] || {
+          if [[ "$actual_version" != "$VERSION_NAME" || "$actual_build" != "$BUILD_NUMBER" ]]; then
             echo "Archived version/build does not match workflow inputs" >&2
             exit 1
-          }
+          fi
 
           mkdir -p artifacts
           tar -czf artifacts/ChatHouse.xcarchive.tgz \
@@ -423,7 +423,7 @@ jobs:
             }' > artifacts/ios-production-manifest.json
 
       - name: Upload signed iOS evidence
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ios-production-xcarchive
           path: |

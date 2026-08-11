@@ -24,6 +24,8 @@ regexes = [
   '''chathouse:chathouse''',                    # dev Postgres creds
   '''ci_(access|refresh)_secret_[0-9a-f]+''',   # CI-only JWT secrets
   '''ExponentPushToken\[[^\]]+\]''',            # Expo push token fixtures
+  '''voice-attempt-123''',                       # Upload retry test idempotency fixture
+  '''tok-abcdef12345''',                         # House invite documentation fixture
   # Source code that READS a secret from an env var is not a hardcoded
   # secret. The generic-api-key rule false-flags lines like
   # `secret: env.RECORDING_S3_SECRET as string` (recordings.service.ts:182).
