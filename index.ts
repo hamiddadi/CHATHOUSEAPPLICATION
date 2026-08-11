@@ -3,7 +3,10 @@ import notifee from '@notifee/react-native';
 import { getMessaging, setBackgroundMessageHandler } from '@react-native-firebase/messaging';
 import { AppRegistry } from 'react-native';
 import { App } from './App';
+import { configureDevelopmentLogBox } from './src/core/configureDevelopmentLogBox';
 import { handleBackgroundNotificationEvent } from './src/features/notifications/services/notificationOpenService';
+
+configureDevelopmentLogBox();
 
 // FCM background / quit-state handler. `notification`-type payloads are rendered
 // by the OS automatically; registering this satisfies @react-native-firebase's
