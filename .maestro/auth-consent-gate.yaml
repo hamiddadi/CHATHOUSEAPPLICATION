@@ -32,7 +32,6 @@ tags:
     visible:
       id: 'auth-phone-input'
     timeout: 10000
-- hideKeyboard
 
 - assertVisible:
     id: 'auth-age-confirmation'
@@ -60,7 +59,6 @@ tags:
 - tapOn:
     id: 'auth-phone-input'
 - inputText: '4155552671'
-- hideKeyboard
 - tapOn:
     id: 'auth-age-confirmation'
 - tapOn:

@@ -81,7 +81,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
       - name: Test the dependency-free preflight and native CI harness
-        run: node --test scripts/go-live-preflight.test.mjs scripts/run-ios-maestro.test.mjs
+        run: node --test scripts/go-live-preflight.test.mjs scripts/mobile-maestro-flows.test.mjs scripts/run-ios-maestro.test.mjs
       - name: Validate this exact checkout through the shared preflight
         env:
           GO_LIVE_EXPECTED_SHA: ${{ github.sha }}
