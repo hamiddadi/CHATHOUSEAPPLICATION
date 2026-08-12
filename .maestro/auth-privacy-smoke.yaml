@@ -39,18 +39,40 @@ tags:
       platform: Android
     commands:
       - hideKeyboard
-- assertVisible:
-    id: 'auth-age-confirmation'
-    checked: false
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - assertVisible:
+          id: 'auth-age-confirmation'
+          checked: false
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - assertVisible:
+          id: 'auth-age-confirmation'
+          text: 'checkbox, unchecked'
 - assertVisible:
     id: 'auth-phone-submit'
     enabled: false
 
 - tapOn:
     id: 'auth-age-confirmation'
-- assertVisible:
-    id: 'auth-age-confirmation'
-    checked: true
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - assertVisible:
+          id: 'auth-age-confirmation'
+          checked: true
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - assertVisible:
+          id: 'auth-age-confirmation'
+          text: 'checkbox, checked'
 
 # The legal documents must be available before authentication and offer an
 # explicit in-app return control on both platforms.

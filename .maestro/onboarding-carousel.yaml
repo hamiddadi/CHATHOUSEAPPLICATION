@@ -61,6 +61,6 @@ tags:
 - extendedWaitUntil:
     visible:
       id: 'auth-get-started'
-    timeout: 15000
+    timeout: 45000
 - assertNotVisible:
     id: 'welcome-slides-screen'

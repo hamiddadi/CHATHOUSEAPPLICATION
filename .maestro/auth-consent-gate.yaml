@@ -37,16 +37,32 @@ tags:
       platform: Android
     commands:
       - hideKeyboard
-
-- assertVisible:
-    id: 'auth-age-confirmation'
-    checked: false
-- assertVisible:
-    id: 'auth-terms-acceptance'
-    checked: false
-- assertVisible:
-    id: 'auth-privacy-acknowledgement'
-    checked: false
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - assertVisible:
+          id: 'auth-age-confirmation'
+          checked: false
+      - assertVisible:
+          id: 'auth-terms-acceptance'
+          checked: false
+      - assertVisible:
+          id: 'auth-privacy-acknowledgement'
+          checked: false
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - assertVisible:
+          id: 'auth-age-confirmation'
+          text: 'checkbox, unchecked'
+      - assertVisible:
+          id: 'auth-terms-acceptance'
+          text: 'checkbox, unchecked'
+      - assertVisible:
+          id: 'auth-privacy-acknowledgement'
+          text: 'checkbox, unchecked'
 - assertVisible:
     id: 'auth-phone-submit'
     enabled: false
@@ -81,23 +97,51 @@ tags:
       id: 'auth-phone-submit'
       enabled: true
     timeout: 5000
-- assertVisible:
-    id: 'auth-age-confirmation'
-    checked: true
-- assertVisible:
-    id: 'auth-terms-acceptance'
-    checked: true
-- assertVisible:
-    id: 'auth-privacy-acknowledgement'
-    checked: true
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - assertVisible:
+          id: 'auth-age-confirmation'
+          checked: true
+      - assertVisible:
+          id: 'auth-terms-acceptance'
+          checked: true
+      - assertVisible:
+          id: 'auth-privacy-acknowledgement'
+          checked: true
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - assertVisible:
+          id: 'auth-age-confirmation'
+          text: 'checkbox, checked'
+      - assertVisible:
+          id: 'auth-terms-acceptance'
+          text: 'checkbox, checked'
+      - assertVisible:
+          id: 'auth-privacy-acknowledgement'
+          text: 'checkbox, checked'
 
 # Each mandatory acknowledgement remains a live gate. Do not tap Submit: this
 # flow deliberately makes no OTP/backend request.
 - tapOn:
     id: 'auth-privacy-acknowledgement'
-- assertVisible:
-    id: 'auth-privacy-acknowledgement'
-    checked: false
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - assertVisible:
+          id: 'auth-privacy-acknowledgement'
+          checked: false
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - assertVisible:
+          id: 'auth-privacy-acknowledgement'
+          text: 'checkbox, unchecked'
 - assertVisible:
     id: 'auth-phone-submit'
     enabled: false
@@ -108,3 +152,17 @@ tags:
       id: 'auth-phone-submit'
       enabled: true
     timeout: 5000
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - assertVisible:
+          id: 'auth-privacy-acknowledgement'
+          checked: true
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - assertVisible:
+          id: 'auth-privacy-acknowledgement'
+          text: 'checkbox, checked'
