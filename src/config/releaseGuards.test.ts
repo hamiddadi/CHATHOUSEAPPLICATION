@@ -18,6 +18,7 @@ describe('native release guard wiring', () => {
     expect(releaseGuard).toBeGreaterThan(localSource);
     expect(wrapper).toContain('validate_firebase_plist');
     expect(wrapper).toContain('ENVFILE=.env.production');
+    expect(wrapper).toContain('contains_placeholder "$api_key"');
   });
 
   it('keeps production checks out of the overridable base Xcode env file', () => {

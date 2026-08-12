@@ -80,8 +80,8 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: ${{ env.NODE_VERSION }}
-      - name: Test the dependency-free preflight
-        run: node --test scripts/go-live-preflight.test.mjs
+      - name: Test the dependency-free preflight and native CI harness
+        run: node --test scripts/go-live-preflight.test.mjs scripts/run-ios-maestro.test.mjs
       - name: Validate this exact checkout through the shared preflight
         env:
           GO_LIVE_EXPECTED_SHA: ${{ github.sha }}
@@ -300,32 +300,7 @@ jobs:
           xcrun simctl bootstatus "$IOS_SIMULATOR_UDID" -b
       - name: Run smoke flow on iOS Simulator
         shell: bash
-        run: |
-          mkdir -p e2e-artifacts/ios
-          ENVFILE=.env.test nohup npm start -- --reset-cache > e2e-artifacts/ios/metro.log 2>&1 &
-          for _ in {1..60}; do
-            if curl -fsS http://127.0.0.1:8081/status; then
-              break
-            fi
-            sleep 2
-          done
-          curl -fsS http://127.0.0.1:8081/status
-          # Populate Metro's transform cache before the first flow. A cold iOS
-          # bundle can exceed the strict UI assertion timeout on hosted runners.
-          curl --fail --show-error --silent \
-            --retry 2 \
-            --retry-all-errors \
-            --max-time 600 \
-            'http://127.0.0.1:8081/index.bundle?platform=ios&dev=true&lazy=true&minify=false&inlineSourceMap=false&modulesOnly=false&runModule=true&excludeSource=true&sourcePaths=url-server&app=com.chathouse.app' \
-            --output /dev/null
-          APP_PATH="ios/build/Build/Products/Debug-iphonesimulator/ChatHouse.app"
-          test -d "$APP_PATH"
-          xcrun simctl install "$IOS_SIMULATOR_UDID" "$APP_PATH"
-          "$HOME/.maestro/bin/maestro" --device "$IOS_SIMULATOR_UDID" test \
-            --format junit \
-            --output e2e-artifacts/ios/report.xml \
-            --test-output-dir e2e-artifacts/ios/run \
-            .maestro
+        run: bash scripts/run-ios-maestro.sh
       - name: Upload iOS E2E diagnostics
         if: always()
         uses: actions/upload-artifact@v6

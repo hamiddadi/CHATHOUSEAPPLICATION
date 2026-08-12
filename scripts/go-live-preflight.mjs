@@ -402,7 +402,7 @@ export function validateIosFirebaseText(text) {
   if (!/^\d+:\d+:ios:[0-9A-Fa-f]+$/u.test(appId)) {
     throw new Error('GOOGLE_APP_ID Firebase iOS invalide');
   }
-  if (!/^AIza[0-9A-Za-z_-]{35}$/u.test(apiKey)) {
+  if (hasPlaceholder(apiKey) || !/^AIza[0-9A-Za-z_-]{35}$/u.test(apiKey)) {
     throw new Error('clé API Firebase iOS invalide');
   }
   return projectId;

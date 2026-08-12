@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -462,6 +462,23 @@ test('validateIosFirebaseText validates the bundle and production identifiers', 
     () => validateIosFirebaseText(plist.replace('com.chathouse.app', 'com.example.app')),
     /BUNDLE_ID/u,
   );
+});
+
+test('the iOS Firebase CI fixture boots but remains blocked from production', () => {
+  const plist = readFileSync('ios/ChatHouse/GoogleService-Info.plist.example', 'utf8');
+  const apiKey = plistString(plist, 'API_KEY');
+
+  // Firebase Installations aborts iOS apps at launch unless the API key has
+  // this shape, even for a compile/smoke-test-only configuration.
+  assert.match(apiKey, /^AIza[0-9A-Za-z_-]{35}$/u);
+  assert.equal(hasPlaceholder(apiKey), true);
+  assert.throws(() => validateIosFirebaseText(plist), /PROJECT_ID.*factice/u);
+
+  const otherwiseValidFixture = plist.replaceAll(
+    'replace-with-firebase-project-id',
+    'chathouse-production',
+  );
+  assert.throws(() => validateIosFirebaseText(otherwiseValidFixture), /clé API.*invalide/u);
 });
 
 test('legalDraftReasons blocks draft markers and bracketed legal placeholders', () => {

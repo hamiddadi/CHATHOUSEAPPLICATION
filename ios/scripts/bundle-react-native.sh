@@ -183,7 +183,7 @@ validate_firebase_plist() {
     fail "GoogleService-Info.plist has no valid Firebase API key."
   [[ "$gcm_enabled" == "true" || "$gcm_enabled" == "YES" ]] ||
     fail "Firebase Cloud Messaging must be enabled for the iOS app."
-  if contains_placeholder "$project_id"; then
+  if contains_placeholder "$project_id" || contains_placeholder "$api_key"; then
     fail "GoogleService-Info.plist is still a placeholder."
   fi
   return 0
