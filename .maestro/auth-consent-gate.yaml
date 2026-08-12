@@ -20,6 +20,7 @@ tags:
     commands:
       - tapOn:
           id: 'welcome-skip'
+          retryTapIfNoChange: true
 
 - extendedWaitUntil:
     visible:

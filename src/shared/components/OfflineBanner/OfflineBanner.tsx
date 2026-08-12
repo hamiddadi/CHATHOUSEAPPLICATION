@@ -16,7 +16,7 @@ export const OfflineBanner: React.FC = () => {
   if (isOnline) return null;
   return (
     <View
-      pointerEvents="box-none"
+      pointerEvents="none"
       accessibilityRole="alert"
       accessibilityLiveRegion="polite"
       style={[styles.anchor, { top: insets.top }]}
