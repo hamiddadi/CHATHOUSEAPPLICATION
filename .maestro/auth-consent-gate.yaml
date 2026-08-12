@@ -32,6 +32,11 @@ tags:
     visible:
       id: 'auth-phone-input'
     timeout: 10000
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - hideKeyboard
 
 - assertVisible:
     id: 'auth-age-confirmation'
@@ -59,6 +64,11 @@ tags:
 - tapOn:
     id: 'auth-phone-input'
 - inputText: '4155552671'
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - hideKeyboard
 - tapOn:
     id: 'auth-age-confirmation'
 - tapOn:
