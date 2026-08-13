@@ -236,7 +236,7 @@ Row.displayName = 'Row';
 const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: colors.modalBackdrop,
     justifyContent: 'flex-end',
   },
   sheet: {
@@ -273,7 +273,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: spacing.md,
     borderRadius: 12,
-    backgroundColor: 'rgba(255,255,255,0.05)',
+    backgroundColor: colors.glass,
   },
   cancelLabel: { color: colors.textMuted, fontSize: 14, fontWeight: '600' },
 });

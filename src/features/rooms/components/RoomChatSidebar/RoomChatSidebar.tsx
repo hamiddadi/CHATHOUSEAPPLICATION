@@ -17,7 +17,7 @@ import { useTranslation } from 'react-i18next';
 import { chatmodApi } from '../../../extensions';
 import { Avatar } from '../../../../shared/components/Avatar';
 import { ContentReportSheet } from '../../../../shared/components/ContentReportSheet';
-import { colors, spacing } from '../../../../shared/constants/theme';
+import { colors, spacing, withAlpha } from '../../../../shared/constants/theme';
 import { getSocket } from '../../../../shared/services/realtime/socketClient';
 import type { ContentReportReason } from '../../../../shared/types/moderation';
 import { errorMessage } from '../../../../shared/utils/errorMessage';
@@ -452,7 +452,7 @@ export const RoomChatSidebar: React.FC<RoomChatSidebarProps> = memo(
 RoomChatSidebar.displayName = 'RoomChatSidebar';
 
 const styles = StyleSheet.create({
-  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  backdrop: { flex: 1, backgroundColor: colors.modalBackdrop, justifyContent: 'flex-end' },
   sheet: {
     backgroundColor: colors.surfaceHigh,
     borderTopLeftRadius: 24,
@@ -467,7 +467,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.xxl,
     paddingVertical: spacing.md,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(255,255,255,0.08)',
+    borderBottomColor: colors.glassStrong,
   },
   title: { color: colors.text, fontSize: 16, fontWeight: '700' },
   listContent: { padding: spacing.lg, gap: spacing.sm },
@@ -479,7 +479,7 @@ const styles = StyleSheet.create({
   },
   bubble: {
     flex: 1,
-    backgroundColor: 'rgba(255,255,255,0.05)',
+    backgroundColor: colors.glass,
     padding: spacing.sm,
     borderRadius: 12,
   },
@@ -499,7 +499,7 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     padding: spacing.lg,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(255,255,255,0.08)',
+    borderTopColor: colors.glassStrong,
   },
   composerDisabled: {
     flexDirection: 'row',
@@ -508,13 +508,13 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     padding: spacing.lg,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(255,255,255,0.08)',
+    borderTopColor: colors.glassStrong,
   },
   composerDisabledText: { color: colors.textMuted, fontSize: 13 },
   input: {
     flex: 1,
     color: colors.text,
-    backgroundColor: 'rgba(255,255,255,0.05)',
+    backgroundColor: colors.glass,
     borderRadius: 18,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
@@ -546,8 +546,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.sm,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(255,255,255,0.08)',
-    backgroundColor: 'rgba(0,228,117,0.05)',
+    borderTopColor: colors.glassStrong,
+    backgroundColor: withAlpha(colors.accent, 0.05),
   },
   replyBannerLabel: { color: colors.primary, fontSize: 11, fontWeight: '700' },
   replyBannerSnippet: { color: colors.textMuted, fontSize: 12, marginTop: 2 },

@@ -117,7 +117,9 @@ export const LegalAcceptanceGate: React.FC = () => {
                       : 'border-overlay-white-30 bg-transparent'
                   }`}
                 >
-                  {termsAccepted && <MaterialIcons name="check" size={18} color="white" />}
+                  {termsAccepted && (
+                    <MaterialIcons name="check" size={18} color={colors.onPrimary} />
+                  )}
                 </View>
               </Pressable>
               <Pressable
@@ -149,7 +151,9 @@ export const LegalAcceptanceGate: React.FC = () => {
                       : 'border-overlay-white-30 bg-transparent'
                   }`}
                 >
-                  {privacyAcknowledged && <MaterialIcons name="check" size={18} color="white" />}
+                  {privacyAcknowledged && (
+                    <MaterialIcons name="check" size={18} color={colors.onPrimary} />
+                  )}
                 </View>
               </Pressable>
               <Pressable
@@ -182,15 +186,17 @@ export const LegalAcceptanceGate: React.FC = () => {
             disabled={!termsAccepted || !privacyAcknowledged || submitting}
             onPress={submit}
             className={`rounded-full py-lg items-center ${
-              termsAccepted && privacyAcknowledged && !submitting
-                ? 'bg-primary'
-                : 'bg-overlay-white-10'
+              termsAccepted && privacyAcknowledged ? 'bg-primary' : 'bg-overlay-white-10'
             }`}
           >
             {submitting ? (
-              <ActivityIndicator color={colors.white} />
+              <ActivityIndicator color={colors.onPrimary} />
             ) : (
-              <Text className="text-white text-md font-body-bold">
+              <Text
+                className={`text-md font-body-bold ${
+                  termsAccepted && privacyAcknowledged ? 'text-primary-on' : 'text-ink-muted'
+                }`}
+              >
                 {t('privacy.legalGate.continue', 'Accept and continue')}
               </Text>
             )}

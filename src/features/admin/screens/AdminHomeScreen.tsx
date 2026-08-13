@@ -80,7 +80,7 @@ const NavTile: React.FC<NavTileProps> = ({ icon, label, hint, onPress, badge }) 
     </View>
     {typeof badge === 'number' && badge > 0 ? (
       <View className="bg-danger rounded-pill px-sm py-xxs">
-        <Text className="text-xs font-body-bold text-white">{badge > 99 ? '99+' : badge}</Text>
+        <Text className="text-xs font-body-bold text-on-danger">{badge > 99 ? '99+' : badge}</Text>
       </View>
     ) : null}
     <MaterialIcons name="chevron-right" size={20} color={colors.textMuted} />

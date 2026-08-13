@@ -44,7 +44,7 @@ const HERO_GRADIENT = [
   colors.surfaceLowest,
 ] as const;
 const PRIMARY_GRADIENT = [colors.primary, colors.primaryContainer] as const;
-const ACCENT_GRADIENT = [colors.primaryContainer, palette.inversePrimary] as const;
+const ACCENT_GRADIENT = [colors.gradientEnd, palette.inversePrimary] as const;
 
 const formatCount = (n: number): string => {
   if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;
@@ -303,7 +303,7 @@ export const SettingsScreen: React.FC = () => {
         </View>
 
         <View className="mt-[56px] items-center px-xxl">
-          <Text className="text-xl font-display-bold text-white">
+          <Text className="text-xl font-display text-white">
             {user?.displayName ?? t('settings.yourProfile')}
           </Text>
           <Text className="text-sm font-body-medium text-ink-muted mt-xxs">
@@ -365,7 +365,7 @@ export const SettingsScreen: React.FC = () => {
                 end={{ x: 1, y: 0 }}
                 style={styles.primaryBtn}
               >
-                <Text className="text-sm font-body-bold text-on-primary-container">
+                <Text className="text-sm font-body-bold text-primary-on-container">
                   {t('settings.editProfile')}
                 </Text>
               </GradientView>

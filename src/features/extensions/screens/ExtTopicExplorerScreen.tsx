@@ -79,7 +79,7 @@ export const ExtTopicExplorerScreen: React.FC<Props> = ({ onSelectTopic, initial
       </View>
 
       {tree.isLoading ? (
-        <ActivityIndicator style={styles.loader} />
+        <ActivityIndicator style={styles.loader} color={colors.primary} />
       ) : tree.isError ? (
         <View style={styles.errorWrap}>
           <Text style={styles.errorText}>

@@ -47,14 +47,20 @@ export const getStatusColor = (status: AvatarStatus): string => {
 };
 
 /** Deterministic fallback tint so the same seed always produces the same color. */
-const FALLBACK_TINTS = ['#558dff', '#2f3f92', '#00a754', '#232846', '#b0c6ff'];
+const FALLBACK_TINTS = [
+  colors.primaryContainer,
+  palette.secondaryContainer,
+  colors.accentContainer,
+  colors.surfaceHigh,
+  colors.primary,
+];
 
 export const getFallbackTint = (seed?: string): string => {
-  if (!seed) return '#232846';
+  if (!seed) return colors.surfaceHigh;
   let hash = 0;
   for (let i = 0; i < seed.length; i++) {
     hash = (hash * 31 + seed.charCodeAt(i)) | 0;
   }
   const idx = Math.abs(hash) % FALLBACK_TINTS.length;
-  return FALLBACK_TINTS[idx] ?? '#232846';
+  return FALLBACK_TINTS[idx] ?? colors.surfaceHigh;
 };

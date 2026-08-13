@@ -165,7 +165,7 @@ export const PhoneScreen: React.FC = () => {
                     className="flex-row items-center px-sm gap-xs"
                   >
                     <Text className="text-xl">{selectedCountry.flag}</Text>
-                    <Text className="text-body font-body-medium text-ink">
+                    <Text className="text-md font-body-medium text-ink">
                       {selectedCountry.callingCode}
                     </Text>
                     <MaterialIcons name="arrow-drop-down" size={24} color={colors.text} />
@@ -194,7 +194,7 @@ export const PhoneScreen: React.FC = () => {
                   value ? 'bg-primary border-primary' : 'border-overlay-white-30 bg-transparent'
                 }`}
               >
-                {value && <MaterialIcons name="check" size={16} color="white" />}
+                {value && <MaterialIcons name="check" size={16} color={colors.onPrimary} />}
               </View>
               <Text className="text-sm font-body-semibold text-ink flex-1">
                 {t('auth.phone.ageVerification', 'I confirm I am at least 16 years old')}
@@ -232,7 +232,7 @@ export const PhoneScreen: React.FC = () => {
                     value ? 'bg-primary border-primary' : 'border-overlay-white-30 bg-transparent'
                   }`}
                 >
-                  {value && <MaterialIcons name="check" size={16} color="white" />}
+                  {value && <MaterialIcons name="check" size={16} color={colors.onPrimary} />}
                 </View>
               </Pressable>
               <Text
@@ -283,7 +283,7 @@ export const PhoneScreen: React.FC = () => {
                     value ? 'bg-primary border-primary' : 'border-overlay-white-30 bg-transparent'
                   }`}
                 >
-                  {value && <MaterialIcons name="check" size={16} color="white" />}
+                  {value && <MaterialIcons name="check" size={16} color={colors.onPrimary} />}
                 </View>
               </Pressable>
               <Text

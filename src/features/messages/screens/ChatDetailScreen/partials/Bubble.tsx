@@ -2,7 +2,7 @@ import React, { memo } from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import MaterialIcons from '@react-native-vector-icons/material-icons';
 import { GradientView } from '../../../../../shared/components/GradientView';
-import { colors, spacing } from '../../../../../shared/constants/theme';
+import { colors, spacing, withAlpha } from '../../../../../shared/constants/theme';
 import { DEFAULTS } from '../../../../../shared/constants/images';
 import type { Message } from '../../../../../shared/types/domain';
 import { formatTime } from '../../../../../shared/utils/intl';
@@ -12,8 +12,10 @@ import VoiceMessageBubble from '../../../components/VoiceMessageBubble';
 const AVATAR_BUBBLE_SIZE = 32;
 const BUBBLE_CORNER = 20;
 
-const GLASS_BG = 'rgba(255,255,255,0.05)';
-const SENT_GRADIENT = ['rgba(176,198,255,0.2)', 'rgba(85,141,255,0.3)'] as const;
+const SENT_GRADIENT = [
+  withAlpha(colors.primary, 0.2),
+  withAlpha(colors.primaryContainer, 0.3),
+] as const;
 
 interface BubbleProps {
   message: Message;
@@ -127,7 +129,7 @@ const styles = StyleSheet.create({
     flexShrink: 1,
   },
   receivedBubble: {
-    backgroundColor: GLASS_BG,
+    backgroundColor: colors.glass,
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.md,
     borderRadius: BUBBLE_CORNER,

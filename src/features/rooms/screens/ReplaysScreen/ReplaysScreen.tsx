@@ -102,7 +102,7 @@ export const ReplaysScreen: React.FC = () => {
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: 'rgba(255,255,255,0.05)',
+    backgroundColor: colors.glass,
     borderRadius: 16,
     padding: spacing.lg,
     gap: spacing.xs,

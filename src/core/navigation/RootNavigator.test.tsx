@@ -56,10 +56,6 @@ jest.mock('./OnboardingNavigator', () => {
   return { OnboardingNavigator: () => ReactActual.createElement(Text, null, 'ONBOARDING_STACK') };
 });
 
-jest.mock('../../features/extensions', () => ({
-  useExtColorScheme: () => 'dark',
-}));
-
 // The account-restoration gate makes an authenticated /users/me call on mount;
 // stub it to a no-op so these routing tests stay isolated from the network.
 jest.mock('../../features/privacy', () => ({

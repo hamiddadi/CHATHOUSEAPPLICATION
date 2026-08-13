@@ -13,7 +13,7 @@ export const RoomRow: React.FC<{ room: SearchRoomHit; onPress: (id: string) => v
       accessibilityRole="button"
       className="flex-row items-center gap-md py-md"
     >
-      <View className="w-10 h-10 rounded-md bg-surface-container items-center justify-center">
+      <View className="w-10 h-10 rounded-md bg-surface-alt items-center justify-center">
         <MaterialIcons
           name={room.isLive ? 'mic' : 'schedule'}
           size={20}
@@ -51,7 +51,7 @@ export const ClubRow: React.FC<{ club: ClubRowData; onPress: (id: string) => voi
       accessibilityRole="button"
       className="flex-row items-center gap-md py-md"
     >
-      <View className="w-10 h-10 rounded-md bg-surface-container items-center justify-center">
+      <View className="w-10 h-10 rounded-md bg-surface-alt items-center justify-center">
         <Text className="text-lg">{club.categoryEmoji}</Text>
       </View>
       <View className="flex-1 gap-xxs">

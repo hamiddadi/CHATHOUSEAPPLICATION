@@ -12,8 +12,7 @@ const SEND_BTN_SIZE = 44;
 const MAX_MESSAGE_LEN = 2000;
 const COUNTER_THRESHOLD = 1900;
 
-const GLASS_BG = 'rgba(255,255,255,0.05)';
-const SEND_GRADIENT = ['#b0c6ff', '#558dff'] as const;
+const SEND_GRADIENT = [colors.primary, colors.primaryContainer] as const;
 
 // Lightweight emoji palette — a no-native-module quick-pick that beats the old
 // hardcoded single smiley. Tapping appends to the draft and keeps the palette
@@ -147,7 +146,7 @@ const styles = StyleSheet.create({
     paddingTop: spacing.sm,
     backgroundColor: colors.background,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(255,255,255,0.05)',
+    borderTopColor: colors.glass,
   },
   row: {
     flexDirection: 'row',
@@ -167,12 +166,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-    backgroundColor: GLASS_BG,
+    backgroundColor: colors.glass,
     borderRadius: 9999,
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.xs,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.08)',
+    borderColor: colors.glassStrong,
     minHeight: 44,
   },
   input: {
@@ -197,9 +196,9 @@ const styles = StyleSheet.create({
     width: SEND_BTN_SIZE,
     height: SEND_BTN_SIZE,
     borderRadius: SEND_BTN_SIZE / 2,
-    backgroundColor: GLASS_BG,
+    backgroundColor: colors.glass,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.08)',
+    borderColor: colors.glassStrong,
     alignItems: 'center',
     justifyContent: 'center',
   },

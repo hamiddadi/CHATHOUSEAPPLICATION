@@ -359,6 +359,7 @@
     "profileA11y": "Profile of {{name}}",
     "openSettings": "Open settings",
     "editTitleA11y": "Edit title: {{title}}",
+    "participantActionsA11y": "Actions for {{name}}",
     "visibilityOpen": "Open",
     "visibilitySocial": "Social",
     "visibilityClosed": "Closed",
@@ -770,6 +771,8 @@
     "markAllRead": "Mark all as read",
     "unread": "{{count}} unread",
     "delete": "Delete",
+    "itemReadA11y": "Read notification: {{message}}",
+    "itemUnreadA11y": "Unread notification: {{message}}",
     "followRequests": {
       "open": "Follow requests",
       "openA11y": "Open follow requests",

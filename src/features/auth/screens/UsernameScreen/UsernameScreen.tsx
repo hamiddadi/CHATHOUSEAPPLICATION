@@ -179,9 +179,9 @@ export const UsernameScreen: React.FC = () => {
                   defaultValue: 'Use suggestion @{{username}}',
                   username: sug,
                 })}
-                className="bg-surface px-md py-sm rounded-full border border-surface-border"
+                className="bg-surface px-md py-sm rounded-full border border-outline"
               >
-                <Text className="text-body font-body-medium text-ink">@{sug}</Text>
+                <Text className="text-md font-body-medium text-ink">@{sug}</Text>
               </Pressable>
             ))}
           </View>

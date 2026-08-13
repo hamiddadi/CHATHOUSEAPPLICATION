@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { badgesApi, BADGE_META, type Badge } from '../api/badgesApi';
-import { colors } from '../../../shared/constants/theme';
 
 interface Props {
   userId: string;
@@ -48,8 +47,10 @@ export const ExtBadgesRow: React.FC<Props> = ({ userId, compact = false, max = 4
             style={[styles.chip, { backgroundColor: meta.tone }]}
             accessibilityLabel={meta.label}
           >
-            <Text style={styles.emoji}>{meta.emoji}</Text>
-            {!compact ? <Text style={styles.label}>{meta.label}</Text> : null}
+            <Text style={[styles.emoji, { color: meta.foreground }]}>{meta.emoji}</Text>
+            {!compact ? (
+              <Text style={[styles.label, { color: meta.foreground }]}>{meta.label}</Text>
+            ) : null}
           </View>
         );
       })}
@@ -68,6 +69,6 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     gap: 4,
   },
-  emoji: { fontSize: 12, color: colors.white },
-  label: { fontSize: 11, color: colors.white, fontWeight: '600' },
+  emoji: { fontSize: 12 },
+  label: { fontSize: 11, fontWeight: '600' },
 });

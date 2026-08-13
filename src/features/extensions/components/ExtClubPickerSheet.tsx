@@ -58,7 +58,7 @@ export const ExtClubPickerSheet: React.FC<Props> = ({
       <Text style={styles.subtitle}>The room will appear on the Club page.</Text>
 
       {loading ? (
-        <ActivityIndicator style={styles.loader} />
+        <ActivityIndicator style={styles.loader} color={colors.primary} />
       ) : (
         <FlatList
           data={[null, ...clubs] as (ClubLite | null)[]}

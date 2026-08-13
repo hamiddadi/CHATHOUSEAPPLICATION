@@ -1,7 +1,13 @@
 import React from 'react';
 import { fireEvent, render } from '@testing-library/react-native';
+import { ActivityIndicator } from 'react-native';
 import { Button } from './Button';
-import { sizeContainerClass, sizeHitSlop } from './Button.styles';
+import {
+  sizeContainerClass,
+  sizeHitSlop,
+  variantIndicatorColor,
+  variantTextClass,
+} from './Button.styles';
 
 describe('Button', () => {
   it('renders the label and fires onPress', () => {
@@ -17,6 +23,19 @@ describe('Button', () => {
     const { getByRole } = render(<Button label="Join" disabled onPress={onPress} />);
     fireEvent.press(getByRole('button'));
     expect(onPress).not.toHaveBeenCalled();
+  });
+
+  it('uses the high-contrast foreground token for destructive actions', () => {
+    expect(variantTextClass.danger).toBe('text-on-danger');
+  });
+
+  it('uses a variant-aware spinner color while loading', () => {
+    const { UNSAFE_getByType, getByRole } = render(
+      <Button label="Delete" variant="danger" loading />,
+    );
+    expect(UNSAFE_getByType(ActivityIndicator).props.color).toBe(variantIndicatorColor.danger);
+    expect(getByRole('button', { name: 'Delete' })).toBeTruthy();
+    expect(getByRole('button').props.className).not.toContain('opacity-45');
   });
 
   describe('44pt touch target', () => {

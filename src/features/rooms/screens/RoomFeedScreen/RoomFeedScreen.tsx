@@ -478,7 +478,7 @@ export const RoomFeedScreen: React.FC = () => {
           ListFooterComponent={
             isFetchingNextPage ? (
               <View className="py-xl items-center">
-                <ActivityIndicator />
+                <ActivityIndicator color={colors.primary} />
               </View>
             ) : null
           }

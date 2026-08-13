@@ -67,11 +67,12 @@ describe('NotificationsScreen', () => {
   });
 
   it('renders the primed notification row', () => {
-    const { getByText } = renderScreen(<NotificationsScreen />, {
+    const { getByLabelText, getByText } = renderScreen(<NotificationsScreen />, {
       route: { name: 'Notifications', params: {} },
       seedQueryData: seedNotifs([makeNotif()]),
     });
     expect(getByText('Some One started following you.')).toBeTruthy();
+    expect(getByLabelText('Unread notification: Some One started following you.')).toBeTruthy();
   });
 
   it('shows the empty state when there are no notifications', () => {

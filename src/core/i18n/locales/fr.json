@@ -359,6 +359,7 @@
     "profileA11y": "Profil de {{name}}",
     "openSettings": "Ouvrir les réglages",
     "editTitleA11y": "Modifier le titre : {{title}}",
+    "participantActionsA11y": "Actions pour {{name}}",
     "visibilityOpen": "Ouverte",
     "visibilitySocial": "Social",
     "visibilityClosed": "Privée",
@@ -770,6 +771,8 @@
     "markAllRead": "Tout marquer comme lu",
     "unread": "{{count}} non lues",
     "delete": "Supprimer",
+    "itemReadA11y": "Notification lue : {{message}}",
+    "itemUnreadA11y": "Notification non lue : {{message}}",
     "followRequests": {
       "open": "Demandes d'abonnement",
       "openA11y": "Ouvrir les demandes d'abonnement",

@@ -79,7 +79,7 @@ export const ExtShareSheet: React.FC<Props> = ({ roomId, visible, onClose }) => 
     <ExtBottomSheet visible={visible} onClose={onClose} sheetStyle={styles.sheet}>
       <Text style={styles.title}>{t('extensions.share.title', 'Share this room')}</Text>
       {loading ? (
-        <ActivityIndicator style={styles.loader} />
+        <ActivityIndicator style={styles.loader} color={colors.primary} />
       ) : !links ? (
         <Text style={styles.error}>
           {t('extensions.share.error', 'Failed to build share links.')}

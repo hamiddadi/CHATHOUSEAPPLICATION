@@ -2,7 +2,7 @@ import React, { forwardRef, useCallback, useState } from 'react';
 import { Text, TextInput, View } from 'react-native';
 import type { TextInput as RNTextInput } from 'react-native';
 import { cn } from '../../utils/cn';
-import { sizeContainerClass, sizeInputClass } from './Input.styles';
+import { getInputBorderClass, sizeContainerClass, sizeInputClass } from './Input.styles';
 import type { InputProps } from './types';
 
 const PLACEHOLDER_COLOR = '#c2c6d7';
@@ -66,17 +66,15 @@ export const Input = forwardRef<RNTextInput, InputProps>(
           className={cn(
             'flex-row items-center gap-sm rounded-md border',
             sizeContainerClass[size],
-            variant === 'filled'
-              ? 'bg-surface-high border-transparent'
-              : 'bg-glass border-glass-strong',
-            isFocused && 'border-primary',
-            !!error && 'border-danger',
+            variant === 'filled' ? 'bg-surface-high' : 'bg-glass',
+            getInputBorderClass(variant, isFocused, !!error),
           )}
         >
           {leftAdornment}
           <TextInput
             ref={ref}
             {...inputProps}
+            accessibilityLabel={inputProps.accessibilityLabel ?? label}
             onFocus={handleFocus}
             onBlur={handleBlur}
             placeholderTextColor={placeholderTextColor ?? PLACEHOLDER_COLOR}

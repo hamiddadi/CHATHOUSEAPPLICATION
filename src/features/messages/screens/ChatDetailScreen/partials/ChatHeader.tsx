@@ -111,7 +111,7 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.sm,
     backgroundColor: 'rgba(12,17,46,0.8)',
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(255,255,255,0.05)',
+    borderBottomColor: colors.glass,
   },
   headerLeft: {
     flexDirection: 'row',

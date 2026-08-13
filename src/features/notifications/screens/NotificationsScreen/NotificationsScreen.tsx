@@ -1,5 +1,13 @@
 import React, { memo, useCallback, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  FlatList,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import MaterialIcons from '@react-native-vector-icons/material-icons';
 import { Swipeable } from 'react-native-gesture-handler';
 import { useNavigation } from '@react-navigation/native';
@@ -8,7 +16,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { Loader } from '../../../../shared/components/Loader';
 import { EmptyState } from '../../../../shared/components/EmptyState';
-import { colors, spacing } from '../../../../shared/constants/theme';
+import { colors, palette, spacing } from '../../../../shared/constants/theme';
 import { formatDateTime } from '../../../../shared/utils/intl';
 import type { RoomStackParamList } from '../../../../core/navigation/types';
 import type { AppNotification, NotificationKind } from '../../../../shared/types/domain';
@@ -54,8 +62,8 @@ const RightActions: React.FC<{ label: string; onPress: () => void }> = ({ label,
     accessibilityLabel={label}
     style={styles.swipeAction}
   >
-    <MaterialIcons name="delete" size={22} color="white" />
-    <Text className="text-xs text-white mt-xxs">{label}</Text>
+    <MaterialIcons name="delete" size={22} color={palette.onError} />
+    <Text className="text-xs text-on-danger mt-xxs">{label}</Text>
   </Pressable>
 );
 
@@ -65,6 +73,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     width: 96,
     backgroundColor: colors.danger,
+  },
+  tabs: {
+    gap: spacing.sm,
+    paddingHorizontal: spacing.xxl,
+    paddingBottom: spacing.md,
+  },
+  tabScroller: {
+    flexGrow: 0,
+    flexShrink: 0,
   },
 });
 
@@ -81,14 +98,18 @@ const NotificationRow: React.FC<RowProps> = memo(({ notif, onPress, onDelete }) 
       <Pressable
         onPress={() => onPress(notif)}
         accessibilityRole="button"
-        accessibilityState={{ selected: notif.isRead }}
+        accessibilityLabel={t(
+          notif.isRead ? 'notifications.itemReadA11y' : 'notifications.itemUnreadA11y',
+          notif.isRead ? 'Read notification: {{message}}' : 'Unread notification: {{message}}',
+          { message: notif.message },
+        )}
         className={
           notif.isRead
             ? 'flex-row items-start gap-md py-lg px-xxl'
             : 'flex-row items-start gap-md py-lg px-xxl bg-overlay-white-5'
         }
       >
-        <View className="w-10 h-10 rounded-pill bg-surface-container items-center justify-center">
+        <View className="w-10 h-10 rounded-pill bg-surface-alt items-center justify-center">
           <MaterialIcons name={iconName} size={18} color={colors.primary} />
         </View>
         <View className="flex-1 gap-xxs">
@@ -112,11 +133,12 @@ const TabPill: React.FC<{
   <Pressable
     onPress={onPress}
     accessibilityRole="button"
+    accessibilityLabel={label}
     accessibilityState={{ selected: active }}
     className={
       active
-        ? 'px-lg py-sm rounded-pill bg-primary'
-        : 'px-lg py-sm rounded-pill bg-overlay-white-5 border border-overlay-white-10'
+        ? 'px-lg py-sm min-h-[44px] items-center justify-center rounded-pill bg-primary'
+        : 'px-lg py-sm min-h-[44px] items-center justify-center rounded-pill bg-overlay-white-5 border border-overlay-white-10'
     }
   >
     <Text
@@ -258,7 +280,12 @@ export const NotificationsScreen: React.FC = () => {
         )}
       </View>
 
-      <View className="flex-row gap-sm px-xxl pb-md">
+      <ScrollView
+        horizontal
+        style={styles.tabScroller}
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.tabs}
+      >
         {TABS.map(tab => (
           <TabPill
             key={tab}
@@ -267,7 +294,7 @@ export const NotificationsScreen: React.FC = () => {
             onPress={() => setFilter(tab)}
           />
         ))}
-      </View>
+      </ScrollView>
 
       <Pressable
         onPress={openFollowRequests}

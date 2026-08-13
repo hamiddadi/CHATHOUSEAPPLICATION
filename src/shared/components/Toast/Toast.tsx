@@ -27,8 +27,8 @@ const toneClass: Record<ToastMessage['tone'], string> = {
 };
 
 const textClass: Record<ToastMessage['tone'], string> = {
-  error: 'text-white',
-  success: 'text-white',
+  error: 'text-on-danger',
+  success: 'text-accent-on',
   info: 'text-ink',
   warning: 'text-surface-highest',
 };

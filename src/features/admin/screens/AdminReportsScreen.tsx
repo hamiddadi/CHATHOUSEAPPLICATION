@@ -152,7 +152,9 @@ const ReportRow: React.FC<{
             accessibilityState={{ disabled: busy }}
             accessibilityLabel={t('admin.reports.resolveA11y')}
           >
-            <Text className="text-xs font-body-bold text-white">{t('admin.reports.resolve')}</Text>
+            <Text className="text-xs font-body-bold text-primary-on">
+              {t('admin.reports.resolve')}
+            </Text>
           </Pressable>
         </View>
       ) : null}

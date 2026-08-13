@@ -113,7 +113,7 @@ export const ExtSettingsScreen: React.FC = () => {
   if (loading) {
     return (
       <SafeAreaView style={styles.center}>
-        <ActivityIndicator />
+        <ActivityIndicator color={colors.primary} />
       </SafeAreaView>
     );
   }

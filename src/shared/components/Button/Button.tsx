@@ -7,6 +7,7 @@ import {
   sizeHitSlop,
   sizeTextClass,
   variantContainerClass,
+  variantIndicatorColor,
   variantPressedClass,
   variantTextClass,
 } from './Button.styles';
@@ -63,6 +64,7 @@ export const Button: React.FC<ButtonProps> = ({
       onPressIn={handlePressIn}
       disabled={isInactive}
       accessibilityRole="button"
+      accessibilityLabel={pressableProps.accessibilityLabel ?? label}
       accessibilityState={{ disabled: isInactive, busy: loading }}
       style={style}
       className={cn(
@@ -70,7 +72,7 @@ export const Button: React.FC<ButtonProps> = ({
         sizeContainerClass[size],
         variantContainerClass[variant],
         fullWidth && 'self-stretch',
-        isInactive && 'opacity-45',
+        disabled && !loading && 'opacity-45',
       )}
     >
       {({ pressed }) => (
@@ -84,7 +86,7 @@ export const Button: React.FC<ButtonProps> = ({
           {leftIcon && !loading ? <View>{leftIcon}</View> : null}
 
           {loading ? (
-            <ActivityIndicator />
+            <ActivityIndicator color={variantIndicatorColor[variant]} />
           ) : label ? (
             <Text
               numberOfLines={1}

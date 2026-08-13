@@ -1,4 +1,5 @@
 import type { Insets } from 'react-native';
+import { colors, palette } from '../../constants/theme';
 import type { ButtonSize, ButtonVariant } from './types';
 
 /**
@@ -27,7 +28,15 @@ export const variantTextClass: Record<ButtonVariant, string> = {
   primaryContainer: 'text-primary-on-container',
   ghost: 'text-ink-muted',
   outline: 'text-ink',
-  danger: 'text-white',
+  danger: 'text-on-danger',
+};
+
+export const variantIndicatorColor: Record<ButtonVariant, string> = {
+  primary: colors.onPrimary,
+  primaryContainer: colors.onPrimaryContainer,
+  ghost: colors.text,
+  outline: colors.text,
+  danger: palette.onError,
 };
 
 export const sizeContainerClass: Record<ButtonSize, string> = {

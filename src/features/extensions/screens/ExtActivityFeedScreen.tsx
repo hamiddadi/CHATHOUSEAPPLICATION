@@ -301,7 +301,7 @@ export const ExtActivityFeedScreen: React.FC<{ onTapItem?: (item: ActivityItem) 
         ))}
       </View>
       {loading ? (
-        <ActivityIndicator style={styles.loader} />
+        <ActivityIndicator style={styles.loader} color={colors.primary} />
       ) : error ? (
         <View style={styles.empty}>
           <Text style={styles.emptyText}>
@@ -329,7 +329,9 @@ export const ExtActivityFeedScreen: React.FC<{ onTapItem?: (item: ActivityItem) 
           contentContainerStyle={styles.list}
           renderItem={renderItem}
           ListFooterComponent={
-            loadingMore ? <ActivityIndicator style={styles.footerLoader} /> : null
+            loadingMore ? (
+              <ActivityIndicator style={styles.footerLoader} color={colors.primary} />
+            ) : null
           }
           ListEmptyComponent={
             <View style={styles.empty}>

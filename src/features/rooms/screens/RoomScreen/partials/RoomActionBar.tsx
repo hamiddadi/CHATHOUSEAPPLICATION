@@ -4,7 +4,7 @@ import MaterialIcons from '@react-native-vector-icons/material-icons';
 import Animated from 'react-native-reanimated';
 import { useTranslation } from 'react-i18next';
 import { useAnimatedPress } from '../../../../../shared/hooks/useAnimatedPress';
-import { colors, spacing } from '../../../../../shared/constants/theme';
+import { colors, palette, spacing } from '../../../../../shared/constants/theme';
 
 const ACTION_BAR_ICON_SIZE = 18;
 
@@ -65,9 +65,9 @@ const RoomActionBar: React.FC<RoomActionBarProps> = memo(
               <MaterialIcons
                 name={isMuted ? 'mic-off' : 'mic'}
                 size={ACTION_BAR_ICON_SIZE}
-                color={colors.white}
+                color={palette.onError}
               />
-              <Text className="text-sm font-body-bold text-white">
+              <Text className="text-sm font-body-bold text-on-danger">
                 {isMuted ? t('room.unmute') : t('room.mute')}
               </Text>
             </Pressable>

@@ -1,6 +1,9 @@
 import React, { memo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { GradientView } from '../../../../../shared/components/GradientView';
+import { colors, withAlpha } from '../../../../../shared/constants/theme';
+
+const EMPHASIS_GRADIENT = [withAlpha(colors.accent, 0.2), withAlpha(colors.accent, 0)] as const;
 
 interface SectionLabelProps {
   label: string;
@@ -20,7 +23,7 @@ const SectionLabel: React.FC<SectionLabelProps> = memo(({ label, emphasis = fals
     </Text>
     {emphasis && (
       <GradientView
-        colors={['rgba(0,228,117,0.2)', 'rgba(0,228,117,0)']}
+        colors={EMPHASIS_GRADIENT}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 0 }}
         style={styles.sectionGradientLine}

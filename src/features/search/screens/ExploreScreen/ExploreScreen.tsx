@@ -261,8 +261,8 @@ const FilterChip: React.FC<{ label: string; active: boolean; onPress: () => void
       accessibilityLabel={t('explore.filterChipA11y', 'Filter {{label}}', { label })}
       className={
         active
-          ? 'px-md py-xs rounded-pill bg-primary'
-          : 'px-md py-xs rounded-pill bg-overlay-white-5 border border-overlay-white-10'
+          ? 'px-md py-xs min-h-[44px] items-center justify-center rounded-pill bg-primary'
+          : 'px-md py-xs min-h-[44px] items-center justify-center rounded-pill bg-overlay-white-5 border border-overlay-white-10'
       }
     >
       <Text

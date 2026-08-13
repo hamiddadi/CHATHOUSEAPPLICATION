@@ -124,17 +124,20 @@ OtpInput.displayName = 'OtpInput';
 
 export { OtpInput as default };
 
-const CELL_SIZE = 48;
+const CELL_MAX_WIDTH = 48;
 
 const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     justifyContent: 'center',
     gap: spacing.sm,
+    width: '100%',
   },
   cell: {
-    width: CELL_SIZE,
-    height: CELL_SIZE + 8,
+    flexGrow: 1,
+    flexBasis: 0,
+    maxWidth: CELL_MAX_WIDTH,
+    height: 56,
     borderRadius: radii.md,
     borderWidth: 1.5,
     borderColor: colors.outline,

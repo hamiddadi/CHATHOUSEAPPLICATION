@@ -19,7 +19,7 @@ const HouseRow: React.FC<HouseRowProps> = memo(({ house, onPress }) => {
       accessibilityLabel={house.name}
       className="flex-row items-center gap-md py-sm"
     >
-      <View className="w-10 h-10 rounded-md bg-surface-container items-center justify-center">
+      <View className="w-10 h-10 rounded-md bg-surface-alt items-center justify-center">
         <Text className="text-lg">{house.categoryEmoji}</Text>
       </View>
       <View className="flex-1 gap-xxs">
@@ -50,7 +50,7 @@ const HistoryRow: React.FC<HistoryRowProps> = memo(({ room, onPress }) => {
       accessibilityLabel={room.title}
       className="flex-row items-center gap-md py-sm"
     >
-      <View className="w-10 h-10 rounded-md bg-surface-container items-center justify-center">
+      <View className="w-10 h-10 rounded-md bg-surface-alt items-center justify-center">
         <Text className="text-lg">{room.categoryEmoji}</Text>
       </View>
       <View className="flex-1 gap-xxs">

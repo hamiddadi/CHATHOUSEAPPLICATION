@@ -130,7 +130,7 @@ const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
     justifyContent: 'flex-end',
-    backgroundColor: 'rgba(0,0,0,0.58)',
+    backgroundColor: colors.modalBackdropStrong,
   },
   sheet: {
     paddingHorizontal: spacing.xxl,

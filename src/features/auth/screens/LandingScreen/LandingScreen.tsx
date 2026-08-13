@@ -215,7 +215,7 @@ const LandingCTA: React.FC<LandingCTAProps> = memo(
             className="items-center justify-center"
             style={styles.devSkipButton}
           >
-            <Text className="text-xs font-body-medium text-overlay-white-60 underline">
+            <Text className="text-xs font-body-medium text-overlay-white-70 underline">
               {devSkipPending ? '…' : labels.devSkip}
             </Text>
           </Pressable>

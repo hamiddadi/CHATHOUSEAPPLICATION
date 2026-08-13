@@ -125,6 +125,8 @@ export const colors = {
 
   // Overlays
   overlay: 'rgba(7, 11, 40, 0.6)',
+  modalBackdrop: 'rgba(0, 0, 0, 0.5)',
+  modalBackdropStrong: 'rgba(0, 0, 0, 0.58)',
   glass: 'rgba(255, 255, 255, 0.05)',
   glassStrong: 'rgba(255, 255, 255, 0.08)',
 
@@ -147,12 +149,13 @@ export const colors = {
   overlayBlue50: 'rgba(77, 163, 255, 0.50)',
 
   // Hero gradient (landing). Tuned to match the dark app interior —
-  // deep navy at top fading to a primary-container blue at bottom
-  // right, so the jump Landing → Home feels continuous rather than
-  // switching between two different worlds.
+  // deep navy at top fading to a dark cobalt at bottom. The endpoint stays
+  // dark enough for the small semi-transparent white labels used on Landing
+  // to retain WCAG AA contrast while the navy/cobalt progression keeps the
+  // transition from Landing to Home visually continuous.
   gradientStart: '#0c112e',
   gradientMid: '#1a3091',
-  gradientEnd: '#558dff',
+  gradientEnd: '#274b9f',
 
   // Semantic aliases used by legacy-style code
   textWhite: palette.white,

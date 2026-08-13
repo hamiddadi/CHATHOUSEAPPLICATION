@@ -113,9 +113,9 @@ const styles = StyleSheet.create({
   title: { color: colors.text, fontSize: 14, fontWeight: '600' },
   subtitle: { color: colors.textDim, fontSize: 12, marginTop: 1 },
   action: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: colors.glassStrong,
     alignItems: 'center',
     justifyContent: 'center',
