@@ -45,13 +45,21 @@ export const SearchResultsView: React.FC<SearchResultsViewProps> = ({
     (filteredRooms?.length ?? 0);
   return (
     <ScrollView
+      keyboardShouldPersistTaps="handled"
       contentContainerStyle={{
         paddingBottom: bottomInset + spacing.huge,
         paddingHorizontal: spacing.xxl,
       }}
     >
       {isFetching ? (
-        <View className="py-sm items-center" accessibilityRole="progressbar">
+        <View
+          className="py-sm items-center"
+          accessible
+          accessibilityRole="progressbar"
+          accessibilityLabel={t('explore.searchResults', 'Search results')}
+          accessibilityState={{ busy: true }}
+          accessibilityLiveRegion="polite"
+        >
           <ActivityIndicator size="small" color={colors.primary} />
         </View>
       ) : null}

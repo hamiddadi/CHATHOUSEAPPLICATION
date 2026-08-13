@@ -1,4 +1,4 @@
-import { colors } from './theme';
+import { colors, palette } from './theme';
 
 interface TailwindColors {
   background: string;
@@ -57,5 +57,20 @@ describe('design token synchronization', () => {
       number,
     ];
     expect(contrast(translucentWhite, colors.gradientEnd)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it.each([
+    ['body text', colors.text, colors.background],
+    ['muted text', colors.textMuted, colors.background],
+    ['primary action', colors.onPrimary, colors.primary],
+    ['primary container', colors.onPrimaryContainer, colors.primaryContainer],
+    ['accent action', colors.onAccent, colors.accent],
+    ['danger action', palette.onError, colors.danger],
+  ])('keeps the %s token pair at WCAG AA contrast', (_name, foreground, background) => {
+    expect(contrast(toRgb(foreground), background)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it('keeps the idle form outline distinguishable from the app background', () => {
+    expect(contrast(toRgb(colors.outline), colors.background)).toBeGreaterThanOrEqual(3);
   });
 });

@@ -1,13 +1,16 @@
 import React, { memo, useCallback } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import MaterialIcons from '@react-native-vector-icons/material-icons';
 import Animated, { FadeInDown, FadeOutDown } from 'react-native-reanimated';
 import { useNavigation, useNavigationState } from '@react-navigation/native';
 import type { NavigationState, PartialState } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Avatar } from '../Avatar';
 import { colors, layout, radii, shadows, spacing } from '../../constants/theme';
 import { useCurrentRoom } from '../../../features/rooms/hooks/useRooms';
 import type { RoomParticipant } from '../../types/domain';
+
+const NARROW_LAYOUT_WIDTH = 360;
 
 // Walk the nested navigator state down to the focused leaf route name, so the
 // mini-bar can hide itself while the Room screen is actually open (it's mounted
@@ -35,6 +38,8 @@ export const RoomMiniBar: React.FC = memo(() => {
   const navigation = useNavigation();
   const { room, isMuted, toggleMute, leave } = useCurrentRoom();
   const activeRoute = useNavigationState(activeLeafName);
+  const insets = useSafeAreaInsets();
+  const { width: windowWidth } = useWindowDimensions();
 
   const handleTap = useCallback(() => {
     if (room) {
@@ -61,7 +66,9 @@ export const RoomMiniBar: React.FC = memo(() => {
   // navigated-away "resume" affordance).
   if (!room || activeRoute === 'Room') return null;
 
-  const bottomOffset = layout.tabBarHeight + layout.tabBarBottomOffset + spacing.sm;
+  const bottomOffset = insets.bottom + layout.tabBarHeight + layout.tabBarBottomOffset + spacing.sm;
+  const isNarrow = windowWidth < NARROW_LAYOUT_WIDTH;
+  const visibleSpeakers = room.speakers.slice(0, isNarrow ? 1 : 3);
 
   return (
     <Animated.View
@@ -70,42 +77,45 @@ export const RoomMiniBar: React.FC = memo(() => {
       style={[styles.wrapper, { bottom: bottomOffset }]}
       pointerEvents="box-none"
     >
-      <Pressable
-        onPress={handleTap}
-        accessibilityRole="button"
-        accessibilityLabel={`Return to room: ${room.title}`}
-        style={styles.bar}
-      >
+      <View style={styles.bar}>
         <View style={[StyleSheet.absoluteFill, styles.glassBg]} />
-        <View style={styles.content}>
-          {/* Speaker avatars */}
-          <View style={styles.avatarStack}>
-            {room.speakers.slice(0, 3).map((s: RoomParticipant, i: number) => (
-              <View key={s.id} style={[styles.stackItem, i > 0 && styles.stackItemOverlap]}>
-                <Avatar
-                  uri={s.avatarUrl ?? undefined}
-                  name={s.displayName}
-                  sizeValue={28}
-                  ring={s.audio === 'speaking'}
-                  ringColor={colors.accent}
-                  ringWidth={1.5}
-                />
+        <View style={[styles.content, isNarrow && styles.contentNarrow]}>
+          {/* The three sibling actions keep gestures and accessibility focus independent. */}
+          <Pressable
+            onPress={handleTap}
+            accessibilityRole="button"
+            accessibilityLabel={`Return to room: ${room.title}`}
+            style={[styles.roomAction, isNarrow && styles.roomActionNarrow]}
+          >
+            {visibleSpeakers.length > 0 ? (
+              <View style={styles.avatarStack}>
+                {visibleSpeakers.map((s: RoomParticipant, i: number) => (
+                  <View key={s.id} style={[styles.stackItem, i > 0 && styles.stackItemOverlap]}>
+                    <Avatar
+                      uri={s.avatarUrl ?? undefined}
+                      name={s.displayName}
+                      sizeValue={28}
+                      ring={s.audio === 'speaking'}
+                      ringColor={colors.accent}
+                      ringWidth={1.5}
+                    />
+                  </View>
+                ))}
               </View>
-            ))}
-          </View>
+            ) : null}
 
-          {/* Room info */}
-          <View style={styles.info}>
-            <Text style={styles.title} numberOfLines={1}>
-              {room.title}
-            </Text>
-            <View style={styles.metaRow}>
-              <MaterialIcons name="graphic-eq" size={10} color={colors.accent} />
-              <Text style={styles.meta}>
-                {room.speakers.length} speaking · {room.listenersCount} listening
+            <View style={styles.info}>
+              <Text style={styles.title} numberOfLines={1} ellipsizeMode="tail">
+                {room.title}
               </Text>
+              <View style={styles.metaRow}>
+                <MaterialIcons name="graphic-eq" size={10} color={colors.accent} />
+                <Text style={styles.meta} numberOfLines={1} ellipsizeMode="tail">
+                  {room.speakers.length} speaking · {room.listenersCount} listening
+                </Text>
+              </View>
             </View>
-          </View>
+          </Pressable>
 
           {/* Mute toggle */}
           <Pressable
@@ -113,7 +123,6 @@ export const RoomMiniBar: React.FC = memo(() => {
             accessibilityRole="button"
             accessibilityLabel={isMuted ? 'Unmute' : 'Mute'}
             style={[styles.iconBtn, isMuted && styles.iconBtnMuted]}
-            hitSlop={8}
           >
             <MaterialIcons
               name={isMuted ? 'mic-off' : 'mic'}
@@ -128,12 +137,11 @@ export const RoomMiniBar: React.FC = memo(() => {
             accessibilityRole="button"
             accessibilityLabel="Leave room"
             style={styles.leaveBtn}
-            hitSlop={8}
           >
             <MaterialIcons name="call-end" size={16} color={colors.danger} />
           </Pressable>
         </View>
-      </Pressable>
+      </View>
     </Animated.View>
   );
 });
@@ -166,9 +174,25 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
     gap: spacing.sm,
   },
+  contentNarrow: {
+    paddingHorizontal: spacing.sm,
+    gap: spacing.xs,
+  },
+  roomAction: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  roomActionNarrow: {
+    gap: spacing.xs,
+  },
   avatarStack: {
     flexDirection: 'row',
     alignItems: 'center',
+    flexShrink: 0,
   },
   stackItem: {
     marginLeft: 0,
@@ -178,6 +202,7 @@ const styles = StyleSheet.create({
   },
   info: {
     flex: 1,
+    minWidth: 0,
     gap: 2,
   },
   title: {
@@ -188,16 +213,19 @@ const styles = StyleSheet.create({
   metaRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    minWidth: 0,
     gap: 4,
   },
   meta: {
     color: colors.textMuted,
     fontSize: 10,
+    flexShrink: 1,
   },
   iconBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    flexShrink: 0,
     backgroundColor: 'rgba(255,255,255,0.1)',
     alignItems: 'center',
     justifyContent: 'center',
@@ -206,9 +234,10 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255, 180, 171, 0.15)',
   },
   leaveBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    flexShrink: 0,
     backgroundColor: 'rgba(255, 180, 171, 0.1)',
     alignItems: 'center',
     justifyContent: 'center',

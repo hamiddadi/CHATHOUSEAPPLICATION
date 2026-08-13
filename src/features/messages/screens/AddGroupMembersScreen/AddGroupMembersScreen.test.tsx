@@ -11,6 +11,7 @@ import { groupKeys } from '../../hooks/useGroups';
 import { profileKeys } from '../../../profile/hooks/useProfile';
 import type { User } from '../../../../shared/types/domain';
 import { renderScreen, mockAuthenticated, resetAuth } from '../../../../test-utils/renderScreen';
+import { profileService } from '../../../profile/services/profileService';
 import { groupService, type GroupConversation } from '../../services/groupService';
 import { AddGroupMembersScreen } from './AddGroupMembersScreen';
 
@@ -74,6 +75,26 @@ describe('AddGroupMembersScreen', () => {
   it('mounts and shows the "Add people" title', () => {
     const { getAllByText } = renderAdd([]);
     expect(getAllByText('Add people').length).toBeGreaterThan(0);
+  });
+
+  it('shows a retryable error instead of an empty candidate list when loading fails', async () => {
+    const followingSpy = jest
+      .spyOn(profileService, 'following')
+      .mockRejectedValue(new Error('offline'));
+    const { findByText, getAllByText, getByText, queryByText } = renderScreen(
+      <AddGroupMembersScreen />,
+      {
+        route: { name: 'AddGroupMembers', params: { conversationId: GROUP_ID } },
+        seedQueryData: [{ key: [...groupKeys.detail(GROUP_ID)], data: group() }],
+      },
+    );
+
+    expect(await findByText("Couldn't load messages")).toBeTruthy();
+    expect(queryByText('No one to message yet')).toBeNull();
+    expect(getAllByText('Add people').length).toBeGreaterThan(0);
+
+    fireEvent.press(getByText('Retry'));
+    await waitFor(() => expect(followingSpy).toHaveBeenCalledTimes(2));
   });
 
   it('close button calls navigation.goBack', () => {

@@ -1,5 +1,13 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Linking, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Linking,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { profileLinksApi, type ProfileLink } from '../api/profileLinksApi';
 import { apiErrorMessage } from '../utils/extUi';
 import { areExternalDigitalPurchasesAllowed } from '../utils/digitalPurchases';
@@ -127,12 +135,14 @@ export const ExtProfileLinks: React.FC<Props> = ({ userId, editable = false }) =
           />
           {error ? <Text style={styles.error}>{error}</Text> : null}
           <Pressable
-            style={[styles.add, busy && styles.addBusy]}
+            style={styles.add}
             onPress={() => void onAdd()}
             disabled={busy}
             accessibilityRole="button"
             accessibilityLabel="Add profile link"
+            accessibilityState={{ disabled: busy, busy }}
           >
+            {busy ? <ActivityIndicator size="small" color={colors.onPrimary} /> : null}
             <Text style={styles.addText}>{busy ? 'Adding…' : '+ Add link'}</Text>
           </Pressable>
         </View>
@@ -169,20 +179,27 @@ const styles = StyleSheet.create({
   form: { gap: 8 },
   input: {
     backgroundColor: colors.overlayWhite5,
+    borderWidth: 1,
+    borderColor: colors.outline,
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 10,
+    minHeight: 44,
     fontSize: 13,
     color: colors.text,
   },
   error: { color: colors.danger, fontSize: 12 },
   add: {
     alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
     paddingHorizontal: 16,
     paddingVertical: 10,
     backgroundColor: colors.primary,
     borderRadius: 10,
+    minHeight: 44,
   },
-  addBusy: { opacity: 0.5 },
   addText: { color: colors.onPrimary, fontWeight: '600', fontSize: 13 },
 });

@@ -144,7 +144,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: spacing.md,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.15)',
+    borderColor: colors.outline,
     fontSize: 16,
   },
   counter: { color: colors.textMuted, fontSize: 11, textAlign: 'right' },

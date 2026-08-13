@@ -52,7 +52,8 @@ export const NewMessageScreen: React.FC = () => {
   // the next page on scroll so a follow past the 50th isn't unreachable. A local
   // filter narrows the loaded rows as the user types — no per-keystroke call.
   const followingQuery = useFollowing(myId);
-  const { isLoading, hasNextPage, isFetchingNextPage, fetchNextPage } = followingQuery;
+  const { isLoading, isError, hasNextPage, isFetchingNextPage, fetchNextPage, refetch } =
+    followingQuery;
   const following = useMemo(() => flattenFollowPages(followingQuery.data), [followingQuery.data]);
 
   const [query, setQuery] = useState('');
@@ -85,6 +86,10 @@ export const NewMessageScreen: React.FC = () => {
   const handleEndReached = useCallback(() => {
     if (hasNextPage && !isFetchingNextPage) void fetchNextPage();
   }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+
+  const handleRetry = useCallback(() => {
+    void refetch();
+  }, [refetch]);
 
   const handleStart = useCallback(async () => {
     const ids = [...selected.keys()];
@@ -228,6 +233,13 @@ export const NewMessageScreen: React.FC = () => {
 
       {isLoading ? (
         <Loader fullscreen accessibilityLabel={t('common.loading', 'Loading')} />
+      ) : isError ? (
+        <EmptyState
+          title={t('messages.couldNotLoad', "Couldn't load messages")}
+          description={t('messages.loadErrorHint', 'Check your connection and try again.')}
+          actionLabel={t('common.retry', 'Retry')}
+          onAction={handleRetry}
+        />
       ) : (
         <FlatList
           data={results}

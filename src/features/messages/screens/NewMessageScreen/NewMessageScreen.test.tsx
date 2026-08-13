@@ -12,6 +12,7 @@ import { act, fireEvent, waitFor } from '@testing-library/react-native';
 import { profileKeys } from '../../../profile/hooks/useProfile';
 import type { User } from '../../../../shared/types/domain';
 import { renderScreen, mockAuthenticated, resetAuth } from '../../../../test-utils/renderScreen';
+import { profileService } from '../../../profile/services/profileService';
 import { groupService, type GroupConversation } from '../../services/groupService';
 import { NewMessageScreen } from './NewMessageScreen';
 
@@ -65,6 +66,23 @@ describe('NewMessageScreen', () => {
     // Header title still renders; the body explains there is no one to message.
     expect(getAllByText('New message').length).toBeGreaterThan(0);
     expect(getByText('No one to message yet')).toBeTruthy();
+  });
+
+  it('shows a retryable error instead of the no-following state when loading fails', async () => {
+    const followingSpy = jest
+      .spyOn(profileService, 'following')
+      .mockRejectedValue(new Error('offline'));
+    const { findByText, getAllByText, getByText, queryByText } = renderScreen(
+      <NewMessageScreen />,
+      { route: { name: 'NewMessage' } },
+    );
+
+    expect(await findByText("Couldn't load messages")).toBeTruthy();
+    expect(queryByText('No one to message yet')).toBeNull();
+    expect(getAllByText('New message').length).toBeGreaterThan(0);
+
+    fireEvent.press(getByText('Retry'));
+    await waitFor(() => expect(followingSpy).toHaveBeenCalledTimes(2));
   });
 
   it('close button calls navigation.goBack', () => {

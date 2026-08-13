@@ -13,6 +13,7 @@
  * Room screen and renders — exactly the "navigated away" state it exists for.
  */
 import React from 'react';
+import { StyleSheet } from 'react-native';
 import { fireEvent } from '@testing-library/react-native';
 import { renderScreen } from '../../../test-utils/renderScreen';
 import { useCurrentRoomStore } from '../../../features/rooms/store/currentRoomStore';
@@ -47,5 +48,20 @@ describe('RoomMiniBar', () => {
       params: { screen: 'Room', params: { roomId: 'room-xyz' } },
     });
     expect(navigation.navigate).not.toHaveBeenCalledWith('RoomsTab', expect.anything());
+  });
+
+  it('keeps resume, mute and leave as sibling actions with full-size control targets', () => {
+    useCurrentRoomStore.getState().setRoom(ROOM);
+    const { getAllByRole, getByLabelText, getByText } = renderScreen(<RoomMiniBar />);
+
+    const resume = getByLabelText('Return to room: Resume me');
+    const mute = getByLabelText('Mute');
+    const leave = getByLabelText('Leave room');
+
+    expect(getAllByRole('button')).toHaveLength(3);
+    expect(StyleSheet.flatten(resume.props.style)).toMatchObject({ minWidth: 0, minHeight: 44 });
+    expect(StyleSheet.flatten(mute.props.style)).toMatchObject({ width: 44, height: 44 });
+    expect(StyleSheet.flatten(leave.props.style)).toMatchObject({ width: 44, height: 44 });
+    expect(getByText('0 speaking · 3 listening').props.numberOfLines).toBe(1);
   });
 });

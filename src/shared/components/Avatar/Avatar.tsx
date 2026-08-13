@@ -1,4 +1,4 @@
-import React, { memo, useMemo, useState } from 'react';
+import React, { memo, useEffect, useMemo, useState } from 'react';
 import { Image, Pressable, Text, View } from 'react-native';
 import { cn } from '../../utils/cn';
 import { colors } from '../../constants/theme';
@@ -7,6 +7,7 @@ import {
   INITIALS_FONT_RATIO,
   STATUS_BORDER_RATIO,
   STATUS_DOT_RATIO,
+  getFallbackForeground,
   getFallbackTint,
   getShapeRadius,
   getStatusColor,
@@ -63,6 +64,11 @@ export const Avatar: React.FC<AvatarProps> = memo(
     const radius = getShapeRadius(shape, dimension);
     const initials = useMemo(() => getInitials(name), [name]);
     const tint = useMemo(() => getFallbackTint(name ?? uri ?? undefined), [name, uri]);
+    const fallbackForeground = useMemo(() => getFallbackForeground(tint), [tint]);
+
+    useEffect(() => {
+      setHasError(false);
+    }, [uri]);
 
     const statusDotSize = Math.round(dimension * STATUS_DOT_RATIO);
     const statusBorder = Math.max(1, Math.round(dimension * STATUS_BORDER_RATIO));
@@ -113,8 +119,11 @@ export const Avatar: React.FC<AvatarProps> = memo(
             />
           ) : (
             <Text
-              className="text-primary-on font-body-bold text-center"
-              style={{ fontSize: Math.round(dimension * INITIALS_FONT_RATIO) }}
+              className="font-body-bold text-center"
+              style={{
+                color: fallbackForeground,
+                fontSize: Math.round(dimension * INITIALS_FONT_RATIO),
+              }}
               allowFontScaling={false}
               numberOfLines={1}
             >
@@ -147,7 +156,7 @@ export const Avatar: React.FC<AvatarProps> = memo(
           accessibilityRole="button"
           accessibilityLabel={a11yLabel}
           testID={testID}
-          hitSlop={8}
+          hitSlop={10}
           className={cn('active:opacity-85')}
         >
           {content}

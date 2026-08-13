@@ -132,7 +132,11 @@ export const BlockedUsersScreen: React.FC = () => {
           renderItem={renderItem}
           keyExtractor={keyExtractor}
           ItemSeparatorComponent={renderSeparator}
-          contentContainerStyle={[styles.list, { paddingBottom: insets.bottom + spacing.giant }]}
+          contentContainerStyle={[
+            styles.list,
+            (data?.length ?? 0) === 0 ? styles.emptyList : undefined,
+            { paddingBottom: insets.bottom + spacing.giant },
+          ]}
           ListEmptyComponent={
             <EmptyState
               title={t('blockedUsers.empty', 'No blocked accounts')}
@@ -151,4 +155,5 @@ export const BlockedUsersScreen: React.FC = () => {
 
 const styles = StyleSheet.create({
   list: { paddingHorizontal: spacing.xxl },
+  emptyList: { flexGrow: 1 },
 });

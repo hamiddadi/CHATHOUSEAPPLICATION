@@ -9,7 +9,7 @@ import { useGhostModeStore } from '../store/ghostModeStore';
 const BUTTON_SIZE = 46;
 const ICON_SIZE = 22;
 const VISIBLE_COLOR = '#1E3A8A';
-const HIDDEN_COLOR = '#9CA3AF';
+const HIDDEN_COLOR = '#64748B';
 
 /**
  * See / Unsee toggle — floating white chip stacked under the recenter button.

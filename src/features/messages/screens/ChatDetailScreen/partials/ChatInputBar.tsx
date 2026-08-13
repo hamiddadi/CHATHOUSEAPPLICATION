@@ -3,7 +3,7 @@ import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import MaterialIcons from '@react-native-vector-icons/material-icons';
 import { useTranslation } from 'react-i18next';
 import { GradientView } from '../../../../../shared/components/GradientView';
-import { colors, spacing } from '../../../../../shared/constants/theme';
+import { colors, spacing, withAlpha } from '../../../../../shared/constants/theme';
 
 const INPUT_ICON_SIZE = 22;
 const SEND_BTN_SIZE = 44;
@@ -11,6 +11,7 @@ const SEND_BTN_SIZE = 44;
 // discrete counter only appears as the user nears the ceiling.
 const MAX_MESSAGE_LEN = 2000;
 const COUNTER_THRESHOLD = 1900;
+const PLACEHOLDER_COLOR = withAlpha(colors.textMuted, 0.72);
 
 const SEND_GRADIENT = [colors.primary, colors.primaryContainer] as const;
 
@@ -94,7 +95,8 @@ const ChatInputBar: React.FC<ChatInputBarProps> = memo(
             <TextInput
               style={styles.input}
               placeholder={t('chat.inputPlaceholder')}
-              placeholderTextColor={'rgba(194,198,215,0.5)'}
+              accessibilityLabel={t('chat.inputPlaceholder')}
+              placeholderTextColor={PLACEHOLDER_COLOR}
               value={value}
               onChangeText={onChangeText}
               onFocus={onInputFocus}
@@ -170,8 +172,8 @@ const styles = StyleSheet.create({
     borderRadius: 9999,
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.xs,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.glassStrong,
+    borderWidth: 1,
+    borderColor: colors.outline,
     minHeight: 44,
   },
   input: {

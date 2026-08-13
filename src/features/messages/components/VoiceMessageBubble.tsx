@@ -2,7 +2,7 @@ import React, { useCallback } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import MaterialIcons from '@react-native-vector-icons/material-icons';
 import { useTranslation } from 'react-i18next';
-import { colors, spacing } from '../../../shared/constants/theme';
+import { colors, spacing, withAlpha } from '../../../shared/constants/theme';
 import { useVoicePlayback } from '../../../shared/services/audio/voicePlayback';
 
 interface VoiceMessageBubbleProps {
@@ -11,6 +11,8 @@ interface VoiceMessageBubbleProps {
   durationMs: number | null;
   /** Tints the controls to read on a sent (primary) vs received (glass) bubble. */
   isMine: boolean;
+  /** Override when a sent bubble uses a light fill rather than the dark sent gradient. */
+  foregroundColor?: string;
 }
 
 const formatClock = (seconds: number): string => {
@@ -32,6 +34,7 @@ const VoiceMessageBubble: React.FC<VoiceMessageBubbleProps> = ({
   audioUrl,
   durationMs,
   isMine,
+  foregroundColor,
 }) => {
   const { t } = useTranslation();
   const playing = useVoicePlayback(s => s.activeUrl === audioUrl && s.playing);
@@ -49,8 +52,8 @@ const VoiceMessageBubble: React.FC<VoiceMessageBubbleProps> = ({
     void toggle(audioUrl, durationMs);
   }, [toggle, audioUrl, durationMs]);
 
-  const fg = isMine ? '#FFFFFF' : colors.text;
-  const trackBg = isMine ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.12)';
+  const fg = foregroundColor ?? (isMine ? colors.white : colors.text);
+  const trackBg = withAlpha(fg, isMine ? 0.25 : 0.12);
 
   return (
     <View style={styles.row}>

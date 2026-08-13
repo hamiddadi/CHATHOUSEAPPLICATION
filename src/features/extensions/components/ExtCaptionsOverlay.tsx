@@ -6,6 +6,7 @@ import { colors } from '../../../shared/constants/theme';
 interface Props {
   lines: CaptionLine[];
   maxLines?: number;
+  bottomOffset?: number;
 }
 
 /**
@@ -15,16 +16,20 @@ interface Props {
  * Caller decides when to mount (typically: only when
  * `useExtCaptions().enabled === true`).
  */
-export const ExtCaptionsOverlay: React.FC<Props> = ({ lines, maxLines = 3 }) => {
+export const ExtCaptionsOverlay: React.FC<Props> = ({ lines, maxLines = 3, bottomOffset = 96 }) => {
   const visible = lines.slice(-maxLines);
   if (visible.length === 0) return null;
+  const accessibleTranscript = visible
+    .map(line => (line.speakerName ? `${line.speakerName}: ${line.text}` : line.text))
+    .join('. ');
 
   return (
     <View
-      style={styles.wrap}
+      style={[styles.wrap, { bottom: bottomOffset }]}
       pointerEvents="none"
       accessibilityRole="text"
-      accessibilityLabel="Live captions"
+      accessibilityLabel={accessibleTranscript}
+      accessibilityLiveRegion="polite"
     >
       {visible.map(line => (
         <View key={line.id} style={styles.row}>
@@ -47,7 +52,6 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 16,
     right: 16,
-    bottom: 96,
     padding: 10,
     borderRadius: 12,
     backgroundColor: 'rgba(15,23,42,0.78)',

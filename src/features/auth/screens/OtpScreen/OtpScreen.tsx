@@ -1,5 +1,13 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { KeyboardAvoidingView, Platform, Pressable, Text, View } from 'react-native';
+import {
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import MaterialIcons from '@react-native-vector-icons/material-icons';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -18,7 +26,7 @@ import {
   toAppError,
   type AppError,
 } from '../../../../shared/services/api/errorHandler';
-import { colors, spacing } from '../../../../shared/constants/theme';
+import { colors, layout, spacing } from '../../../../shared/constants/theme';
 import type { AuthStackParamList } from '../../../../core/navigation/types';
 
 type Nav = NativeStackNavigationProp<AuthStackParamList, 'Otp'>;
@@ -196,9 +204,11 @@ export const OtpScreen: React.FC = () => {
         </Pressable>
       </View>
 
-      <View
-        className="flex-1 px-xxl gap-xxl"
-        style={{ paddingBottom: insets.bottom + spacing.huge }}
+      <ScrollView
+        className="flex-1"
+        contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + spacing.huge }]}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
       >
         <Text className="text-display font-display text-ink tracking-tight">
           {t('auth.otp.title')}
@@ -256,6 +266,7 @@ export const OtpScreen: React.FC = () => {
               onPress={handleResend}
               accessibilityRole="button"
               accessibilityLabel={t('auth.otp.resend')}
+              className="min-h-[44px] justify-center"
             >
               <Text className="text-sm font-body-bold text-primary">{t('auth.otp.resend')}</Text>
             </Pressable>
@@ -267,7 +278,18 @@ export const OtpScreen: React.FC = () => {
         </View>
 
         <View className="flex-1" />
-      </View>
+      </ScrollView>
     </KeyboardAvoidingView>
   );
 };
+
+const styles = StyleSheet.create({
+  content: {
+    flexGrow: 1,
+    width: '100%',
+    maxWidth: layout.maxContentWidth,
+    alignSelf: 'center',
+    paddingHorizontal: spacing.xxl,
+    gap: spacing.xxl,
+  },
+});

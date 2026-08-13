@@ -111,7 +111,7 @@ const VisibilityRow: React.FC<VisibilityRowProps> = memo(
           <Text
             className={
               selected
-                ? 'text-xs font-body text-primary-on-container opacity-80'
+                ? 'text-xs font-body text-primary-on-container'
                 : 'text-xs font-body text-ink-muted'
             }
           >
@@ -136,8 +136,8 @@ const TopicChip: React.FC<TopicChipProps> = memo(({ topic, selected, onPress }) 
   return (
     <Pressable
       onPress={handlePress}
-      accessibilityRole="button"
-      accessibilityState={{ selected }}
+      accessibilityRole="checkbox"
+      accessibilityState={{ checked: selected }}
       style={[styles.chip, selected ? styles.chipSelected : styles.chipUnselected]}
     >
       <Text style={selected ? styles.chipLabelSelected : styles.chipLabelUnselected}>{topic}</Text>
@@ -178,12 +178,20 @@ interface CoHostSlotProps {
 }
 
 const CoHostSlot: React.FC<CoHostSlotProps> = memo(({ user, onRemove }) => {
+  const { t } = useTranslation();
   const handleRemove = useCallback(() => onRemove(user.id), [onRemove, user.id]);
   return (
     <View className="flex-row items-center gap-sm bg-overlay-white-5 rounded-pill px-sm py-xs">
       <Avatar uri={user.avatarUrl ?? undefined} name={user.displayName} sizeValue={24} />
       <Text className="text-xs text-ink">@{user.username}</Text>
-      <Pressable onPress={handleRemove} accessibilityRole="button" hitSlop={8}>
+      <Pressable
+        onPress={handleRemove}
+        accessibilityRole="button"
+        accessibilityLabel={t('createRoom.removeCoHostA11y', 'Remove {{name}} as co-host', {
+          name: user.displayName || user.username,
+        })}
+        className="w-[44px] h-[44px] items-center justify-center"
+      >
         <MaterialIcons name="close" size={16} color={colors.textMuted} />
       </Pressable>
     </View>
@@ -568,7 +576,7 @@ export const CreateRoomScreen: React.FC = () => {
             <View
               className={
                 isScheduled
-                  ? 'w-[22px] h-[22px] rounded-pill bg-white mt-xxs ml-[20px]'
+                  ? 'w-[22px] h-[22px] rounded-pill bg-primary-on mt-xxs ml-[20px]'
                   : 'w-[22px] h-[22px] rounded-pill bg-ink-muted mt-xxs ml-xxs'
               }
             />

@@ -100,7 +100,7 @@ const PrivacyRow: React.FC<PrivacyRowProps> = memo(({ option, selected, onPress 
         <Text
           className={
             selected
-              ? 'text-xs font-body text-primary-on-container opacity-80'
+              ? 'text-xs font-body text-primary-on-container'
               : 'text-xs font-body text-ink-muted'
           }
         >

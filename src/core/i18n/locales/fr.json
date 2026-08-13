@@ -734,6 +734,7 @@
     "coHostsLabel": "Co-hosts",
     "coHostsHint": "Invite jusqu'à 5 personnes à co-animer.",
     "coHostsSearchPlaceholder": "Rechercher par pseudo",
+    "removeCoHostA11y": "Retirer {{name}} des co-animateurs",
     "houseLabel": "Maison",
     "houseHint": "Rattache éventuellement cette room à l'une de tes maisons.",
     "houseNone": "Aucune",

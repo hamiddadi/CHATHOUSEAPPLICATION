@@ -100,12 +100,14 @@ export const ExtNominatorPanel: React.FC = () => {
           />
           {error ? <Text style={styles.error}>{error}</Text> : null}
           <Pressable
-            style={[styles.btn, busy && styles.btnBusy]}
+            style={styles.btn}
             onPress={() => void onInvite()}
             disabled={busy}
             accessibilityRole="button"
             accessibilityLabel="Send invitation"
+            accessibilityState={{ disabled: busy, busy }}
           >
+            {busy ? <ActivityIndicator size="small" color={colors.onPrimary} /> : null}
             <Text style={styles.btnText}>{busy ? 'Sending…' : 'Send invitation'}</Text>
           </Pressable>
         </View>
@@ -158,20 +160,26 @@ const styles = StyleSheet.create({
   form: { gap: 10 },
   input: {
     backgroundColor: colors.overlayWhite5,
+    borderWidth: 1,
+    borderColor: colors.outline,
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 10,
+    minHeight: 44,
     fontSize: 13,
     color: colors.text,
   },
   error: { color: colors.danger, fontSize: 12 },
   btn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
     backgroundColor: colors.primary,
     paddingVertical: 12,
     borderRadius: 10,
-    alignItems: 'center',
+    minHeight: 44,
   },
-  btnBusy: { opacity: 0.5 },
   btnText: { color: colors.onPrimary, fontWeight: '600', fontSize: 14 },
   exhausted: { color: colors.textMuted, fontSize: 13, paddingVertical: 8 },
   historyHeader: { marginTop: 8 },

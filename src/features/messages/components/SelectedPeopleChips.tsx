@@ -25,6 +25,7 @@ export const SelectedPeopleChips: React.FC<SelectedPeopleChipsProps> = ({ people
   return (
     <ScrollView
       horizontal
+      style={styles.scroller}
       keyboardShouldPersistTaps="handled"
       showsHorizontalScrollIndicator={false}
       contentContainerStyle={styles.row}
@@ -40,6 +41,7 @@ export const SelectedPeopleChips: React.FC<SelectedPeopleChipsProps> = ({ people
               name,
               defaultValue: `Remove ${name}`,
             })}
+            style={styles.chip}
             className="flex-row items-center gap-xs bg-surface-high rounded-pill pl-xxs pr-sm py-xxs active:opacity-70"
           >
             <Avatar uri={person.avatarUrl ?? undefined} name={person.displayName} size="sm" />
@@ -55,5 +57,7 @@ export const SelectedPeopleChips: React.FC<SelectedPeopleChipsProps> = ({ people
 };
 
 const styles = StyleSheet.create({
+  scroller: { flexGrow: 0, flexShrink: 0 },
+  chip: { minHeight: 44 },
   row: { gap: spacing.sm, paddingHorizontal: spacing.xxl, paddingBottom: spacing.md },
 });

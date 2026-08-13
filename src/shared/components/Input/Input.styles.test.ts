@@ -2,7 +2,7 @@ import { getInputBorderClass } from './Input.styles';
 
 describe('getInputBorderClass', () => {
   it('uses the variant default while idle', () => {
-    expect(getInputBorderClass('filled', false, false)).toBe('border-transparent');
+    expect(getInputBorderClass('filled', false, false)).toBe('border-outline');
     expect(getInputBorderClass('outlined', false, false)).toBe('border-outline');
   });
 

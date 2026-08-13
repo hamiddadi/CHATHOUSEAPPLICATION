@@ -30,12 +30,14 @@ describe('Button', () => {
   });
 
   it('uses a variant-aware spinner color while loading', () => {
-    const { UNSAFE_getByType, getByRole } = render(
+    const { UNSAFE_getByType, getByRole, getByText } = render(
       <Button label="Delete" variant="danger" loading />,
     );
     expect(UNSAFE_getByType(ActivityIndicator).props.color).toBe(variantIndicatorColor.danger);
     expect(getByRole('button', { name: 'Delete' })).toBeTruthy();
     expect(getByRole('button').props.className).not.toContain('opacity-45');
+    // The invisible label remains mounted so a compact button keeps its width.
+    expect(getByText('Delete')).toBeTruthy();
   });
 
   describe('44pt touch target', () => {

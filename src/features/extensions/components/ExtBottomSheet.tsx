@@ -1,6 +1,7 @@
 import React from 'react';
 import { Modal, Pressable, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
-import { colors } from '../../../shared/constants/theme';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { colors, layout } from '../../../shared/constants/theme';
 
 interface Props {
   visible: boolean;
@@ -20,20 +21,48 @@ interface Props {
  * handle. Sheets supply their own content via `children` and tweak the
  * container with `sheetStyle`.
  */
-export const ExtBottomSheet: React.FC<Props> = ({ visible, onClose, sheetStyle, children }) => (
-  <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-    <Pressable style={styles.backdrop} onPress={onClose}>
-      <Pressable style={[styles.sheet, sheetStyle]} onPress={e => e.stopPropagation()}>
-        <View style={styles.handle} />
-        {children}
+export const ExtBottomSheet: React.FC<Props> = ({ visible, onClose, sheetStyle, children }) => {
+  const insets = useSafeAreaInsets();
+  const flattenedSheetStyle = StyleSheet.flatten(sheetStyle);
+  const requestedBottomPadding =
+    flattenedSheetStyle?.paddingBottom ??
+    flattenedSheetStyle?.paddingVertical ??
+    flattenedSheetStyle?.padding ??
+    0;
+  const safeBottomPadding =
+    typeof requestedBottomPadding === 'number'
+      ? requestedBottomPadding + insets.bottom
+      : insets.bottom;
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable style={styles.backdrop} onPress={onClose} accessible={false}>
+        <Pressable
+          style={[styles.sheet, sheetStyle, { paddingBottom: safeBottomPadding }]}
+          onPress={event => event.stopPropagation()}
+          accessible={false}
+          focusable={false}
+          accessibilityViewIsModal
+        >
+          <View style={styles.handle} />
+          {children}
+        </Pressable>
       </Pressable>
-    </Pressable>
-  </Modal>
-);
+    </Modal>
+  );
+};
 
 const styles = StyleSheet.create({
-  backdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.4)' },
+  backdrop: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    backgroundColor: colors.modalBackdrop,
+  },
   sheet: {
+    width: '100%',
+    maxWidth: layout.maxContentWidth,
+    maxHeight: '90%',
+    overflow: 'hidden',
     backgroundColor: colors.surfaceAlt,
     borderTopLeftRadius: 18,
     borderTopRightRadius: 18,

@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useState } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
+  ScrollView,
+  StyleSheet,
   Text,
   View,
   Pressable,
@@ -20,7 +22,7 @@ import { toAppError } from '../../../../shared/services/api/errorHandler';
 import { useAuthStore } from '../../store/authStore';
 import { authService } from '../../services/authService';
 import { usernameFormSchema, type UsernameFormValues } from '../../schemas';
-import { colors, spacing } from '../../../../shared/constants/theme';
+import { colors, layout, spacing } from '../../../../shared/constants/theme';
 
 const USERNAME_MAX = 24;
 
@@ -120,9 +122,11 @@ export const UsernameScreen: React.FC = () => {
         )}
       </View>
 
-      <View
-        className="flex-1 px-xxl gap-xxl"
-        style={{ paddingBottom: insets.bottom + spacing.huge }}
+      <ScrollView
+        className="flex-1"
+        contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + spacing.huge }]}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
       >
         <Text className="text-display font-display text-ink tracking-tight">
           {t('auth.username.title')}
@@ -161,7 +165,7 @@ export const UsernameScreen: React.FC = () => {
               'auth.username.suggestionsRetry',
               "Couldn't load suggestions — tap to retry",
             )}
-            hitSlop={8}
+            hitSlop={12}
             className="pl-sm"
           >
             <Text className="text-xs font-body-medium text-ink-muted underline">
@@ -179,7 +183,7 @@ export const UsernameScreen: React.FC = () => {
                   defaultValue: 'Use suggestion @{{username}}',
                   username: sug,
                 })}
-                className="bg-surface px-md py-sm rounded-full border border-outline"
+                className="bg-surface px-md py-sm min-h-[44px] justify-center rounded-full border border-outline"
               >
                 <Text className="text-md font-body-medium text-ink">@{sug}</Text>
               </Pressable>
@@ -198,7 +202,18 @@ export const UsernameScreen: React.FC = () => {
           loading={isSubmitting}
           onPress={handleSubmit(onSubmit)}
         />
-      </View>
+      </ScrollView>
     </KeyboardAvoidingView>
   );
 };
+
+const styles = StyleSheet.create({
+  content: {
+    flexGrow: 1,
+    width: '100%',
+    maxWidth: layout.maxContentWidth,
+    alignSelf: 'center',
+    paddingHorizontal: spacing.xxl,
+    gap: spacing.xxl,
+  },
+});

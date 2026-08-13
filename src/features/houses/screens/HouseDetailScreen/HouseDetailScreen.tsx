@@ -73,7 +73,9 @@ const MemberRow: React.FC<MemberRowProps> = memo(
         </View>
         {m.role !== 'member' && (
           <View className="bg-accent-container px-sm py-xxs rounded-xs">
-            <Text className="text-xxs font-body-bold text-accent uppercase">{m.role}</Text>
+            <Text className="text-xxs font-body-bold text-accent-on-container uppercase">
+              {m.role}
+            </Text>
           </View>
         )}
         {manageable && <MaterialIcons name="more-horiz" size={20} color={colors.textMuted} />}

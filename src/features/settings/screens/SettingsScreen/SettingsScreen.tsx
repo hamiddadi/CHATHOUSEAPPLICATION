@@ -7,7 +7,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { useQuery } from '@tanstack/react-query';
 import { Avatar } from '../../../../shared/components/Avatar';
+import { EmptyState } from '../../../../shared/components/EmptyState';
 import { GradientView } from '../../../../shared/components/GradientView';
+import { Loader } from '../../../../shared/components/Loader';
 import { toast } from '../../../../shared/components/Toast';
 import { invitesApi } from '../../../extensions/api/invitesApi';
 import { ExtPremiumRow } from '../../../extensions/components/ExtPremiumRow';
@@ -107,8 +109,18 @@ export const SettingsScreen: React.FC = () => {
   const navigation = useNavigation<Nav>();
   const insets = useSafeAreaInsets();
   const signOut = useAuthStore(s => s.signOut);
-  const { data: user } = useMe();
-  const { data: myHouses } = useHouses('mine');
+  const {
+    data: user,
+    isLoading: isUserLoading,
+    isError: isUserError,
+    refetch: refetchUser,
+  } = useMe();
+  const {
+    data: myHouses,
+    isLoading: areHousesLoading,
+    isError: areHousesError,
+    refetch: refetchHouses,
+  } = useHouses('mine');
   const [bioExpanded, setBioExpanded] = useState(false);
   const { t } = useTranslation();
 
@@ -199,6 +211,14 @@ export const SettingsScreen: React.FC = () => {
 
   const handleToggleBio = useCallback(() => setBioExpanded(v => !v), []);
 
+  const handleRetryUser = useCallback(() => {
+    void refetchUser();
+  }, [refetchUser]);
+
+  const handleRetryHouses = useCallback(() => {
+    void refetchHouses();
+  }, [refetchHouses]);
+
   // Discoverable sign-out (account section row) — confirmed before running so
   // a stray tap can't log the user out. The "…" header menu reuses it.
   const handleSignOut = useCallback(() => {
@@ -251,28 +271,57 @@ export const SettingsScreen: React.FC = () => {
     navigation.navigate('Followers', { userId: user.id, initialTab: 'following' });
   }, [navigation, user]);
 
+  const topBar = (
+    <View pointerEvents="box-none" style={[styles.topBar, { paddingTop: insets.top + spacing.sm }]}>
+      <View className="flex-row items-center gap-sm">
+        <MaterialIcons name="graphic-eq" size={22} color={colors.primary} />
+        <Text className="text-lg font-display text-primary tracking-tighter">
+          {t('common.appName', 'ChatHouse')}
+        </Text>
+      </View>
+      <Pressable
+        onPress={handleWave}
+        disabled={!user}
+        accessibilityRole="button"
+        accessibilityLabel={t('settings.sendWaveA11y', 'Send a wave')}
+        accessibilityState={{ disabled: !user }}
+        className={`bg-primary/10 px-lg py-xs rounded-pill${user ? '' : ' opacity-50'}`}
+      >
+        <Text className="text-sm font-body-bold text-primary">{t('feed.wave', 'Wave 👋')}</Text>
+      </Pressable>
+    </View>
+  );
+
+  if (isUserLoading) {
+    return (
+      <View className="flex-1 bg-background">
+        {topBar}
+        <View style={[styles.screenState, { paddingTop: insets.top + spacing.giant }]}>
+          <Loader fullscreen accessibilityLabel={t('profile.loading', 'Loading profile')} />
+        </View>
+      </View>
+    );
+  }
+
+  if (isUserError || !user) {
+    return (
+      <View className="flex-1 bg-background">
+        {topBar}
+        <View style={[styles.screenState, { paddingTop: insets.top + spacing.giant }]}>
+          <EmptyState
+            title={t('extensions.settings.loadError', "Couldn't load your settings.")}
+            description={t('messages.loadErrorHint', 'Check your connection and try again.')}
+            actionLabel={t('common.retry', 'Retry')}
+            onAction={handleRetryUser}
+          />
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View className="flex-1 bg-background">
-      <View
-        pointerEvents="box-none"
-        style={[styles.topBar, { paddingTop: insets.top + spacing.sm }]}
-      >
-        <View className="flex-row items-center gap-sm">
-          <MaterialIcons name="graphic-eq" size={22} color={colors.primary} />
-          <Text className="text-lg font-display text-primary tracking-tighter">
-            {t('common.appName', 'ChatHouse')}
-          </Text>
-        </View>
-        <Pressable
-          onPress={handleWave}
-          accessibilityRole="button"
-          accessibilityLabel={t('settings.sendWaveA11y', 'Send a wave')}
-          className="bg-primary/10 px-lg py-xs rounded-pill"
-        >
-          <Text className="text-sm font-body-bold text-primary">{t('feed.wave', 'Wave 👋')}</Text>
-        </Pressable>
-      </View>
-
+      {topBar}
       <ScrollView
         className="flex-1"
         contentContainerStyle={{
@@ -349,7 +398,10 @@ export const SettingsScreen: React.FC = () => {
               onPress={handleFollowingTap}
             />
             <View style={styles.statDivider} />
-            <Stat label={t('settings.clubs')} value={String(clubsCount)} />
+            <Stat
+              label={t('settings.clubs')}
+              value={areHousesLoading || areHousesError ? '—' : String(clubsCount)}
+            />
           </View>
 
           <View className="flex-row items-center gap-sm mt-xl">
@@ -422,11 +474,36 @@ export const SettingsScreen: React.FC = () => {
               <Text className="text-xs font-body-bold text-primary">{t('settings.viewAll')}</Text>
             </Pressable>
           </View>
-          <View style={styles.housesGrid}>
-            {houseTiles.map(h => (
-              <HouseTile key={h.id} house={h} onPress={handleOpenHouse} />
-            ))}
-          </View>
+          {areHousesLoading ? (
+            <View style={styles.housesState}>
+              <Loader accessibilityLabel={t('houses.loading', 'Loading houses')} />
+            </View>
+          ) : areHousesError ? (
+            <View style={styles.housesState}>
+              <EmptyState
+                title={t('houses.errorTitle', "Couldn't load houses")}
+                description={t('houses.errorBody', 'Check your connection.')}
+                actionLabel={t('common.retry', 'Retry')}
+                onAction={handleRetryHouses}
+              />
+            </View>
+          ) : houseTiles.length > 0 ? (
+            <View style={styles.housesGrid}>
+              {houseTiles.map(h => (
+                <HouseTile key={h.id} house={h} onPress={handleOpenHouse} />
+              ))}
+            </View>
+          ) : (
+            <View style={styles.housesState}>
+              <EmptyState
+                title={t('houses.emptyMineTitle', 'No houses yet')}
+                description={t(
+                  'houses.emptyMineBody',
+                  'Join a house or create your own community.',
+                )}
+              />
+            </View>
+          )}
         </View>
 
         {/* Premium — hidden unless Stripe/premium is configured server-side. */}
@@ -498,7 +575,13 @@ export const SettingsScreen: React.FC = () => {
                 analyticsEnabled ? styles.toggleTrackOn : styles.toggleTrackOff,
               ]}
             >
-              <Animated.View style={[styles.toggleThumb, thumbStyle]} />
+              <Animated.View
+                style={[
+                  styles.toggleThumb,
+                  analyticsEnabled ? styles.toggleThumbOn : null,
+                  thumbStyle,
+                ]}
+              />
             </View>
           </Pressable>
 
@@ -607,6 +690,9 @@ const SettingsRow: React.FC<SettingsRowProps> = ({ icon, label, hint, danger, on
 );
 
 const styles = StyleSheet.create({
+  screenState: {
+    flex: 1,
+  },
   topBar: {
     position: 'absolute',
     top: 0,
@@ -659,6 +745,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: spacing.md,
+  },
+  housesState: {
+    minHeight: 160,
   },
   houseTile: {
     flexBasis: '47%',
@@ -713,6 +802,7 @@ const styles = StyleSheet.create({
   toggleTrackOn: { backgroundColor: colors.primary },
   toggleTrackOff: { backgroundColor: colors.overlayWhite15 },
   toggleThumb: { width: 22, height: 22, borderRadius: 11, backgroundColor: colors.white },
+  toggleThumbOn: { backgroundColor: colors.onPrimary },
   houseIcon: {
     width: '100%',
     height: '100%',

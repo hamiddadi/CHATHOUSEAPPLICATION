@@ -1,10 +1,20 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Linking, Modal, Pressable, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  Linking,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import MaterialIcons from '@react-native-vector-icons/material-icons';
 import { useTranslation } from 'react-i18next';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { legalDocumentVersion } from '../../../config/env';
-import { colors } from '../../../shared/constants/theme';
+import { colors, layout, spacing } from '../../../shared/constants/theme';
 import { useAuthStore } from '../../auth/store/authStore';
 import { legalUrls } from '../legalUrls';
 
@@ -84,7 +94,7 @@ export const LegalAcceptanceGate: React.FC = () => {
       testID="legal-acceptance-gate"
     >
       <SafeAreaView className="flex-1 bg-background">
-        <View className="flex-1 px-xxl py-huge justify-center gap-xl">
+        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           <View className="gap-sm">
             <Text className="text-display font-display text-ink">
               {t('privacy.legalGate.title', 'Review required')}
@@ -109,6 +119,7 @@ export const LegalAcceptanceGate: React.FC = () => {
                   'I accept the current Terms of Use',
                 )}
                 onPress={() => setTermsAccepted(value => !value)}
+                hitSlop={8}
               >
                 <View
                   className={`w-7 h-7 rounded border items-center justify-center ${
@@ -143,6 +154,7 @@ export const LegalAcceptanceGate: React.FC = () => {
                   'I acknowledge that I have read the Privacy Policy',
                 )}
                 onPress={() => setPrivacyAcknowledged(value => !value)}
+                hitSlop={8}
               >
                 <View
                   className={`w-7 h-7 rounded border items-center justify-center ${
@@ -201,8 +213,21 @@ export const LegalAcceptanceGate: React.FC = () => {
               </Text>
             )}
           </Pressable>
-        </View>
+        </ScrollView>
       </SafeAreaView>
     </Modal>
   );
 };
+
+const styles = StyleSheet.create({
+  content: {
+    flexGrow: 1,
+    width: '100%',
+    maxWidth: layout.maxContentWidth,
+    alignSelf: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.xxl,
+    paddingVertical: spacing.huge,
+    gap: spacing.xl,
+  },
+});

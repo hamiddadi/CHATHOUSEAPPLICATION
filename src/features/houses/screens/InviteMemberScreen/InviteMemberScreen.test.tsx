@@ -17,6 +17,7 @@ import Clipboard from '@react-native-clipboard/clipboard';
 import { renderScreen, mockAuthenticated, resetAuth } from '../../../../test-utils/renderScreen';
 import { houseService } from '../../services/houseService';
 import { profileKeys } from '../../../profile/hooks/useProfile';
+import { profileService } from '../../../profile/services/profileService';
 import type { User } from '../../../../shared/types/domain';
 import { houseKeys } from '../../hooks/useHouses';
 import { InviteMemberScreen } from './InviteMemberScreen';
@@ -97,6 +98,19 @@ describe('InviteMemberScreen', () => {
     expect(setStringSpy).toHaveBeenCalledWith(INVITE_URL);
   });
 
+  it('replaces a failed invite-link placeholder with an explicit retry action', async () => {
+    const linkSpy = jest
+      .spyOn(houseService, 'getInviteLink')
+      .mockRejectedValue(new Error('offline'));
+    const { findByText, getByLabelText } = renderScreen(<InviteMemberScreen />, {
+      route: ROUTE,
+    });
+
+    expect(await findByText('Something went wrong')).toBeTruthy();
+    fireEvent.press(getByLabelText('Retry invite link'));
+    await waitFor(() => expect(linkSpy).toHaveBeenCalledTimes(2));
+  });
+
   it('typing a search query does not crash the screen', () => {
     const { getByPlaceholderText, toJSON } = renderScreen(<InviteMemberScreen />, {
       route: ROUTE,
@@ -104,6 +118,21 @@ describe('InviteMemberScreen', () => {
     });
     fireEvent.changeText(getByPlaceholderText('Search users'), 'alice');
     expect(toJSON()).toBeTruthy();
+  });
+
+  it('shows a retryable search error instead of reporting no results', async () => {
+    const searchSpy = jest.spyOn(profileService, 'search').mockRejectedValue(new Error('offline'));
+    const { findByText, getByPlaceholderText, getByText, queryByText } = renderScreen(
+      <InviteMemberScreen />,
+      { route: ROUTE, seedQueryData: seedLink() },
+    );
+
+    fireEvent.changeText(getByPlaceholderText('Search users'), 'alice');
+    expect(await findByText('Search failed')).toBeTruthy();
+    expect(queryByText('No results')).toBeNull();
+
+    fireEvent.press(getByText('Retry'));
+    await waitFor(() => expect(searchSpy).toHaveBeenCalledTimes(2));
   });
 
   it('a fresh invitation (sent > 0) marks the row as "Invited"', async () => {

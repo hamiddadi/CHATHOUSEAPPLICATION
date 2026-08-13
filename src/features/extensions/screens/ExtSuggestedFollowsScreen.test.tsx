@@ -37,12 +37,13 @@ describe('ExtSuggestedFollowsScreen', () => {
   });
 
   it('mounts with the header and renders a seeded suggestion row', () => {
-    const { getByText, toJSON } = renderScreen(<ExtSuggestedFollowsScreen />, {
+    const { getByText, queryByLabelText, toJSON } = renderScreen(<ExtSuggestedFollowsScreen />, {
       seedQueryData: seed([makeUser()]),
     });
     expect(toJSON()).toBeTruthy();
     expect(getByText('People you may know')).toBeTruthy();
     expect(getByText('Ada Lovelace')).toBeTruthy();
+    expect(queryByLabelText('View profile of Ada Lovelace')).toBeNull();
   });
 
   it('tapping a row invokes onTapUser with the user', () => {
@@ -52,6 +53,15 @@ describe('ExtSuggestedFollowsScreen', () => {
     });
     fireEvent.press(getByLabelText('View profile of Ada Lovelace'));
     expect(onTapUser).toHaveBeenCalledWith(expect.objectContaining({ id: 'u-1' }));
+  });
+
+  it('keeps profile and Follow as separate actions when profile navigation is available', () => {
+    const { getAllByRole } = renderScreen(
+      <ExtSuggestedFollowsScreen onTapUser={jest.fn()} onFollow={jest.fn()} />,
+      { seedQueryData: seed([makeUser()]) },
+    );
+
+    expect(getAllByRole('button')).toHaveLength(2);
   });
 
   it('Follow button fires onFollow and flips to the "Following" state', () => {

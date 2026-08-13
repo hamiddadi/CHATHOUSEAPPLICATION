@@ -1,5 +1,13 @@
 import React, { memo, useCallback, useMemo } from 'react';
-import { Platform, Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import {
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+  useWindowDimensions,
+} from 'react-native';
 import Ionicons from '@react-native-vector-icons/ionicons';
 import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -17,7 +25,7 @@ import { useAnimatedPress } from '../../../../shared/hooks/useAnimatedPress';
 import { useOnMount } from '../../../../shared/hooks/useOnMount';
 import { errorMessage } from '../../../../shared/utils/errorMessage';
 import { AVATARS_10 } from '../../../../shared/constants/images';
-import { colors, spacing } from '../../../../shared/constants/theme';
+import { colors, layout, spacing } from '../../../../shared/constants/theme';
 import type { LandingNavProp } from '../../../../core/navigation/types';
 import { useAuthStore } from '../../store/authStore';
 
@@ -130,24 +138,33 @@ FeatureItem.displayName = 'FeatureItem';
 interface AvatarsPreviewProps {
   label: string;
   a11yLabel: string;
+  compact: boolean;
 }
 
-const AvatarsPreview: React.FC<AvatarsPreviewProps> = memo(({ label, a11yLabel }) => (
+const AvatarsPreview: React.FC<AvatarsPreviewProps> = memo(({ label, a11yLabel, compact }) => (
   <View
     accessibilityRole="text"
     accessibilityLabel={a11yLabel}
-    className="flex-row items-center justify-center"
+    className={compact ? 'items-center justify-center' : 'flex-row items-center justify-center'}
   >
-    {AVATAR_PREVIEW.map((preview, i) => (
-      <View
-        key={preview.uri}
-        className="border-2 border-overlay-blue-50 rounded-xl"
-        style={i > 0 ? styles.avatarStacked : undefined}
-      >
-        <Avatar uri={preview.uri} name={preview.name} size="md" shape="rounded" />
-      </View>
-    ))}
-    <Text className="text-xs font-body-semibold text-overlay-white-80 ml-sm">{label}</Text>
+    <View className="flex-row items-center">
+      {AVATAR_PREVIEW.map((preview, i) => (
+        <View
+          key={preview.uri}
+          className="border-2 border-overlay-blue-50 rounded-xl"
+          style={i > 0 ? styles.avatarStacked : undefined}
+        >
+          <Avatar uri={preview.uri} name={preview.name} size="md" shape="rounded" />
+        </View>
+      ))}
+    </View>
+    <Text
+      className={`text-xs font-body-semibold text-overlay-white-80 text-center ${
+        compact ? 'mt-sm' : 'ml-sm'
+      }`}
+    >
+      {label}
+    </Text>
   </View>
 ));
 AvatarsPreview.displayName = 'AvatarsPreview';
@@ -211,6 +228,7 @@ const LandingCTA: React.FC<LandingCTAProps> = memo(
             onPress={onDevSkip}
             accessibilityRole="button"
             accessibilityLabel={labels.devSkipA11y}
+            accessibilityState={{ disabled: devSkipPending }}
             disabled={devSkipPending}
             className="items-center justify-center"
             style={styles.devSkipButton}
@@ -343,7 +361,7 @@ export const LandingScreen: React.FC = () => {
       colors={GRADIENT_COLORS}
       start={{ x: 0, y: 0 }}
       end={{ x: 1, y: 1 }}
-      style={[styles.container, containerPadding]}
+      style={styles.container}
     >
       {circles.map(cfg => (
         <View
@@ -362,37 +380,43 @@ export const LandingScreen: React.FC = () => {
         />
       ))}
 
-      <Animated.View style={logoStyle}>
-        <LandingLogo tagline={t('auth.landing.tagline')} />
-      </Animated.View>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={[styles.content, containerPadding]}
+      >
+        <Animated.View style={logoStyle}>
+          <LandingLogo tagline={t('auth.landing.tagline')} />
+        </Animated.View>
 
-      <Animated.View style={featuresStyle} className="gap-md">
-        {FEATURES_DATA.map(f => (
-          <FeatureItem
-            key={f.id}
-            icon={f.icon}
-            title={t(`auth.landing.features.${f.id}.title`)}
-            desc={t(`auth.landing.features.${f.id}.desc`)}
+        <Animated.View style={featuresStyle} className="gap-md">
+          {FEATURES_DATA.map(f => (
+            <FeatureItem
+              key={f.id}
+              icon={f.icon}
+              title={t(`auth.landing.features.${f.id}.title`)}
+              desc={t(`auth.landing.features.${f.id}.desc`)}
+            />
+          ))}
+        </Animated.View>
+
+        <Animated.View style={avatarsStyle}>
+          <AvatarsPreview
+            label={t('auth.landing.onlineSuffix')}
+            a11yLabel={t('auth.landing.onlineA11y')}
+            compact={width < 400}
           />
-        ))}
-      </Animated.View>
+        </Animated.View>
 
-      <Animated.View style={avatarsStyle}>
-        <AvatarsPreview
-          label={t('auth.landing.onlineSuffix')}
-          a11yLabel={t('auth.landing.onlineA11y')}
-        />
-      </Animated.View>
-
-      <Animated.View style={ctaStyle}>
-        <LandingCTA
-          onGetStarted={handleGetStarted}
-          onLogin={handleLogin}
-          onDevSkip={__DEV__ ? handleDevSkip : undefined}
-          devSkipPending={authStatus === 'authenticating'}
-          labels={ctaLabels}
-        />
-      </Animated.View>
+        <Animated.View style={ctaStyle}>
+          <LandingCTA
+            onGetStarted={handleGetStarted}
+            onLogin={handleLogin}
+            onDevSkip={__DEV__ ? handleDevSkip : undefined}
+            devSkipPending={authStatus === 'authenticating'}
+            labels={ctaLabels}
+          />
+        </Animated.View>
+      </ScrollView>
     </GradientView>
   );
 };
@@ -404,8 +428,15 @@ export const LandingScreen: React.FC = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  content: {
+    flexGrow: 1,
     justifyContent: 'space-between',
+    gap: spacing.xl,
     paddingHorizontal: spacing.lg,
+    width: '100%',
+    maxWidth: layout.maxContentWidth,
+    alignSelf: 'center',
   },
   logoContainer: {
     width: LOGO_BOX_SIZE,
@@ -433,10 +464,11 @@ const styles = StyleSheet.create({
     marginLeft: AVATAR_OVERLAP,
   },
   ctaButton: {
-    height: CTA_BUTTON_HEIGHT,
+    minHeight: CTA_BUTTON_HEIGHT,
+    paddingVertical: spacing.md,
   },
   devSkipButton: {
-    height: 36,
+    minHeight: 44,
     marginTop: spacing.xs,
   },
 });

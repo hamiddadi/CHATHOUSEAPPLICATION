@@ -1,8 +1,9 @@
 import React from 'react';
-import { Alert } from 'react-native';
+import { ActivityIndicator, Alert, StyleSheet } from 'react-native';
 import { act, fireEvent, waitFor } from '@testing-library/react-native';
 import { i18n } from '../../../../core/i18n';
 import { renderScreen, mockAuthenticated, resetAuth } from '../../../../test-utils/renderScreen';
+import { colors } from '../../../../shared/constants/theme';
 import { roomKeys } from '../../hooks/useRooms';
 import { roomService } from '../../services/roomService';
 import { RoomChatSidebar } from './RoomChatSidebar';
@@ -102,6 +103,7 @@ describe('RoomChatSidebar content reporting', () => {
 
     const message = getByLabelText('Message de Room Peer');
     expect(message.props.accessibilityHint).toBe('Maintenez appuyé pour répondre');
+    expect(message.findAllByProps({ accessibilityLabel: 'Supprimer le message' })).toHaveLength(0);
 
     fireEvent.press(getByLabelText('Supprimer le message'));
     expect(alertSpy).toHaveBeenCalledWith(
@@ -136,6 +138,21 @@ describe('RoomChatSidebar content reporting', () => {
     expect(getByPlaceholderText('Write a message…')).toBeTruthy();
   });
 
+  it('starts a reply through the message accessibility action', () => {
+    const { getByLabelText, getByPlaceholderText } = renderScreen(
+      <RoomChatSidebar visible roomId={ROOM_ID} onClose={jest.fn()} />,
+      {
+        seedQueryData: [{ key: [...roomKeys.all, 'messages', ROOM_ID], data: messages }],
+      },
+    );
+
+    const message = getByLabelText('Message from Room Peer');
+    fireEvent(message, 'accessibilityAction', {
+      nativeEvent: { actionName: 'reply' },
+    });
+    expect(getByPlaceholderText('Reply…')).toBeTruthy();
+  });
+
   it('synchronously blocks a double send while the first room message is pending', async () => {
     let resolveSend!: (message: Awaited<ReturnType<typeof roomService.sendMessage>>) => void;
     const pendingSend = new Promise<Awaited<ReturnType<typeof roomService.sendMessage>>>(
@@ -157,11 +174,23 @@ describe('RoomChatSidebar content reporting', () => {
     );
 
     fireEvent.changeText(getByLabelText('Chat message'), 'Only once');
+    expect(StyleSheet.flatten(getByLabelText('Chat message').props.style).minHeight).toBe(44);
     const sendButton = getByLabelText('Send message');
     fireEvent.press(sendButton);
     fireEvent.press(sendButton);
 
-    await waitFor(() => expect(sendSpy).toHaveBeenCalledTimes(1));
+    await waitFor(() => {
+      expect(sendSpy).toHaveBeenCalledTimes(1);
+      const pendingButton = getByLabelText('Send message');
+      const pendingStyle = StyleSheet.flatten(pendingButton.props.style);
+      expect(pendingButton.props.accessibilityState).toEqual({ busy: true, disabled: true });
+      expect(pendingStyle).toMatchObject({
+        backgroundColor: colors.primary,
+        width: 44,
+        height: 44,
+      });
+      expect(pendingButton.findByType(ActivityIndicator).props.color).toBe(colors.onPrimary);
+    });
     expect(sendSpy).toHaveBeenCalledWith(ROOM_ID, 'Only once', undefined);
 
     await act(async () => {

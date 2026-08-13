@@ -125,8 +125,8 @@ export const InterestSelectionScreen: React.FC = () => {
               <Pressable
                 key={cat}
                 onPress={() => toggle(cat)}
-                accessibilityRole="button"
-                accessibilityState={{ selected: isSelected }}
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: isSelected }}
                 hitSlop={8}
                 style={[chipBase, isSelected ? chipSelected : chipUnselected]}
               >
@@ -159,10 +159,12 @@ const chipWrapStyle = {
 };
 
 const chipBase = {
+  minHeight: 44,
   paddingHorizontal: spacing.lg,
   paddingVertical: spacing.md,
   borderRadius: radii.xxl,
   borderWidth: 1,
+  justifyContent: 'center' as const,
 };
 
 const chipUnselected = {

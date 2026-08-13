@@ -136,6 +136,22 @@ describe('FollowersScreen', () => {
     expect(getByText('No followers yet')).toBeTruthy();
   });
 
+  it('offers a retry when the active connections query fails', async () => {
+    const followersSpy = jest
+      .spyOn(profileService, 'followers')
+      .mockRejectedValue(new Error('offline'));
+    const { findByText, getByText, queryByText } = renderScreen(<FollowersScreen />, {
+      route: baseRoute,
+      seedQueryData: [{ key: [...profileKeys.following(TARGET_ID)], data: page(following) }],
+    });
+
+    expect(await findByText("Couldn't load list")).toBeTruthy();
+    expect(queryByText('No followers yet')).toBeNull();
+
+    fireEvent.press(getByText('Retry'));
+    await waitFor(() => expect(followersSpy).toHaveBeenCalledTimes(2));
+  });
+
   it('hides the Follow button on my own row (no self-follow)', () => {
     // My own account appears in the followers list; its row must not offer a
     // Follow toggle (a self-follow 400s server-side).

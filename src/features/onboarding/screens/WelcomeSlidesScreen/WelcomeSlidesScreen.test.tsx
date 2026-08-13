@@ -5,6 +5,7 @@
  * button advances through slides and finishes on the last one.
  */
 import React from 'react';
+import { StyleSheet } from 'react-native';
 import { fireEvent, waitFor } from '@testing-library/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { renderScreen, mockAuthenticated, resetAuth } from '../../../../test-utils/renderScreen';
@@ -25,7 +26,12 @@ describe('WelcomeSlidesScreen', () => {
     });
     expect(toJSON()).toBeTruthy();
     expect(getByTestId('welcome-slides-screen')).toBeTruthy();
-    expect(getByTestId('welcome-slide-welcome')).toBeTruthy();
+    const firstSlide = getByTestId('welcome-slide-welcome');
+    expect(firstSlide).toBeTruthy();
+    expect(firstSlide.props.nestedScrollEnabled).toBe(true);
+    expect(StyleSheet.flatten(firstSlide.props.contentContainerStyle)).toMatchObject({
+      flexGrow: 1,
+    });
     expect(getByTestId('welcome-progress-1-of-4')).toBeTruthy();
     // First slide title (welcome) and the not-last CTA label.
     expect(getByText('Welcome to ChatHouse')).toBeTruthy();

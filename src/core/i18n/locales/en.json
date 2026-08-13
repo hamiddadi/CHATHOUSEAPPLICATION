@@ -734,6 +734,7 @@
     "coHostsLabel": "Co-hosts",
     "coHostsHint": "Invite up to 5 people to co-host.",
     "coHostsSearchPlaceholder": "Search by username",
+    "removeCoHostA11y": "Remove {{name}} as co-host",
     "houseLabel": "House",
     "houseHint": "Optionally attach this room to one of your houses.",
     "houseNone": "None",

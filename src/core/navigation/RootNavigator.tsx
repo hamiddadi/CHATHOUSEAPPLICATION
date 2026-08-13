@@ -1,5 +1,5 @@
 import React from 'react';
-import { NavigationContainer } from '@react-navigation/native';
+import { DarkTheme, NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { StatusBar } from 'react-native';
 import { useAuthStore } from '../../features/auth/store/authStore';
@@ -14,6 +14,19 @@ import { MainNavigator } from './MainNavigator';
 import { OnboardingNavigator } from './OnboardingNavigator';
 
 const RootStack = createNativeStackNavigator<RootStackParamList>();
+
+const navigationTheme = {
+  ...DarkTheme,
+  colors: {
+    ...DarkTheme.colors,
+    primary: colors.primary,
+    background: colors.background,
+    card: colors.surface,
+    text: colors.text,
+    border: colors.border,
+    notification: colors.danger,
+  },
+};
 
 interface RootNavigatorProps {
   onReady?: () => void;
@@ -66,6 +79,7 @@ export const RootNavigator: React.FC<RootNavigatorProps> = ({ onReady }) => {
       linking={linking}
       initialState={initialState}
       onReady={onReady}
+      theme={navigationTheme}
       fallback={<Loader fullscreen />}
     >
       <StatusBar barStyle="light-content" backgroundColor={colors.background} />

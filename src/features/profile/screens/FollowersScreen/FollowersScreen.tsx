@@ -234,6 +234,8 @@ export const FollowersScreen: React.FC = () => {
         <EmptyState
           title={t('profile.couldNotLoadConnections', "Couldn't load list")}
           description={t('profile.pleaseTryAgain', 'Please try again.')}
+          actionLabel={t('common.retry', 'Retry')}
+          onAction={handleRefresh}
         />
       ) : (
         <FlatList

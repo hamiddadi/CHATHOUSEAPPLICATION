@@ -1,5 +1,13 @@
 import React, { useCallback, useState } from 'react';
-import { KeyboardAvoidingView, Platform, Pressable, Text, View } from 'react-native';
+import {
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import MaterialIcons from '@react-native-vector-icons/material-icons';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -7,7 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { Button } from '../../../../shared/components/Button';
 import { Input } from '../../../../shared/components/Input';
-import { colors, spacing } from '../../../../shared/constants/theme';
+import { colors, layout, spacing } from '../../../../shared/constants/theme';
 import type { AuthStackParamList } from '../../../../core/navigation/types';
 import { useOnboardingStore } from '../../../onboarding/store/onboardingStore';
 
@@ -68,9 +76,11 @@ export const NameScreen: React.FC = () => {
         </Pressable>
       </View>
 
-      <View
-        className="flex-1 px-xxl gap-xxl"
-        style={{ paddingBottom: insets.bottom + spacing.huge }}
+      <ScrollView
+        className="flex-1"
+        contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + spacing.huge }]}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
       >
         <View className="gap-md">
           <Text className="text-display font-display text-ink tracking-tight">
@@ -115,7 +125,18 @@ export const NameScreen: React.FC = () => {
           disabled={!canContinue}
           onPress={handleNext}
         />
-      </View>
+      </ScrollView>
     </KeyboardAvoidingView>
   );
 };
+
+const styles = StyleSheet.create({
+  content: {
+    flexGrow: 1,
+    width: '100%',
+    maxWidth: layout.maxContentWidth,
+    alignSelf: 'center',
+    paddingHorizontal: spacing.xxl,
+    gap: spacing.xxl,
+  },
+});

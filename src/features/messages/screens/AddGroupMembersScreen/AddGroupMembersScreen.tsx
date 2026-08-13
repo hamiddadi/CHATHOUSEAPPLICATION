@@ -48,11 +48,23 @@ export const AddGroupMembersScreen: React.FC = () => {
   const conversationId = route.params.conversationId;
   const myId = useAuthStore(s => s.user?.id) ?? '';
 
-  const { data: group } = useGroup(conversationId);
+  const {
+    data: group,
+    isLoading: isGroupLoading,
+    isError: isGroupError,
+    refetch: refetchGroup,
+  } = useGroup(conversationId);
   // Who I follow, paged server-side (limit 50/page); the infinite query pulls
   // the next page on scroll so followers past the 50th are still addable.
   const followingQuery = useFollowing(myId);
-  const { isLoading, hasNextPage, isFetchingNextPage, fetchNextPage } = followingQuery;
+  const {
+    isLoading: isFollowingLoading,
+    isError: isFollowingError,
+    hasNextPage,
+    isFetchingNextPage,
+    fetchNextPage,
+    refetch: refetchFollowing,
+  } = followingQuery;
   const following = useMemo(() => flattenFollowPages(followingQuery.data), [followingQuery.data]);
   const addMembers = useAddGroupMembers();
   // Existing members can't be re-added — drop them from the candidate list.
@@ -92,6 +104,11 @@ export const AddGroupMembersScreen: React.FC = () => {
   const handleEndReached = useCallback(() => {
     if (hasNextPage && !isFetchingNextPage) void fetchNextPage();
   }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+
+  const handleRetry = useCallback(() => {
+    if (isGroupError) void refetchGroup();
+    if (isFollowingError) void refetchFollowing();
+  }, [isFollowingError, isGroupError, refetchFollowing, refetchGroup]);
 
   const handleAdd = useCallback(async () => {
     if (addInFlightRef.current) return;
@@ -196,8 +213,15 @@ export const AddGroupMembersScreen: React.FC = () => {
 
       <SelectedPeopleChips people={selectedPeople} onRemove={toggle} />
 
-      {isLoading ? (
+      {isGroupLoading || isFollowingLoading ? (
         <Loader fullscreen accessibilityLabel={t('common.loading', 'Loading')} />
+      ) : isGroupError || isFollowingError ? (
+        <EmptyState
+          title={t('messages.couldNotLoad', "Couldn't load messages")}
+          description={t('messages.loadErrorHint', 'Check your connection and try again.')}
+          actionLabel={t('common.retry', 'Retry')}
+          onAction={handleRetry}
+        />
       ) : (
         <FlatList
           data={results}

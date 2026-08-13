@@ -79,7 +79,7 @@ export const CountryPicker: React.FC<CountryPickerProps> = ({ visible, onClose, 
         <View className="p-md">
           <TextInput
             testID="country-picker-search"
-            className="bg-surface px-md py-sm rounded-lg text-ink font-body"
+            className="min-h-[44px] bg-surface-high px-md py-sm rounded-lg border border-outline text-ink font-body"
             placeholder={t('common.search', 'Search')}
             accessibilityLabel={t('common.search', 'Search')}
             placeholderTextColor={colors.textMuted}

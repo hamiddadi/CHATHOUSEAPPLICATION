@@ -3,6 +3,7 @@ import { StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-na
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { getFocusedRouteNameFromRoute, type RouteProp } from '@react-navigation/native';
 import MaterialIcons from '@react-native-vector-icons/material-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, layout, radii, shadows, spacing } from '../../shared/constants/theme';
 import { useTranslation } from '../i18n';
 import { useUnreadMessageCount } from '../../features/messages/hooks/useMessages';
@@ -55,7 +56,9 @@ const MessagesTabIcon: React.FC<{ color: string; size: number }> = ({ color, siz
       <MaterialIcons name="chat-bubble-outline" size={size} color={color} />
       {unread > 0 && (
         <View style={styles.badge} accessibilityLabel={`${unread} unread messages`}>
-          <Text style={styles.badgeLabel}>{unread > 99 ? '99+' : String(unread)}</Text>
+          <Text style={styles.badgeLabel} numberOfLines={1} allowFontScaling={false}>
+            {unread > 99 ? '99+' : String(unread)}
+          </Text>
         </View>
       )}
     </View>
@@ -66,20 +69,59 @@ const messagesTabIcon = ({ color, size }: { color: string; size: number }) => (
   <MessagesTabIcon color={color} size={size} />
 );
 
-const HIDDEN_TAB_BAR_ROUTES = new Set<string>(['ChatDetail']);
+const HIDDEN_TAB_BAR_ROUTES = new Set<string>([
+  'CreateRoom',
+  'InviteToRoom',
+  'Profile',
+  'EditProfile',
+  'HouseDetail',
+  'CreateHouse',
+  'HouseInvitation',
+  'InviteMember',
+  'ManageHouse',
+  'Explore',
+  'Events',
+  'Notifications',
+  'FollowRequests',
+  'TopicExplorer',
+  'ActivityFeed',
+  'NewMessage',
+  'ChatDetail',
+  'GroupChat',
+  'GroupInfo',
+  'AddGroupMembers',
+  'NotificationSettings',
+  'Followers',
+  'AdminHome',
+  'AdminUsers',
+  'AdminUserDetail',
+  'AdminReports',
+  'AdminRooms',
+  'AdminAuditLog',
+  'PrivacyPolicy',
+  'Terms',
+  'DataExport',
+  'DeleteAccount',
+  'BlockedUsers',
+  'ExtSettings',
+  'TipHistory',
+]);
 
 const resolveTabBarStyle = (
   route: RouteProp<MainTabParamList, keyof MainTabParamList>,
+  bottom: number,
 ): StyleProp<ViewStyle> => {
   const focused = getFocusedRouteNameFromRoute(route);
   if (focused && HIDDEN_TAB_BAR_ROUTES.has(focused)) {
     return { display: 'none' };
   }
-  return styles.tabBar;
+  return [styles.tabBar, { bottom }];
 };
 
 export const MainNavigator: React.FC = () => {
   const { t } = useTranslation();
+  const insets = useSafeAreaInsets();
+  const tabBarBottom = insets.bottom + layout.tabBarBottomOffset;
 
   // Subscribe to chat:message / chat:read at the nav level so the
   // Messages tab badge refreshes even when the user is on another tab
@@ -97,46 +139,50 @@ export const MainNavigator: React.FC = () => {
         initialRouteName="RoomsTab"
         screenOptions={{
           headerShown: false,
+          tabBarHideOnKeyboard: true,
           tabBarShowLabel: false,
           tabBarActiveTintColor: colors.primary,
           tabBarInactiveTintColor: colors.outline,
           tabBarBackground: renderTabBarBackground,
-          tabBarStyle: styles.tabBar,
+          tabBarStyle: [styles.tabBar, { bottom: tabBarBottom }],
           tabBarItemStyle: styles.tabItem,
         }}
       >
         <Tab.Screen
           name="RoomsTab"
           component={RoomsNavigator}
-          options={{
+          options={({ route }) => ({
             tabBarIcon: tabIcon('mic'),
+            tabBarStyle: resolveTabBarStyle(route, tabBarBottom),
             tabBarAccessibilityLabel: t('navigation.tabs.rooms', 'Rooms'),
-          }}
+          })}
         />
         <Tab.Screen
           name="MapsTab"
           component={MapsNavigator}
-          options={{
+          options={({ route }) => ({
             tabBarIcon: tabIcon('map'),
+            tabBarStyle: resolveTabBarStyle(route, tabBarBottom),
             tabBarAccessibilityLabel: t('navigation.tabs.map', 'Map'),
-          }}
+          })}
         />
         <Tab.Screen
           name="MessagesTab"
           component={MessagesNavigator}
           options={({ route }) => ({
             tabBarIcon: messagesTabIcon,
-            tabBarStyle: resolveTabBarStyle(route),
+            tabBarStyle: resolveTabBarStyle(route, tabBarBottom),
             tabBarAccessibilityLabel: t('navigation.tabs.messages', 'Messages'),
           })}
         />
         <Tab.Screen
           name="SettingsTab"
           component={SettingsNavigator}
-          options={{
+          options={({ route }) => ({
             tabBarIcon: tabIcon('settings'),
+            tabBarStyle: resolveTabBarStyle(route, tabBarBottom),
             tabBarAccessibilityLabel: t('navigation.tabs.settings', 'Settings'),
-          }}
+          })}
         />
       </Tab.Navigator>
       <RoomMiniBar />
@@ -149,7 +195,6 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: '5%',
     right: '5%',
-    bottom: layout.tabBarBottomOffset,
     height: layout.tabBarHeight,
     borderRadius: radii.xxxl,
     borderTopWidth: 0,
@@ -170,8 +215,9 @@ const styles = StyleSheet.create({
     top: -4,
     right: -8,
     minWidth: 16,
-    height: 16,
+    minHeight: 16,
     paddingHorizontal: 4,
+    paddingVertical: 2,
     borderRadius: 8,
     backgroundColor: colors.primary,
     alignItems: 'center',

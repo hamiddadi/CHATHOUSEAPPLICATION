@@ -85,11 +85,11 @@ export const ReplaysScreen: React.FC = () => {
           keyExtractor={item => item.id}
           refreshing={isRefetching}
           onRefresh={handleRefresh}
-          contentContainerStyle={{
-            padding: spacing.xxl,
-            gap: spacing.md,
-            paddingBottom: insets.bottom + spacing.huge,
-          }}
+          contentContainerStyle={[
+            styles.list,
+            (replays?.length ?? 0) === 0 ? styles.emptyList : undefined,
+            { paddingBottom: insets.bottom + spacing.huge },
+          ]}
           ListEmptyComponent={
             <EmptyState title={t('replays.emptyTitle')} description={t('replays.emptyBody')} />
           }
@@ -101,6 +101,8 @@ export const ReplaysScreen: React.FC = () => {
 };
 
 const styles = StyleSheet.create({
+  list: { padding: spacing.xxl, gap: spacing.md },
+  emptyList: { flexGrow: 1 },
   card: {
     backgroundColor: colors.glass,
     borderRadius: 16,

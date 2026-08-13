@@ -71,7 +71,7 @@ export const ExtJoinHouseButton: React.FC<ExtJoinHouseButtonProps> = ({
       accessibilityRole="button"
       accessibilityState={{ disabled, busy: isSubmitting }}
       accessibilityLabel={isPending ? 'Demande envoyée, en attente d’approbation' : 'Rejoindre'}
-      style={[styles.button, disabled && styles.buttonDisabled]}
+      style={[styles.button, isPending && styles.buttonPending]}
       testID={testID}
     >
       {isSubmitting ? (
@@ -94,7 +94,7 @@ const styles = StyleSheet.create({
     minWidth: 140,
     minHeight: 44,
   },
-  buttonDisabled: {
+  buttonPending: {
     backgroundColor: colors.overlayWhite10,
   },
   label: {

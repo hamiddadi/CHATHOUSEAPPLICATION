@@ -1,4 +1,4 @@
-import React, { forwardRef, useCallback, useState } from 'react';
+import React, { forwardRef, useCallback, useId, useState } from 'react';
 import { Text, TextInput, View } from 'react-native';
 import type { TextInput as RNTextInput } from 'react-native';
 import { cn } from '../../utils/cn';
@@ -38,6 +38,8 @@ export const Input = forwardRef<RNTextInput, InputProps>(
     ref,
   ) => {
     const [isFocused, setIsFocused] = useState(false);
+    const generatedId = useId().replace(/:/g, '');
+    const labelId = `input-label-${generatedId}`;
 
     const handleFocus = useCallback(
       (e: Parameters<NonNullable<typeof onFocus>>[0]) => {
@@ -58,7 +60,9 @@ export const Input = forwardRef<RNTextInput, InputProps>(
     return (
       <View className="gap-xs">
         {label ? (
-          <Text className="text-xs text-ink-muted ml-xs font-body-medium">{label}</Text>
+          <Text nativeID={labelId} className="text-xs text-ink-muted ml-xs font-body-medium">
+            {label}
+          </Text>
         ) : null}
 
         <View
@@ -75,6 +79,11 @@ export const Input = forwardRef<RNTextInput, InputProps>(
             ref={ref}
             {...inputProps}
             accessibilityLabel={inputProps.accessibilityLabel ?? label}
+            accessibilityLabelledBy={
+              inputProps.accessibilityLabelledBy ??
+              (!inputProps.accessibilityLabel && label ? labelId : undefined)
+            }
+            accessibilityHint={inputProps.accessibilityHint ?? error ?? helperText}
             onFocus={handleFocus}
             onBlur={handleBlur}
             placeholderTextColor={placeholderTextColor ?? PLACEHOLDER_COLOR}
@@ -85,7 +94,13 @@ export const Input = forwardRef<RNTextInput, InputProps>(
         </View>
 
         {error ? (
-          <Text className="text-xs text-danger ml-xs">{error}</Text>
+          <Text
+            accessibilityRole="alert"
+            accessibilityLiveRegion="polite"
+            className="text-xs text-danger ml-xs"
+          >
+            {error}
+          </Text>
         ) : helperText ? (
           <Text className="text-xs text-ink-muted ml-xs">{helperText}</Text>
         ) : null}

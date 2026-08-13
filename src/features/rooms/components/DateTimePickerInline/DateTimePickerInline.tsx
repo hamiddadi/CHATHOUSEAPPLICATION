@@ -257,7 +257,7 @@ export const DateTimePickerInline: React.FC<DateTimePickerInlineProps> = ({ valu
   }, [parsed.hour, parsed.minute, parsed.startOfDay]);
 
   return (
-    <View style={styles.container} accessibilityRole="adjustable">
+    <View style={styles.container}>
       <Text style={styles.sectionLabel}>{t('dateTimePicker.dateLabel', 'Date')}</Text>
       <FlatList
         ref={dayListRef}

@@ -82,6 +82,16 @@ describe('CreateRoomScreen', () => {
     expect(getByLabelText('Schedule +30 min')).toBeTruthy();
   });
 
+  it('exposes topic chips as checked multi-selection controls', () => {
+    const { getByRole } = mount();
+    const tech = getByRole('checkbox', { name: 'tech' });
+    expect(tech.props.accessibilityState).toEqual({ checked: false });
+    fireEvent.press(tech);
+    expect(getByRole('checkbox', { name: 'tech' }).props.accessibilityState).toEqual({
+      checked: true,
+    });
+  });
+
   it('does not navigate when the disabled Start CTA is pressed with an empty title', () => {
     const { navigation, getByText } = mount();
     // Title is empty → canStart is false → Button is disabled → onPress undefined.

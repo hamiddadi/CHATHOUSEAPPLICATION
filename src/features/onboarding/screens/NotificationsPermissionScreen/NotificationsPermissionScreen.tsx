@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { Alert, Linking, Pressable, Text, View } from 'react-native';
+import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import MaterialIcons from '@react-native-vector-icons/material-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -81,9 +81,11 @@ export const NotificationsPermissionScreen: React.FC = () => {
 
   return (
     <View className="flex-1 bg-background" style={{ paddingTop: insets.top + spacing.xl }}>
-      <View
-        className="flex-1 px-xxl gap-xxl"
-        style={{ paddingBottom: insets.bottom + spacing.huge }}
+      <ScrollView
+        testID="notifications-permission-scroll"
+        style={styles.fill}
+        contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + spacing.huge }]}
+        showsVerticalScrollIndicator={false}
       >
         <View className="items-center gap-md mt-huge">
           <View className="w-20 h-20 rounded-full bg-primary/15 items-center justify-center">
@@ -137,7 +139,16 @@ export const NotificationsPermissionScreen: React.FC = () => {
             </Text>
           </Pressable>
         </View>
-      </View>
+      </ScrollView>
     </View>
   );
 };
+
+const styles = StyleSheet.create({
+  fill: { flex: 1 },
+  content: {
+    flexGrow: 1,
+    paddingHorizontal: spacing.xxl,
+    gap: spacing.xxl,
+  },
+});

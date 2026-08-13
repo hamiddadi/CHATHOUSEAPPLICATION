@@ -4,7 +4,8 @@ import MaterialIcons from '@react-native-vector-icons/material-icons';
 import { useTranslation } from 'react-i18next';
 
 const BRAND_NAVY = '#1E3A8A';
-const PLACEHOLDER_COLOR = 'rgba(30,58,138,0.55)';
+const CONTROL_BACKGROUND = '#FFFFFF';
+const PLACEHOLDER_COLOR = BRAND_NAVY;
 
 interface MapSearchBarProps {
   value: string;
@@ -43,7 +44,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     borderWidth: 1.5,
     borderColor: BRAND_NAVY,
-    backgroundColor: 'transparent',
+    backgroundColor: CONTROL_BACKGROUND,
   },
   input: {
     flex: 1,

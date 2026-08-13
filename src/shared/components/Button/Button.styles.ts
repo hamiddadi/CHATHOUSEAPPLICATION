@@ -1,4 +1,4 @@
-import type { Insets } from 'react-native';
+import type { Insets, ViewStyle } from 'react-native';
 import { colors, palette } from '../../constants/theme';
 import type { ButtonSize, ButtonVariant } from './types';
 
@@ -21,6 +21,15 @@ export const variantPressedClass: Record<ButtonVariant, string> = {
   ghost: 'bg-glass-strong',
   outline: 'bg-glass',
   danger: 'opacity-90',
+};
+
+/** Inline pressed styles belong to the Pressable surface, not its contents. */
+export const variantPressedStyle: Record<ButtonVariant, ViewStyle> = {
+  primary: { opacity: 0.9 },
+  primaryContainer: { opacity: 0.85 },
+  ghost: { backgroundColor: colors.glassStrong },
+  outline: { backgroundColor: colors.glass },
+  danger: { opacity: 0.9 },
 };
 
 export const variantTextClass: Record<ButtonVariant, string> = {

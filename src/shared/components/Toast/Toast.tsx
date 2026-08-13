@@ -90,11 +90,11 @@ const ToastItem: React.FC<ToastItemProps> = ({ toast }) => {
  * Global toast portal. Mount once near the root (inside SafeAreaProvider).
  * Consumers call `useToastStore.getState().show({ message, tone })`.
  */
-export const ToastPortal: React.FC = () => {
+export const ToastPortal: React.FC<{ topInset?: number }> = ({ topInset }) => {
   const toasts = useToastStore(s => s.toasts);
   const insets = useSafeAreaInsets();
   return (
-    <View pointerEvents="box-none" style={[toastStyles.anchor, { top: insets.top }]}>
+    <View pointerEvents="box-none" style={[toastStyles.anchor, { top: topInset ?? insets.top }]}>
       {toasts.map(t => (
         <ToastItem key={t.id} toast={t} />
       ))}

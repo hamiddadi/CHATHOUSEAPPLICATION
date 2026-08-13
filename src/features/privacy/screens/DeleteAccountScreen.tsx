@@ -166,7 +166,7 @@ const styles = StyleSheet.create({
     borderRadius: radii.md,
     padding: spacing.md,
     borderWidth: 1,
-    borderColor: colors.overlayWhite15,
+    borderColor: colors.outline,
     fontSize: 15,
     letterSpacing: 1,
   },

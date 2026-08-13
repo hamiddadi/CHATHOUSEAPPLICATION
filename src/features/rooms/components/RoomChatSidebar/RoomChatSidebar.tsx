@@ -1,5 +1,6 @@
 import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   FlatList,
   KeyboardAvoidingView,
@@ -116,7 +117,8 @@ export const RoomChatSidebar: React.FC<RoomChatSidebarProps> = memo(
     const [deletingMessageId, setDeletingMessageId] = useState<string | null>(null);
     const sendInFlightRef = useRef(false);
     const listRef = useRef<FlatList<ChatMessage>>(null);
-    const sendDisabled = draft.trim().length === 0 || sendMessage.isPending;
+    const hasSendableDraft = draft.trim().length > 0;
+    const sendDisabled = !hasSendableDraft || sendMessage.isPending;
 
     // Subscribe to live `room:chat_message` so new entries land instantly
     // without polling. The hook only attaches while the sidebar is mounted
@@ -254,15 +256,7 @@ export const RoomChatSidebar: React.FC<RoomChatSidebarProps> = memo(
 
     const renderItem = useCallback(
       ({ item }: { item: ChatMessage }) => (
-        <Pressable
-          onLongPress={() => handleStartReply(item)}
-          accessibilityRole="button"
-          accessibilityLabel={t('roomChat.messageA11y', {
-            name: item.user.displayName || item.user.username,
-          })}
-          accessibilityHint={t('roomChat.replyMessageHint')}
-          style={styles.row}
-        >
+        <View style={styles.row}>
           <Avatar
             uri={item.user.avatarUrl ?? undefined}
             name={item.user.displayName}
@@ -306,19 +300,32 @@ export const RoomChatSidebar: React.FC<RoomChatSidebarProps> = memo(
                 ) : null}
               </View>
             </View>
-            {item.replyTo ? (
-              <View style={styles.replyQuote}>
-                <Text style={styles.replyAuthor} numberOfLines={1}>
-                  ↳ @{item.replyTo.user.username || item.replyTo.user.displayName}
-                </Text>
-                <Text style={styles.replySnippet} numberOfLines={2}>
-                  {item.replyTo.content}
-                </Text>
-              </View>
-            ) : null}
-            <Text style={styles.content}>{item.content}</Text>
+            <Pressable
+              onLongPress={() => handleStartReply(item)}
+              accessibilityRole="button"
+              accessibilityLabel={t('roomChat.messageA11y', {
+                name: item.user.displayName || item.user.username,
+              })}
+              accessibilityHint={t('roomChat.replyMessageHint')}
+              accessibilityActions={[{ name: 'reply', label: t('roomChat.replyMessageHint') }]}
+              onAccessibilityAction={event => {
+                if (event.nativeEvent.actionName === 'reply') handleStartReply(item);
+              }}
+            >
+              {item.replyTo ? (
+                <View style={styles.replyQuote}>
+                  <Text style={styles.replyAuthor} numberOfLines={1}>
+                    ↳ @{item.replyTo.user.username || item.replyTo.user.displayName}
+                  </Text>
+                  <Text style={styles.replySnippet} numberOfLines={2}>
+                    {item.replyTo.content}
+                  </Text>
+                </View>
+              ) : null}
+              <Text style={styles.content}>{item.content}</Text>
+            </Pressable>
           </View>
-        </Pressable>
+        </View>
       ),
       [
         canModerate,
@@ -418,9 +425,13 @@ export const RoomChatSidebar: React.FC<RoomChatSidebarProps> = memo(
                         busy: sendMessage.isPending,
                         disabled: sendDisabled,
                       }}
-                      style={[styles.sendBtn, sendDisabled ? styles.sendBtnDisabled : null]}
+                      style={[styles.sendBtn, !hasSendableDraft ? styles.sendBtnDisabled : null]}
                     >
-                      <MaterialIcons name="send" size={18} color={colors.background} />
+                      {sendMessage.isPending ? (
+                        <ActivityIndicator size="small" color={colors.onPrimary} />
+                      ) : (
+                        <MaterialIcons name="send" size={18} color={colors.onPrimary} />
+                      )}
                     </Pressable>
                   </View>
                 ) : (
@@ -490,8 +501,13 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   author: { color: colors.textMuted, fontSize: 11, fontWeight: '600' },
-  messageActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  messageAction: { padding: 2 },
+  messageActions: { flexDirection: 'row', alignItems: 'center' },
+  messageAction: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   content: { color: colors.text, fontSize: 14, lineHeight: 18 },
   composer: {
     flexDirection: 'row',
@@ -515,21 +531,24 @@ const styles = StyleSheet.create({
     flex: 1,
     color: colors.text,
     backgroundColor: colors.glass,
+    borderWidth: 1,
+    borderColor: colors.outline,
     borderRadius: 18,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
+    minHeight: 44,
     maxHeight: 100,
     fontSize: 14,
   },
   sendBtn: {
     backgroundColor: colors.primary,
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  sendBtnDisabled: { backgroundColor: 'rgba(255,255,255,0.1)' },
+  sendBtnDisabled: { backgroundColor: colors.overlayWhite10 },
   replyQuote: {
     borderLeftWidth: 2,
     borderLeftColor: colors.primary,

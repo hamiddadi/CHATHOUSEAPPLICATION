@@ -192,10 +192,29 @@ export const GroupChatScreen: React.FC = () => {
       const isMine = item.senderId === myId;
       return (
         <Pressable
+          testID={`group-message-${item.id}`}
           className={isMine ? 'items-end px-xxl py-xxs' : 'items-start px-xxl py-xxs'}
           onLongPress={!isMine ? () => setReportMessageId(item.id) : undefined}
           delayLongPress={350}
-          accessibilityRole="button"
+          accessible={!isMine}
+          accessibilityRole={!isMine ? 'button' : undefined}
+          accessibilityActions={
+            !isMine
+              ? [
+                  {
+                    name: 'report',
+                    label: t('moderation.reportMessageA11y', 'Report this message'),
+                  },
+                ]
+              : undefined
+          }
+          onAccessibilityAction={
+            !isMine
+              ? event => {
+                  if (event.nativeEvent.actionName === 'report') setReportMessageId(item.id);
+                }
+              : undefined
+          }
           accessibilityHint={
             !isMine
               ? t('moderation.longPressToReport', 'Long press to report this message')
@@ -219,6 +238,7 @@ export const GroupChatScreen: React.FC = () => {
                 audioUrl={item.audioUrl}
                 durationMs={item.durationMs}
                 isMine={isMine}
+                foregroundColor={isMine ? colors.onPrimary : undefined}
               />
             ) : (
               <Text className={isMine ? 'text-sm text-primary-on-container' : 'text-sm text-ink'}>
@@ -339,10 +359,11 @@ export const GroupChatScreen: React.FC = () => {
               value={draft}
               onChangeText={setDraft}
               placeholder={t('messages.messagePlaceholder', 'Message')}
+              accessibilityLabel={t('messages.messagePlaceholder', 'Message')}
               placeholderTextColor={colors.textMuted}
               maxLength={MAX_MESSAGE_LEN}
               multiline
-              className="max-h-28 bg-overlay-white-5 rounded-2xl px-md py-sm text-ink"
+              className="min-h-[44px] max-h-28 bg-overlay-white-5 rounded-2xl border border-outline px-md py-sm text-ink"
             />
             {draft.length >= COUNTER_THRESHOLD ? (
               <Text className="text-[10px] text-ink-muted self-end mt-xxs mr-sm">

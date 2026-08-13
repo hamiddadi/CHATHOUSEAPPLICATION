@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NavigationProp } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -193,6 +193,7 @@ export const MapsScreen: React.FC = () => {
 
   return (
     <View style={styles.rootContainer}>
+      <StatusBar barStyle="dark-content" backgroundColor={GOOGLE_MAPS_COLORS.landSoft} />
       <MapView
         ref={mapRef}
         provider={undefined} // OSM Migration — use the native provider (Apple Maps iOS / Google-compatible Android shell, overlaid by OSM tiles)

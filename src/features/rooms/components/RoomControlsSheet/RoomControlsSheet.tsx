@@ -1,9 +1,10 @@
 import React, { memo, useCallback } from 'react';
-import { Alert, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import MaterialIcons from '@react-native-vector-icons/material-icons';
 import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { colors, spacing } from '../../../../shared/constants/theme';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { colors, layout, spacing } from '../../../../shared/constants/theme';
 import { errorMessage } from '../../../../shared/utils/errorMessage';
 import { useLockRoom, useMuteAllInRoom, useToggleRoomChat } from '../../hooks/useRooms';
 import { roomSettingsExtApi } from '../../../extensions/api/roomSettingsExtApi';
@@ -45,6 +46,7 @@ export const RoomControlsSheet: React.FC<RoomControlsSheetProps> = memo(
     onToggleCaptions,
   }) => {
     const { t } = useTranslation();
+    const insets = useSafeAreaInsets();
     const muteAll = useMuteAllInRoom();
     const toggleChat = useToggleRoomChat();
     const lockRoom = useLockRoom();
@@ -132,81 +134,95 @@ export const RoomControlsSheet: React.FC<RoomControlsSheetProps> = memo(
 
     return (
       <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-        <Pressable
-          style={styles.backdrop}
-          onPress={onClose}
-          accessibilityLabel={t('roomControls.close')}
-        >
-          <Pressable style={styles.sheet} onPress={() => undefined}>
-            <View style={styles.handle} />
-            <Text style={styles.title}>{t('roomControls.title')}</Text>
-
-            <Row
-              icon="title"
-              label={t('roomControls.editTitle')}
-              onPress={() => {
-                onClose();
-                onEditTitle();
-              }}
-            />
-            <Row
-              icon="person-add"
-              label={t('roomControls.invite')}
-              onPress={() => {
-                onClose();
-                onInvite();
-              }}
-            />
-            <Row
-              icon="volume-off"
-              label={t('roomControls.muteAll')}
-              onPress={handleMuteAll}
-              destructive
-            />
-            <Row
-              icon={chatEnabled ? 'chat' : 'chat-bubble-outline'}
-              label={chatEnabled ? t('roomControls.disableChat') : t('roomControls.enableChat')}
-              onPress={handleToggleChatEnabled}
-            />
-            <Row
-              icon={chatVisibility === 'MODS_ONLY' ? 'visibility' : 'visibility-off'}
-              label={
-                chatVisibility === 'MODS_ONLY'
-                  ? t('roomControls.chatVisibleAll')
-                  : t('roomControls.chatModsOnly')
-              }
-              onPress={handleToggleChatVisibility}
-            />
-            <Row icon="pan-tool" label={handRaiseLabel} onPress={handleCycleHandRaise} />
-            <Row
-              icon={isLocked ? 'lock' : 'lock-open'}
-              label={
-                isLocked
-                  ? t('roomControls.unlockRoom', 'Unlock the room')
-                  : t('roomControls.lockRoom', 'Lock the room')
-              }
-              onPress={handleToggleLock}
-            />
-            {captionsConfigured && onToggleCaptions ? (
-              <Row
-                icon={captionsEnabled ? 'closed-caption' : 'closed-caption-off'}
-                label={
-                  captionsEnabled
-                    ? t('roomControls.disableCaptions', 'Désactiver les sous-titres')
-                    : t('roomControls.enableCaptions', 'Activer les sous-titres')
-                }
-                onPress={onToggleCaptions}
-              />
-            ) : null}
-
-            <Pressable
-              onPress={onClose}
-              style={styles.cancel}
-              accessibilityRole="button"
-              accessibilityLabel={t('roomControls.close')}
+        <Pressable style={styles.backdrop} onPress={onClose} accessible={false}>
+          <Pressable
+            style={styles.sheet}
+            onPress={() => undefined}
+            accessible={false}
+            focusable={false}
+            accessibilityViewIsModal
+          >
+            <ScrollView
+              bounces={false}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={[
+                styles.sheetContent,
+                { paddingBottom: Math.max(insets.bottom, spacing.xl) },
+              ]}
             >
-              <Text style={styles.cancelLabel}>{t('roomControls.close')}</Text>
-            </Pressable>
+              <View style={styles.handle} />
+              <Text style={styles.title} accessibilityRole="header">
+                {t('roomControls.title')}
+              </Text>
+
+              <Row
+                icon="title"
+                label={t('roomControls.editTitle')}
+                onPress={() => {
+                  onClose();
+                  onEditTitle();
+                }}
+              />
+              <Row
+                icon="person-add"
+                label={t('roomControls.invite')}
+                onPress={() => {
+                  onClose();
+                  onInvite();
+                }}
+              />
+              <Row
+                icon="volume-off"
+                label={t('roomControls.muteAll')}
+                onPress={handleMuteAll}
+                destructive
+              />
+              <Row
+                icon={chatEnabled ? 'chat' : 'chat-bubble-outline'}
+                label={chatEnabled ? t('roomControls.disableChat') : t('roomControls.enableChat')}
+                onPress={handleToggleChatEnabled}
+              />
+              <Row
+                icon={chatVisibility === 'MODS_ONLY' ? 'visibility' : 'visibility-off'}
+                label={
+                  chatVisibility === 'MODS_ONLY'
+                    ? t('roomControls.chatVisibleAll')
+                    : t('roomControls.chatModsOnly')
+                }
+                onPress={handleToggleChatVisibility}
+              />
+              <Row icon="pan-tool" label={handRaiseLabel} onPress={handleCycleHandRaise} />
+              <Row
+                icon={isLocked ? 'lock' : 'lock-open'}
+                label={
+                  isLocked
+                    ? t('roomControls.unlockRoom', 'Unlock the room')
+                    : t('roomControls.lockRoom', 'Lock the room')
+                }
+                onPress={handleToggleLock}
+              />
+              {captionsConfigured && onToggleCaptions ? (
+                <Row
+                  icon={captionsEnabled ? 'closed-caption' : 'closed-caption-off'}
+                  label={
+                    captionsEnabled
+                      ? t('roomControls.disableCaptions', 'Désactiver les sous-titres')
+                      : t('roomControls.enableCaptions', 'Activer les sous-titres')
+                  }
+                  onPress={onToggleCaptions}
+                />
+              ) : null}
+
+              <Pressable
+                onPress={onClose}
+                style={styles.cancel}
+                accessibilityRole="button"
+                accessibilityLabel={t('roomControls.close')}
+              >
+                <Text style={styles.cancelLabel}>{t('roomControls.close')}</Text>
+              </Pressable>
+            </ScrollView>
           </Pressable>
         </Pressable>
       </Modal>
@@ -238,11 +254,18 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.modalBackdrop,
     justifyContent: 'flex-end',
+    alignItems: 'center',
   },
   sheet: {
+    width: '100%',
+    maxWidth: layout.maxContentWidth,
+    maxHeight: '90%',
     backgroundColor: colors.surfaceHigh,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
+    overflow: 'hidden',
+  },
+  sheetContent: {
     padding: spacing.xxl,
     gap: spacing.xs,
   },
@@ -261,6 +284,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   row: {
+    minHeight: 48,
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.md,

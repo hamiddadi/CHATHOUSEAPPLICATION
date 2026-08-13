@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
   Platform,
@@ -14,6 +15,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { Avatar } from '../../../../shared/components/Avatar';
+import { EmptyState } from '../../../../shared/components/EmptyState';
 import { Input } from '../../../../shared/components/Input';
 import { Loader } from '../../../../shared/components/Loader';
 import { colors, spacing } from '../../../../shared/constants/theme';
@@ -41,7 +43,7 @@ export const GroupInfoScreen: React.FC = () => {
   const conversationId = route.params.conversationId;
   const myId = useAuthStore(s => s.user?.id ?? null);
 
-  const { data: group, isLoading } = useGroup(conversationId);
+  const { data: group, isLoading, isError, refetch } = useGroup(conversationId);
   const rename = useRenameGroup();
   const removeMember = useRemoveGroupMember();
   const leave = useLeaveGroup();
@@ -115,8 +117,31 @@ export const GroupInfoScreen: React.FC = () => {
 
   const handleBack = useCallback(() => navigation.goBack(), [navigation]);
 
-  if (isLoading || !group) {
+  if (isLoading) {
     return <Loader fullscreen accessibilityLabel={t('common.loading')} />;
+  }
+
+  if (isError || !group) {
+    return (
+      <View className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
+        <View className="flex-row items-center px-xxl py-md">
+          <Pressable
+            onPress={handleBack}
+            accessibilityRole="button"
+            accessibilityLabel={t('common.back', 'Back')}
+            hitSlop={10}
+          >
+            <MaterialIcons name="arrow-back" size={24} color={colors.text} />
+          </Pressable>
+        </View>
+        <EmptyState
+          title={t('messages.groupInfoLoadError', "Couldn't load group info")}
+          description={t('common.checkConnection', 'Check your connection and try again.')}
+          actionLabel={t('common.retry', 'Retry')}
+          onAction={() => void refetch()}
+        />
+      </View>
+    );
   }
 
   return (
@@ -164,13 +189,21 @@ export const GroupInfoScreen: React.FC = () => {
             disabled={!titleChanged || rename.isPending}
             accessibilityRole="button"
             accessibilityLabel={t('common.save', 'Save')}
+            accessibilityState={{
+              disabled: !titleChanged || rename.isPending,
+              busy: rename.isPending,
+            }}
             className={
-              titleChanged && !rename.isPending
+              titleChanged || rename.isPending
                 ? 'w-12 h-12 rounded-pill bg-primary items-center justify-center mb-xxs'
                 : 'w-12 h-12 rounded-pill bg-overlay-white-10 items-center justify-center mb-xxs opacity-50'
             }
           >
-            <MaterialIcons name="check" size={20} color={colors.onPrimary} />
+            {rename.isPending ? (
+              <ActivityIndicator size="small" color={colors.onPrimary} />
+            ) : (
+              <MaterialIcons name="check" size={20} color={colors.onPrimary} />
+            )}
           </Pressable>
         </View>
 

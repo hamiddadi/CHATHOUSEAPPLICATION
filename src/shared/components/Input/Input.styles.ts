@@ -8,13 +8,13 @@ type InputVariant = NonNullable<InputProps['variant']>;
  * utilities can otherwise let the default color override the active state.
  */
 export const getInputBorderClass = (
-  variant: InputVariant,
+  _variant: InputVariant,
   isFocused: boolean,
   hasError: boolean,
 ): string => {
   if (hasError) return 'border-danger';
   if (isFocused) return 'border-primary';
-  return variant === 'filled' ? 'border-transparent' : 'border-outline';
+  return 'border-outline';
 };
 
 export const sizeContainerClass: Record<InputSize, string> = {

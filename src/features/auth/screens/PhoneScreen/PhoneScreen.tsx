@@ -1,5 +1,14 @@
 import React, { useCallback, useState } from 'react';
-import { KeyboardAvoidingView, Platform, Pressable, Text, View, Keyboard } from 'react-native';
+import {
+  Keyboard,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import MaterialIcons from '@react-native-vector-icons/material-icons';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -19,7 +28,7 @@ import {
 import { useFormApiErrors } from '../../../../shared/hooks/useFormApiErrors';
 import { useAuthStore } from '../../store/authStore';
 import { phoneFormSchema, type PhoneFormValues } from '../../schemas';
-import { colors, spacing } from '../../../../shared/constants/theme';
+import { colors, layout, spacing } from '../../../../shared/constants/theme';
 import { legalDocumentVersion } from '../../../../config/env';
 import type { AuthStackParamList } from '../../../../core/navigation/types';
 import type { LegalAcceptancePayload } from '../../types/auth.types';
@@ -111,9 +120,11 @@ export const PhoneScreen: React.FC = () => {
         </Pressable>
       </View>
 
-      <View
-        className="flex-1 px-xxl gap-xxl"
-        style={{ paddingBottom: insets.bottom + spacing.huge }}
+      <ScrollView
+        className="flex-1"
+        contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + spacing.huge }]}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
       >
         <Text className="text-display font-display text-ink tracking-tight">
           {t('auth.phone.title', "What's your phone number?")}
@@ -185,7 +196,7 @@ export const PhoneScreen: React.FC = () => {
             <Pressable
               testID="auth-age-confirmation"
               onPress={() => onChange(!value)}
-              className="flex-row items-center gap-sm mb-md"
+              className="flex-row items-center gap-sm mb-md min-h-[44px]"
               accessibilityRole="checkbox"
               accessibilityState={{ checked: value }}
             >
@@ -226,6 +237,7 @@ export const PhoneScreen: React.FC = () => {
                   'auth.phone.termsAcceptance',
                   'I accept the current Terms of Use',
                 )}
+                hitSlop={10}
               >
                 <View
                   className={`w-6 h-6 rounded border items-center justify-center ${
@@ -277,6 +289,7 @@ export const PhoneScreen: React.FC = () => {
                   'auth.phone.privacyAcknowledgement',
                   'I acknowledge that I have read the Privacy Policy',
                 )}
+                hitSlop={10}
               >
                 <View
                   className={`w-6 h-6 rounded border items-center justify-center ${
@@ -325,7 +338,7 @@ export const PhoneScreen: React.FC = () => {
           loading={isSubmitting}
           onPress={handleSubmit(onSubmit)}
         />
-      </View>
+      </ScrollView>
 
       <CountryPicker
         visible={countryPickerVisible}
@@ -335,3 +348,14 @@ export const PhoneScreen: React.FC = () => {
     </KeyboardAvoidingView>
   );
 };
+
+const styles = StyleSheet.create({
+  content: {
+    flexGrow: 1,
+    width: '100%',
+    maxWidth: layout.maxContentWidth,
+    alignSelf: 'center',
+    paddingHorizontal: spacing.xxl,
+    gap: spacing.xxl,
+  },
+});

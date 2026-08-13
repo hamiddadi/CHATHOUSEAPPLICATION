@@ -1,8 +1,17 @@
 import React from 'react';
-import { ActivityIndicator, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import MaterialIcons from '@react-native-vector-icons/material-icons';
 import { useTranslation } from 'react-i18next';
-import { colors, radii, spacing } from '../../../shared/constants/theme';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { colors, layout, radii, spacing } from '../../../shared/constants/theme';
 import type { ReportReason } from '../services/socialService';
 
 interface ProfileReportSheetProps {
@@ -32,6 +41,7 @@ export const ProfileReportSheet: React.FC<ProfileReportSheetProps> = ({
   onSelect,
 }) => {
   const { t } = useTranslation();
+  const insets = useSafeAreaInsets();
 
   return (
     <Modal
@@ -43,50 +53,68 @@ export const ProfileReportSheet: React.FC<ProfileReportSheetProps> = ({
       <Pressable
         style={styles.backdrop}
         onPress={submitting ? undefined : onClose}
-        accessibilityLabel={t('common.close')}
+        accessible={false}
       >
-        <Pressable style={styles.sheet} onPress={() => undefined} accessibilityViewIsModal>
-          <View style={styles.handle} />
-          <View style={styles.header}>
-            <View style={styles.headerText}>
-              <Text style={styles.title}>{t('profile.reportTitle', { handle: targetLabel })}</Text>
-              <Text style={styles.subtitle}>{t('profile.reportReason')}</Text>
+        <Pressable
+          style={styles.sheet}
+          onPress={() => undefined}
+          accessible={false}
+          focusable={false}
+          accessibilityViewIsModal
+        >
+          <ScrollView
+            bounces={false}
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={[
+              styles.sheetContent,
+              { paddingBottom: Math.max(insets.bottom, spacing.xl) },
+            ]}
+          >
+            <View style={styles.handle} />
+            <View style={styles.header}>
+              <View style={styles.headerText}>
+                <Text style={styles.title}>
+                  {t('profile.reportTitle', { handle: targetLabel })}
+                </Text>
+                <Text style={styles.subtitle}>{t('profile.reportReason')}</Text>
+              </View>
+              <Pressable
+                onPress={onClose}
+                disabled={submitting}
+                accessibilityRole="button"
+                accessibilityLabel={t('common.close')}
+                hitSlop={8}
+                style={styles.closeButton}
+              >
+                <MaterialIcons name="close" size={22} color={colors.textMuted} />
+              </Pressable>
             </View>
-            <Pressable
-              onPress={onClose}
-              disabled={submitting}
-              accessibilityRole="button"
-              accessibilityLabel={t('common.close')}
-              hitSlop={8}
-            >
-              <MaterialIcons name="close" size={22} color={colors.textMuted} />
-            </Pressable>
-          </View>
 
-          {REASONS.map(reason => (
-            <Pressable
-              key={reason.value}
-              onPress={() => onSelect(reason.value)}
-              disabled={submitting}
-              accessibilityRole="button"
-              accessibilityLabel={t(`profile.reasons.${reason.value}`)}
-              style={({ pressed }) => [
-                styles.reason,
-                pressed && !submitting ? styles.reasonPressed : null,
-              ]}
-            >
-              <MaterialIcons name={reason.icon} size={21} color={colors.danger} />
-              <Text style={styles.reasonText}>{t(`profile.reasons.${reason.value}`)}</Text>
-              <MaterialIcons name="chevron-right" size={20} color={colors.textMuted} />
-            </Pressable>
-          ))}
+            {REASONS.map(reason => (
+              <Pressable
+                key={reason.value}
+                onPress={() => onSelect(reason.value)}
+                disabled={submitting}
+                accessibilityRole="button"
+                accessibilityLabel={t(`profile.reasons.${reason.value}`)}
+                style={({ pressed }) => [
+                  styles.reason,
+                  pressed && !submitting ? styles.reasonPressed : null,
+                ]}
+              >
+                <MaterialIcons name={reason.icon} size={21} color={colors.danger} />
+                <Text style={styles.reasonText}>{t(`profile.reasons.${reason.value}`)}</Text>
+                <MaterialIcons name="chevron-right" size={20} color={colors.textMuted} />
+              </Pressable>
+            ))}
 
-          {submitting ? (
-            <View style={styles.progress} accessibilityRole="progressbar">
-              <ActivityIndicator size="small" color={colors.primary} />
-              <Text style={styles.progressText}>{t('moderation.submitting')}</Text>
-            </View>
-          ) : null}
+            {submitting ? (
+              <View style={styles.progress} accessibilityRole="progressbar">
+                <ActivityIndicator size="small" color={colors.primary} />
+                <Text style={styles.progressText}>{t('moderation.submitting')}</Text>
+              </View>
+            ) : null}
+          </ScrollView>
         </Pressable>
       </Pressable>
     </Modal>
@@ -97,15 +125,21 @@ const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
     justifyContent: 'flex-end',
+    alignItems: 'center',
     backgroundColor: colors.modalBackdropStrong,
   },
   sheet: {
-    paddingHorizontal: spacing.xxl,
-    paddingTop: spacing.sm,
-    paddingBottom: spacing.giant,
+    width: '100%',
+    maxWidth: layout.maxContentWidth,
+    maxHeight: '90%',
+    overflow: 'hidden',
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     backgroundColor: colors.surfaceHigh,
+  },
+  sheetContent: {
+    paddingHorizontal: spacing.xxl,
+    paddingTop: spacing.sm,
   },
   handle: {
     width: 36,
@@ -122,6 +156,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.lg,
   },
   headerText: { flex: 1, gap: spacing.xs },
+  closeButton: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
   title: { color: colors.text, fontSize: 18, fontWeight: '700' },
   subtitle: { color: colors.textMuted, fontSize: 13, lineHeight: 18 },
   reason: {

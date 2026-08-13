@@ -1,6 +1,7 @@
 import React, { memo } from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import MaterialIcons from '@react-native-vector-icons/material-icons';
+import { useTranslation } from 'react-i18next';
 import { GradientView } from '../../../../../shared/components/GradientView';
 import { colors, spacing, withAlpha } from '../../../../../shared/constants/theme';
 import { DEFAULTS } from '../../../../../shared/constants/images';
@@ -26,14 +27,28 @@ interface BubbleProps {
 }
 
 const Bubble: React.FC<BubbleProps> = memo(({ message, otherAvatar, showAvatar, onLongPress }) => {
+  const { t } = useTranslation();
+  const actionName = message.isMine ? 'delete' : 'report';
+  const actionLabel = message.isMine
+    ? t('moderation.deleteMessage', 'Delete message')
+    : t('moderation.reportMessage', 'Report message');
+  const accessibilityActions = onLongPress ? [{ name: actionName, label: actionLabel }] : undefined;
+  const handleAccessibilityAction = onLongPress ? () => onLongPress(message) : undefined;
+
   if (message.isMine) {
     return (
       <View style={styles.sentRow}>
         <Pressable
           onLongPress={onLongPress ? () => onLongPress(message) : undefined}
           delayLongPress={350}
-          accessibilityRole="button"
-          accessibilityHint="Maintenir pour supprimer le message"
+          accessibilityRole={onLongPress ? 'button' : undefined}
+          accessibilityHint={
+            onLongPress
+              ? t('moderation.longPressToDelete', 'Long press to delete this message')
+              : undefined
+          }
+          accessibilityActions={accessibilityActions}
+          onAccessibilityAction={handleAccessibilityAction}
         >
           <GradientView
             colors={SENT_GRADIENT}
@@ -73,8 +88,14 @@ const Bubble: React.FC<BubbleProps> = memo(({ message, otherAvatar, showAvatar, 
       style={styles.receivedRow}
       onLongPress={onLongPress ? () => onLongPress(message) : undefined}
       delayLongPress={350}
-      accessibilityRole="button"
-      accessibilityHint="Maintenir pour signaler le message"
+      accessibilityRole={onLongPress ? 'button' : undefined}
+      accessibilityHint={
+        onLongPress
+          ? t('moderation.longPressToReport', 'Long press to report this message')
+          : undefined
+      }
+      accessibilityActions={accessibilityActions}
+      onAccessibilityAction={handleAccessibilityAction}
     >
       {showAvatar ? (
         <Image

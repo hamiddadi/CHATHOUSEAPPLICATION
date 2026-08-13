@@ -1,18 +1,20 @@
 /**
  * Render-test for SettingsScreen (the user's own profile + app settings hub).
  * The screen reads `useMe()` / `useHouses('mine')` / `useAdminWhoami()` and a
- * signed-invite query, but every one of those falls back to a neutral default
- * when its cache is empty, so the screen mounts WITHOUT seeding. We still prime
- * `profileKeys.me()` (so the stats/name render real values) and exercise the
- * primary controls: the Wave + More header actions (open an Alert), Edit
+ * signed-invite query. Profile and house failures have explicit retry states,
+ * so tests prime their caches for the success path and reject their services
+ * for the failure path. The primary controls cover the Wave + More header
+ * actions (open an Alert), Edit
  * profile / Create House / notification + blocked-accounts rows (navigate),
  * the analytics privacy toggle (mutates the consent store), and the stat taps.
  */
 import React from 'react';
 import { Alert, Share } from 'react-native';
-import { fireEvent } from '@testing-library/react-native';
+import { fireEvent, waitFor } from '@testing-library/react-native';
 import { profileKeys } from '../../../profile/hooks/useProfile';
+import { profileService } from '../../../profile/services/profileService';
 import { houseKeys } from '../../../houses/hooks/useHouses';
+import { houseService } from '../../../houses/services/houseService';
 import type { HouseSummary, User } from '../../../../shared/types/domain';
 import { renderScreen, mockAuthenticated, resetAuth } from '../../../../test-utils/renderScreen';
 import { SettingsScreen } from './SettingsScreen';
@@ -73,10 +75,17 @@ describe('SettingsScreen', () => {
     expect(getByText('@tester')).toBeTruthy();
   });
 
-  it('mounts with an empty cache (all queries fall back to defaults)', () => {
-    const { getByText } = renderScreen(<SettingsScreen />);
-    // No `me` data → the header shows the localized "Your profile" fallback.
-    expect(getByText('Your profile')).toBeTruthy();
+  it('keeps the app header and shows a retryable error without a fake profile', async () => {
+    const meSpy = jest.spyOn(profileService, 'me').mockRejectedValue(new Error('offline'));
+    const { findByText, getByText, queryByText } = renderScreen(<SettingsScreen />);
+
+    expect(getByText('ChatHouse')).toBeTruthy();
+    expect(queryByText('Your profile')).toBeNull();
+    expect(await findByText("Couldn't load your settings.")).toBeTruthy();
+    expect(queryByText('@username')).toBeNull();
+
+    fireEvent.press(getByText('Retry'));
+    await waitFor(() => expect(meSpy).toHaveBeenCalledTimes(2));
   });
 
   it('renders member-of house tiles when houses are primed', () => {
@@ -84,6 +93,19 @@ describe('SettingsScreen', () => {
       seedQueryData: [seedMe(makeUser()), seedHouses([makeHouse()])],
     });
     expect(getByLabelText('Open Design Club')).toBeTruthy();
+  });
+
+  it('shows a local retry state instead of an empty houses grid on failure', async () => {
+    const housesSpy = jest.spyOn(houseService, 'list').mockRejectedValue(new Error('offline'));
+    const { findByText, getByText, queryByText } = renderScreen(<SettingsScreen />, {
+      seedQueryData: [seedMe(makeUser())],
+    });
+
+    expect(await findByText("Couldn't load houses")).toBeTruthy();
+    expect(queryByText('No houses yet')).toBeNull();
+
+    fireEvent.press(getByText('Retry'));
+    await waitFor(() => expect(housesSpy).toHaveBeenCalledTimes(2));
   });
 
   it('Wave button opens the wave-hint Alert', () => {

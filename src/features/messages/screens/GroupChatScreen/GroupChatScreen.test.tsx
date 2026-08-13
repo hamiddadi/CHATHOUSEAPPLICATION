@@ -148,6 +148,35 @@ describe('GroupChatScreen', () => {
     await waitFor(() => expect(reportSpy).toHaveBeenCalledWith(GROUP_ID, 'gm1', 'spam'));
   });
 
+  it('exposes reporting only on received messages through an accessibility action', async () => {
+    const received = messages()[0]!;
+    const mine: GroupMessage = {
+      ...received,
+      id: 'gm-mine',
+      senderId: 'user-test-1',
+      content: 'My own message',
+    };
+    const { getByTestId, getByText } = renderScreen(<GroupChatScreen />, {
+      route: { name: 'GroupChat', params: { conversationId: GROUP_ID } },
+      seedQueryData: [
+        { key: [...groupKeys.detail(GROUP_ID)], data: group() },
+        { key: [...groupKeys.messages(GROUP_ID)], data: seededThread([received, mine]) },
+      ],
+    });
+
+    const receivedMessage = getByTestId('group-message-gm1');
+    expect(receivedMessage.props.accessibilityRole).toBe('button');
+    expect(receivedMessage.props.accessibilityActions).toEqual([
+      { name: 'report', label: 'Report this message' },
+    ]);
+    expect(getByTestId('group-message-gm-mine').props.accessibilityRole).toBeUndefined();
+
+    fireEvent(receivedMessage, 'accessibilityAction', {
+      nativeEvent: { actionName: 'report' },
+    });
+    expect(await waitFor(() => getByText('Report this message'))).toBeTruthy();
+  });
+
   it('reaching the top of the inverted list loads the next (older) page', async () => {
     // A full first page means older history may remain → getNextPageParam yields
     // a cursor, so onEndReached must fetch page 2. Serve one full page then a

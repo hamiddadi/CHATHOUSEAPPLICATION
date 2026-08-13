@@ -47,16 +47,8 @@ const reasonLabel = (u: SuggestedUser, t: TFunction): string => {
 const UserRow: React.FC<UserRowProps> = memo(({ item, isFollowed, onTap, onFollow, t }) => {
   const handleTap = useCallback(() => onTap?.(item), [onTap, item]);
   const handleFollowPress = useCallback(() => onFollow(item), [onFollow, item]);
-
-  return (
-    <Pressable
-      style={styles.row}
-      onPress={handleTap}
-      accessibilityRole="button"
-      accessibilityLabel={t('extensions.suggested.viewProfile', 'View profile of {{name}}', {
-        name: item.displayName ?? item.username,
-      })}
-    >
+  const profileContent = (
+    <>
       {item.avatarUrl ? (
         <Image source={{ uri: item.avatarUrl }} style={styles.avatar} />
       ) : (
@@ -77,6 +69,25 @@ const UserRow: React.FC<UserRowProps> = memo(({ item, isFollowed, onTap, onFollo
         ) : null}
         <Text style={styles.reason}>{reasonLabel(item, t)}</Text>
       </View>
+    </>
+  );
+
+  return (
+    <View style={styles.row}>
+      {onTap ? (
+        <Pressable
+          style={styles.profileAction}
+          onPress={handleTap}
+          accessibilityRole="button"
+          accessibilityLabel={t('extensions.suggested.viewProfile', 'View profile of {{name}}', {
+            name: item.displayName ?? item.username,
+          })}
+        >
+          {profileContent}
+        </Pressable>
+      ) : (
+        <View style={styles.profileAction}>{profileContent}</View>
+      )}
       <Pressable
         style={[styles.followBtn, isFollowed && styles.followBtnDone]}
         onPress={handleFollowPress}
@@ -93,7 +104,7 @@ const UserRow: React.FC<UserRowProps> = memo(({ item, isFollowed, onTap, onFollo
             : t('extensions.suggested.follow', 'Follow')}
         </Text>
       </Pressable>
-    </Pressable>
+    </View>
   );
 });
 UserRow.displayName = 'UserRow';
@@ -199,6 +210,14 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     gap: 12,
   },
+  profileAction: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
   avatar: { width: 52, height: 52, borderRadius: 26 },
   avatarFallback: {
     backgroundColor: colors.surfaceHigh,
@@ -213,8 +232,10 @@ const styles = StyleSheet.create({
   followBtn: {
     paddingHorizontal: 14,
     paddingVertical: 8,
+    minHeight: 44,
     borderRadius: 20,
     backgroundColor: colors.primary,
+    justifyContent: 'center',
   },
   followBtnDone: {
     backgroundColor: colors.surfaceHigh,

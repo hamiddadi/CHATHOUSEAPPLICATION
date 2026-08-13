@@ -1,5 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, FlatList, Linking, Pressable, Share, StyleSheet, Text, View } from 'react-native';
+import {
+  Alert,
+  FlatList,
+  Linking,
+  Pressable,
+  Share,
+  StyleSheet,
+  Text,
+  View,
+  useWindowDimensions,
+} from 'react-native';
 import MaterialIcons from '@react-native-vector-icons/material-icons';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -83,6 +93,8 @@ export const RoomScreen: React.FC = () => {
   const navigation = useNavigation<Nav>();
   const route = useRoute<Route>();
   const insets = useSafeAreaInsets();
+  const { width, fontScale } = useWindowDimensions();
+  const compactHeader = width < 380 || fontScale > 1.3;
   const { t } = useTranslation();
   // SINGLE source of truth for the viewer's mute state (see currentRoomStore):
   // roomAudioService re-applies it after a LiveKit token renew/rejoin, so a
@@ -695,9 +707,11 @@ export const RoomScreen: React.FC = () => {
       <View style={[styles.topBar, { paddingTop: insets.top + spacing.sm }]}>
         <View className="flex-row items-center gap-sm">
           <MaterialIcons name="graphic-eq" size={HEADER_ICON_SIZE} color={colors.primary} />
-          <Text className="text-lg font-display text-primary tracking-tighter">
-            {t('common.appName', 'ChatHouse')}
-          </Text>
+          {!compactHeader ? (
+            <Text className="text-lg font-display text-primary tracking-tighter">
+              {t('common.appName', 'ChatHouse')}
+            </Text>
+          ) : null}
         </View>
         <View className="flex-row items-center gap-xs">
           <Pressable
@@ -705,7 +719,7 @@ export const RoomScreen: React.FC = () => {
             accessibilityRole="button"
             accessibilityLabel={t('room.shareA11y', 'Share room link')}
             hitSlop={8}
-            className="w-9 h-9 items-center justify-center rounded-pill bg-overlay-white-5"
+            className="w-11 h-11 items-center justify-center rounded-pill bg-overlay-white-5"
           >
             <MaterialIcons name="ios-share" size={18} color={colors.text} />
           </Pressable>
@@ -714,7 +728,7 @@ export const RoomScreen: React.FC = () => {
             accessibilityRole="button"
             accessibilityLabel={t('room.openChatA11y', 'Open chat')}
             hitSlop={8}
-            className="w-9 h-9 items-center justify-center rounded-pill bg-overlay-white-5"
+            className="w-11 h-11 items-center justify-center rounded-pill bg-overlay-white-5"
           >
             <MaterialIcons name="chat" size={18} color={colors.text} />
           </Pressable>
@@ -724,7 +738,7 @@ export const RoomScreen: React.FC = () => {
               accessibilityRole="button"
               accessibilityLabel={t('room.controlsA11y', 'Room controls')}
               hitSlop={8}
-              className="w-9 h-9 items-center justify-center rounded-pill bg-overlay-white-5"
+              className="w-11 h-11 items-center justify-center rounded-pill bg-overlay-white-5"
             >
               <MaterialIcons name="tune" size={18} color={colors.text} />
             </Pressable>
@@ -735,7 +749,7 @@ export const RoomScreen: React.FC = () => {
               accessibilityRole="button"
               accessibilityLabel={t('room.reportA11y', 'Report room')}
               hitSlop={8}
-              className="w-9 h-9 items-center justify-center rounded-pill bg-overlay-white-5"
+              className="w-11 h-11 items-center justify-center rounded-pill bg-overlay-white-5"
             >
               <MaterialIcons name="flag" size={18} color={colors.textMuted} />
             </Pressable>
@@ -748,13 +762,17 @@ export const RoomScreen: React.FC = () => {
               accessibilityLabel={t('room.closeRoom', 'End Room')}
               accessibilityState={{ disabled: endRoom.isPending, busy: endRoom.isPending }}
               hitSlop={8}
-              className={`bg-danger/15 border border-danger/30 px-lg py-xs rounded-pill ${
+              className={`min-w-[44px] min-h-[44px] items-center justify-center bg-danger/15 border border-danger/30 px-md py-xs rounded-pill ${
                 endRoom.isPending ? 'opacity-50' : ''
               }`}
             >
-              <Text className="text-sm font-body-bold text-danger">
-                {t('room.closeRoom', 'End Room')}
-              </Text>
+              {compactHeader ? (
+                <MaterialIcons name="stop-circle" size={20} color={colors.danger} />
+              ) : (
+                <Text className="text-sm font-body-bold text-danger">
+                  {t('room.closeRoom', 'End Room')}
+                </Text>
+              )}
             </Pressable>
           )}
         </View>
@@ -976,7 +994,12 @@ export const RoomScreen: React.FC = () => {
 
       {/* Floating live-captions overlay — renders the rolling transcript
           near the bottom of the room when captions are on. */}
-      {captions.enabled ? <ExtCaptionsOverlay lines={captions.lines} /> : null}
+      {captions.enabled ? (
+        <ExtCaptionsOverlay
+          lines={captions.lines}
+          bottomOffset={insets.bottom + ACTION_BAR_BOTTOM_OFFSET + 112}
+        />
+      ) : null}
 
       {/* Floating reactions bar — sits just above the action pill so the
           float-up emojis fly in front of the controls. pointerEvents

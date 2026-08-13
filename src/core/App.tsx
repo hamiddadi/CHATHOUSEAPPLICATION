@@ -4,9 +4,13 @@ import React, { useEffect, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { useAppFonts } from '../shared/hooks/useAppFonts';
 import { probeBackendHealth } from '../shared/services/api/healthProbe';
-import { startNetworkListener } from '../shared/services/network/networkStore';
+import { startNetworkListener, useNetworkStore } from '../shared/services/network/networkStore';
 import { ImpersonationBanner } from '../features/admin/components/ImpersonationBanner';
+import { useImpersonationStore } from '../features/admin/store/impersonationStore';
 import { SocketStatusBanner } from '../features/rooms/components/SocketStatusBanner';
+import { useSocketStore } from '../shared/services/realtime/socketStore';
+import { OfflineBanner } from '../shared/components/OfflineBanner';
+import { ToastPortal } from '../shared/components/Toast';
 import { useAnalyticsConsentStore } from '../features/privacy';
 import { setupForegroundPush } from '../features/notifications/services/pushNotifications';
 import { reportException } from './observability/reporter';
@@ -16,6 +20,43 @@ import { RootNavigator } from './navigation/RootNavigator';
 // Boot-time NetInfo subscription. No-op if @react-native-community/netinfo
 // isn't installed; the OfflineBanner simply never shows.
 startNetworkListener();
+
+/**
+ * Keeps persistent status banners in normal document flow, then anchors
+ * transient toasts inside the remaining navigator viewport. This prevents
+ * offline, socket and impersonation messages from painting on top of one
+ * another while retaining the system safe-area exactly once.
+ */
+const AppShell: React.FC = () => {
+  const impersonationToken = useImpersonationStore(s => s.token);
+  const impersonatedUser = useImpersonationStore(s => s.user);
+  const impersonationExpiry = useImpersonationStore(s => s.expiresAt);
+  const socketStatus = useSocketStore(s => s.status);
+  const isOnline = useNetworkStore(s => s.isOnline);
+
+  const impersonationVisible = Boolean(
+    impersonationToken &&
+    impersonatedUser &&
+    impersonationExpiry &&
+    impersonationExpiry > Date.now(),
+  );
+  const socketBannerVisible = socketStatus === 'reconnecting' || socketStatus === 'disconnected';
+  const offlineVisible = !isOnline;
+  const hasStatusBanner = impersonationVisible || socketBannerVisible || offlineVisible;
+
+  return (
+    <View style={appStyles.container}>
+      <ImpersonationBanner />
+      <SocketStatusBanner includeSafeArea={!impersonationVisible} />
+      <OfflineBanner inline includeSafeArea={!impersonationVisible && !socketBannerVisible} />
+
+      <View style={appStyles.container}>
+        <RootNavigator />
+        <ToastPortal topInset={hasStatusBanner ? 0 : undefined} />
+      </View>
+    </View>
+  );
+};
 
 // Hydrate the GDPR analytics-consent store. Default = disabled, so until
 // the user opts in (Settings → Confidentialité → toggle), the reporter is
@@ -54,15 +95,7 @@ export const App: React.FC = () => {
 
   return (
     <AppProviders>
-      <View style={appStyles.container}>
-        {/* Banners sit ABOVE the navigator so they're visible on every
-            screen. Order matters: ImpersonationBanner (red, action-required)
-            then SocketStatusBanner (yellow, transient network status).
-            Insets are handled internally so they cohabit with status bar. */}
-        <ImpersonationBanner />
-        <SocketStatusBanner />
-        <RootNavigator />
-      </View>
+      <AppShell />
     </AppProviders>
   );
 };

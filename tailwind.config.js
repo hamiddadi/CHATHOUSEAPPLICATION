@@ -81,6 +81,7 @@ module.exports = {
         'overlay-white-7': 'rgba(255, 255, 255, 0.07)',
         'overlay-white-10': 'rgba(255, 255, 255, 0.10)',
         'overlay-white-12': 'rgba(255, 255, 255, 0.12)',
+        'overlay-white-15': 'rgba(255, 255, 255, 0.15)',
         'overlay-white-20': 'rgba(255, 255, 255, 0.20)',
         'overlay-white-30': 'rgba(255, 255, 255, 0.30)',
         'overlay-white-70': 'rgba(255, 255, 255, 0.70)',

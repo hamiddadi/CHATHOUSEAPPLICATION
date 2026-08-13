@@ -4,6 +4,7 @@ import {
   type NativeScrollEvent,
   type NativeSyntheticEvent,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   useWindowDimensions,
@@ -78,21 +79,25 @@ export const WelcomeSlidesScreen: React.FC = () => {
 
   const renderItem = useCallback(
     ({ item }: { item: SlideDef }) => (
-      <View
+      <ScrollView
         testID={`welcome-slide-${item.key}`}
         style={{ width: windowWidth }}
-        className="px-xxl items-center justify-center"
+        contentContainerStyle={styles.slideContent}
+        showsVerticalScrollIndicator={false}
+        nestedScrollEnabled
       >
-        <View className="w-32 h-32 rounded-pill bg-primary-container items-center justify-center mb-xxxl">
-          <MaterialIcons name={item.icon} size={56} color={colors.primary} />
+        <View style={styles.slideInner}>
+          <View className="w-32 h-32 rounded-pill bg-primary-container items-center justify-center mb-xxxl">
+            <MaterialIcons name={item.icon} size={56} color={colors.primary} />
+          </View>
+          <Text className="text-display font-display text-ink text-center mb-lg">
+            {t(`onboarding.welcome.slides.${item.key}.title`)}
+          </Text>
+          <Text className="text-md text-ink-muted text-center max-w-xs">
+            {t(`onboarding.welcome.slides.${item.key}.body`)}
+          </Text>
         </View>
-        <Text className="text-display font-display text-ink text-center mb-lg">
-          {t(`onboarding.welcome.slides.${item.key}.title`)}
-        </Text>
-        <Text className="text-md text-ink-muted text-center max-w-xs">
-          {t(`onboarding.welcome.slides.${item.key}.body`)}
-        </Text>
-      </View>
+      </ScrollView>
     ),
     [t, windowWidth],
   );
@@ -174,6 +179,17 @@ export const WelcomeSlidesScreen: React.FC = () => {
 const styles = StyleSheet.create({
   fill: { flex: 1 },
   headerRow: { minHeight: 44 },
+  slideContent: {
+    flexGrow: 1,
+    paddingHorizontal: spacing.xxl,
+    paddingVertical: spacing.lg,
+  },
+  slideInner: {
+    flexGrow: 1,
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   dotBase: { height: 8, borderRadius: 4 },
   dotActive: { width: 20, backgroundColor: colors.primary },
   dotInactive: { width: 8, backgroundColor: colors.outline },
