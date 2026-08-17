@@ -6,10 +6,11 @@ export const premiumKeys = {
 };
 
 /** Server-side entitlement status (drives the badge + gating UI). Cached 60s. */
-export const usePremiumStatus = () =>
+export const usePremiumStatus = (enabled = true) =>
   useQuery<PremiumStatus>({
     queryKey: premiumKeys.status,
     queryFn: () => premiumApi.status(),
+    enabled,
     staleTime: 60_000,
   });
 

@@ -16,7 +16,7 @@ extensions.configure(com.facebook.react.ReactSettingsExtension) { ex ->
   ex.autolinkLibrariesFromCommand()
 }
 
-rootProject.name = 'Chathouse'
+rootProject.name = 'ChatHouse'
 
 include ':app'
 

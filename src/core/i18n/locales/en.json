@@ -4,7 +4,7 @@
     "shareHint": "Share your personal link",
     "remaining": "{{count}} invite left",
     "remaining_other": "{{count}} invites left",
-    "shareMessage": "Join me on Chathouse 👋 {{url}}",
+    "shareMessage": "Join me on ChatHouse 👋 {{url}}",
     "noneLeftTitle": "No invites left",
     "noneLeftBody": "You've used all your invites for now."
   },
@@ -19,13 +19,29 @@
     "error": "Something went wrong",
     "actionFailed": "Action failed. Please try again.",
     "permissionDenied": "Permission required",
-    "appName": "Chathouse",
+    "appName": "ChatHouse",
     "ok": "OK",
     "select_country": "Select Country",
     "search": "Search",
     "save": "Save",
     "loadingMore": "Loading more",
     "delete": "Delete"
+  },
+  "permissions": {
+    "microphoneTitle": "Microphone permission",
+    "microphoneBody": "ChatHouse needs access to your microphone so you can speak in rooms.",
+    "bluetoothAudioTitle": "Nearby audio devices",
+    "bluetoothAudioBody": "ChatHouse needs this permission to use your Bluetooth headsets and headphones.",
+    "allow": "Allow",
+    "deny": "Deny"
+  },
+  "navigation": {
+    "tabs": {
+      "rooms": "Rooms",
+      "map": "Map",
+      "messages": "Messages",
+      "settings": "Settings"
+    }
   },
   "errorBoundary": {
     "title": "Something went wrong",
@@ -53,17 +69,56 @@
     "micA11y": "Record voice message",
     "typing": "typing…",
     "cannotMessageTitle": "Can't send message",
-    "cannotMessageBody": "You both need to follow each other to exchange messages.",
+    "cannotMessageBody": "This person cannot receive a direct message from you right now.",
     "loadErrorTitle": "Couldn't load messages",
     "loadErrorHint": "Check your connection and try again.",
     "emptyTitle": "No messages yet",
     "emptyHint": "Send a message to start the conversation.",
     "comingSoon": "This feature is coming soon.",
     "callLabel": "Voice call",
+    "privateCallTitle": "Private call with {{name}}",
+    "privateCallFallbackTitle": "Private voice call",
     "moreLabel": "Conversation options",
     "attachLabel": "Attachment",
     "deleteTitle": "Delete message",
     "deleteBody": "This message will be permanently deleted."
+  },
+  "roomChat": {
+    "title": "Room chat",
+    "closeA11y": "Close room chat",
+    "messagesA11y": "Room chat messages",
+    "messageA11y": "Message from {{name}}",
+    "replyMessageHint": "Long press to reply",
+    "deleteMessageA11y": "Delete message",
+    "deleteTitle": "Delete message",
+    "deleteBody": "Delete this message from the room chat?",
+    "deleteFailed": "Couldn't delete the message.",
+    "sendFailed": "Couldn't send the message.",
+    "replyingTo": "Replying to @{{name}}",
+    "cancelReplyA11y": "Cancel reply",
+    "replyPlaceholder": "Reply…",
+    "inputPlaceholder": "Write a message…",
+    "inputA11y": "Chat message",
+    "sendA11y": "Send message",
+    "chatDisabled": "Chat is disabled for this room.",
+    "moderatorsOnly": "Chat is limited to moderators."
+  },
+  "moderation": {
+    "reportMessageTitle": "Report this message",
+    "reportMessageBody": "Choose the reason. The moderation team will receive a copy of the message.",
+    "reportMessageA11y": "Report this message",
+    "longPressToReport": "Long press to report this message",
+    "closeReport": "Close report form",
+    "submitting": "Sending report…",
+    "reportSentTitle": "Report sent",
+    "reportSentBody": "The moderation team will review this message.",
+    "reportAlreadySent": "You already reported this message.",
+    "reportFailed": "Couldn't send the report.",
+    "reasons": {
+      "spam": "Spam",
+      "harassment": "Harassment or abuse",
+      "other": "Other"
+    }
   },
   "voice": {
     "preview": "🎤 Voice message",
@@ -136,13 +191,15 @@
     "searchPeople": "Search people",
     "searchHint": "Search for someone to start a conversation.",
     "searchGroupHint": "Pick from people you follow: one for a direct message, or several to start a group.",
-    "followGateHint": "You can message people you follow.",
+    "followGateHint": "Direct messages depend on each person's privacy settings.",
     "followGateAddHint": "You can add people you follow.",
     "noFollowing": "No one to message yet",
     "noFollowingHint": "Follow people to start messaging them.",
     "noFollowingAddHint": "Follow people to add them to a group.",
     "filterPeople": "Filter people you follow",
     "message": "Message",
+    "messageUnavailable": "Direct message unavailable",
+    "messageUnavailableHint": "This person cannot receive a direct message from you right now.",
     "createGroupN": "Create group · {{count}}",
     "groupError": "Couldn't create the group. Try again.",
     "groups": "Groups",
@@ -183,6 +240,7 @@
     "timeHours": "{{count}}h",
     "timeDays": "{{count}}d",
     "openChatA11y": "Open chat with {{name}}",
+    "onlineChatHint": "This person is currently available to chat.",
     "openGroupA11y": "Open group {{name}}"
   },
   "settings": {
@@ -258,6 +316,7 @@
   "room": {
     "stage": "STAGE",
     "handRaised": "Hand raised",
+    "inviteUserToSpeakA11y": "Invite {{name}} to speak",
     "followedBy": "People you follow",
     "others": "Others in room",
     "rec": "REC",
@@ -272,12 +331,18 @@
     "leaveQuietly": "Leave quietly",
     "invite": "Invite",
     "waveA11y": "Send a wave",
+    "joining": "Joining room",
+    "joinConnectionTitle": "Unable to connect",
+    "joinConnectionBody": "Check your connection and try again.",
     "unavailable": "Room unavailable",
     "mayHaveEnded": "This room may have ended.",
     "audioBanner": "Audio coming soon — chat, hand-raise & reactions are live.",
     "audioConnecting": "🔊 Connecting audio…",
+    "audioReconnecting": "🔄 Reconnecting audio…",
     "audioUnsupported": "⚠️ Audio requires an EAS dev-client (@livekit/react-native is unavailable in Expo Go).",
     "audioError": "Audio error",
+    "audioErrorBody": "Live audio is unavailable. Check your connection and try again.",
+    "retryAudio": "Retry audio",
     "upcoming": "Upcoming",
     "participants": "{{speakers}} speakers · {{listeners}} listeners",
     "closeRoom": "End Room",
@@ -286,9 +351,15 @@
     "openChatA11y": "Open chat",
     "reportA11y": "Report room",
     "shareA11y": "Share room link",
+    "shareMessage": "Join me on ChatHouse in “{{title}}” — {{url}}",
+    "shareDmMessage": "Join me on ChatHouse 👉 {{url}}",
+    "shareRoomAction": "Share this room",
+    "shareSentTitle": "Link sent",
+    "shareSentBody": "@{{handle}} received the room link.",
     "profileA11y": "Profile of {{name}}",
     "openSettings": "Open settings",
     "editTitleA11y": "Edit title: {{title}}",
+    "participantActionsA11y": "Actions for {{name}}",
     "visibilityOpen": "Open",
     "visibilitySocial": "Social",
     "visibilityClosed": "Closed",
@@ -300,6 +371,42 @@
     "hideSelfA11y": "Go invisible",
     "visible": "Visible",
     "invisible": "Invisible",
+    "profileActions": {
+      "followedTitle": "Following",
+      "followedBody": "You now follow @{{handle}}.",
+      "requestedTitle": "Request sent",
+      "requestedBody": "@{{handle}} can now approve your follow request.",
+      "pingSentTitle": "Ping sent",
+      "pingSentBody": "@{{handle}} received a notification.",
+      "blockBody": "You will no longer follow each other, exchange messages, or share a room.",
+      "reportSentTitle": "Report sent",
+      "message": "Send a message",
+      "ping": "Ping to join me",
+      "wave": "Send a wave 🌊",
+      "tip": "Send a tip 💸",
+      "openProfile": "View full profile",
+      "report": "Report profile",
+      "block": "Block profile",
+      "self": "This is you 👋"
+    },
+    "hostActions": {
+      "inviteSentTitle": "Invitation sent",
+      "inviteSentBody": "@{{handle}} was invited to speak.",
+      "transferTitle": "Transfer the room",
+      "transferBody": "Make @{{handle}} the host? You will become a speaker.",
+      "transferConfirm": "Transfer",
+      "kickTitle": "Remove this user",
+      "kickBody": "@{{handle}} will be removed from the room and banned for 30 minutes.",
+      "kickConfirm": "Remove",
+      "unmuteParticipant": "Unmute microphone",
+      "muteParticipant": "Mute microphone",
+      "promoteSpeaker": "Invite to speak",
+      "nominateSpeaker": "Nominate to speak (request)",
+      "moveToAudience": "Move to audience",
+      "makeModerator": "Make moderator",
+      "transferHost": "Transfer host role",
+      "kickBan": "Remove (30-minute ban)"
+    },
     "speakInvite": {
       "title": "Invitation to speak",
       "body": "A host invites you on stage.",
@@ -321,6 +428,8 @@
       "roleSpeaker": "You can speak — tap Mute to toggle your microphone.",
       "confirmEndTitle": "End Room",
       "confirmEndBody": "\"{{title}}\" will be closed for all participants. Continue?",
+      "endFailedTitle": "Couldn't end the room",
+      "endFailedBody": "The room is still active. Check your connection and try again.",
       "reportTitle": "Report this room",
       "reportReason": "What is the reason?"
     }
@@ -409,9 +518,17 @@
       "errors": {
         "required": "Phone number is required.",
         "invalid": "Invalid number. Expected format: +14155551234.",
-        "ageVerification": "You must confirm you are at least 16 years old to continue."
+        "ageVerification": "You must confirm you are at least 16 years old to continue.",
+        "termsAcceptance": "You must accept the current Terms of Use to continue.",
+        "privacyAcknowledgement": "Please acknowledge that you have read the Privacy Policy."
       },
       "ageVerification": "I confirm I am at least 16 years old",
+      "termsAcceptance": "I accept the current Terms of Use",
+      "termsAcceptancePrefix": "I accept the ",
+      "privacyAcknowledgement": "I acknowledge that I have read the Privacy Policy",
+      "privacyAcknowledgementPrefix": "I acknowledge that I have read the ",
+      "privacyNotConsent": ". This is not consent to optional processing.",
+      "legalVersion": " (version {{version}})",
       "terms": "By entering your number, you’re agreeing to our ",
       "termsLinkA11y": "Terms of Service",
       "termsAnd": " and ",
@@ -439,7 +556,7 @@
     },
     "name": {
       "title": "What's your name?",
-      "subtitle": "This is how people will know you on Chathouse.",
+      "subtitle": "This is how people will know you on ChatHouse.",
       "firstNameLabel": "First name",
       "firstNamePlaceholder": "Jane",
       "lastNameLabel": "Last name",
@@ -464,7 +581,7 @@
       "title": "You're on the waitlist",
       "subtitle": "We'll let you know the moment a spot opens up. In the meantime, invite a friend to move up the queue.",
       "invite": "Invite a friend",
-      "shareMessage": "I'm waiting for my Chathouse access — join the waitlist to help me move up: https://app.chathouse.com"
+      "shareMessage": "I'm waiting for my ChatHouse access — join the waitlist to help me move up: https://app.chathouse.com"
     }
   },
   "explore": {
@@ -586,6 +703,7 @@
     "unavailable": "Profile unavailable",
     "userMayNotExist": "This user may not exist.",
     "shareProfileA11y": "Share profile",
+    "shareMessage": "{{handle}} on ChatHouse — {{url}}",
     "copyUsernameA11y": "Copy username @{{handle}}",
     "currentlyInRoom": "Live in a room — tap to join",
     "currentlyInRoomA11y": "Join the current room",
@@ -597,6 +715,7 @@
     "whoViewedError": "Couldn't load profile views.",
     "whoViewedEmpty": "No one yet.",
     "followingState": "Following",
+    "requested": "Requested",
     "loadingMore": "Loading more"
   },
   "createRoom": {
@@ -615,6 +734,7 @@
     "coHostsLabel": "Co-hosts",
     "coHostsHint": "Invite up to 5 people to co-host.",
     "coHostsSearchPlaceholder": "Search by username",
+    "removeCoHostA11y": "Remove {{name}} as co-host",
     "houseLabel": "House",
     "houseHint": "Optionally attach this room to one of your houses.",
     "houseNone": "None",
@@ -625,7 +745,7 @@
     "visibility": {
       "public": {
         "label": "Open",
-        "description": "Anyone in Chathouse can join"
+        "description": "Anyone in ChatHouse can join"
       },
       "social": {
         "label": "Social",
@@ -652,6 +772,25 @@
     "markAllRead": "Mark all as read",
     "unread": "{{count}} unread",
     "delete": "Delete",
+    "itemReadA11y": "Read notification: {{message}}",
+    "itemUnreadA11y": "Unread notification: {{message}}",
+    "followRequests": {
+      "open": "Follow requests",
+      "openA11y": "Open follow requests",
+      "openHint": "Review people who asked to follow your private account",
+      "title": "Follow requests",
+      "loading": "Loading follow requests",
+      "emptyTitle": "No pending requests",
+      "emptyBody": "New requests to follow your private account will appear here.",
+      "errorTitle": "Couldn't load follow requests",
+      "errorBody": "Check your connection and try again.",
+      "actionError": "This request couldn't be updated. Please try again.",
+      "accept": "Accept",
+      "reject": "Reject",
+      "acceptA11y": "Accept follow request from {{name}}",
+      "rejectA11y": "Reject follow request from {{name}}",
+      "viewProfile": "View profile of {{name}}"
+    },
     "tabs": {
       "all": "All",
       "rooms": "Rooms",
@@ -668,7 +807,7 @@
       "start": "Get started",
       "slides": {
         "welcome": {
-          "title": "Welcome to Chathouse",
+          "title": "Welcome to ChatHouse",
           "body": "A cozy place for live audio conversations with people you care about."
         },
         "rooms": {
@@ -741,7 +880,9 @@
       },
       "deniedTitle": "Notifications are off",
       "deniedBody": "No problem — you can turn them on anytime from your profile settings.",
-      "blockedBody": "Notifications are blocked for Chathouse. Enable them in your phone settings to get notified.",
+      "blockedBody": "Notifications are blocked for ChatHouse. Enable them in your phone settings to get notified.",
+      "errorTitle": "Notifications weren't enabled",
+      "errorBody": "ChatHouse could not finish enabling notifications. You can continue; ChatHouse will try again automatically the next time you open the app.",
       "openSettings": "Open settings"
     }
   },
@@ -852,6 +993,10 @@
       "roomLive": "Live",
       "roomEnded": "Ended",
       "reportedBy": "Reported by",
+      "messageEvidence": "Reported message",
+      "voiceEvidence": "Voice message",
+      "voiceEvidenceUnavailable": "Voice evidence unavailable",
+      "deletedEvidence": "Message deleted after report",
       "errorTitle": "Couldn't load reports",
       "errorBody": "Check your connection and try again.",
       "emptyTitle": "Nothing here",
@@ -986,7 +1131,7 @@
     "optionsA11y": "House options",
     "manageMemberA11y": "Manage role for {{name}}",
     "share": "Share the house",
-    "shareMessage": "Check out this house on Chathouse — {{url}}",
+    "shareMessage": "Check out this house on ChatHouse — {{url}}",
     "inviteMembers": "Invite members",
     "inviteOnly": "Invite only",
     "acceptInvite": "Accept invitation",
@@ -1109,6 +1254,15 @@
     "membersCount": "{{countStr}} members",
     "openHouseA11y": "Open house {{name}}",
     "createA11y": "Create a new house",
+    "searchPlaceholder": "Search houses",
+    "searchA11y": "Search houses",
+    "clearSearchA11y": "Clear house search",
+    "clearSearch": "Clear search",
+    "searching": "Searching houses",
+    "searchErrorTitle": "Couldn't search houses",
+    "searchErrorBody": "Check your connection and try again.",
+    "searchNoResultsTitle": "No houses found",
+    "searchNoResultsBody": "Nothing matches “{{query}}”. Try another name or category.",
     "emptyMineTitle": "No houses yet",
     "emptyMineBody": "Join a house or create your own community.",
     "emptyDiscoverTitle": "Nothing to discover",
@@ -1275,67 +1429,65 @@
     "export": {
       "title": "Export my data",
       "description1": "Under Article 20 of the GDPR (right to data portability), you can download a full copy of all your personal data in a structured JSON file.",
-      "description2": "The archive contains: your profile, your hosted rooms, your participations, your follow graph, your direct messages, your room messages, your RSVPs, your device list (platform and dates, without the secret token) and your notification preferences.",
-      "note": "Note: the audit log (moderation actions) and reports issued against your account are not included, in accordance with Article 23 of the GDPR (legitimate interest of moderation).",
+      "description2": "The archive includes your profile, rooms and participation, follow graph, direct/group/room messages, houses, notifications, reactions, reports you filed, Stripe payment history, private media and account-related history.",
+      "note": "Passwords, OTPs, session/push tokens, storage keys and confidential reports filed by other people are intentionally excluded.",
       "buttonPrepare": "Preparing…",
       "buttonExport": "Generate and share my export",
-      "success": "✓ Export generated ({{size}} KB) — share it via the share menu.",
-      "warning": "The clipboard is readable by other apps. Only copy the archive if necessary, then clear the clipboard.",
-      "buttonCopy": "Copy to clipboard",
-      "buttonClear": "Clear clipboard",
+      "success": "✓ JSON export shared ({{size}} KB). The temporary local file was removed.",
       "errorExportTitle": "Error",
-      "errorExportBody": "Export failed",
-      "errorCopyBody": "Copy failed"
+      "errorExportBody": "Export failed"
     },
     "delete": {
       "title": "Delete my account",
-      "description": "Deleting your account is permanent and irreversible. We will immediately delete your profile, messages, houses, and rooms.",
-      "grace": "A 30-day grace period is enforced on our backup servers before your data is completely purged.",
+      "description": "The request immediately disables your account, revokes sessions and hides your profile. Permanent purge occurs after 30 days.",
+      "grace": "During those 30 days, signing in opens a recovery-only session. Your account is restored only after you explicitly confirm. Without restoration, account data and private media are purged.",
       "confirmInputLabel": "To confirm, type: ",
-      "buttonDelete": "Delete my account permanently",
+      "buttonDelete": "Request account deletion",
       "buttonCancel": "Cancel",
-      "alertTitle": "Account deleted",
-      "alertBody": "Your account has been deleted. We're sorry to see you go.",
+      "alertTitle": "Deletion scheduled",
+      "alertBody": "Your account is disabled and will be purged after the 30-day period.",
       "errorTitle": "Error",
       "errorBody": "Deletion failed",
       "warningTitle": "⚠️ Near-irreversible action",
       "beforeDelete": "Before deleting",
       "stepExport": "• You can export your data from Settings → Privacy → Export my data.",
       "stepRooms": "• Rooms you hosted will be closed if they are active.",
-      "stepMessages": "• Direct messages you sent to other users will remain visible to the recipient (cannot be retracted after sending).",
+      "stepMessages": "• Your messages and private media will be removed during permanent purge.",
       "a11yInput": "Deletion confirmation input",
       "confirmPhrase": "DELETE"
     },
     "policy": {
       "title": "Privacy Policy",
-      "lastUpdated": "Last updated: April 25, 2026",
+      "lastUpdated": "Document version: {{version}}",
+      "fullNotice": "This offline summary does not replace the current published Privacy Policy.",
+      "fullLink": "Read the complete policy",
       "s1": {
         "title": "1. What data we collect",
-        "p1": "• Account data: phone number, username, profile picture, bio, social links (optional).",
-        "p2": "• Content: hosted rooms, participations, direct messages, room messages, reactions, hand raises.",
+        "p1": "• Account data: phone, email when provided, username, name, 16+ confirmation, photo, biography, interests and optional social links.",
+        "p2": "• Content and activity: rooms and participation, direct/group/room messages, voice messages, houses, follows, reactions and reports.",
         "p3": "• Metadata: creation date, last login, followers list, interests, platform role.",
-        "p4": "• Geolocation (optional, after consent): used only for the map feature. Stored at the lowest compatible precision.",
-        "p5": "• Technical data: IP address, user agent, device tokens for push notifications."
+        "p4": "• Precise or approximate location, optional and off by default: users who enable visibility appear on the real-time map. Turning visibility off clears coordinates.",
+        "p5": "• Payments and technical data: Stripe history, IP address, security logs and device identifiers needed for push notifications."
       },
       "s2": {
         "title": "2. Why we collect them",
         "p1": "• Provide the service: create an account, join rooms, exchange messages.",
         "p2": "• Moderation: reports, suspensions and bans (legitimate interest — community safety).",
         "p3": "• Notifications: inform about invitations, starting rooms, received messages (you can disable them in settings).",
-        "p4": "• Anonymous statistics (optional): crash reports, telemetry. Disabled by default."
+        "p4": "• Optional Sentry mobile diagnostics: off by default, no default PII, and enabled only after revocable consent."
       },
       "s3": {
         "title": "3. Who we share them with",
         "p1": "• No sale. No third-party advertising.",
-        "p2": "• Technical subcontractors only, under GDPR compliant contract: hosting (server), sending authentication SMS, push notifications.",
+        "p2": "• Necessary providers: hosting and private object storage, Twilio (SMS), Firebase/APNs (push), LiveKit (live audio), Stripe (payments), Sentry (consented diagnostics), Resend/email delivery, and the map/tile provider enabled on your platform.",
         "p3": "• In case of legal obligation, judicial requisition or protection of a person in danger."
       },
       "s4": {
         "title": "4. How long",
         "p1": "• Profile and content: as long as your account is active.",
         "p2": "• Account deletion: 30 days grace period, then definitive purge.",
-        "p3": "• Technical logs: 90 days.",
-        "p4": "• Moderation log (reports, suspensions): kept for 1 year for compliance."
+        "p3": "• Database audit log: 90 days by default; expired authentication artefacts are removed on short schedules.",
+        "p4": "• Narrow financial, security or legal records may be isolated and retained only for periods required by law."
       },
       "s5": {
         "title": "5. Your rights (GDPR)",
@@ -1343,7 +1495,7 @@
         "p2": "• Rectification: modify your profile at any time.",
         "p3": "• Erasure: delete your account (Settings → Privacy → Delete my account).",
         "p4": "• Opposition: disable notifications, location sharing, or crash reporting from settings.",
-        "p5": "• Complaint: you can seize the competent supervisory authority (CNIL in France)."
+        "p5": "• Complaint: you can contact the competent data-protection supervisory authority for your situation."
       },
       "s6": {
         "title": "6. Security",
@@ -1353,25 +1505,28 @@
       },
       "s7": {
         "title": "7. Contact",
-        "p1": "For any questions regarding your data: "
+        "p1": "Use the verified privacy contact shown in the complete published policy.",
+        "link": "Open contact details"
       }
     },
     "terms": {
       "title": "Terms of Service",
-      "lastUpdated": "Last updated: April 25, 2026",
+      "lastUpdated": "Document version: {{version}}",
+      "fullNotice": "This offline summary does not replace the current published Terms of Use.",
+      "fullLink": "Read the complete terms",
       "s1": {
         "title": "1. Acceptance",
-        "p1": "By creating an account or using the Chathouse app, you agree to these terms. If you do not agree, do not use the service."
+        "p1": "By creating an account or using the ChatHouse app, you agree to these terms. If you do not agree, do not use the service."
       },
       "s2": {
         "title": "2. Eligibility",
-        "p1": "You must be at least 16 years old to use Chathouse. Under this age, explicit consent from a legal guardian is required.",
+        "p1": "You must be at least 16 years old to create or use a ChatHouse account. Registration by anyone under 16 is not permitted.",
         "p2": "• Do not share illegal, explicit, or copyright-infringing content.",
-        "p3": "• Do not record rooms without the consent of all speakers."
+        "p3": "• Built-in room recording is disabled. Do not make an external recording without the explicit consent of everyone concerned."
       },
       "s3": {
         "title": "3. Prohibited Conduct",
-        "p1": "• Harassment, discrimination, hate speech, non-consensual explicit content.",
+        "p1": "• Harassment, discrimination, hate speech, non-consensual explicit content, child sexual exploitation or abuse, and child sexual abuse material.",
         "p2": "• Identity theft, fake accounts, unauthorized automation (bots).",
         "p3": "• Broadcast of copyrighted works without rights, illegal content.",
         "p4": "• Spam, phishing, social engineering, vulnerability exploitation.",
@@ -1379,7 +1534,7 @@
       },
       "s4": {
         "title": "4. Moderation",
-        "p1": "We reserve the right to suspend or delete any violating account, without notice. All moderation actions are logged and auditable.",
+        "p1": "We may restrict content or features, end a room, or suspend or delete an account that violates the rules. Notice or an appeal path is provided where appropriate and legally required.",
         "p2": "You can report a user or a room directly in the interface."
       },
       "s5": {
@@ -1393,22 +1548,34 @@
       },
       "s7": {
         "title": "7. Modifications",
-        "p1": "These terms may evolve. Material changes will be notified in-app at least 30 days before taking effect."
+        "p1": "These terms may evolve. Material changes will use a new version and be communicated before taking effect as required by law; renewed acceptance will be requested where required."
       },
       "s8": {
         "title": "8. Governing Law",
-        "p1": "These terms are governed by French law. Any dispute falls under the jurisdiction of French courts."
+        "p1": "These terms are governed by the law and dispute provisions stated in the current published Terms of Use. Mandatory consumer protections and jurisdiction rights in your country remain unaffected."
       }
     },
     "restore": {
       "title": "Account scheduled for deletion",
       "body": "Your account is being deleted. Would you like to restore it and keep your data?",
-      "dismiss": "Not now",
+      "dismiss": "Sign out",
       "confirm": "Restore",
       "successTitle": "Account restored",
       "successBody": "Welcome back — your account is active again.",
       "errorTitle": "Couldn't restore",
       "errorBody": "Something went wrong. Please try again."
+    },
+    "legalGate": {
+      "title": "Review required",
+      "body": "Before publishing or speaking, review the current legal documents (version {{version}}).",
+      "acceptTerms": "I accept the current Terms of Use",
+      "ackPrivacy": "I acknowledge that I have read the Privacy Policy",
+      "notConsent": "This acknowledgement is not consent to optional processing.",
+      "continue": "Accept and continue",
+      "errorTitle": "Acceptance not saved",
+      "errorBody": "We could not save your acknowledgement. Update the app or try again.",
+      "linkErrorTitle": "Unable to open document",
+      "linkErrorBody": "Check your connection and try again."
     }
   },
   "errors": {
@@ -1421,6 +1588,8 @@
       "AUTH_006": "This username is already taken.",
       "AUTH_007": "Your account is suspended.",
       "AUTH_008": "You don't have the required privileges.",
+      "LEGAL_001": "Review and accept the current legal documents to continue.",
+      "LEGAL_002": "The legal documents changed. Update the app and review them again.",
       "ADMIN_001": "Cannot demote the only super-admin.",
       "ADMIN_002": "Cannot modify a higher-ranked admin.",
       "ADMIN_003": "Godmode is disabled.",
@@ -1435,6 +1604,8 @@
       "ROOM_008": "You are banned from this room.",
       "ROOM_009": "You can't mute the host.",
       "ROOM_010": "This room is locked.",
+      "ROOM_011": "Room recording is currently disabled.",
+      "ROOM_012": "Leave your current room before joining another.",
       "PREMIUM_001": "Premium required.",
       "USER_001": "User not found.",
       "USER_002": "This username is already taken.",
@@ -1445,13 +1616,15 @@
       "CHAT_001": "Conversation not found.",
       "CHAT_002": "Message not found.",
       "CHAT_003": "That's not your message.",
-      "CHAT_004": "Direct messages are limited to people who follow each other.",
+      "CHAT_004": "This person cannot receive a direct message from you right now.",
       "GROUP_001": "Group conversation not found.",
       "GROUP_002": "You're not a member of this group.",
       "GROUP_003": "A group needs at least two other members.",
       "GROUP_004": "Only the group owner can do that.",
       "GROUP_005": "Use \"Leave group\" to remove yourself.",
       "GROUP_006": "You can't share a group with this person.",
+      "REPORT_001": "You can't report your own content.",
+      "REPORT_002": "This message is no longer available to report.",
       "CLUB_001": "House not found.",
       "CLUB_002": "You're not an admin of this house.",
       "CLUB_003": "Private house — you can't join it directly.",
@@ -1462,6 +1635,14 @@
       "CLUB_008": "This invitation link has expired.",
       "CLUB_009": "This invitation link is invalid.",
       "ACCOUNT_001": "Account deletion is already scheduled.",
+      "ACCOUNT_002": "Restore your account before continuing.",
+      "AGE_001": "You must confirm that you are at least 16 years old.",
+      "MAPS_001": "Enable map visibility before sharing your location.",
+      "UPLOAD_001": "This media file is too large.",
+      "PUSH_001": "This device notification token belongs to another session.",
+      "IDEMPOTENCY_001": "This request key was already used for a different operation.",
+      "IDEMPOTENCY_002": "The request key is invalid.",
+      "VALIDATION_001": "Some submitted information is invalid.",
       "RATE_LIMIT_001": "Too many attempts. Please try again in a moment.",
       "NOT_FOUND_001": "Resource not found.",
       "SERVER_001": "Something went wrong on our end."
@@ -1491,13 +1672,15 @@
     "maps": {
       "attribution": "© OpenStreetMap contributors © CARTO",
       "consentTitle": "Location Consent",
-      "consentBody": "ChatHouse uses your location to show you friends nearby on the map. Your location data will be stored securely on our servers and automatically deleted after 30 days of inactivity. You can turn this off anytime using Ghost Mode.",
+      "consentBody": "ChatHouse uses your location to show users who choose to be visible on the map. If you enable visibility, those users can also see your live position. Turning sharing off clears your coordinates; inactive locations are also purged automatically.",
       "consentAccept": "I Understand",
       "consentDecline": "Not Now",
       "ghostSee": "SEE",
       "ghostUnsee": "UNSEE",
       "ghostVisibleA11y": "You are visible. Tap to hide.",
       "ghostHiddenA11y": "You are hidden. Tap to reveal.",
+      "ghostUpdateErrorTitle": "Visibility not changed",
+      "ghostUpdateErrorBody": "We could not confirm the change with the server. Check your connection and try again.",
       "searchPlaceholder": "Find a friend...",
       "searchA11y": "Find a friend",
       "recenterA11y": "Recenter map on my location",

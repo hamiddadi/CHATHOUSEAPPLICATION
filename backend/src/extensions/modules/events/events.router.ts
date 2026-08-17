@@ -3,14 +3,15 @@ import { z } from 'zod';
 import { requireAuth } from '../../../middlewares/auth.middleware';
 import { asyncHandler } from '../../../utils/asyncHandler';
 import { authedUserId } from '../../../utils/authedUserId';
+import { publicContentString } from '../../../utils/publicContentModeration';
 import { extEventsService } from './events.service';
 
 export const eventsRouter: Router = Router();
 
 eventsRouter.use(requireAuth);
 
-const cancelSchema = z.object({
-  reason: z.string().trim().min(1).max(280).optional(),
+export const cancelSchema = z.object({
+  reason: publicContentString(z.string().trim().min(1).max(280)).optional(),
 });
 
 eventsRouter.post(
@@ -24,9 +25,9 @@ eventsRouter.post(
   }),
 );
 
-const rescheduleSchema = z.object({
+export const rescheduleSchema = z.object({
   scheduledFor: z.string().datetime(),
-  title: z.string().trim().min(3).max(120).optional(),
+  title: publicContentString(z.string().trim().min(3).max(120)).optional(),
 });
 
 eventsRouter.patch(

@@ -79,7 +79,7 @@ export const ExtTopicExplorerScreen: React.FC<Props> = ({ onSelectTopic, initial
       </View>
 
       {tree.isLoading ? (
-        <ActivityIndicator style={styles.loader} />
+        <ActivityIndicator style={styles.loader} color={colors.primary} />
       ) : tree.isError ? (
         <View style={styles.errorWrap}>
           <Text style={styles.errorText}>
@@ -206,9 +206,12 @@ const styles = StyleSheet.create({
   search: {
     marginTop: 8,
     backgroundColor: colors.surfaceHigh,
+    borderWidth: 1,
+    borderColor: colors.outline,
     paddingHorizontal: 12,
     paddingVertical: 10,
     borderRadius: 12,
+    minHeight: 44,
     color: colors.text,
   },
   defaultPane: { flex: 1 },

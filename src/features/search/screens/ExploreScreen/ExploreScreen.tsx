@@ -130,7 +130,12 @@ export const ExploreScreen: React.FC = () => {
   return (
     <View className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
       <View className="flex-row items-center gap-md px-xxl py-lg">
-        <Pressable onPress={goBack} accessibilityRole="button" hitSlop={8}>
+        <Pressable
+          onPress={goBack}
+          accessibilityRole="button"
+          accessibilityLabel={t('common.back', 'Back')}
+          hitSlop={8}
+        >
           <MaterialIcons name="arrow-back" size={24} color={colors.text} />
         </Pressable>
         <Text className="text-xl font-display text-ink flex-1">{t('explore.title')}</Text>
@@ -261,8 +266,8 @@ const FilterChip: React.FC<{ label: string; active: boolean; onPress: () => void
       accessibilityLabel={t('explore.filterChipA11y', 'Filter {{label}}', { label })}
       className={
         active
-          ? 'px-md py-xs rounded-pill bg-primary'
-          : 'px-md py-xs rounded-pill bg-overlay-white-5 border border-overlay-white-10'
+          ? 'px-md py-xs min-h-[44px] items-center justify-center rounded-pill bg-primary'
+          : 'px-md py-xs min-h-[44px] items-center justify-center rounded-pill bg-overlay-white-5 border border-overlay-white-10'
       }
     >
       <Text

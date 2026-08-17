@@ -1,3 +1,6 @@
+import { drainBackgroundTasks } from '../src/utils/backgroundTasks';
+import { isIntegrationTestPath } from './integrationTestPath';
+
 // Runs in setupFilesAfterEnv (the test framework — and the `jest` global with
 // retryTimes — only exists here, not in setupFiles).
 //
@@ -9,4 +12,18 @@
 // its file runs on its own. Retry twice to absorb that noise; a genuine logic
 // failure still fails on every attempt and is reported. Unit suites are
 // deterministic, so retries never trigger for them.
-jest.retryTimes(2, { logErrorsBeforeRetry: true });
+const testPath = expect.getState().testPath;
+if (!testPath) {
+  throw new Error('Jest setup could not identify the current test file');
+}
+if (isIntegrationTestPath(testPath)) {
+  jest.retryTimes(2, { logErrorsBeforeRetry: true });
+}
+
+afterEach(async () => {
+  await drainBackgroundTasks();
+});
+
+afterAll(async () => {
+  await drainBackgroundTasks();
+});

@@ -70,6 +70,8 @@ module.exports = {
         glass: 'rgba(255, 255, 255, 0.05)',
         'glass-strong': 'rgba(255, 255, 255, 0.08)',
         overlay: 'rgba(7, 11, 40, 0.6)',
+        'modal-backdrop': 'rgba(0, 0, 0, 0.5)',
+        'modal-backdrop-strong': 'rgba(0, 0, 0, 0.58)',
 
         // ---- White alpha ladder ----
         'overlay-white-3': 'rgba(255, 255, 255, 0.03)',
@@ -79,6 +81,7 @@ module.exports = {
         'overlay-white-7': 'rgba(255, 255, 255, 0.07)',
         'overlay-white-10': 'rgba(255, 255, 255, 0.10)',
         'overlay-white-12': 'rgba(255, 255, 255, 0.12)',
+        'overlay-white-15': 'rgba(255, 255, 255, 0.15)',
         'overlay-white-20': 'rgba(255, 255, 255, 0.20)',
         'overlay-white-30': 'rgba(255, 255, 255, 0.30)',
         'overlay-white-70': 'rgba(255, 255, 255, 0.70)',
@@ -87,9 +90,9 @@ module.exports = {
         'overlay-blue-50': 'rgba(77, 163, 255, 0.50)',
 
         // ---- Hero gradient anchor tokens (used in style prop, mirrored here for className use) ----
-        'gradient-start': '#1a3091',
-        'gradient-mid': '#4d6dd1',
-        'gradient-end': '#b0c6ff',
+        'gradient-start': '#0c112e',
+        'gradient-mid': '#1a3091',
+        'gradient-end': '#274b9f',
       },
 
       spacing: {

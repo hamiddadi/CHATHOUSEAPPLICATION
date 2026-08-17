@@ -97,11 +97,11 @@ describe('ExploreScreen', () => {
   });
 
   it('header back button calls navigation.goBack', () => {
-    const { getAllByRole, navigation } = renderScreen(<ExploreScreen />, {
+    const { getByLabelText, navigation } = renderScreen(<ExploreScreen />, {
       route: { name: 'Explore', params: {} },
       seedQueryData: seedExplore(makeFeed()),
     });
-    fireEvent.press(getAllByRole('button')[0]);
+    fireEvent.press(getByLabelText('Back'));
     expect(navigation.goBack).toHaveBeenCalledTimes(1);
   });
 

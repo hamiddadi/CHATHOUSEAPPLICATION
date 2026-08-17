@@ -2,6 +2,7 @@ import { apiClient } from '../../../shared/services/api/apiClient';
 import { useAuthStore } from '../../auth/store/authStore';
 import type { Envelope } from '../../../shared/types/api';
 import type { Conversation, Message, UserSummary } from '../../../shared/types/domain';
+import type { ContentReportReason, ContentReportResult } from '../../../shared/types/moderation';
 
 /**
  * DM service — one "conversation" == one peer user. The frontend uses
@@ -9,17 +10,19 @@ import type { Conversation, Message, UserSummary } from '../../../shared/types/d
  * hooks' call-shape intact while collapsing the two concepts.
  *
  * Backend contract (see backend/src/modules/chat) :
- *  GET    /chat/conversations            → [{ peer, lastMessage, unreadCount }]
+ *  GET    /chat/conversations?limit&cursor
+ *                                            → { data: RawConversation[], nextCursor, hasMore }
  *  GET    /chat/unread-count             → { count }
- *  GET    /chat/:peerId?limit&before     → [RawMessage]
+ *  GET    /chat/:peerId?limit&before&paginated=true
+ *                                            → { data: RawMessage[], nextCursor, hasMore }
  *  POST   /chat/:peerId                  → RawMessage
  *  PATCH  /chat/:peerId/read             → { updated }
  *  PATCH  /chat/messages/:msgId/read     → RawMessage
  *  DELETE /chat/messages/:msgId          → { deleted }
  *
- * Business rule: DM is only allowed when the two users follow each
- * other. The backend returns 403 CHAT_004 otherwise; the send mutation
- * surfaces that error verbatim to the UI.
+ * Business rule: the recipient's privacy setting, follow graph and block state
+ * decide whether a DM is allowed. The backend returns CHAT_004 otherwise; the
+ * send mutation surfaces that error to the UI.
  */
 
 interface RawUser {
@@ -47,6 +50,22 @@ interface RawConversation {
   peer: RawUser;
   lastMessage: RawMessage;
   unreadCount: number;
+}
+
+interface RawPage<T> {
+  data: T[];
+  nextCursor: string | null;
+  hasMore: boolean;
+}
+
+export interface ConversationPage {
+  items: Conversation[];
+  nextCursor: string | null;
+}
+
+export interface MessagePage {
+  items: Message[];
+  nextCursor: string | null;
 }
 
 const toSummary = (u: RawUser): UserSummary => ({
@@ -83,10 +102,15 @@ const toConversation = (raw: RawConversation, viewerId: string): Conversation =>
 };
 
 export const messageService = {
-  async conversations(): Promise<Conversation[]> {
-    const res = await apiClient.get<Envelope<RawConversation[]>>('/chat/conversations');
+  async conversations(cursor?: string, limit = 50): Promise<ConversationPage> {
+    const res = await apiClient.get<Envelope<RawPage<RawConversation>>>('/chat/conversations', {
+      params: { limit, ...(cursor ? { cursor } : {}) },
+    });
     const me = currentUserId();
-    return res.data.data.map(c => toConversation(c, me));
+    return {
+      items: res.data.data.data.map(c => toConversation(c, me)),
+      nextCursor: res.data.data.nextCursor,
+    };
   },
 
   async conversation(
@@ -116,41 +140,52 @@ export const messageService = {
   },
 
   /**
-   * One page of the thread, newest page first. `before` is an ISO createdAt
-   * cursor — the backend returns messages strictly older than it (see
-   * chat.schema listMessagesSchema), each page sorted ascending.
+   * One page of the thread, newest page first. `before` is the opaque
+   * `nextCursor` from the previous envelope; each returned page is sorted
+   * ascending for display.
    */
   async messages(
     peerId: string,
     opts: { before?: string; limit?: number } = {},
-  ): Promise<Message[]> {
-    const params: Record<string, string | number> = {};
+  ): Promise<MessagePage> {
+    const params: Record<string, string | number | boolean> = { paginated: true };
     if (opts.before) params.before = opts.before;
     if (opts.limit) params.limit = opts.limit;
-    const res = await apiClient.get<Envelope<RawMessage[]>>(`/chat/${peerId}`, { params });
+    const res = await apiClient.get<Envelope<RawPage<RawMessage>>>(`/chat/${peerId}`, { params });
     const me = currentUserId();
-    return res.data.data.map(m => toMessage(m, me, peerId));
+    return {
+      items: res.data.data.data.map(m => toMessage(m, me, peerId)),
+      nextCursor: res.data.data.nextCursor,
+    };
   },
 
-  async send(peerId: string, text: string): Promise<Message> {
+  async send(peerId: string, text: string, idempotencyKey: string): Promise<Message> {
     const trimmed = text.trim();
     if (trimmed.length === 0) throw new Error('Message cannot be empty');
-    const res = await apiClient.post<Envelope<RawMessage>>(`/chat/${peerId}`, {
-      content: trimmed,
-    });
+    const res = await apiClient.post<Envelope<RawMessage>>(
+      `/chat/${peerId}`,
+      { content: trimmed },
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    );
     return toMessage(res.data.data, currentUserId(), peerId);
   },
 
   /**
    * Send a voice note. The clip must already be uploaded (see voiceService);
-   * we post the stored URL + clip length. DM is still gated on mutual follow
+   * we post the stored URL + clip length. DM privacy is still enforced
    * server-side (403 CHAT_004), surfaced to the caller verbatim.
    */
-  async sendVoice(peerId: string, audioUrl: string, durationMs: number): Promise<Message> {
-    const res = await apiClient.post<Envelope<RawMessage>>(`/chat/${peerId}/voice`, {
-      audioUrl,
-      durationMs,
-    });
+  async sendVoice(
+    peerId: string,
+    audioUrl: string,
+    durationMs: number,
+    idempotencyKey: string,
+  ): Promise<Message> {
+    const res = await apiClient.post<Envelope<RawMessage>>(
+      `/chat/${peerId}/voice`,
+      { audioUrl, durationMs },
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    );
     return toMessage(res.data.data, currentUserId(), peerId);
   },
 
@@ -166,6 +201,14 @@ export const messageService = {
 
   async remove(messageId: string): Promise<{ deleted: true }> {
     const res = await apiClient.delete<Envelope<{ deleted: true }>>(`/chat/messages/${messageId}`);
+    return res.data.data;
+  },
+
+  async report(messageId: string, reason: ContentReportReason): Promise<ContentReportResult> {
+    const res = await apiClient.post<Envelope<ContentReportResult>>(
+      `/chat/messages/${messageId}/report`,
+      { reason },
+    );
     return res.data.data;
   },
 };

@@ -9,7 +9,7 @@ cd "$ROOT"
 echo "▶ 1/4 — Starting Docker services (Postgres + Redis)"
 docker compose -f backend/docker-compose.yml up -d postgres redis
 echo "  waiting for healthy state..."
-for i in $(seq 1 30); do
+for _ in {1..30}; do
   pg=$(docker inspect -f '{{.State.Health.Status}}' chathouse-postgres 2>/dev/null || echo "n/a")
   rd=$(docker inspect -f '{{.State.Health.Status}}' chathouse-redis 2>/dev/null || echo "n/a")
   if [ "$pg" = "healthy" ] && [ "$rd" = "healthy" ]; then break; fi

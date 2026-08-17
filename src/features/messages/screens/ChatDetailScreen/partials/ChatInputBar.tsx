@@ -3,7 +3,7 @@ import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import MaterialIcons from '@react-native-vector-icons/material-icons';
 import { useTranslation } from 'react-i18next';
 import { GradientView } from '../../../../../shared/components/GradientView';
-import { colors, spacing } from '../../../../../shared/constants/theme';
+import { colors, spacing, withAlpha } from '../../../../../shared/constants/theme';
 
 const INPUT_ICON_SIZE = 22;
 const SEND_BTN_SIZE = 44;
@@ -11,9 +11,9 @@ const SEND_BTN_SIZE = 44;
 // discrete counter only appears as the user nears the ceiling.
 const MAX_MESSAGE_LEN = 2000;
 const COUNTER_THRESHOLD = 1900;
+const PLACEHOLDER_COLOR = withAlpha(colors.textMuted, 0.72);
 
-const GLASS_BG = 'rgba(255,255,255,0.05)';
-const SEND_GRADIENT = ['#b0c6ff', '#558dff'] as const;
+const SEND_GRADIENT = [colors.primary, colors.primaryContainer] as const;
 
 // Lightweight emoji palette — a no-native-module quick-pick that beats the old
 // hardcoded single smiley. Tapping appends to the draft and keeps the palette
@@ -46,23 +46,12 @@ interface ChatInputBarProps {
   /** Bottom safe-area inset; applied only when the keyboard is hidden. */
   bottomInset: number;
   keyboardVisible: boolean;
-  onAttach: () => void;
   onMic: () => void;
   onInputFocus: () => void;
 }
 
 const ChatInputBar: React.FC<ChatInputBarProps> = memo(
-  ({
-    value,
-    onChangeText,
-    onSend,
-    canSend,
-    bottomInset,
-    keyboardVisible,
-    onAttach,
-    onMic,
-    onInputFocus,
-  }) => {
+  ({ value, onChangeText, onSend, canSend, bottomInset, keyboardVisible, onMic, onInputFocus }) => {
     const { t } = useTranslation();
     const [showEmoji, setShowEmoji] = useState(false);
 
@@ -106,7 +95,8 @@ const ChatInputBar: React.FC<ChatInputBarProps> = memo(
             <TextInput
               style={styles.input}
               placeholder={t('chat.inputPlaceholder')}
-              placeholderTextColor={'rgba(194,198,215,0.5)'}
+              accessibilityLabel={t('chat.inputPlaceholder')}
+              placeholderTextColor={PLACEHOLDER_COLOR}
               value={value}
               onChangeText={onChangeText}
               onFocus={onInputFocus}
@@ -116,14 +106,6 @@ const ChatInputBar: React.FC<ChatInputBarProps> = memo(
             {value.length >= COUNTER_THRESHOLD ? (
               <Text style={styles.counter}>{`${value.length}/${MAX_MESSAGE_LEN}`}</Text>
             ) : null}
-            <Pressable
-              onPress={onAttach}
-              accessibilityRole="button"
-              accessibilityLabel={t('chat.attachA11y')}
-              hitSlop={12}
-            >
-              <MaterialIcons name="attach-file" size={INPUT_ICON_SIZE} color={colors.textMuted} />
-            </Pressable>
           </View>
           {canSend ? (
             <Pressable
@@ -166,7 +148,7 @@ const styles = StyleSheet.create({
     paddingTop: spacing.sm,
     backgroundColor: colors.background,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(255,255,255,0.05)',
+    borderTopColor: colors.glass,
   },
   row: {
     flexDirection: 'row',
@@ -186,12 +168,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-    backgroundColor: GLASS_BG,
+    backgroundColor: colors.glass,
     borderRadius: 9999,
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.xs,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: colors.outline,
     minHeight: 44,
   },
   input: {
@@ -216,9 +198,9 @@ const styles = StyleSheet.create({
     width: SEND_BTN_SIZE,
     height: SEND_BTN_SIZE,
     borderRadius: SEND_BTN_SIZE / 2,
-    backgroundColor: GLASS_BG,
+    backgroundColor: colors.glass,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.08)',
+    borderColor: colors.glassStrong,
     alignItems: 'center',
     justifyContent: 'center',
   },

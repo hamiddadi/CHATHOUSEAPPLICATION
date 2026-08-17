@@ -1,21 +1,23 @@
 import http from 'node:http';
-import express, {
-  json as expressJson,
-  urlencoded as expressUrlencoded,
-  static as expressStatic,
-} from 'express';
+import express, { json as expressJson, urlencoded as expressUrlencoded } from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
 import compression from 'compression';
-import morgan from 'morgan';
+import morgan, { token as registerMorganToken } from 'morgan';
 import { env } from './config/env';
 import { logger } from './config/logger';
-import { connectRedis, disconnectRedis } from './config/redis';
+import { connectRedis, disconnectRedis, redis } from './config/redis';
 import { disconnectDatabase } from './config/database';
+import {
+  shutdownParticipantAdmissionCleanup,
+  startParticipantAdmissionCleanup,
+} from './queues/participantAdmissionCleanup';
+import { beginSocketServerDrain } from './socket/server-drain';
 import { globalLimiter } from './middlewares/rateLimit.middleware';
 import { errorMiddleware, notFoundHandler } from './middlewares/error.middleware';
 import { healthRouter } from './routes/health';
 import { docsRouter } from './routes/docs';
+import { legalRouter } from './routes/legal';
 import { authRouter } from './modules/auth/auth.router';
 import { usersRouter } from './modules/users/users.router';
 import { followRouter } from './modules/follow/follow.router';
@@ -30,28 +32,80 @@ import { exploreRouter } from './modules/explore/explore.router';
 import { pushRouter } from './modules/push/push.router';
 import { adminRouter } from './modules/admin/admin.router';
 import { uploadRouter } from './modules/upload/upload.router';
+import { mediaRouter } from './modules/media/media.router';
 import { recordingsRouter } from './modules/recordings/recordings.router';
 import { livekitWebhookRouter } from './modules/recordings/recordings.webhook';
 import { stripeWebhookRouter } from './extensions/modules/payments/payments.webhook';
-import { UPLOADS_DIR } from './modules/upload/upload.service';
-import { createSocketServer } from './socket/socket.server';
-import { mountExtensions } from './extensions/mount';
+import { createSocketServer, drainRoomDisconnectCleanups } from './socket/socket.server';
+import {
+  mountExtensions,
+  shutdownExtensionWorkers,
+  startExtensionWorkers,
+} from './extensions/mount';
 import { setRealtimeAliasServer } from './extensions/realtime/aliases';
 import { initMediasoup, shutdownMediasoup } from './webrtc/mediasoup.manager';
-import { startReminderWorker, shutdownReminders } from './queues/eventReminders';
-import { startLocationPurgeWorker, shutdownLocationPurge } from './queues/locationPurge';
+import { getRemindersQueue, startReminderWorker, shutdownReminders } from './queues/eventReminders';
+import {
+  getLocationPurgeQueue,
+  startLocationPurgeWorker,
+  shutdownLocationPurge,
+} from './queues/locationPurge';
+import {
+  getMediaCleanupQueue,
+  startMediaCleanupWorker,
+  shutdownMediaCleanup,
+} from './queues/mediaCleanup';
 import { registerGdprPurgeWorker, shutdownGdprPurge } from './workers/gdpr-purge.worker';
-import { ensureSearchIndexes } from './config/searchIndexes';
+import { getGdprPurgeQueue } from './workers/gdpr-purge.queue';
 import { initSentry } from './monitoring/sentry';
 import { httpMetricsMiddleware, metricsHandler } from './monitoring/metrics';
+import {
+  startBullMqMetricsCollector,
+  stopBullMqMetricsCollector,
+} from './monitoring/bullmqMetrics';
+import { createMetricsAuthMiddleware } from './monitoring/metricsAuth';
+import { drainBackgroundTasks } from './utils/backgroundTasks';
+import { initializePush } from './modules/push/push.service';
+import { getReminder15Queue } from './extensions/queues/reminder15';
+import { sanitizeRequestUrl } from './utils/sanitizeRequestUrl';
+import {
+  startRedisMemoryMetricsCollector,
+  stopRedisMemoryMetricsCollector,
+} from './monitoring/redisMetrics';
+import { shutdownOutboxWorker, startOutboxWorker } from './workers/outbox.worker';
+import { requestIdMiddleware } from './middlewares/requestId.middleware';
+// Register the storage-deletion consumer in every process that starts the
+// generic outbox poller; do not rely on an incidental GDPR-worker import.
+import './modules/media/media-deletion.outbox';
+import './extensions/club-extension-cleanup.outbox';
 
-// Grace period before a hung server.close() is hard-killed during shutdown.
+// Grace period before a hung Socket.IO/HTTP shutdown is hard-killed.
 const SHUTDOWN_GRACE_MS = 10_000;
+
+// Access logs must never retain search terms, reset tokens or any other query
+// parameter. Route paths remain useful for operations while the query string is
+// discarded before it reaches the logger.
+registerMorganToken('safe-url', request => {
+  const req = request as http.IncomingMessage & { originalUrl?: string };
+  return sanitizeRequestUrl(req.originalUrl ?? req.url);
+});
+
+const ACCESS_LOG_FORMAT =
+  ':remote-addr [:date[iso]] request_id=:request-id ":method :safe-url HTTP/:http-version" :status :res[content-length] :response-time ms';
 
 export const createApp = (): express.Express => {
   const app = express();
+  const metricsAuth = createMetricsAuthMiddleware({
+    production: env.NODE_ENV === 'production',
+  });
 
   app.set('trust proxy', 1);
+
+  app.use(requestIdMiddleware);
+  registerMorganToken('request-id', request => {
+    const req = request as http.IncomingMessage & { requestId?: string };
+    return req.requestId ?? '-';
+  });
 
   // LiveKit egress webhook — mounted BEFORE the JSON parser because signature
   // verification needs the raw request body (the router installs its own
@@ -64,9 +118,6 @@ export const createApp = (): express.Express => {
   app.use('/webhooks', stripeWebhookRouter);
 
   // Body parsers — cap at 1 MB; avatar uploads go through /upload (phase 2)
-  app.use(expressJson({ limit: '1mb' }));
-  app.use(expressUrlencoded({ extended: true, limit: '1mb' }));
-
   // Security headers. contentSecurityPolicy is disabled for the API itself
   // (no HTML served); re-enable if you ever mount a web UI on the same host.
   app.use(
@@ -81,12 +132,18 @@ export const createApp = (): express.Express => {
       },
       credentials: true,
       methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE'],
+      exposedHeaders: ['X-Request-ID'],
     }),
   );
 
   app.use(compression());
+
+  // Keep signed media capability tokens out of access logs. The route has a
+  // dedicated public-read limiter and streams only private stored objects.
+  app.use('/media', mediaRouter);
+
   app.use(
-    morgan(env.NODE_ENV === 'production' ? 'combined' : 'dev', {
+    morgan(ACCESS_LOG_FORMAT, {
       stream: { write: (line: string) => logger.info(line.trim()) },
     }),
   );
@@ -96,35 +153,26 @@ export const createApp = (): express.Express => {
   // the label to avoid high-cardinality raw paths.
   app.use(httpMetricsMiddleware);
 
-  // Prometheus scrape endpoint. In production it is fail-CLOSED: a METRICS_TOKEN
-  // must be configured and presented as `Authorization: Bearer <token>`, so the
-  // metric surface is never publicly enumerable on a prod deploy that forgot to
-  // set the token. Outside production it stays open for local/dev scraping (with
-  // optional token enforcement when one is set). Mounted BEFORE the /api
-  // globalLimiter so scrapes don't burn the API budget.
-  app.get('/metrics', (req, res, next) => {
-    const token = process.env.METRICS_TOKEN;
-    if (env.NODE_ENV === 'production' && !token) {
-      res.status(403).end();
-      return;
-    }
-    if (token && req.get('authorization') !== `Bearer ${token}`) {
-      res.status(403).end();
-      return;
-    }
+  // Prometheus scrape endpoint. Production Compose injects the credential as a
+  // file shared with Prometheus (never as a clear-text environment variable).
+  // Outside production it stays open only when no token source is configured.
+  // Mounted BEFORE the /api globalLimiter so scrapes don't burn the API budget.
+  app.get('/metrics', metricsAuth, (req, res, next) => {
     void metricsHandler(req, res, next);
   });
 
   // Health is unauthenticated and unratelimited (Kubernetes/ECS probes).
   app.use(healthRouter);
+  // Public, static store-compliance resources. They contain no scripts, forms
+  // or user data and remain reachable even when the API documentation is off.
+  app.use(legalRouter);
 
-  // Serve locally-stored uploads (avatars). Public + unratelimited so the
-  // mobile app's <Image> can fetch them without a bearer token, and mounted
-  // BEFORE the /api globalLimiter so image loads don't burn the API budget.
-  // express.static creates no directory itself; upload.service.ts mkdirs it
-  // on first write. The crossOriginResourcePolicy: 'cross-origin' helmet
-  // setting above lets RN/web clients on other origins load these.
-  app.use('/uploads', expressStatic(UPLOADS_DIR));
+  // Authenticate and rate-limit before parsing base64 payloads. This route
+  // owns a 12 MB parser and therefore has to precede the global 1 MB parser.
+  app.use('/api/upload', uploadRouter);
+
+  app.use(expressJson({ limit: '1mb' }));
+  app.use(expressUrlencoded({ extended: true, limit: '1mb' }));
 
   // OpenAPI/Swagger UI — unauthenticated, so keep it out of production to
   // avoid handing an attacker a free map of the API surface. Browse the
@@ -156,23 +204,26 @@ export const createApp = (): express.Express => {
   // inside the router. Always mounted so the `/api/admin/me` probe stays
   // available; the writable endpoints reject non-admins.
   app.use('/api/admin', adminRouter);
-  // Avatar upload (local-disk, no multer). Mounts its own 8 MB JSON parser
-  // internally since the global 1 MB cap is too small for base64 images.
-  app.use('/api/upload', uploadRouter);
-
+  if (env.EXTENSIONS_ENABLED) {
+    mountExtensions(app);
+  }
   app.use(notFoundHandler);
   app.use(errorMiddleware);
 
   return app;
 };
 
-const startServer = async (): Promise<void> => {
+export const startServer = async (): Promise<void> => {
   // Initialise error tracking FIRST — as early as possible so the HTTP
   // instrumentation can patch the layer before any service connects. No-op
   // when SENTRY_DSN is unset (the normal local/dev/CI state).
   initSentry();
+  // Production push is a required delivery channel. Build the Firebase client
+  // and obtain a real provider token before connecting infrastructure or
+  // accepting HTTP traffic, so lazy/invalid ADC fails the deployment instead
+  // of silently dropping the first notifications.
+  await initializePush();
   await connectRedis();
-  await ensureSearchIndexes();
   // mediasoup boots best-effort: if the native build is unavailable the rest
   // of the API keeps working and rtc:* events return RTC_DISABLED.
   await initMediasoup().catch(err => {
@@ -186,54 +237,83 @@ const startServer = async (): Promise<void> => {
   // docs/rgpd/data-retention-policy.md: hard-deletes soft-deleted accounts past
   // the grace window and purges expired tokens/OTPs/audit logs.
   await registerGdprPurgeWorker();
+  await startMediaCleanupWorker();
   const app = createApp();
-  // Mount the `/api/ext/*` extension contract on the SAME entry point that
-  // production uses (`dist/app.js`), gated by env. Previously these routers
-  // were only mounted by the alternate `extensions/server.ts`, so the whole
-  // extension surface 404'd under the default `npm start`.
   if (env.EXTENSIONS_ENABLED) {
-    mountExtensions(app);
+    startExtensionWorkers();
   }
+  startBullMqMetricsCollector([
+    getRemindersQueue(),
+    getLocationPurgeQueue(),
+    getGdprPurgeQueue(),
+    getMediaCleanupQueue(),
+    ...(env.EXTENSIONS_ENABLED ? [getReminder15Queue()] : []),
+  ]);
+  startRedisMemoryMetricsCollector(redis);
   const server = http.createServer(app);
   const io = await createSocketServer(server);
+  startParticipantAdmissionCleanup(io);
   // Bind the alias emitter so extension realtime events publish under their
   // Clubhouse-spec names (e.g. `room_title_updated`).
   if (env.EXTENSIONS_ENABLED) {
     setRealtimeAliasServer(io);
   }
+  // Outbox consumers emit through Socket.IO. Start claiming only after the
+  // realtime server/Redis adapter is fully bound, otherwise a boot backlog
+  // could be marked delivered while ioRef is still absent.
+  startOutboxWorker();
 
   server.listen(env.PORT, env.HOST, () => {
     logger.info(
-      `Chathouse API listening on http://${env.HOST}:${env.PORT} (${env.NODE_ENV}) — socket.io ready`,
+      `ChatHouse API listening on http://${env.HOST}:${env.PORT} (${env.NODE_ENV}) — socket.io ready`,
     );
   });
 
-  // Reference `io` so linters don't flag it; kept around for future
-  // cross-module broadcasts (notifications fan-out, etc.).
-  void io;
-
+  let shuttingDown = false;
   const shutdown = async (signal: string): Promise<void> => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    const exitCode = signal === 'unhandledRejection' || signal === 'uncaughtException' ? 1 : 0;
     logger.info(`${signal} received — graceful shutdown`);
-    server.close(async () => {
-      try {
-        await shutdownMediasoup();
-        await shutdownReminders();
-        await shutdownLocationPurge();
-        await shutdownGdprPurge();
-        await disconnectDatabase();
-        await disconnectRedis();
-        logger.info('server stopped cleanly');
-        process.exit(0);
-      } catch (err) {
-        logger.error('shutdown error', { err });
-        process.exit(1);
-      }
-    });
-    // Hard-kill after the grace period if close() hangs
-    setTimeout(() => {
+    // Arm the deadline before awaiting network teardown so a stuck close is
+    // still bounded.
+    const forceTimer = setTimeout(() => {
       logger.error(`forced shutdown after ${SHUTDOWN_GRACE_MS / 1000}s`);
       process.exit(1);
     }, SHUTDOWN_GRACE_MS).unref();
+
+    // Set before any awaited shutdown work. Only Socket.IO's explicit
+    // `server shutting down` reason consults this flag; ordinary transport and
+    // client disconnects continue to close durable participation normally.
+    beginSocketServerDrain();
+    try {
+      await shutdownParticipantAdmissionCleanup();
+      // Stop new claims and drain any active delivery while Socket.IO and push
+      // transports are still available. Events committed by a final in-flight
+      // request after this point remain PENDING for the next process.
+      await shutdownOutboxWorker();
+      await io.close();
+      await drainRoomDisconnectCleanups();
+      await shutdownMediasoup();
+      stopBullMqMetricsCollector();
+      stopRedisMemoryMetricsCollector();
+      await shutdownReminders();
+      await shutdownLocationPurge();
+      await shutdownGdprPurge();
+      await shutdownMediaCleanup();
+      if (env.EXTENSIONS_ENABLED) {
+        await shutdownExtensionWorkers();
+      }
+      await drainBackgroundTasks();
+      await disconnectDatabase();
+      await disconnectRedis();
+      clearTimeout(forceTimer);
+      logger.info('server shutdown completed', { exitCode });
+      process.exit(exitCode);
+    } catch (err) {
+      logger.error('shutdown error', { err });
+      process.exit(1);
+    }
   };
 
   process.on('SIGTERM', () => {
@@ -244,6 +324,7 @@ const startServer = async (): Promise<void> => {
   });
   process.on('unhandledRejection', err => {
     logger.error('unhandledRejection', { err });
+    void shutdown('unhandledRejection');
   });
   process.on('uncaughtException', err => {
     logger.error('uncaughtException', { err });
@@ -251,6 +332,20 @@ const startServer = async (): Promise<void> => {
   });
 };
 
+export const startServerOrExit = (): void => {
+  void startServer().catch(err => {
+    // Startup errors can contain provider response fragments or credential
+    // paths in nested causes. Emit only the controlled top-level reason.
+    logger.error('server startup failed', {
+      reason: err instanceof Error ? err.message : 'unknown startup failure',
+    });
+    // Startup may already have opened Redis/BullMQ/native handles. Exit now so
+    // the orchestrator can restart a clean process instead of leaving an
+    // unhealthy container alive indefinitely with no listening HTTP server.
+    process.exit(1);
+  });
+};
+
 if (require.main === module) {
-  void startServer();
+  startServerOrExit();
 }

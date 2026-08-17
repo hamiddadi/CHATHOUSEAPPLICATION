@@ -71,19 +71,27 @@ export const houseService = {
     return res.data.data;
   },
 
-  async get(id: string): Promise<House> {
-    const res = await apiClient.get<Envelope<House>>(`/clubs/${id}`);
+  async get(id: string, inviteToken?: string): Promise<House> {
+    // Invitation tokens are bearer capabilities. Keep them out of URLs so
+    // reverse-proxy, analytics and navigation logs do not retain them.
+    const res = await apiClient.get<Envelope<House>>(`/clubs/${id}`, {
+      ...(inviteToken ? { headers: { 'X-House-Invite': inviteToken } } : {}),
+    });
     return res.data.data;
   },
 
-  async create(input: CreateHouseInput): Promise<House> {
-    const res = await apiClient.post<Envelope<House>>('/clubs', {
-      name: input.name.trim(),
-      description: input.description.trim() || undefined,
-      rules: input.rules?.trim() || undefined,
-      privacy: PRIVACY_TO_DB[input.privacy],
-      iconUrl: input.iconUrl ?? undefined,
-    });
+  async create(input: CreateHouseInput, idempotencyKey: string): Promise<House> {
+    const res = await apiClient.post<Envelope<House>>(
+      '/clubs',
+      {
+        name: input.name.trim(),
+        description: input.description.trim() || undefined,
+        rules: input.rules?.trim() || undefined,
+        privacy: PRIVACY_TO_DB[input.privacy],
+        iconUrl: input.iconUrl ?? undefined,
+      },
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    );
     return res.data.data;
   },
 

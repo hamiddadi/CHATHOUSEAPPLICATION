@@ -1,5 +1,5 @@
 import React, { useCallback } from 'react';
-import { ActivityIndicator, Pressable, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { impactLight } from '../../utils/haptics';
 import { cn } from '../../utils/cn';
 import {
@@ -7,7 +7,8 @@ import {
   sizeHitSlop,
   sizeTextClass,
   variantContainerClass,
-  variantPressedClass,
+  variantIndicatorColor,
+  variantPressedStyle,
   variantTextClass,
 } from './Button.styles';
 import type { ButtonProps } from './types';
@@ -63,29 +64,28 @@ export const Button: React.FC<ButtonProps> = ({
       onPressIn={handlePressIn}
       disabled={isInactive}
       accessibilityRole="button"
+      accessibilityLabel={pressableProps.accessibilityLabel ?? label}
       accessibilityState={{ disabled: isInactive, busy: loading }}
-      style={style}
+      style={({ pressed }) => [
+        style,
+        pressed && !isInactive ? variantPressedStyle[variant] : undefined,
+      ]}
       className={cn(
         'flex-row items-center justify-center rounded-pill gap-sm',
         sizeContainerClass[size],
         variantContainerClass[variant],
         fullWidth && 'self-stretch',
-        isInactive && 'opacity-45',
+        disabled && !loading && 'opacity-45',
       )}
     >
-      {({ pressed }) => (
+      <View pointerEvents="none" style={styles.contentFrame}>
         <View
-          pointerEvents="none"
-          className={cn(
-            'flex-row items-center justify-center gap-sm',
-            pressed && !isInactive && variantPressedClass[variant],
-          )}
+          className="flex-row items-center justify-center gap-sm"
+          style={loading ? styles.loadingPlaceholder : undefined}
         >
-          {leftIcon && !loading ? <View>{leftIcon}</View> : null}
+          {leftIcon ? <View>{leftIcon}</View> : null}
 
-          {loading ? (
-            <ActivityIndicator />
-          ) : label ? (
+          {label ? (
             <Text
               numberOfLines={1}
               className={cn(sizeTextClass[size], variantTextClass[variant])}
@@ -97,9 +97,24 @@ export const Button: React.FC<ButtonProps> = ({
             children
           )}
 
-          {rightIcon && !loading ? <View>{rightIcon}</View> : null}
+          {rightIcon ? <View>{rightIcon}</View> : null}
         </View>
-      )}
+        {loading ? (
+          <View style={styles.loadingOverlay}>
+            <ActivityIndicator color={variantIndicatorColor[variant]} />
+          </View>
+        ) : null}
+      </View>
     </Pressable>
   );
 };
+
+const styles = StyleSheet.create({
+  contentFrame: { position: 'relative' },
+  loadingPlaceholder: { opacity: 0 },
+  loadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+});

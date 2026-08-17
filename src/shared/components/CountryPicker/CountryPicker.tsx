@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
-import { FlatList, Modal, Pressable, SafeAreaView, Text, TextInput, View } from 'react-native';
+import { FlatList, Modal, Pressable, Text, TextInput, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import MaterialIcons from '@react-native-vector-icons/material-icons';
 import type { CountryCode } from 'libphonenumber-js';
 import { useTranslation } from 'react-i18next';
@@ -52,14 +53,16 @@ export const CountryPicker: React.FC<CountryPickerProps> = ({ visible, onClose, 
 
   return (
     <Modal
+      testID="country-picker"
       visible={visible}
       animationType="slide"
       presentationStyle="pageSheet"
       onRequestClose={onClose}
     >
       <SafeAreaView className="flex-1 bg-background">
-        <View className="px-lg py-md flex-row items-center border-b border-surface-border">
+        <View className="px-lg py-md flex-row items-center border-b border-outline-variant">
           <Pressable
+            testID="country-picker-close"
             onPress={onClose}
             accessibilityRole="button"
             accessibilityLabel={t('common.close', 'Close')}
@@ -68,14 +71,15 @@ export const CountryPicker: React.FC<CountryPickerProps> = ({ visible, onClose, 
           >
             <MaterialIcons name="close" size={24} color={colors.text} />
           </Pressable>
-          <Text className="text-h3 font-display text-ink flex-1">
+          <Text className="text-xl font-display text-ink flex-1">
             {t('common.select_country', 'Select Country')}
           </Text>
         </View>
 
         <View className="p-md">
           <TextInput
-            className="bg-surface px-md py-sm rounded-lg text-ink font-body"
+            testID="country-picker-search"
+            className="min-h-[44px] bg-surface-high px-md py-sm rounded-lg border border-outline text-ink font-body"
             placeholder={t('common.search', 'Search')}
             accessibilityLabel={t('common.search', 'Search')}
             placeholderTextColor={colors.textMuted}
@@ -92,6 +96,7 @@ export const CountryPicker: React.FC<CountryPickerProps> = ({ visible, onClose, 
           keyboardShouldPersistTaps="handled"
           renderItem={({ item }) => (
             <Pressable
+              testID={`country-option-${item.cca2.toLowerCase()}`}
               onPress={() => {
                 onSelect(item);
                 onClose();
@@ -101,9 +106,9 @@ export const CountryPicker: React.FC<CountryPickerProps> = ({ visible, onClose, 
               accessibilityLabel={`${item.name}, ${item.callingCode}`}
               className="flex-row items-center px-lg py-md border-b border-surface/50 active:bg-surface"
             >
-              <Text className="text-display text-2xl mr-md">{item.flag}</Text>
-              <Text className="text-body font-body text-ink flex-1">{item.name}</Text>
-              <Text className="text-body font-body text-textMuted">{item.callingCode}</Text>
+              <Text className="text-xxxl mr-md">{item.flag}</Text>
+              <Text className="text-md font-body text-ink flex-1">{item.name}</Text>
+              <Text className="text-md font-body text-ink-muted">{item.callingCode}</Text>
             </Pressable>
           )}
         />

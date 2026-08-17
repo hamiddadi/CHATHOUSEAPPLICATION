@@ -350,7 +350,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   segmentTextActive: {
-    color: colors.white,
+    color: colors.onPrimaryContainer,
     fontSize: fontSizes.sm,
     fontWeight: '700',
   },

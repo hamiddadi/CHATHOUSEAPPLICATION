@@ -10,6 +10,7 @@ export const publicUser = {
 
 export const clubInclude = {
   members: {
+    where: { user: { deletedAt: null } },
     include: { user: { select: publicUser } },
     orderBy: { joinedAt: 'asc' },
     // Bound the roster so a very large club can't return an unbounded member
@@ -18,8 +19,8 @@ export const clubInclude = {
   },
   _count: {
     select: {
-      members: true,
-      rooms: { where: { isLive: true, endedAt: null } },
+      members: { where: { user: { deletedAt: null } } },
+      rooms: { where: { isLive: true, endedAt: null, host: { deletedAt: null } } },
     },
   },
 } satisfies Prisma.ClubInclude;

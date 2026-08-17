@@ -1,0 +1,16 @@
+diff --git a/node_modules/@livekit/react-native/android/build.gradle b/node_modules/@livekit/react-native/android/build.gradle
+--- a/node_modules/@livekit/react-native/android/build.gradle
++++ b/node_modules/@livekit/react-native/android/build.gradle
+@@ -54,6 +54,11 @@ repositories {
+   mavenCentral()
+   google()
+-  maven { url 'https://jitpack.io' }
++  maven {
++    url = uri('https://jitpack.io')
++    content {
++      includeGroup 'com.github.davidliu'
++    }
++  }
+ 
+   def found = false
+   def defaultDir = null

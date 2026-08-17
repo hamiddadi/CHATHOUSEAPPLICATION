@@ -1,6 +1,7 @@
 import { prisma } from '../../../config/database';
 import { AppError } from '../../../middlewares/error.middleware';
 import { auditLogService } from '../../../modules/admin/auditLog.service';
+import { withLockedRoomState } from '../../../modules/rooms/room-state-lock';
 
 /**
  * Soft-delete a room chat message. Reuses the existing `isDeleted` flag on
@@ -19,48 +20,48 @@ export const chatmodService = {
     if (!msg) throw new AppError('CHAT_001', 'Message not found');
     if (msg.isDeleted) return { id: msg.id, alreadyDeleted: true };
 
-    const isAuthor = msg.userId === callerId;
-    let canModerate = isAuthor;
-
-    if (!canModerate) {
-      const room = await prisma.room.findUnique({
-        where: { id: msg.roomId },
-        select: { hostId: true },
-      });
+    const deletion = await withLockedRoomState(msg.roomId, async (tx, room) => {
       if (!room) throw new AppError('ROOM_001');
-      if (room.hostId === callerId) canModerate = true;
+      const current = await tx.roomChatMessage.findUnique({
+        where: { id: messageId },
+        select: { id: true, userId: true, roomId: true, isDeleted: true },
+      });
+      if (!current) throw new AppError('CHAT_001', 'Message not found');
+      if (current.isDeleted) return { ...current, alreadyDeleted: true as const };
+
+      let canModerate = current.userId === callerId || room.hostId === callerId;
       if (!canModerate) {
-        const participant = await prisma.participant.findUnique({
-          where: { userId_roomId: { userId: callerId, roomId: msg.roomId } },
+        const participant = await tx.participant.findUnique({
+          where: { userId_roomId: { userId: callerId, roomId: current.roomId } },
           select: { role: true, leftAt: true },
         });
-        // Mirror the legacy `requireHostOrMod`: a moderator who has left the
-        // room (leftAt set) no longer holds moderation powers.
-        if (participant && !participant.leftAt && participant.role === 'MODERATOR') {
-          canModerate = true;
-        }
+        canModerate = Boolean(
+          participant && !participant.leftAt && participant.role === 'MODERATOR',
+        );
       }
-    }
+      if (!canModerate) throw new AppError('AUTH_008', 'Not allowed');
 
-    if (!canModerate) throw new AppError('AUTH_008', 'Not allowed');
-
-    await prisma.roomChatMessage.update({
-      where: { id: messageId },
-      data: { isDeleted: true },
+      await tx.roomChatMessage.update({
+        where: { id: messageId },
+        data: { isDeleted: true },
+      });
+      await auditLogService.record(
+        {
+          actorId: callerId,
+          action: 'ROOM_MESSAGE_DELETED',
+          targetUserId: current.userId,
+          targetRoomId: current.roomId,
+          targetType: 'roomChatMessage',
+          targetId: current.id,
+          metadata: { messageId: current.id },
+        },
+        tx,
+      );
+      return { ...current, alreadyDeleted: false as const };
     });
 
-    // MODE-06: audit the moderation action. record() swallows persistence
-    // errors itself, so a failed write never breaks the delete.
-    await auditLogService.record({
-      actorId: callerId,
-      action: 'ROOM_MESSAGE_DELETED',
-      targetUserId: msg.userId,
-      targetRoomId: msg.roomId,
-      targetType: 'roomChatMessage',
-      targetId: msg.id,
-      metadata: { messageId: msg.id },
-    });
+    if (deletion.alreadyDeleted) return { id: deletion.id, alreadyDeleted: true };
 
-    return { id: msg.id, alreadyDeleted: false };
+    return { id: deletion.id, alreadyDeleted: false };
   },
 };

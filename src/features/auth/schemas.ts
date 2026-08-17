@@ -29,6 +29,12 @@ export const phoneFormSchema = z.object({
   ageConfirmed: z.boolean().refine(v => v === true, {
     message: 'auth.phone.errors.ageVerification',
   }),
+  termsAccepted: z.boolean().refine(v => v === true, {
+    message: 'auth.phone.errors.termsAcceptance',
+  }),
+  privacyNoticeAcknowledged: z.boolean().refine(v => v === true, {
+    message: 'auth.phone.errors.privacyAcknowledgement',
+  }),
 });
 
 export const otpFormSchema = z.object({

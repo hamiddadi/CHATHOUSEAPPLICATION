@@ -2,6 +2,7 @@ import { redis } from '../../../config/redis';
 import { prisma } from '../../../config/database';
 import { logger } from '../../../config/logger';
 import { AppError } from '../../../middlewares/error.middleware';
+import { withLockedRoomState } from '../../../modules/rooms/room-state-lock';
 import { emitRoomCaptionsState } from '../../../socket/realtime';
 import { extError } from '../../utils/ExtAppError';
 
@@ -41,21 +42,21 @@ export const captionsService = {
     // per-room captions flag. Mirrors chatmod.service's host/MODERATOR gate
     // so a random authenticated user cannot flip captions on someone else's
     // room (IDOR fix).
-    const room = await prisma.room.findUnique({
-      where: { id: roomId },
-      select: { hostId: true },
+    await withLockedRoomState(roomId, async (tx, room) => {
+      if (!room || room.endedAt || !room.isLive) {
+        throw extError('CLUB_REQ_NOT_FOUND', 'Room not found');
+      }
+      let allowed = room.hostId === callerId;
+      if (!allowed) {
+        const participant = await tx.participant.findUnique({
+          where: { userId_roomId: { userId: callerId, roomId } },
+          select: { role: true, leftAt: true },
+        });
+        allowed = Boolean(participant && !participant.leftAt && participant.role === 'MODERATOR');
+      }
+      if (!allowed) throw new AppError('AUTH_008', 'Not allowed');
+      await redis.set(flagKey(roomId), enabled ? '1' : '0');
     });
-    if (!room) throw extError('CLUB_REQ_NOT_FOUND', 'Room not found');
-    let allowed = room.hostId === callerId;
-    if (!allowed) {
-      const participant = await prisma.participant.findUnique({
-        where: { userId_roomId: { userId: callerId, roomId } },
-        select: { role: true },
-      });
-      allowed = participant?.role === 'MODERATOR';
-    }
-    if (!allowed) throw new AppError('AUTH_008', 'Not allowed');
-    await redis.set(flagKey(roomId), enabled ? '1' : '0');
     // Live-propagate so listeners already in the room subscribe/unsubscribe the
     // caption stream without remounting.
     emitRoomCaptionsState(roomId, enabled);
@@ -65,6 +66,20 @@ export const captionsService = {
   async isEnabled(roomId: string): Promise<boolean> {
     const v = await redis.get(flagKey(roomId));
     return v === '1';
+  },
+
+  async isEnabledForCaller(callerId: string, roomId: string): Promise<boolean> {
+    const room = await prisma.room.findFirst({
+      where: {
+        id: roomId,
+        endedAt: null,
+        isLive: true,
+        participants: { some: { userId: callerId, leftAt: null } },
+      },
+      select: { id: true },
+    });
+    if (!room) throw extError('CLUB_REQ_NOT_FOUND', 'Room not found');
+    return this.isEnabled(roomId);
   },
 
   /**

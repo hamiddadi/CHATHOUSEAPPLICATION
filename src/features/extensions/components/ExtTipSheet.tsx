@@ -1,11 +1,13 @@
 import React, { useCallback, useState } from 'react';
 import { ActivityIndicator, Alert, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useTranslation } from 'react-i18next';
-import { colors, spacing } from '../../../shared/constants/theme';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { colors, layout, spacing } from '../../../shared/constants/theme';
 import { errorMessage } from '../../../shared/utils/errorMessage';
 import { STRIPE_HOSTS, openExternalUrl } from '../../../shared/utils/openExternalUrl';
 import type { UserSummary } from '../../../shared/types/domain';
 import { useTip } from '../hooks/useTip';
+import { areExternalDigitalPurchasesAllowed } from '../utils/digitalPurchases';
 
 const PRESETS = [2, 5, 10, 20];
 const CURRENCIES = [
@@ -29,12 +31,14 @@ interface ExtTipSheetProps {
  */
 export const ExtTipSheet: React.FC<ExtTipSheetProps> = ({ target, onClose, onSent }) => {
   const { t } = useTranslation();
+  const insets = useSafeAreaInsets();
+  const externalPurchasesAllowed = areExternalDigitalPurchasesAllowed();
   const tip = useTip();
   const [currency, setCurrency] = useState<string>('eur');
 
   const handleTip = useCallback(
     (amountMajor: number) => {
-      if (!target) return;
+      if (!externalPurchasesAllowed || !target) return;
       tip.mutate(
         { toUserId: target.id, amountCents: amountMajor * 100, currency },
         {
@@ -48,20 +52,23 @@ export const ExtTipSheet: React.FC<ExtTipSheetProps> = ({ target, onClose, onSen
         },
       );
     },
-    [tip, target, currency, t, onSent],
+    [tip, target, currency, t, onSent, externalPurchasesAllowed],
   );
 
   const symbol = CURRENCIES.find(c => c.code === currency)?.symbol ?? '';
 
+  if (!externalPurchasesAllowed) return null;
+
   return (
     <Modal visible={target !== null} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable
-        style={styles.backdrop}
-        onPress={onClose}
-        accessibilityRole="button"
-        accessibilityLabel={t('common.close', 'Fermer')}
-      >
-        <Pressable style={styles.sheet} onPress={() => undefined}>
+      <Pressable style={styles.backdrop} onPress={onClose} accessible={false}>
+        <Pressable
+          style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, spacing.xxl) }]}
+          onPress={() => undefined}
+          accessible={false}
+          focusable={false}
+          accessibilityViewIsModal
+        >
           <View style={styles.handle} />
           <Text style={styles.title}>
             {t('tip.title', {
@@ -124,8 +131,15 @@ export const ExtTipSheet: React.FC<ExtTipSheetProps> = ({ target, onClose, onSen
 };
 
 const styles = StyleSheet.create({
-  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  backdrop: {
+    flex: 1,
+    backgroundColor: colors.modalBackdrop,
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+  },
   sheet: {
+    width: '100%',
+    maxWidth: layout.maxContentWidth,
     backgroundColor: colors.surfaceHigh,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
@@ -144,6 +158,8 @@ const styles = StyleSheet.create({
   subtitle: { color: colors.textMuted, fontSize: 13 },
   currencyRow: { flexDirection: 'row', gap: spacing.sm },
   currencyChip: {
+    minHeight: 44,
+    justifyContent: 'center',
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs,
     borderRadius: 9999,
@@ -167,11 +183,12 @@ const styles = StyleSheet.create({
   presetText: { color: colors.text, fontSize: 18, fontWeight: '700' },
   spinner: { marginTop: spacing.sm },
   cancel: {
+    minHeight: 44,
     marginTop: spacing.sm,
     alignItems: 'center',
     paddingVertical: spacing.md,
     borderRadius: 12,
-    backgroundColor: 'rgba(255,255,255,0.05)',
+    backgroundColor: colors.glass,
   },
   cancelLabel: { color: colors.textMuted, fontSize: 14, fontWeight: '600' },
 });

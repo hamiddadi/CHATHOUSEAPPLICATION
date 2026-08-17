@@ -11,8 +11,6 @@ const { createApp } = require('../src/app') as typeof import('../src/app');
 const { prisma } = require('../src/config/database') as typeof import('../src/config/database');
 const { connectRedis, disconnectRedis } =
   require('../src/config/redis') as typeof import('../src/config/redis');
-const { ensureSearchIndexes } =
-  require('../src/config/searchIndexes') as typeof import('../src/config/searchIndexes');
 /* eslint-enable @typescript-eslint/no-require-imports */
 
 const rand = () => Math.random().toString(36).slice(2, 10);
@@ -47,7 +45,6 @@ describe('Search + Explore integration', () => {
     await connectRedis();
     // Ensure pg_trgm extension + indexes exist for this suite. Idempotent,
     // so repeated runs are safe.
-    await ensureSearchIndexes();
     app = createApp();
   });
 
@@ -128,6 +125,46 @@ describe('Search + Explore integration', () => {
     expect(ids).toEqual(expect.arrayContaining([u1.id, u2.id]));
   });
 
+  it('club search preserves SOCIAL privacy and hides blocked or deleted owners', async () => {
+    const socialOwner = await registerUser(app, `soc${marker}`);
+    const blockedOwner = await registerUser(app, `blk${marker}`);
+    const deletedOwner = await registerUser(app, `del${marker}`);
+    const viewer = await registerUser(app, `cvw${marker}`);
+    createdUserIds.push(socialOwner.id, blockedOwner.id, deletedOwner.id, viewer.id);
+
+    const createClub = async (token: string, suffix: string, privacy: 'OPEN' | 'SOCIAL') => {
+      const res = await request(app)
+        .post('/api/clubs')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ name: `${marker} ${suffix}`, privacy });
+      createdClubIds.push(res.body.data.id as string);
+      return res.body.data.id as string;
+    };
+
+    const socialId = await createClub(socialOwner.token, 'Social', 'SOCIAL');
+    const blockedId = await createClub(blockedOwner.token, 'Blocked', 'OPEN');
+    const deletedId = await createClub(deletedOwner.token, 'Deleted', 'OPEN');
+
+    // A block is a symmetric discovery break, regardless of who initiated it.
+    await prisma.block.create({
+      data: { blockerId: blockedOwner.id, blockedId: viewer.id },
+    });
+    await prisma.user.update({
+      where: { id: deletedOwner.id },
+      data: { deletedAt: new Date() },
+    });
+
+    const res = await request(app)
+      .get(`/api/search?q=${marker}&type=clubs`)
+      .set('Authorization', `Bearer ${viewer.token}`);
+    expect(res.status).toBe(200);
+
+    const clubs = res.body.data.clubs as { id: string; privacy: string }[];
+    expect(clubs).toContainEqual(expect.objectContaining({ id: socialId, privacy: 'social' }));
+    expect(clubs.some(club => club.id === blockedId)).toBe(false);
+    expect(clubs.some(club => club.id === deletedId)).toBe(false);
+  });
+
   it('rejects empty q (VALIDATION_001)', async () => {
     const u = await registerUser(app, 'empty');
     createdUserIds.push(u.id);
@@ -197,5 +234,36 @@ describe('Search + Explore integration', () => {
     expect(res.status).toBe(200);
     const clubIds = res.body.data.clubs.map((c: { id: string }) => c.id);
     expect(clubIds).not.toContain(privClub.body.data.id);
+  });
+
+  it('explore hides clubs whose owner is deleted or blocked by the viewer', async () => {
+    const viewer = await registerUser(app, `exv${marker}`);
+    const blockedOwner = await registerUser(app, `exb${marker}`);
+    const deletedOwner = await registerUser(app, `exd${marker}`);
+    createdUserIds.push(viewer.id, blockedOwner.id, deletedOwner.id);
+
+    const blockedClub = await request(app)
+      .post('/api/clubs')
+      .set('Authorization', `Bearer ${blockedOwner.token}`)
+      .send({ name: `${marker} explore blocked`, privacy: 'OPEN' });
+    const deletedClub = await request(app)
+      .post('/api/clubs')
+      .set('Authorization', `Bearer ${deletedOwner.token}`)
+      .send({ name: `${marker} explore deleted`, privacy: 'OPEN' });
+    createdClubIds.push(blockedClub.body.data.id, deletedClub.body.data.id);
+
+    await prisma.block.create({ data: { blockerId: viewer.id, blockedId: blockedOwner.id } });
+    await prisma.user.update({
+      where: { id: deletedOwner.id },
+      data: { deletedAt: new Date() },
+    });
+
+    const res = await request(app)
+      .get('/api/explore')
+      .set('Authorization', `Bearer ${viewer.token}`);
+    expect(res.status).toBe(200);
+    const clubIds = res.body.data.clubs.map((club: { id: string }) => club.id);
+    expect(clubIds).not.toContain(blockedClub.body.data.id);
+    expect(clubIds).not.toContain(deletedClub.body.data.id);
   });
 });

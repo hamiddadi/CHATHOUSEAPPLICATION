@@ -42,7 +42,10 @@ const makeTestQueryClient = (): QueryClient =>
   new QueryClient({
     defaultOptions: {
       queries: { retry: false, gcTime: Infinity, staleTime: Infinity },
-      mutations: { retry: false },
+      // TanStack's default 5-minute mutation GC timer keeps Jest alive after
+      // render cleanup. Infinity avoids creating that timer in the per-test
+      // client; the client itself becomes collectible with the render tree.
+      mutations: { retry: false, gcTime: Infinity },
     },
   });
 
@@ -91,6 +94,9 @@ export const fakeAuthUser = (overrides: Partial<AuthUser> = {}): AuthUser => ({
   bio: null,
   interests: [],
   hasCompletedOnboarding: true,
+  accountState: 'ACTIVE',
+  deletedAt: null,
+  permanentDeletionAt: null,
   createdAt: new Date(0).toISOString(),
   ...overrides,
 });
@@ -110,6 +116,7 @@ export const mockAuthenticated = (overrides: Partial<AuthUser> = {}): AuthUser =
       accessToken: 'test-access',
       refreshToken: 'test-refresh',
       expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+      scope: 'active',
     },
     error: null,
   });

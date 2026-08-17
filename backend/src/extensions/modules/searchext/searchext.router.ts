@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { requireAuth } from '../../../middlewares/auth.middleware';
 import { asyncHandler } from '../../../utils/asyncHandler';
+import { authedUserId } from '../../../utils/authedUserId';
 import { searchExtService } from './searchext.service';
 
 export const searchExtRouter: Router = Router();
@@ -28,7 +29,7 @@ searchExtRouter.get(
   '/rooms',
   asyncHandler(async (req, res) => {
     const f = querySchema.parse(req.query);
-    const items = await searchExtService.rooms(f);
+    const items = await searchExtService.rooms(authedUserId(req), f);
     res.json({ items, count: items.length });
   }),
 );

@@ -9,6 +9,7 @@ export { ExtSuggestedFollowsScreen } from './screens/ExtSuggestedFollowsScreen';
 export { ExtTopicExplorerScreen } from './screens/ExtTopicExplorerScreen';
 export { useExtSuggestions } from './hooks/useSuggestions';
 export { useExtAvailablePeople } from './hooks/usePresence';
+export { usePeerPresence, peerPresenceKey } from './hooks/usePeerPresence';
 export { useExtTopicsTree, useExtTopicsFlat } from './hooks/useTopics';
 export { openTwitterHandle, openInstagramHandle } from './utils/socialDeepLink';
 export { suggestionsApi } from './api/suggestionsApi';
@@ -75,6 +76,11 @@ export {
 } from './hooks/usePremium';
 export { ExtTipSheet } from './components/ExtTipSheet';
 export { ExtPremiumRow } from './components/ExtPremiumRow';
+export {
+  areExternalDigitalPurchasesAllowed,
+  assertExternalDigitalPurchasesAllowed,
+  EXTERNAL_DIGITAL_PURCHASES_DISABLED_MESSAGE,
+} from './utils/digitalPurchases';
 
 // ─── Vague 9 ───
 export { calendarApi } from './api/calendarApi';

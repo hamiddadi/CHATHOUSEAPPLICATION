@@ -1,5 +1,6 @@
 import { prisma } from '../../../config/database';
 import { extError } from '../../utils/ExtAppError';
+import { roomMetadataAccessWhere } from '../../../modules/rooms/rooms.access';
 
 /**
  * Calendar export (.ics) for scheduled events.
@@ -31,29 +32,15 @@ const ROOM_URL_BASE = 'https://app.chathouse.com/r';
 
 export const calendarService = {
   async icsForRoom(callerId: string, roomId: string): Promise<string> {
-    const room = await prisma.room.findUnique({
-      where: { id: roomId },
+    const room = await prisma.room.findFirst({
+      where: {
+        AND: [{ id: roomId }, roomMetadataAccessWhere(callerId)],
+      },
       include: {
         host: { select: { displayName: true, username: true } },
       },
     });
     if (!room) throw extError('CLUB_REQ_NOT_FOUND', 'Event not found');
-
-    // Confidentiality gate: private/closed rooms only export to the host or
-    // a user who has RSVP'd. Mirrors followFanout's isPrivate/CLOSED guard so
-    // a .ics export cannot leak metadata (title, schedule, host) of rooms the
-    // caller has no access to (IDOR fix).
-    if (room.isPrivate || room.roomType === 'CLOSED') {
-      const isHost = room.hostId === callerId;
-      if (!isHost) {
-        const rsvp = await prisma.roomRsvp.findUnique({
-          where: { roomId_userId: { roomId, userId: callerId } },
-          select: { id: true },
-        });
-        // Surface as a 404 to avoid confirming the room's existence.
-        if (!rsvp) throw extError('CLUB_REQ_NOT_FOUND', 'Event not found');
-      }
-    }
 
     if (!room.scheduledFor) {
       throw extError('PAY_INVALID', 'Room is not a scheduled event');
@@ -63,17 +50,17 @@ export const calendarService = {
     const end = new Date(start.getTime() + DEFAULT_DURATION_MS);
     const now = new Date();
     const uid = `${room.id}@${ICS_UID_DOMAIN}`;
-    const summary = escapeIcs(`Chathouse — ${room.title}`);
+    const summary = escapeIcs(`ChatHouse — ${room.title}`);
     const description = escapeIcs(
       room.description ??
-        `Live audio room hosted by ${room.host.displayName ?? room.host.username ?? 'a Chathouse user'}.`,
+        `Live audio room hosted by ${room.host.displayName ?? room.host.username ?? 'a ChatHouse user'}.`,
     );
     const url = `${ROOM_URL_BASE}/${room.id}`;
 
     const lines = [
       'BEGIN:VCALENDAR',
       'VERSION:2.0',
-      'PRODID:-//Chathouse//Event Export//EN',
+      'PRODID:-//ChatHouse//Event Export//EN',
       'CALSCALE:GREGORIAN',
       'METHOD:PUBLISH',
       'BEGIN:VEVENT',

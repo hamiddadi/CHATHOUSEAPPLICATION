@@ -1,10 +1,10 @@
 import React, { memo } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import MaterialIcons from '@react-native-vector-icons/material-icons';
 import Animated from 'react-native-reanimated';
 import { useTranslation } from 'react-i18next';
 import { useAnimatedPress } from '../../../../../shared/hooks/useAnimatedPress';
-import { colors, spacing } from '../../../../../shared/constants/theme';
+import { colors, palette, spacing } from '../../../../../shared/constants/theme';
 
 const ACTION_BAR_ICON_SIZE = 18;
 
@@ -17,6 +17,7 @@ interface RoomActionBarProps {
   /** Mic button only renders for users with publishing rights. */
   viewerCanSpeak: boolean;
   isMuted: boolean;
+  isMuteBusy: boolean;
   isHandRaised: boolean;
   onToggleMute: () => void;
   onToggleHand: () => void;
@@ -26,12 +27,23 @@ interface RoomActionBarProps {
 }
 
 const RoomActionBar: React.FC<RoomActionBarProps> = memo(
-  ({ viewerCanSpeak, isMuted, isHandRaised, onToggleMute, onToggleHand, onInvite, onLeave }) => {
+  ({
+    viewerCanSpeak,
+    isMuted,
+    isMuteBusy,
+    isHandRaised,
+    onToggleMute,
+    onToggleHand,
+    onInvite,
+    onLeave,
+  }) => {
     const { t } = useTranslation();
     const muteBtn = useAnimatedPress({ scaleTo: 0.96 });
     const raiseBtn = useAnimatedPress({ scaleTo: 0.96 });
     const inviteBtn = useAnimatedPress({ scaleTo: 0.96 });
     const leaveBtn = useAnimatedPress({ scaleTo: 0.96 });
+    const { width, fontScale } = useWindowDimensions();
+    const compact = width < 380 || fontScale > 1.3;
 
     return (
       <View style={styles.actionPill}>
@@ -39,6 +51,7 @@ const RoomActionBar: React.FC<RoomActionBarProps> = memo(
           <Animated.View style={muteBtn.animatedStyle}>
             <Pressable
               onPress={onToggleMute}
+              disabled={isMuteBusy}
               onPressIn={muteBtn.onPressIn}
               onPressOut={muteBtn.onPressOut}
               accessibilityRole="button"
@@ -47,18 +60,20 @@ const RoomActionBar: React.FC<RoomActionBarProps> = memo(
                   ? t('room.unmuteA11y', 'Unmute microphone')
                   : t('room.muteA11y', 'Mute microphone')
               }
-              accessibilityState={{ selected: isMuted }}
+              accessibilityState={{ selected: isMuted, disabled: isMuteBusy, busy: isMuteBusy }}
               hitSlop={ACTION_HIT_SLOP}
-              className="flex-row items-center gap-sm bg-danger rounded-pill py-sm px-xl"
+              className="min-w-[44px] min-h-[44px] flex-row items-center justify-center gap-sm bg-danger rounded-pill py-sm px-sm"
             >
               <MaterialIcons
                 name={isMuted ? 'mic-off' : 'mic'}
                 size={ACTION_BAR_ICON_SIZE}
-                color={colors.white}
+                color={palette.onError}
               />
-              <Text className="text-sm font-body-bold text-white">
-                {isMuted ? t('room.unmute') : t('room.mute')}
-              </Text>
+              {!compact ? (
+                <Text className="text-sm font-body-bold text-on-danger">
+                  {isMuted ? t('room.unmute') : t('room.mute')}
+                </Text>
+              ) : null}
             </Pressable>
           </Animated.View>
         ) : null}
@@ -76,12 +91,14 @@ const RoomActionBar: React.FC<RoomActionBarProps> = memo(
             }
             accessibilityState={{ selected: isHandRaised }}
             hitSlop={ACTION_HIT_SLOP}
-            className="flex-row items-center gap-sm bg-primary/20 rounded-pill py-sm px-lg"
+            className="min-w-[44px] min-h-[44px] flex-row items-center justify-center gap-sm bg-primary/20 rounded-pill py-sm px-sm"
           >
             <MaterialIcons name="pan-tool" size={ACTION_BAR_ICON_SIZE} color={colors.primary} />
-            <Text className="text-sm font-body-bold text-primary">
-              {isHandRaised ? t('room.lower') : t('room.raise')}
-            </Text>
+            {!compact ? (
+              <Text className="text-sm font-body-bold text-primary">
+                {isHandRaised ? t('room.lower') : t('room.raise')}
+              </Text>
+            ) : null}
           </Pressable>
         </Animated.View>
 
@@ -93,10 +110,12 @@ const RoomActionBar: React.FC<RoomActionBarProps> = memo(
             accessibilityRole="button"
             accessibilityLabel={t('room.invite')}
             hitSlop={ACTION_HIT_SLOP}
-            className="flex-row items-center gap-sm bg-overlay-white-5 rounded-pill py-sm px-lg"
+            className="min-w-[44px] min-h-[44px] flex-row items-center justify-center gap-sm bg-overlay-white-5 rounded-pill py-sm px-sm"
           >
             <MaterialIcons name="person-add" size={ACTION_BAR_ICON_SIZE} color={colors.primary} />
-            <Text className="text-sm font-body-bold text-primary">{t('room.invite')}</Text>
+            {!compact ? (
+              <Text className="text-sm font-body-bold text-primary">{t('room.invite')}</Text>
+            ) : null}
           </Pressable>
         </Animated.View>
 
@@ -108,10 +127,16 @@ const RoomActionBar: React.FC<RoomActionBarProps> = memo(
             accessibilityRole="button"
             accessibilityLabel={t('room.leaveQuietly')}
             hitSlop={ACTION_HIT_SLOP}
-            className="flex-row items-center gap-sm border border-overlay-white-20 rounded-pill py-sm px-xl"
+            className="min-w-[44px] min-h-[44px] flex-row items-center justify-center gap-sm border border-overlay-white-20 rounded-pill py-sm px-sm"
           >
             <MaterialIcons name="logout" size={ACTION_BAR_ICON_SIZE} color={colors.danger} />
-            <Text className="text-sm font-body-bold text-white">{t('room.leaveQuietly')}</Text>
+            {/* Visible label is the SHORT "Quitter"/"Leave" so the 3- and 4-button
+                bar fits on one row without clipping the edge buttons; the full
+                "Quitter discrètement" / "Leave quietly" stays as the a11y label
+                above so intent is preserved for screen readers. */}
+            {!compact ? (
+              <Text className="text-sm font-body-bold text-white">{t('room.leave')}</Text>
+            ) : null}
           </Pressable>
         </Animated.View>
       </View>
@@ -124,12 +149,13 @@ const styles = StyleSheet.create({
   actionPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.sm,
+    gap: spacing.xs,
     backgroundColor: 'rgba(12,17,46,0.9)',
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: 'rgba(255,255,255,0.1)',
     borderRadius: 9999,
     padding: spacing.xs,
+    maxWidth: '100%',
   },
 });
 

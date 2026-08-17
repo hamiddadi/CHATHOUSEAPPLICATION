@@ -1,5 +1,6 @@
 import { prisma } from '../../config/database';
 import { getBlockedIdSet } from '../social/blocks';
+import { discoverableRoomWhere } from '../rooms/rooms.access';
 
 /**
  * "Explore" aggregates popular content for the home discovery feed. Each
@@ -14,12 +15,18 @@ const EXPLORE_CLUBS = 20;
 const EXPLORE_USERS = 20;
 const ACTIVE_USER_WINDOW_MS = 14 * 24 * 60 * 60 * 1000; // 14 days
 
-const trendingRooms = async () => {
+const trendingRooms = async (viewerId: string) => {
   const rooms = await prisma.room.findMany({
-    where: { isLive: true, isPrivate: false, endedAt: null },
+    where: {
+      AND: [discoverableRoomWhere(viewerId)],
+      isLive: true,
+      endedAt: null,
+    },
     include: {
       host: { select: { id: true, username: true, displayName: true, avatarUrl: true } },
-      _count: { select: { participants: { where: { leftAt: null } } } },
+      _count: {
+        select: { participants: { where: { leftAt: null, user: { deletedAt: null } } } },
+      },
     },
     // Most-populated live rooms first; break ties with "newest started".
     orderBy: [{ participants: { _count: 'desc' } }, { createdAt: 'desc' }],
@@ -51,12 +58,21 @@ const trendingClubs = async (viewerId: string) => {
   });
   const interests = new Set((viewer?.interests ?? []).map(i => i.toLowerCase()));
   const pool = await prisma.club.findMany({
-    where: { privacy: 'OPEN' },
+    where: {
+      privacy: 'OPEN',
+      owner: {
+        deletedAt: null,
+        blocksCreated: { none: { blockedId: viewerId } },
+        blocksReceived: { none: { blockerId: viewerId } },
+      },
+    },
     include: {
       _count: {
         select: {
-          members: true,
-          rooms: { where: { isLive: true, endedAt: null } },
+          members: { where: { user: { deletedAt: null } } },
+          rooms: {
+            where: { isLive: true, endedAt: null, host: { deletedAt: null } },
+          },
         },
       },
     },
@@ -99,6 +115,7 @@ const featuredUsers = async (viewerId: string) => {
   const users = await prisma.user.findMany({
     where: {
       id: { notIn: [viewerId, ...blocked] },
+      deletedAt: null,
       OR: [{ isOnline: true }, { lastSeenAt: { gte: since } }],
     },
     select: {
@@ -108,9 +125,9 @@ const featuredUsers = async (viewerId: string) => {
       avatarUrl: true,
       bio: true,
       isOnline: true,
-      _count: { select: { followers: true } },
+      followerCount: true,
     },
-    orderBy: [{ followers: { _count: 'desc' } }, { lastSeenAt: 'desc' }],
+    orderBy: [{ followerCount: 'desc' }, { lastSeenAt: 'desc' }],
     take: EXPLORE_USERS,
   });
   return users.map(u => ({
@@ -120,14 +137,14 @@ const featuredUsers = async (viewerId: string) => {
     avatarUrl: u.avatarUrl,
     bio: u.bio,
     isOnline: u.isOnline,
-    followersCount: u._count.followers,
+    followersCount: u.followerCount,
   }));
 };
 
 export const exploreService = {
   async feed(viewerId: string) {
     const [rooms, clubs, users] = await Promise.all([
-      trendingRooms(),
+      trendingRooms(viewerId),
       trendingClubs(viewerId),
       featuredUsers(viewerId),
     ]);

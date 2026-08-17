@@ -1,8 +1,6 @@
 import React, { memo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import { spacing } from '../../../../../shared/constants/theme';
-
-const GLASS_BG = 'rgba(255,255,255,0.05)';
+import { colors, spacing } from '../../../../../shared/constants/theme';
 
 interface DateSeparatorProps {
   label: string;
@@ -20,7 +18,7 @@ DateSeparator.displayName = 'DateSeparator';
 const styles = StyleSheet.create({
   dateSeparator: {
     alignSelf: 'center',
-    backgroundColor: GLASS_BG,
+    backgroundColor: colors.glass,
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.xxs,
     borderRadius: 9999,

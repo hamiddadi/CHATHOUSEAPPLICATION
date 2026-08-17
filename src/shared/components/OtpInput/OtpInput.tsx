@@ -11,6 +11,7 @@ import { colors, radii, spacing, withAlpha } from '../../constants/theme';
 const OTP_LENGTH = 6;
 
 interface OtpInputProps {
+  testID?: string;
   value: string;
   onChange: (code: string) => void;
   error?: string;
@@ -32,6 +33,7 @@ interface OtpInputProps {
  */
 export const OtpInput: React.FC<OtpInputProps> = memo(
   ({
+    testID,
     value,
     onChange,
     error,
@@ -97,6 +99,7 @@ export const OtpInput: React.FC<OtpInputProps> = memo(
           })}
         </Pressable>
         <TextInput
+          testID={testID}
           ref={inputRef}
           value={value}
           onChangeText={handleChange}
@@ -121,17 +124,20 @@ OtpInput.displayName = 'OtpInput';
 
 export { OtpInput as default };
 
-const CELL_SIZE = 48;
+const CELL_MAX_WIDTH = 48;
 
 const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     justifyContent: 'center',
     gap: spacing.sm,
+    width: '100%',
   },
   cell: {
-    width: CELL_SIZE,
-    height: CELL_SIZE + 8,
+    flexGrow: 1,
+    flexBasis: 0,
+    maxWidth: CELL_MAX_WIDTH,
+    height: 56,
     borderRadius: radii.md,
     borderWidth: 1.5,
     borderColor: colors.outline,

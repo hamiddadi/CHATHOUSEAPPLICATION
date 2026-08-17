@@ -1,6 +1,7 @@
-import React, { useCallback, useRef, useState } from 'react';
-import { Alert, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
-import Clipboard from '@react-native-clipboard/clipboard';
+import React, { useCallback, useState } from 'react';
+import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
+import NativeShare from 'react-native-share';
+import { CachesDirectoryPath, unlink, writeFile } from '@dr.pogodin/react-native-fs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { Button } from '../../../shared/components/Button';
@@ -13,30 +14,29 @@ export const DataExportScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const [busy, setBusy] = useState(false);
   const [lastBytes, setLastBytes] = useState<number | null>(null);
-  const [copied, setCopied] = useState(false);
-  // Hold the archive in component memory only — never auto-persisted to the
-  // system clipboard. Copying is an explicit, opt-in action below.
-  const archiveRef = useRef<string | null>(null);
 
-  // Privacy: the export contains PII and message content. We hand it off via
-  // the OS Share sheet (which carries the FULL archive) instead of silently
-  // copying it to the system clipboard, where any other app can read it. A
-  // dedicated file export (expo-sharing / expo-file-system) would be ideal but
-  // those modules aren't installed in this build.
-  // TODO(audit): add expo-sharing + expo-file-system to write the archive to a
-  // private file and share it via the native file Share sheet.
+  // The archive contains PII and message content. Keep it in the app's private
+  // cache only long enough to share a real JSON attachment, then delete it on
+  // success, cancellation and failure. It never touches the clipboard.
   const handleExport = useCallback(async () => {
     setBusy(true);
-    setCopied(false);
+    setLastBytes(null);
+    let temporaryPath: string | null = null;
     try {
       const json = await privacyService.exportMyData();
-      archiveRef.current = json;
-      // Share sheet carries the full archive (not truncated) — no clipboard.
-      const result = await Share.share({ message: json, title: t('privacy.export.title') });
-      // Only report success if the archive was actually shared. Dismissing the
-      // sheet (Share.dismissedAction) means nothing left the device, so we must
-      // not show the "exported" confirmation + copy affordances.
-      if (result.action === Share.sharedAction) {
+      const filename = `chathouse-export-${new Date().toISOString().slice(0, 10)}.json`;
+      temporaryPath = `${CachesDirectoryPath}/${filename}`;
+      await writeFile(temporaryPath, json, 'utf8');
+      const result = await NativeShare.open({
+        title: t('privacy.export.title'),
+        subject: t('privacy.export.title'),
+        url: `file://${temporaryPath}`,
+        type: 'application/json',
+        filename,
+        failOnCancel: false,
+        useInternalStorage: true,
+      });
+      if (result.success && !result.dismissedAction) {
         setLastBytes(json.length);
       }
     } catch (e) {
@@ -45,33 +45,12 @@ export const DataExportScreen: React.FC = () => {
         errorMessage(e, t('privacy.export.errorExportBody')),
       );
     } finally {
+      if (temporaryPath) {
+        await unlink(temporaryPath).catch(() => undefined);
+      }
       setBusy(false);
     }
   }, [t]);
-
-  // Explicit opt-in copy. Users who really want the clipboard can choose it,
-  // and we surface a one-tap way to wipe it again afterwards.
-  const handleCopy = useCallback(async () => {
-    if (!archiveRef.current) return;
-    try {
-      await Clipboard.setString(archiveRef.current);
-      setCopied(true);
-    } catch (e) {
-      Alert.alert(
-        t('privacy.export.errorExportTitle'),
-        errorMessage(e, t('privacy.export.errorCopyBody')),
-      );
-    }
-  }, [t]);
-
-  const handleClearClipboard = useCallback(async () => {
-    try {
-      await Clipboard.setString('');
-    } catch {
-      /* best-effort */
-    }
-    setCopied(false);
-  }, []);
 
   return (
     <ScrollView
@@ -101,29 +80,9 @@ export const DataExportScreen: React.FC = () => {
       />
 
       {lastBytes !== null ? (
-        <>
-          <Text style={styles.feedback} accessibilityLiveRegion="polite">
-            {t('privacy.export.success', { size: (lastBytes / 1024).toFixed(1) })}
-          </Text>
-          <Text style={styles.muted}>{t('privacy.export.warning')}</Text>
-          <Button
-            label={t('privacy.export.buttonCopy')}
-            variant="ghost"
-            size="md"
-            fullWidth
-            onPress={handleCopy}
-            accessibilityHint={t('privacy.export.warning')}
-          />
-          {copied ? (
-            <Button
-              label={t('privacy.export.buttonClear')}
-              variant="outline"
-              size="md"
-              fullWidth
-              onPress={handleClearClipboard}
-            />
-          ) : null}
-        </>
+        <Text style={styles.feedback} accessibilityLiveRegion="polite">
+          {t('privacy.export.success', { size: (lastBytes / 1024).toFixed(1) })}
+        </Text>
       ) : null}
     </ScrollView>
   );

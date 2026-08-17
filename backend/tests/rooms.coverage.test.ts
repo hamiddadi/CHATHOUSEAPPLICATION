@@ -128,28 +128,39 @@ describe('Rooms — audit coverage gaps', () => {
 
   // 3.3 — List only returns live, non-private rooms
   it('GET /api/rooms excludes ended and private rooms', async () => {
-    const host = await register(app);
-    createdUserIds.push(host.id);
+    // The product enforces one live room per host. Use one host per room so
+    // this visibility test does not bypass or contradict that invariant.
+    const [liveHost, privateHost, endingHost] = await Promise.all([
+      register(app),
+      register(app),
+      register(app),
+    ]);
+    createdUserIds.push(liveHost.id, privateHost.id, endingHost.id);
 
     const live = await request(app)
       .post('/api/rooms')
-      .set('Authorization', `Bearer ${host.token}`)
+      .set('Authorization', `Bearer ${liveHost.token}`)
       .send({ title: 'Live public' });
     const privateRoom = await request(app)
       .post('/api/rooms')
-      .set('Authorization', `Bearer ${host.token}`)
+      .set('Authorization', `Bearer ${privateHost.token}`)
       .send({ title: 'Private', isPrivate: true });
     const ending = await request(app)
       .post('/api/rooms')
-      .set('Authorization', `Bearer ${host.token}`)
+      .set('Authorization', `Bearer ${endingHost.token}`)
       .send({ title: 'Ended' });
+    expect(live.status).toBe(201);
+    expect(privateRoom.status).toBe(201);
+    expect(ending.status).toBe(201);
     await request(app)
       .delete(`/api/rooms/${ending.body.data.id}`)
-      .set('Authorization', `Bearer ${host.token}`);
+      .set('Authorization', `Bearer ${endingHost.token}`);
 
     createdRoomIds.push(live.body.data.id, privateRoom.body.data.id, ending.body.data.id);
 
-    const list = await request(app).get('/api/rooms').set('Authorization', `Bearer ${host.token}`);
+    const list = await request(app)
+      .get('/api/rooms')
+      .set('Authorization', `Bearer ${liveHost.token}`);
     const ids: string[] = list.body.data.map((r: { id: string }) => r.id);
     expect(ids).toContain(live.body.data.id);
     expect(ids).not.toContain(privateRoom.body.data.id);

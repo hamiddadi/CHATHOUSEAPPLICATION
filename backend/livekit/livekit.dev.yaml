@@ -4,11 +4,16 @@
 # can bind the host ports. 41100-41199 sits just above mediasoup's 40000-40499,
 # so the two engines never collide. Key/secret come from LIVEKIT_KEYS env var.
 port: 7880
+room:
+  auto_create: false
 rtc:
   tcp_port: 7881
   port_range_start: 41100
   port_range_end: 41199
-  use_external_ip: true
+  # node_ip is deliberately supplied by docker-compose's --node-ip flag from
+  # LAN_IP. Keeping an old hotspot address here made every ICE candidate stale
+  # when the PC changed network or tests switched to adb reverse.
+  use_external_ip: false
 logging:
   level: info
   json: true

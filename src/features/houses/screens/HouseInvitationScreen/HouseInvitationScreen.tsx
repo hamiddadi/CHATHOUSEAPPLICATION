@@ -28,7 +28,7 @@ export const HouseInvitationScreen: React.FC = () => {
 
   const { houseId, inviteToken } = route.params;
 
-  const { data: house, isLoading, isError } = useHouse(houseId);
+  const { data: house, isLoading, isError } = useHouse(houseId, inviteToken);
   const accept = useAcceptInvitation();
 
   const houseName = house?.name ?? t('houses.invitation.defaultName', 'this house');

@@ -15,6 +15,8 @@ const { prisma } = require('../src/config/database') as typeof import('../src/co
 const { redis, connectRedis, disconnectRedis } =
   require('../src/config/redis') as typeof import('../src/config/redis');
 const { logger } = require('../src/config/logger') as typeof import('../src/config/logger');
+const smsSender = require('../src/config/smsSender') as typeof import('../src/config/smsSender');
+const { verifyAccessToken } = require('../src/utils/jwt') as typeof import('../src/utils/jwt');
 /* eslint-enable @typescript-eslint/no-require-imports */
 
 // Spy logger to capture the raw OTP (surfaced in dev only). Jest isolates
@@ -148,7 +150,8 @@ describe('OTP flow — send / verify / replay / expired / rate limit', () => {
     });
     expect(firstCode).not.toBe(secondCode);
 
-    // The first code must now be invalid (isUsed=true from the re-send).
+    // Verification is pinned to the newest record, so an older code cannot
+    // become valid again even though it remains available for delivery rollback.
     const replay = await request(app)
       .post('/api/auth/verify-otp')
       .send({ phoneNumber, code: firstCode });
@@ -160,5 +163,133 @@ describe('OTP flow — send / verify / replay / expired / rate limit', () => {
       .send({ phoneNumber, code: secondCode });
     expect(ok.status).toBe(200);
     createdUserIds.push(ok.body.data.user.id);
+  });
+
+  it('keeps the previous code usable and refunds the quota when SMS delivery fails', async () => {
+    const phoneNumber = randomPhone();
+    const firstCode = await captureOtp(async () => {
+      const sent = await request(app).post('/api/auth/send-otp').send({ phoneNumber });
+      expect(sent.status).toBe(200);
+    });
+
+    const sendSpy = jest
+      .spyOn(smsSender, 'sendSms')
+      .mockRejectedValueOnce(new Error('simulated Twilio outage'));
+    try {
+      const failed = await request(app).post('/api/auth/send-otp').send({ phoneNumber });
+      expect(failed.status).toBe(500);
+    } finally {
+      sendSpy.mockRestore();
+    }
+
+    expect(await redis.get(`otp:rate:${phoneNumber}`)).toBe('1');
+    expect(
+      await prisma.otpCode.count({
+        where: { phoneNumber, isUsed: false },
+      }),
+    ).toBe(1);
+
+    const verify = await request(app)
+      .post('/api/auth/verify-otp')
+      .send({ phoneNumber, code: firstCode });
+    expect(verify.status).toBe(200);
+    createdUserIds.push(verify.body.data.user.id);
+  });
+
+  it('issues a recovery-only OTP session without mutating a soft-deleted account', async () => {
+    const phoneNumber = randomPhone();
+    const deletedAt = new Date();
+    const user = await prisma.user.create({
+      data: { phoneNumber, deletedAt },
+      select: { id: true },
+    });
+    createdUserIds.push(user.id);
+
+    const code = await captureOtp(async () => {
+      const sent = await request(app)
+        .post('/api/auth/send-otp')
+        .send({ phoneNumber, ageConfirmed: true });
+      expect(sent.status).toBe(200);
+    });
+    const verify = await request(app)
+      .post('/api/auth/verify-otp')
+      .send({ phoneNumber, code, ageConfirmed: true });
+
+    expect(verify.status).toBe(200);
+    expect(verify.body.data).toMatchObject({
+      isNewUser: false,
+      session: { scope: 'account_recovery' },
+      user: { id: user.id, accountState: 'PENDING_DELETION' },
+    });
+    const recoveryAccess = verify.body.data.session.accessToken as string;
+    expect(verifyAccessToken(recoveryAccess).scope).toBe('account_recovery');
+
+    const unchanged = await prisma.user.findUniqueOrThrow({
+      where: { id: user.id },
+      select: {
+        deletedAt: true,
+        ageConfirmedAt: true,
+        termsAcceptedVersion: true,
+        privacyNoticeAcknowledgedVersion: true,
+      },
+    });
+    expect(unchanged.deletedAt?.getTime()).toBe(deletedAt.getTime());
+    expect(unchanged).toMatchObject({
+      ageConfirmedAt: null,
+      termsAcceptedVersion: null,
+      privacyNoticeAcknowledgedVersion: null,
+    });
+
+    const denied = await request(app)
+      .patch('/api/users/me/visibility')
+      .set('Authorization', `Bearer ${recoveryAccess}`)
+      .send({ isVisible: true });
+    expect(denied.status).toBe(403);
+    expect(denied.body.error.code).toBe('ACCOUNT_002');
+  });
+
+  it('does not mutate a suspended account after a valid OTP is proven', async () => {
+    const phoneNumber = randomPhone();
+    const user = await prisma.user.create({
+      data: {
+        phoneNumber,
+        suspendedUntil: new Date(Date.now() + 60 * 60_000),
+        suspensionReason: 'OTP write guard fixture',
+      },
+      select: { id: true },
+    });
+    createdUserIds.push(user.id);
+    const code = await captureOtp(async () => {
+      const sent = await request(app)
+        .post('/api/auth/send-otp')
+        .send({ phoneNumber, ageConfirmed: true });
+      expect(sent.status).toBe(200);
+    });
+
+    const verify = await request(app)
+      .post('/api/auth/verify-otp')
+      .send({ phoneNumber, code, ageConfirmed: true });
+    expect(verify.status).toBe(403);
+    expect(verify.body.error.code).toBe('AUTH_007');
+    await expect(
+      prisma.user.findUniqueOrThrow({
+        where: { id: user.id },
+        select: {
+          ageConfirmedAt: true,
+          termsAcceptedVersion: true,
+          termsAcceptedAt: true,
+          privacyNoticeAcknowledgedVersion: true,
+          privacyNoticeAcknowledgedAt: true,
+          legalAcceptanceLocale: true,
+        },
+      }),
+    ).resolves.toEqual({
+      ageConfirmedAt: null,
+      termsAcceptedVersion: null,
+      termsAcceptedAt: null,
+      privacyNoticeAcknowledgedVersion: null,
+      privacyNoticeAcknowledgedAt: null,
+      legalAcceptanceLocale: null,
+    });
   });
 });

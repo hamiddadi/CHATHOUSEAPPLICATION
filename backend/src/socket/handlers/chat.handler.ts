@@ -3,6 +3,7 @@ import { chatService } from '../../modules/chat/chat.service';
 import { logger } from '../../config/logger';
 import { userChannel } from '../channels';
 import { getUserId } from '../socket.middleware';
+import { assertCurrentLegalAcceptance } from '../../modules/auth/legal-acceptance';
 
 interface SendPayload {
   receiverId: string;
@@ -27,6 +28,7 @@ export const registerChatHandlers = (io: Server, socket: Socket): void => {
 
   socket.on('chat:send', async (payload: SendPayload, ack?: (ok: boolean) => void) => {
     try {
+      await assertCurrentLegalAcceptance(me());
       // chatService.send now emits `chat:message` to both parties itself
       // (so the REST path is covered too) — don't double-emit here.
       await chatService.send(me(), payload.receiverId, { content: payload.content });

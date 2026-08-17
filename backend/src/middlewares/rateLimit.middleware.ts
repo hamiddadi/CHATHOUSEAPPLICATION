@@ -1,8 +1,9 @@
 import { rateLimit, type Store } from 'express-rate-limit';
-import { RedisStore, type RedisReply } from 'rate-limit-redis';
+import type { RedisReply } from 'rate-limit-redis';
 import { redis } from '../config/redis';
 import { env } from '../config/env';
 import { ERROR_CODES } from './error.middleware';
+import { ConnectedRedisStore } from './connectedRedisStore';
 
 const baseMessage = {
   success: false,
@@ -15,7 +16,9 @@ const baseMessage = {
  * per-process — with N instances an attacker gets N× the quota, and every
  * redeploy/restart resets the counters, defeating the brute-force (login) and
  * cost-control (SMS/email/tip) ceilings. The shared node-redis client is
- * connected at boot by connectRedis(); `sendCommand` only runs per-request.
+ * connected at boot by connectRedis(). ConnectedRedisStore defers the
+ * rate-limit-redis constructor (which eagerly loads Lua scripts) until the
+ * first request, after Redis is ready.
  *
  * Skipped in the `test` env: a single-process test run doesn't need a
  * distributed store, and a persistent Redis store would leak counters across
@@ -24,8 +27,9 @@ const baseMessage = {
  */
 const makeStore = (prefix: string): Store | undefined => {
   if (env.NODE_ENV === 'test') return undefined; // default MemoryStore
-  return new RedisStore({
+  return new ConnectedRedisStore({
     prefix,
+    isReady: () => redis.isReady,
     sendCommand: (...args: string[]): Promise<RedisReply> =>
       redis.sendCommand(args) as Promise<RedisReply>,
   });
@@ -33,13 +37,19 @@ const makeStore = (prefix: string): Store | undefined => {
 
 // All limiters share the same window/header/message policy; only `max`,
 // `skip`, `skipSuccessfulRequests` and the store prefix vary per limiter.
-const makeLimiter = (prefix: string, opts: Partial<Parameters<typeof rateLimit>[0]>) =>
+// Export the factory so tests can use an isolated MemoryStore-backed instance
+// instead of consuming a process-wide route quota and becoming order-dependent.
+export const createRateLimiter = (prefix: string, opts: Partial<Parameters<typeof rateLimit>[0]>) =>
   rateLimit({
     windowMs: env.RATE_LIMIT_WINDOW_MS,
     standardHeaders: true,
     legacyHeaders: false,
     message: baseMessage,
     store: makeStore(prefix),
+    // Redis backs security and external-cost ceilings. Letting requests
+    // through while its shared counters are unavailable would silently
+    // multiply/reset those quotas, so preserve the existing fail-closed policy.
+    passOnStoreError: false,
     ...opts,
   });
 
@@ -47,7 +57,7 @@ const makeLimiter = (prefix: string, opts: Partial<Parameters<typeof rateLimit>[
  * Global limiter — blanket protection for every `/api/*` route.
  * Tune per-route via `authLimiter` for high-risk endpoints.
  */
-export const globalLimiter = makeLimiter('rl:global:', {
+export const globalLimiter = createRateLimiter('rl:global:', {
   max: env.RATE_LIMIT_MAX,
   // Exempt /auth/dev-login in non-prod — it's a QA shortcut and rapid
   // reloads during Expo development shouldn't trip the limiter.
@@ -59,7 +69,7 @@ export const globalLimiter = makeLimiter('rl:global:', {
  * without hurting the normal user flow. `skipSuccessfulRequests` is fine
  * here because a *successful* login is not abuse.
  */
-export const authLimiter = makeLimiter('rl:auth:', {
+export const authLimiter = createRateLimiter('rl:auth:', {
   max: env.AUTH_RATE_LIMIT_MAX,
   skipSuccessfulRequests: true,
 });
@@ -71,6 +81,36 @@ export const authLimiter = makeLimiter('rl:auth:', {
  * the thing we must cap, otherwise an attacker rotating phone numbers can
  * run up the Twilio/SMTP bill with zero HTTP throttling.
  */
-export const sendLimiter = makeLimiter('rl:send:', {
+export const sendLimiter = createRateLimiter('rl:send:', {
   max: env.AUTH_RATE_LIMIT_MAX,
+});
+
+/**
+ * Media uploads are authenticated before their large JSON body is parsed.
+ * A per-user ceiling protects memory, object-storage cost and abuse while
+ * still allowing normal avatar retries and batches of voice notes.
+ */
+export const uploadLimiter = createRateLimiter('rl:upload:', {
+  max: 10,
+  keyGenerator: req => req.userId ?? 'unauthenticated',
+});
+
+/**
+ * Contact discovery accepts a large address-book batch. A very small
+ * per-account request ceiling permits normal initial sync/retries while
+ * making phone-space enumeration materially more expensive.
+ */
+export const contactMatchLimiter = createRateLimiter('rl:contacts:', {
+  max: 3,
+  keyGenerator: req => req.userId ?? 'unauthenticated',
+});
+
+/**
+ * GDPR exports scan every user-owned domain and can generate a large response.
+ * Keep this quota account-scoped so changing IP addresses cannot multiply the
+ * database and memory cost.
+ */
+export const dataExportLimiter = createRateLimiter('rl:data-export:', {
+  max: 2,
+  keyGenerator: req => req.userId ?? 'unauthenticated',
 });

@@ -6,7 +6,16 @@ import {
   type InfiniteData,
   type QueryClient,
 } from '@tanstack/react-query';
-import { groupService, type GroupConversation, type GroupMessage } from '../services/groupService';
+import {
+  groupService,
+  type GroupConversation,
+  type GroupConversationPage,
+  type GroupMessage,
+  type GroupMessagePage,
+} from '../services/groupService';
+import type { ContentReportReason } from '../../../shared/types/moderation';
+import { createIdempotencyKey } from '../../../shared/utils/idempotency';
+import { retryTransientMutation } from '../../../shared/services/api/retryPolicy';
 
 export const groupKeys = {
   all: ['groups'] as const,
@@ -16,16 +25,23 @@ export const groupKeys = {
 };
 
 // Matches the backend default (groups.schema listGroupMessagesSchema limit=30).
-// A short page (< PAGE_SIZE) means the start of the history was reached.
+// Pagination ends only when the backend returns `nextCursor: null`.
 export const GROUP_MESSAGES_PAGE_SIZE = 30;
+export const GROUPS_PAGE_SIZE = 30;
 
 /** Cache shape of a paginated thread: pages of ascending messages, page 0 = newest. */
-type GroupMessagesCache = InfiniteData<GroupMessage[], string | undefined>;
+type GroupMessagesCache = InfiniteData<GroupMessagePage, string | undefined>;
+type GroupConversationsCache = InfiniteData<GroupConversationPage, string | undefined>;
 
 export const useGroups = () =>
-  useQuery<GroupConversation[]>({
+  useInfiniteQuery({
     queryKey: groupKeys.list(),
-    queryFn: () => groupService.list(),
+    queryFn: ({ pageParam }: { pageParam: string | undefined }) =>
+      groupService.list({ cursor: pageParam, limit: GROUPS_PAGE_SIZE }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (lastPage: GroupConversationPage) =>
+      lastPage.hasMore ? (lastPage.nextCursor ?? undefined) : undefined,
+    select: (data: GroupConversationsCache) => data.pages.flatMap(page => page.items),
   });
 
 export const useGroup = (id: string) =>
@@ -37,9 +53,9 @@ export const useGroup = (id: string) =>
 
 /**
  * Cursor-paginated group thread history. Page 0 holds the latest messages;
- * each `fetchNextPage` loads strictly OLDER ones via the `before` cursor (the
- * ISO `createdAt` of the oldest message loaded so far). `select` flattens the
- * pages back into one chronological GroupMessage[].
+ * each `fetchNextPage` loads strictly OLDER ones via the opaque `nextCursor`
+ * returned by the previous page. `select` flattens the pages back into one
+ * chronological GroupMessage[].
  */
 export const useGroupMessages = (id: string) =>
   useInfiniteQuery({
@@ -47,11 +63,9 @@ export const useGroupMessages = (id: string) =>
     queryFn: ({ pageParam }: { pageParam: string | undefined }) =>
       groupService.messages(id, { before: pageParam, limit: GROUP_MESSAGES_PAGE_SIZE }),
     initialPageParam: undefined as string | undefined,
-    // A full page means older history may remain; its first (oldest) message
-    // becomes the next cursor. A short page ends the scroll.
-    getNextPageParam: (lastPage: GroupMessage[]) =>
-      lastPage.length === GROUP_MESSAGES_PAGE_SIZE ? lastPage[0]?.createdAt : undefined,
-    select: (data: GroupMessagesCache) => [...data.pages].reverse().flat(),
+    // The backend owns the total-order boundary and explicitly signals the end.
+    getNextPageParam: (lastPage: GroupMessagePage) => lastPage.nextCursor ?? undefined,
+    select: (data: GroupMessagesCache) => [...data.pages].reverse().flatMap(page => page.items),
     enabled: id.length > 0,
   });
 
@@ -60,51 +74,126 @@ export const useGroupMessages = (id: string) =>
 const appendToGroupThread = (qc: QueryClient, message: GroupMessage): void => {
   qc.setQueryData<GroupMessagesCache>(groupKeys.messages(message.conversationId), prev =>
     prev
-      ? { ...prev, pages: prev.pages.map((page, i) => (i === 0 ? [...page, message] : page)) }
-      : { pages: [[message]], pageParams: [undefined] },
+      ? prev.pages.some(page => page.items.some(existing => existing.id === message.id))
+        ? prev
+        : {
+            ...prev,
+            pages: prev.pages.map((page, i) =>
+              i === 0 ? { ...page, items: [...page.items, message] } : page,
+            ),
+          }
+      : { pages: [{ items: [message], nextCursor: null }], pageParams: [undefined] },
   );
 };
 
 export const useSendGroupMessage = () => {
   const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({ conversationId, text }: { conversationId: string; text: string }) =>
-      groupService.send(conversationId, text),
+  const mutation = useMutation({
+    mutationFn: ({
+      conversationId,
+      text,
+      idempotencyKey,
+    }: {
+      conversationId: string;
+      text: string;
+      idempotencyKey: string;
+    }) => groupService.send(conversationId, text, idempotencyKey),
+    retry: retryTransientMutation,
     onSuccess: message => {
       appendToGroupThread(qc, message);
       void qc.invalidateQueries({ queryKey: groupKeys.list() });
     },
   });
+  type Variables = { conversationId: string; text: string };
+  const withKey = (variables: Variables) => ({
+    ...variables,
+    idempotencyKey: createIdempotencyKey(),
+  });
+  return {
+    ...mutation,
+    mutate: (variables: Variables, options?: Parameters<typeof mutation.mutate>[1]) =>
+      mutation.mutate(withKey(variables), options),
+    mutateAsync: (variables: Variables, options?: Parameters<typeof mutation.mutateAsync>[1]) =>
+      mutation.mutateAsync(withKey(variables), options),
+  };
 };
 
 export const useSendGroupVoice = () => {
   const qc = useQueryClient();
-  return useMutation({
+  const mutation = useMutation({
     mutationFn: ({
       conversationId,
       audioUrl,
       durationMs,
+      idempotencyKey,
     }: {
       conversationId: string;
       audioUrl: string;
       durationMs: number;
-    }) => groupService.sendVoice(conversationId, audioUrl, durationMs),
+      idempotencyKey: string;
+    }) => groupService.sendVoice(conversationId, audioUrl, durationMs, idempotencyKey),
+    retry: retryTransientMutation,
     onSuccess: message => {
       appendToGroupThread(qc, message);
       void qc.invalidateQueries({ queryKey: groupKeys.list() });
     },
   });
+  type Variables = { conversationId: string; audioUrl: string; durationMs: number };
+  const withKey = (variables: Variables) => ({
+    ...variables,
+    idempotencyKey: createIdempotencyKey(),
+  });
+  return {
+    ...mutation,
+    mutate: (variables: Variables, options?: Parameters<typeof mutation.mutate>[1]) =>
+      mutation.mutate(withKey(variables), options),
+    mutateAsync: (variables: Variables, options?: Parameters<typeof mutation.mutateAsync>[1]) =>
+      mutation.mutateAsync(withKey(variables), options),
+  };
 };
+
+export const useReportGroupMessage = () =>
+  useMutation({
+    mutationFn: ({
+      conversationId,
+      messageId,
+      reason,
+    }: {
+      conversationId: string;
+      messageId: string;
+      reason: ContentReportReason;
+    }) => groupService.reportMessage(conversationId, messageId, reason),
+  });
 
 export const useCreateGroup = () => {
   const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({ memberIds, title }: { memberIds: string[]; title?: string }) =>
-      groupService.create(memberIds, title),
+  const mutation = useMutation({
+    mutationFn: ({
+      memberIds,
+      title,
+      idempotencyKey,
+    }: {
+      memberIds: string[];
+      title?: string;
+      idempotencyKey: string;
+    }) => groupService.create(memberIds, title, idempotencyKey),
+    retry: retryTransientMutation,
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: groupKeys.list() });
     },
   });
+  type Variables = { memberIds: string[]; title?: string };
+  const withKey = (variables: Variables) => ({
+    ...variables,
+    idempotencyKey: createIdempotencyKey(),
+  });
+  return {
+    ...mutation,
+    mutate: (variables: Variables, options?: Parameters<typeof mutation.mutate>[1]) =>
+      mutation.mutate(withKey(variables), options),
+    mutateAsync: (variables: Variables, options?: Parameters<typeof mutation.mutateAsync>[1]) =>
+      mutation.mutateAsync(withKey(variables), options),
+  };
 };
 
 export const useMarkGroupRead = () => {
@@ -138,11 +227,31 @@ export const useRenameGroup = () => {
 
 export const useAddGroupMembers = () => {
   const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({ conversationId, userIds }: { conversationId: string; userIds: string[] }) =>
-      groupService.addMembers(conversationId, userIds),
+  const mutation = useMutation({
+    mutationFn: ({
+      conversationId,
+      userIds,
+      idempotencyKey,
+    }: {
+      conversationId: string;
+      userIds: string[];
+      idempotencyKey: string;
+    }) => groupService.addMembers(conversationId, userIds, idempotencyKey),
+    retry: retryTransientMutation,
     onSuccess: (_g, { conversationId }) => invalidateGroup(qc, conversationId),
   });
+  type Variables = { conversationId: string; userIds: string[] };
+  const withKey = (variables: Variables) => ({
+    ...variables,
+    idempotencyKey: createIdempotencyKey(),
+  });
+  return {
+    ...mutation,
+    mutate: (variables: Variables, options?: Parameters<typeof mutation.mutate>[1]) =>
+      mutation.mutate(withKey(variables), options),
+    mutateAsync: (variables: Variables, options?: Parameters<typeof mutation.mutateAsync>[1]) =>
+      mutation.mutateAsync(withKey(variables), options),
+  };
 };
 
 export const useRemoveGroupMember = () => {

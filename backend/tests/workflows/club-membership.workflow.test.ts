@@ -178,4 +178,60 @@ describe('Workflow — adhésion club', () => {
     expect(mine?.username).not.toBe(joiner.id);
     expect(mine?.message).toBe('please let me in');
   });
+
+  it('clubreq SOCIAL : une seule approbation concurrente consomme la demande', async () => {
+    const owner = await registerUser(app);
+    const joiner = await registerUser(app);
+    createdUserIds.push(owner.id, joiner.id);
+    const clubId = await createClub(app, owner, 'SOCIAL');
+
+    await clubReqService.request(joiner.id, clubId, 'approve me once');
+    const outcomes = await Promise.allSettled([
+      clubReqService.approve(owner.id, clubId, joiner.id),
+      clubReqService.approve(owner.id, clubId, joiner.id),
+    ]);
+
+    expect(outcomes.filter(result => result.status === 'fulfilled')).toHaveLength(1);
+    expect(outcomes.filter(result => result.status === 'rejected')).toHaveLength(1);
+    expect(
+      await prisma.clubMember.count({
+        where: { clubId, userId: joiner.id },
+      }),
+    ).toBe(1);
+    expect((await prisma.club.findUniqueOrThrow({ where: { id: clubId } })).memberCount).toBe(2);
+    expect(
+      await prisma.notification.count({
+        where: {
+          userId: joiner.id,
+          type: 'CLUB_INVITE',
+          targetId: clubId,
+        },
+      }),
+    ).toBe(1);
+  });
+
+  it('clubreq SOCIAL : masque une demande soft-deleted puis la restaure pendant 30 jours', async () => {
+    const owner = await registerUser(app);
+    const joiner = await registerUser(app);
+    createdUserIds.push(owner.id, joiner.id);
+    const clubId = await createClub(app, owner, 'SOCIAL');
+
+    await clubReqService.request(joiner.id, clubId, 'retain during grace');
+    await prisma.user.update({
+      where: { id: joiner.id },
+      data: { deletedAt: new Date() },
+    });
+    expect((await clubReqService.list(owner.id, clubId)).map(item => item.userId)).not.toContain(
+      joiner.id,
+    );
+
+    await prisma.user.update({
+      where: { id: joiner.id },
+      data: { deletedAt: null },
+    });
+    expect((await clubReqService.list(owner.id, clubId)).map(item => item.userId)).toContain(
+      joiner.id,
+    );
+    await clubReqService.decline(owner.id, clubId, joiner.id);
+  });
 });

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NavigationProp } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -10,7 +10,6 @@ import { EmptyState } from '../../../../shared/components/EmptyState';
 import { layout, spacing } from '../../../../shared/constants/theme';
 import type { FollowerOnMap } from '../../../../shared/types/domain';
 import type { RootStackParamList } from '../../../../core/navigation/types';
-import { DEFAULT_MAP_CENTER } from '../../../../shared/mocks/followersOnMap.mock';
 import { useCurrentLocation } from '../../hooks/useCurrentLocation';
 import { useFollowersOnMap } from '../../hooks/useFollowersOnMap';
 import { useLocationBroadcast } from '../../hooks/useLocationBroadcast';
@@ -26,7 +25,8 @@ import { UserLocationPulse } from '../../components/UserLocationPulse';
 
 const HEADER_HEIGHT = 64;
 const SEARCH_BAR_TOP_OFFSET = HEADER_HEIGHT + 8;
-const MINI_CARD_BOTTOM_OFFSET = layout.tabBarHeight + layout.tabBarBottomOffset + spacing.xxxl;
+const TAB_BAR_CLEARANCE = layout.tabBarHeight + layout.tabBarBottomOffset;
+const MINI_CARD_BOTTOM_OFFSET = TAB_BAR_CLEARANCE + spacing.xxxl;
 // Extra lift applied to the floating controls when the mini-card is visible,
 // so they sit above the card instead of being covered by it.
 const MINI_CARD_LIFT = 120;
@@ -35,6 +35,12 @@ const MINI_CARD_LIFT = 120;
 const MARKER_TRACK_SETTLE_MS = 1500;
 // Default map zoom level used for auto-center / pin-press / recenter regions.
 const ZOOM_DELTA = 0.01;
+const DEFAULT_MAP_CENTER = {
+  latitude: 14.7167,
+  longitude: -17.4677,
+  latitudeDelta: 0.05,
+  longitudeDelta: 0.05,
+};
 
 const regionFor = (
   latitude: number,
@@ -188,6 +194,7 @@ export const MapsScreen: React.FC = () => {
 
   return (
     <View style={styles.rootContainer}>
+      <StatusBar barStyle="dark-content" backgroundColor={GOOGLE_MAPS_COLORS.landSoft} />
       <MapView
         ref={mapRef}
         provider={undefined} // OSM Migration — use the native provider (Apple Maps iOS / Google-compatible Android shell, overlaid by OSM tiles)
@@ -230,7 +237,7 @@ export const MapsScreen: React.FC = () => {
           visible, legible credit. Kept in the bottom-left corner, out of the way
           of the floating controls (bottom-right). */}
       <View
-        style={[styles.attribution, { bottom: insets.bottom + 4 }]}
+        style={[styles.attribution, { bottom: insets.bottom + TAB_BAR_CLEARANCE + spacing.xs }]}
         pointerEvents="none"
         accessibilityRole="text"
       >

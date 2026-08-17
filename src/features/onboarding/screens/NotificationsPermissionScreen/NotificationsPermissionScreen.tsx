@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { Alert, Linking, Pressable, Text, View } from 'react-native';
+import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import MaterialIcons from '@react-native-vector-icons/material-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -43,7 +43,9 @@ export const NotificationsPermissionScreen: React.FC = () => {
       // Idempotent and safe to call even if already granted.
       status = await pushService.registerWithBackend();
     } catch {
-      /* ignore — never block onboarding on a permission/registration failure */
+      // An unexpected native/API failure is still non-blocking, but it must
+      // not look like notifications were successfully enabled.
+      status = 'error';
     } finally {
       setRequesting(false);
       // Always advance first — a refusal must never block the flow. The
@@ -52,37 +54,38 @@ export const NotificationsPermissionScreen: React.FC = () => {
     }
     if (status === 'denied') {
       Alert.alert(
-        t('onboarding.notifications.deniedTitle', 'Notifications are off'),
-        t(
-          'onboarding.notifications.deniedBody',
-          'No problem — you can turn them on anytime from your profile settings.',
-        ),
+        t('onboarding.notifications.deniedTitle'),
+        t('onboarding.notifications.deniedBody'),
       );
     } else if (status === 'blocked') {
       Alert.alert(
-        t('onboarding.notifications.deniedTitle', 'Notifications are off'),
-        t(
-          'onboarding.notifications.blockedBody',
-          'Notifications are blocked for Chathouse. Enable them in your phone settings to get notified.',
-        ),
+        t('onboarding.notifications.deniedTitle'),
+        t('onboarding.notifications.blockedBody'),
         [
-          { text: t('common.cancel', 'Cancel'), style: 'cancel' },
+          { text: t('common.cancel'), style: 'cancel' },
           {
-            text: t('onboarding.notifications.openSettings', 'Open settings'),
+            text: t('onboarding.notifications.openSettings'),
             onPress: () => {
               void Linking.openSettings();
             },
           },
         ],
       );
+    } else if (status === 'error') {
+      Alert.alert(
+        t('onboarding.notifications.errorTitle'),
+        t('onboarding.notifications.errorBody'),
+      );
     }
   }, [goNext, t]);
 
   return (
     <View className="flex-1 bg-background" style={{ paddingTop: insets.top + spacing.xl }}>
-      <View
-        className="flex-1 px-xxl gap-xxl"
-        style={{ paddingBottom: insets.bottom + spacing.huge }}
+      <ScrollView
+        testID="notifications-permission-scroll"
+        style={styles.fill}
+        contentContainerStyle={[styles.content, { paddingBottom: insets.bottom + spacing.huge }]}
+        showsVerticalScrollIndicator={false}
       >
         <View className="items-center gap-md mt-huge">
           <View className="w-20 h-20 rounded-full bg-primary/15 items-center justify-center">
@@ -136,7 +139,16 @@ export const NotificationsPermissionScreen: React.FC = () => {
             </Text>
           </Pressable>
         </View>
-      </View>
+      </ScrollView>
     </View>
   );
 };
+
+const styles = StyleSheet.create({
+  fill: { flex: 1 },
+  content: {
+    flexGrow: 1,
+    paddingHorizontal: spacing.xxl,
+    gap: spacing.xxl,
+  },
+});

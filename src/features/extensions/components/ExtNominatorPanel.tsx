@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -22,25 +22,29 @@ export const ExtNominatorPanel: React.FC = () => {
   const [remaining, setRemaining] = useState<number>(0);
   const [history, setHistory] = useState<InvitationRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const reload = async (): Promise<void> => {
+  const reload = useCallback(async (): Promise<void> => {
+    setLoading(true);
+    setLoadError(false);
     try {
       const me = await nominatorApi.me();
       setRemaining(me.remaining);
       setHistory(me.history);
     } catch {
-      /* keep stale */
+      setLoadError(true);
+    } finally {
+      setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    setLoading(true);
-    void reload().finally(() => setLoading(false));
-  }, []);
+    void reload();
+  }, [reload]);
 
   const onInvite = async (): Promise<void> => {
     setError(null);
@@ -65,7 +69,29 @@ export const ExtNominatorPanel: React.FC = () => {
   if (loading) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator />
+        <ActivityIndicator
+          color={colors.primary}
+          accessibilityRole="progressbar"
+          accessibilityLabel="Loading invitations"
+        />
+      </View>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <View style={styles.center}>
+        <Text style={styles.error} accessibilityRole="alert">
+          Failed to load your invitations.
+        </Text>
+        <Pressable
+          style={styles.retry}
+          onPress={() => void reload()}
+          accessibilityRole="button"
+          accessibilityLabel="Retry loading invitations"
+        >
+          <Text style={styles.retryText}>Retry</Text>
+        </Pressable>
       </View>
     );
   }
@@ -88,6 +114,7 @@ export const ExtNominatorPanel: React.FC = () => {
             placeholderTextColor={colors.textDim}
             style={styles.input}
             maxLength={80}
+            accessibilityLabel="Friend's name"
           />
           <TextInput
             value={phone}
@@ -97,15 +124,22 @@ export const ExtNominatorPanel: React.FC = () => {
             style={styles.input}
             keyboardType="phone-pad"
             autoCorrect={false}
+            accessibilityLabel="Friend's phone number"
           />
-          {error ? <Text style={styles.error}>{error}</Text> : null}
+          {error ? (
+            <Text style={styles.error} accessibilityRole="alert">
+              {error}
+            </Text>
+          ) : null}
           <Pressable
-            style={[styles.btn, busy && styles.btnBusy]}
+            style={styles.btn}
             onPress={() => void onInvite()}
             disabled={busy}
             accessibilityRole="button"
             accessibilityLabel="Send invitation"
+            accessibilityState={{ disabled: busy, busy }}
           >
+            {busy ? <ActivityIndicator size="small" color={colors.onPrimary} /> : null}
             <Text style={styles.btnText}>{busy ? 'Sending…' : 'Send invitation'}</Text>
           </Pressable>
         </View>
@@ -145,7 +179,15 @@ export const ExtNominatorPanel: React.FC = () => {
 
 const styles = StyleSheet.create({
   container: { padding: 16, gap: 16, backgroundColor: colors.background, flex: 1 },
-  center: { padding: 32, alignItems: 'center' },
+  center: { padding: 32, alignItems: 'center', gap: 12 },
+  retry: {
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingHorizontal: 18,
+    borderRadius: 10,
+    backgroundColor: colors.primary,
+  },
+  retryText: { color: colors.onPrimary, fontSize: 13, fontWeight: '600' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   title: { fontSize: 18, fontWeight: '700', color: colors.text },
   badge: {
@@ -158,20 +200,26 @@ const styles = StyleSheet.create({
   form: { gap: 10 },
   input: {
     backgroundColor: colors.overlayWhite5,
+    borderWidth: 1,
+    borderColor: colors.outline,
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 10,
+    minHeight: 44,
     fontSize: 13,
     color: colors.text,
   },
-  error: { color: colors.danger, fontSize: 12 },
+  error: { color: colors.danger, fontSize: 12, textAlign: 'center' },
   btn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
     backgroundColor: colors.primary,
     paddingVertical: 12,
     borderRadius: 10,
-    alignItems: 'center',
+    minHeight: 44,
   },
-  btnBusy: { opacity: 0.5 },
   btnText: { color: colors.onPrimary, fontWeight: '600', fontSize: 14 },
   exhausted: { color: colors.textMuted, fontSize: 13, paddingVertical: 8 },
   historyHeader: { marginTop: 8 },

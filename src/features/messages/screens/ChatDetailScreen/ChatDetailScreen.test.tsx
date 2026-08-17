@@ -1,18 +1,23 @@
 /**
  * Render test for ChatDetailScreen (a 1:1 thread). Mounts with a conversation +
  * messages seeded so the thread renders (not the loader), then exercises the
- * header back button (→ goBack), the call/more buttons (→ "coming soon" Alert,
- * not a crash), the emoji quick-insert (mutates the draft → reveals send), and
- * the send button after typing.
+ * header back button (→ goBack), a private call (→ closed two-person Room),
+ * the real conversation safety options, the emoji quick-insert (mutates the
+ * draft → reveals send), and sending.
  */
 import React from 'react';
 import { Alert } from 'react-native';
-import { fireEvent, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, waitFor } from '@testing-library/react-native';
 import { messageKeys, MESSAGES_PAGE_SIZE } from '../../hooks/useMessages';
 import { renderScreen, mockAuthenticated, resetAuth } from '../../../../test-utils/renderScreen';
 import { messageService } from '../../services/messageService';
+import { roomService } from '../../../rooms/services/roomService';
+import { ROOM_TITLE_MAX } from '../../../rooms/constants';
+import { socialService } from '../../../social/services/socialService';
+import { toast } from '../../../../shared/components/Toast';
 import * as socketClient from '../../../../shared/services/realtime/socketClient';
-import type { Conversation, Message } from '../../../../shared/types/domain';
+import { peerPresenceKey } from '../../../extensions/hooks/usePeerPresence';
+import type { Conversation, Message, Room } from '../../../../shared/types/domain';
 import { ChatDetailScreen } from './ChatDetailScreen';
 
 const PEER_ID = 'peer-9';
@@ -45,16 +50,20 @@ const messages = (): Message[] => [
 // The thread is now a useInfiniteQuery, so its cache is InfiniteData (pages +
 // pageParams), not a flat array. Wrap a single ascending page as page 0.
 const seededThread = (msgs: Message[]) => ({
-  pages: [msgs],
+  pages: [{ items: msgs, nextCursor: null }],
   pageParams: [undefined],
 });
 
-const renderChat = () =>
+const renderChat = (conversationData: Conversation = conversation()) =>
   renderScreen(<ChatDetailScreen />, {
     route: { name: 'ChatDetail', params: { conversationId: PEER_ID } },
     seedQueryData: [
-      { key: [...messageKeys.conversation(PEER_ID)], data: conversation() },
+      { key: [...messageKeys.conversation(PEER_ID)], data: conversationData },
       { key: [...messageKeys.messages(PEER_ID)], data: seededThread(messages()) },
+      {
+        key: [...peerPresenceKey(PEER_ID)],
+        data: { visible: true, isOnline: true, lastSeenAt: new Date().toISOString() },
+      },
     ],
   });
 
@@ -68,11 +77,12 @@ describe('ChatDetailScreen', () => {
   });
 
   it('mounts and renders the peer name + an existing message bubble', async () => {
-    const { getByText } = renderChat();
+    const { getByText, getByTestId } = renderChat();
     await waitFor(() => {
       expect(getByText('Alice')).toBeTruthy();
     });
     expect(getByText('Hey there')).toBeTruthy();
+    expect(getByTestId('chat-peer-online-dot')).toBeTruthy();
   });
 
   it('header back button calls navigation.goBack', () => {
@@ -81,12 +91,141 @@ describe('ChatDetailScreen', () => {
     expect(navigation.goBack).toHaveBeenCalledTimes(1);
   });
 
-  it('call + more header buttons surface a "coming soon" Alert (no crash)', () => {
+  it('creates one closed two-person room and opens it when starting a private call', async () => {
+    let resolveRoom: ((room: Room) => void) | undefined;
+    const pendingRoom = new Promise<Room>(resolve => {
+      resolveRoom = resolve;
+    });
+    const createSpy = jest.spyOn(roomService, 'create').mockReturnValue(pendingRoom);
+    const { navigation, getByLabelText } = renderChat();
+
+    fireEvent.press(getByLabelText('Call'));
+
+    await waitFor(() => {
+      expect(createSpy).toHaveBeenCalledWith(
+        {
+          title: 'Private call with Alice',
+          visibility: 'closed',
+          topics: [],
+          coHostIds: [PEER_ID],
+          chatEnabled: false,
+          recordingEnabled: false,
+          maxSpeakers: 2,
+        },
+        expect.stringMatching(/^rn-/),
+      );
+    });
+
+    const busyCallButton = getByLabelText('Call');
+    expect(busyCallButton.props.accessibilityState).toEqual({ busy: true, disabled: true });
+    fireEvent.press(busyCallButton);
+    expect(createSpy).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveRoom?.({ id: 'private-call-room-1' } as Room);
+      await pendingRoom;
+    });
+
+    expect(navigation.navigate).toHaveBeenCalledWith('Main', {
+      screen: 'RoomsTab',
+      params: { screen: 'Room', params: { roomId: 'private-call-room-1' } },
+    });
+  });
+
+  it('caps a private-call title built from a long profile name at the room limit', async () => {
+    const longNameConversation = conversation();
+    longNameConversation.participants[0] = {
+      ...longNameConversation.participants[0]!,
+      displayName: 'A'.repeat(ROOM_TITLE_MAX * 2),
+    };
+    const createSpy = jest
+      .spyOn(roomService, 'create')
+      .mockResolvedValue({ id: 'long-name-room' } as Room);
+    const { getByLabelText } = renderChat(longNameConversation);
+
+    fireEvent.press(getByLabelText('Call'));
+
+    await waitFor(() => expect(createSpy).toHaveBeenCalledTimes(1));
+    expect(createSpy.mock.calls[0]![0].title).toHaveLength(ROOM_TITLE_MAX);
+    expect(createSpy.mock.calls[0]![0].title).toMatch(/^Private call with /);
+  });
+
+  it('reports call creation failures, unlocks the action and allows a retry', async () => {
+    const createSpy = jest
+      .spyOn(roomService, 'create')
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValueOnce({ id: 'retry-call-room' } as Room);
+    const toastSpy = jest.spyOn(toast, 'error').mockReturnValue('call-error-toast');
+    const { navigation, getByLabelText } = renderChat();
+
+    fireEvent.press(getByLabelText('Call'));
+
+    await waitFor(() => expect(toastSpy).toHaveBeenCalledTimes(1));
+    expect(navigation.navigate).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(getByLabelText('Call').props.accessibilityState).toEqual({
+        busy: false,
+        disabled: false,
+      });
+    });
+
+    fireEvent.press(getByLabelText('Call'));
+
+    await waitFor(() => expect(createSpy).toHaveBeenCalledTimes(2));
+    await waitFor(() => {
+      expect(navigation.navigate).toHaveBeenCalledWith('Main', {
+        screen: 'RoomsTab',
+        params: { screen: 'Room', params: { roomId: 'retry-call-room' } },
+      });
+    });
+  });
+
+  it('more header button exposes real report and block actions', () => {
     const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
     const { getByLabelText } = renderChat();
-    fireEvent.press(getByLabelText('Call'));
     fireEvent.press(getByLabelText('More options'));
-    expect(alertSpy).toHaveBeenCalledTimes(2);
+    expect(alertSpy).toHaveBeenCalledWith(
+      'Conversation options',
+      '@alice',
+      expect.arrayContaining([
+        expect.objectContaining({ text: 'Report user' }),
+        expect.objectContaining({ text: 'Block user', style: 'destructive' }),
+      ]),
+      { cancelable: true },
+    );
+  });
+
+  it('reports the peer from conversation options with a selected reason', async () => {
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
+    const reportSpy = jest
+      .spyOn(socialService, 'report')
+      .mockResolvedValue({ reportId: 'profile-report-1' });
+    const { getByLabelText } = renderChat();
+
+    fireEvent.press(getByLabelText('More options'));
+    const menuButtons = alertSpy.mock.calls[0]?.[2];
+    menuButtons?.find(button => button.text === 'Report user')?.onPress?.();
+    fireEvent.press(await waitFor(() => getByLabelText('Harassment')));
+
+    await waitFor(() => {
+      expect(reportSpy).toHaveBeenCalledWith(PEER_ID, { reason: 'harassment' });
+    });
+    await waitFor(() => expect(alertSpy).toHaveBeenCalledWith(expect.stringContaining('Thanks')));
+  });
+
+  it('blocks the peer after confirmation and leaves the conversation', async () => {
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
+    const blockSpy = jest.spyOn(socialService, 'block').mockResolvedValue({ blocked: true });
+    const { navigation, getByLabelText } = renderChat();
+
+    fireEvent.press(getByLabelText('More options'));
+    const menuButtons = alertSpy.mock.calls[0]?.[2];
+    menuButtons?.find(button => button.text === 'Block user')?.onPress?.();
+    const confirmButtons = alertSpy.mock.calls[1]?.[2];
+    confirmButtons?.find(button => button.text === 'Block')?.onPress?.();
+
+    await waitFor(() => expect(blockSpy).toHaveBeenCalledWith(PEER_ID));
+    await waitFor(() => expect(navigation.goBack).toHaveBeenCalledTimes(1));
   });
 
   it('emoji button opens the palette; picking an emoji reveals the send button', async () => {
@@ -102,20 +241,69 @@ describe('ChatDetailScreen', () => {
     });
   });
 
-  it('typing then pressing send does not crash and clears nothing unexpectedly', async () => {
+  it('typing then pressing send waits for the message mutation', async () => {
+    const sent: Message = {
+      ...messages()[0]!,
+      id: 'm-sent',
+      authorId: 'user-test-1',
+      text: 'Hello world',
+      isMine: true,
+    };
+    const sendSpy = jest.spyOn(messageService, 'send').mockResolvedValue(sent);
     const { getByLabelText, getByPlaceholderText } = renderChat();
     fireEvent.changeText(getByPlaceholderText('Type a message…'), 'Hello world');
     const send = await waitFor(() => getByLabelText('Send message'));
-    // The send mutation fires against the (unmocked) apiClient and will reject;
-    // handleSend awaits + reports via toast. We assert the press itself is safe.
-    expect(() => fireEvent.press(send)).not.toThrow();
+    fireEvent.press(send);
+    await waitFor(() => {
+      expect(sendSpy).toHaveBeenCalledWith(PEER_ID, 'Hello world', expect.stringMatching(/^rn-/));
+    });
   });
 
-  it('attach button surfaces a "coming soon" Alert (no crash)', () => {
-    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
-    const { getByLabelText } = renderChat();
-    fireEvent.press(getByLabelText('Attach file'));
-    expect(alertSpy).toHaveBeenCalledTimes(1);
+  it('synchronously blocks a double send while the first DM is pending', async () => {
+    const sent: Message = {
+      ...messages()[0]!,
+      id: 'm-sent-once',
+      authorId: 'user-test-1',
+      text: 'Only once',
+      isMine: true,
+    };
+    let resolveSend!: (message: Message) => void;
+    const pendingSend = new Promise<Message>(resolve => {
+      resolveSend = resolve;
+    });
+    const sendSpy = jest.spyOn(messageService, 'send').mockReturnValue(pendingSend);
+    const { getByLabelText, getByPlaceholderText } = renderChat();
+
+    fireEvent.changeText(getByPlaceholderText('Type a message…'), 'Only once');
+    const sendButton = getByLabelText('Send message');
+    fireEvent.press(sendButton);
+    fireEvent.press(sendButton);
+
+    await waitFor(() => expect(sendSpy).toHaveBeenCalledTimes(1));
+    expect(sendSpy).toHaveBeenCalledWith(PEER_ID, 'Only once', expect.stringMatching(/^rn-/));
+
+    await act(async () => {
+      resolveSend(sent);
+      await pendingSend;
+    });
+  });
+
+  it('does not advertise attachments without a complete secure pipeline', () => {
+    const { queryByLabelText } = renderChat();
+    expect(queryByLabelText('Attach file')).toBeNull();
+  });
+
+  it('long-pressing a received DM reports that individual message', async () => {
+    jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
+    const reportSpy = jest
+      .spyOn(messageService, 'report')
+      .mockResolvedValue({ reportId: 'report-1', alreadyReported: false });
+    const { getByText } = renderChat();
+
+    fireEvent(getByText('Hey there'), 'longPress');
+    fireEvent.press(await waitFor(() => getByText('Harassment or abuse')));
+
+    await waitFor(() => expect(reportSpy).toHaveBeenCalledWith('m1', 'harassment'));
   });
 
   it('shows an error state with a working Retry when the thread fails to load', async () => {
@@ -123,17 +311,20 @@ describe('ChatDetailScreen', () => {
     const messagesSpy = jest
       .spyOn(messageService, 'messages')
       .mockRejectedValueOnce(new Error('offline'))
-      .mockResolvedValueOnce([]);
+      .mockResolvedValueOnce({ items: [], nextCursor: null });
     const { getByText } = renderScreen(<ChatDetailScreen />, {
       route: { name: 'ChatDetail', params: { conversationId: PEER_ID } },
       seedQueryData: [{ key: [...messageKeys.conversation(PEER_ID)], data: conversation() }],
     });
-    await waitFor(() => {
-      // Copy is fully localized via t(); the test harness runs in English
-      // (react-native-localize mock → 'en'), so the error title resolves to the
-      // en.json value (chat.loadErrorTitle), not the French inline default.
-      expect(getByText("Couldn't load messages")).toBeTruthy();
-    });
+    await waitFor(
+      () => {
+        // Copy is fully localized via t(); the test harness runs in English
+        // (react-native-localize mock → 'en'), so the error title resolves to the
+        // en.json value (chat.loadErrorTitle), not the French inline default.
+        expect(getByText("Couldn't load messages")).toBeTruthy();
+      },
+      { timeout: 5_000 },
+    );
     // Retry re-runs the query (second call resolves) → error clears. The
     // EmptyState action button renders its label as child text (no a11y label).
     fireEvent.press(getByText('Retry'));
@@ -142,7 +333,9 @@ describe('ChatDetailScreen', () => {
   });
 
   it('shows a "new chat" empty state when the thread is empty', async () => {
-    const messagesSpy = jest.spyOn(messageService, 'messages').mockResolvedValue([]);
+    const messagesSpy = jest
+      .spyOn(messageService, 'messages')
+      .mockResolvedValue({ items: [], nextCursor: null });
     const { getByText } = renderScreen(<ChatDetailScreen />, {
       route: { name: 'ChatDetail', params: { conversationId: PEER_ID } },
       seedQueryData: [{ key: [...messageKeys.conversation(PEER_ID)], data: conversation() }],
@@ -182,8 +375,8 @@ describe('ChatDetailScreen', () => {
     ];
     const messagesSpy = jest
       .spyOn(messageService, 'messages')
-      .mockResolvedValueOnce(fullPage)
-      .mockResolvedValueOnce(olderPage);
+      .mockResolvedValueOnce({ items: fullPage, nextCursor: 'v1.older-dm-page' })
+      .mockResolvedValueOnce({ items: olderPage, nextCursor: null });
     const { getByTestId } = renderScreen(<ChatDetailScreen />, {
       route: { name: 'ChatDetail', params: { conversationId: PEER_ID } },
       seedQueryData: [{ key: [...messageKeys.conversation(PEER_ID)], data: conversation() }],

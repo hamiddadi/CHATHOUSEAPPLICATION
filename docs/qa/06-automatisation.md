@@ -2,7 +2,9 @@
 
 > **ChatHouse** — app audio live facon Clubhouse (React Native / Expo SDK 55, temps reel `socket.io-client` + audio **LiveKit** `@livekit/react-native`, push, i18n FR/EN, roles guest/standard/admin, Android + iOS).
 >
-> **Perimetre teste** : 50 ecrans · 381 boutons · 991 cas de test. Ce document fournit les **scripts d'automatisation executables** pour **14 boutons critiques** (>= 12 exiges) couvrant **auth, room live, messages, moderation admin et profil/follow**.
+> **Perimetre teste** : 50 ecrans · 385 boutons · 991 cas de test (inventaire actualise le 10 aout 2026). Ce document fournit les **scripts d'automatisation executables** pour **14 boutons critiques** (>= 12 exiges) couvrant **auth, room live, messages, moderation admin et profil/follow**.
+>
+> **Etat reel au 10 aout 2026** : le repertoire `.maestro/` contient **3 flows executables** et independants — `onboarding-carousel.yaml`, `auth-privacy-smoke.yaml`, `auth-consent-gate.yaml`. Ils couvrent uniquement la gate pre-auth deterministe, sans revendiquer OTP, backend, room audio ou session authentifiee. Les autres blocs Maestro de ce document restent des specifications/cibles tant que leur fichier YAML n'existe pas.
 
 ## Conventions communes (a lire avant tout)
 

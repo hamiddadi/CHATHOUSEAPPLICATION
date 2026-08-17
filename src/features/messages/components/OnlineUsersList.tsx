@@ -1,14 +1,11 @@
 import React, { memo, useCallback } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useTranslation } from 'react-i18next';
 import { colors } from '../../../shared/constants/theme';
-import type { MessageStackParamList } from '../../../core/navigation/types';
 import { PulsingAvatar } from './PulsingAvatar';
 
 /* ============================================================
- * Constants — Chathouse dark theme via theme tokens
+ * Constants — ChatHouse dark theme via theme tokens
  * ========================================================== */
 const ITEM_SIZE = 60;
 const ITEM_GAP = 16;
@@ -20,31 +17,23 @@ const TITLE_COLOR = colors.textMuted; // #c2c6d7
 const NAME_COLOR = colors.text; // #dee0ff
 const SEPARATOR_COLOR = colors.borderSoft; // rgba(255,255,255,0.1)
 
-type Nav = NativeStackNavigationProp<MessageStackParamList, 'MessagesList'>;
-
 export interface OnlineUser {
-  id: string;
-  name: string;
-  avatar: string;
+  /** Exact user id returned by GET /ext/presence/available. */
+  peerId: string;
+  displayName: string;
+  avatarUrl: string | null;
 }
 
 export interface OnlineUsersListProps {
   /**
-   * Online users to display. These MUST carry real backend user ids: tapping
-   * an item navigates to ChatDetail with the resolved conversation id, and the
-   * DM service treats that id as the peer id. When omitted/empty the band is
-   * not rendered (no mock fallback) so we never navigate to a non-existent
-   * conversation.
+   * Online users mapped from the presence endpoint. When empty the band is not
+   * rendered; there is deliberately no mock fallback.
    */
-  users?: readonly OnlineUser[];
+  users: readonly OnlineUser[];
   /** Localized section title. Defaults to "Online". */
   title?: string;
-  /**
-   * Resolve a chat conversation id from a user id. Required to navigate; when
-   * omitted we use the user id verbatim (peer id == conversation id), which
-   * matches the DM service contract.
-   */
-  resolveConversationId?: (userId: string) => string;
+  /** Opens a DM using the exact backend peer id carried by the selected item. */
+  onOpenChat: (peerId: string) => void;
 }
 
 /* ============================================================
@@ -52,7 +41,7 @@ export interface OnlineUsersListProps {
  * ========================================================== */
 interface UserItemProps {
   user: OnlineUser;
-  onPress: (user: OnlineUser) => void;
+  onPress: (peerId: string) => void;
 }
 
 const truncate = (name: string): string =>
@@ -60,20 +49,24 @@ const truncate = (name: string): string =>
 
 const UserItem: React.FC<UserItemProps> = memo(({ user, onPress }) => {
   const { t } = useTranslation();
-  const handlePress = useCallback(() => onPress(user), [onPress, user]);
+  const handlePress = useCallback(() => onPress(user.peerId), [onPress, user.peerId]);
   return (
     <Pressable
       onPress={handlePress}
       accessibilityRole="button"
       accessibilityLabel={t('messages.openChatA11y', {
-        name: user.name,
+        name: user.displayName,
         defaultValue: 'Open chat with {{name}}',
       })}
+      accessibilityHint={t(
+        'messages.onlineChatHint',
+        'This person is currently available to chat.',
+      )}
       style={({ pressed }) => [styles.item, pressed && styles.itemPressed]}
     >
-      <PulsingAvatar avatar={user.avatar} size={ITEM_SIZE} dotBorderColor={BG_COLOR} />
+      <PulsingAvatar avatar={user.avatarUrl} size={ITEM_SIZE} dotBorderColor={BG_COLOR} />
       <Text style={styles.name} numberOfLines={1}>
-        {truncate(user.name)}
+        {truncate(user.displayName)}
       </Text>
     </Pressable>
   );
@@ -84,42 +77,29 @@ UserItem.displayName = 'UserItem';
  * List
  * ========================================================== */
 export const OnlineUsersList: React.FC<OnlineUsersListProps> = memo(
-  ({ users, title, resolveConversationId }) => {
-    const navigation = useNavigation<Nav>();
+  ({ users, title, onOpenChat }) => {
     const { t } = useTranslation();
     const sectionTitle = title ?? t('messages.online', 'Online');
 
-    const handleOpenChat = useCallback(
-      (user: OnlineUser) => {
-        // Default to the user id verbatim — the DM service uses the peer id as
-        // the conversation id (see messageService). Never fabricate a `conv-{id}`
-        // id, which would resolve to a non-existent conversation and 404.
-        const conversationId = resolveConversationId ? resolveConversationId(user.id) : user.id;
-        navigation.navigate('ChatDetail', { conversationId });
-      },
-      [navigation, resolveConversationId],
-    );
-
     const renderItem = useCallback(
-      ({ item }: { item: OnlineUser }) => <UserItem user={item} onPress={handleOpenChat} />,
-      [handleOpenChat],
+      ({ item }: { item: OnlineUser }) => <UserItem user={item} onPress={onOpenChat} />,
+      [onOpenChat],
     );
-    const keyExtractor = useCallback((item: OnlineUser) => item.id, []);
+    const keyExtractor = useCallback((item: OnlineUser) => item.peerId, []);
     const renderSeparator = useCallback(() => <View style={styles.itemSeparator} />, []);
 
-    // No real online-users source wired yet: render nothing rather than a mock
-    // band that navigates to broken chats.
-    // TODO(audit): feed `users` (with real backend ids) from MessagesScreen,
-    // e.g. from mutual followers / presence, then this band shows up.
-    if (!users || users.length === 0) {
+    if (users.length === 0) {
       return null;
     }
 
     return (
       <View style={styles.block}>
-        <Text style={styles.title}>{sectionTitle}</Text>
+        <Text accessibilityRole="header" style={styles.title}>
+          {sectionTitle}
+        </Text>
         <FlatList
           horizontal
+          accessibilityLabel={sectionTitle}
           data={users}
           renderItem={renderItem}
           keyExtractor={keyExtractor}

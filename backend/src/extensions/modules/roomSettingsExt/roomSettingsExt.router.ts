@@ -3,8 +3,6 @@ import { z } from 'zod';
 import { requireAuth } from '../../../middlewares/auth.middleware';
 import { asyncHandler } from '../../../utils/asyncHandler';
 import { authedUserId } from '../../../utils/authedUserId';
-import { prisma } from '../../../config/database';
-import { extError } from '../../utils/ExtAppError';
 import { roomSettingsExtService } from './roomSettingsExt.service';
 
 export const roomSettingsExtRouter: Router = Router();
@@ -19,16 +17,7 @@ roomSettingsExtRouter.get(
   '/:roomId',
   asyncHandler(async (req, res) => {
     const roomId = String(req.params.roomId);
-    // The service comment promises "anyone in the room can read", but the
-    // settings include a denormalized coHostIds list (other users' ids).
-    // Gate the read on actual room membership (host is always a participant)
-    // so non-members can't enumerate co-hosts of arbitrary rooms.
-    const inRoom = await prisma.participant.findUnique({
-      where: { userId_roomId: { userId: authedUserId(req), roomId } },
-      select: { id: true },
-    });
-    if (!inRoom) throw extError('CLUB_REQ_NOT_FOUND', 'Room not found');
-    const settings = await roomSettingsExtService.get(roomId);
+    const settings = await roomSettingsExtService.getForParticipant(roomId, authedUserId(req));
     res.json(settings);
   }),
 );

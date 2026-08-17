@@ -8,11 +8,13 @@ process.env.REDIS_URL = process.env.REDIS_URL ?? 'redis://localhost:6379';
 
 /* eslint-disable @typescript-eslint/no-require-imports */
 const { createApp } = require('../src/app') as typeof import('../src/app');
-const { mountExtensions } =
-  require('../src/extensions/mount') as typeof import('../src/extensions/mount');
 const { prisma } = require('../src/config/database') as typeof import('../src/config/database');
 const { connectRedis, disconnectRedis } =
   require('../src/config/redis') as typeof import('../src/config/redis');
+const { cancelEventReminder, shutdownReminders } =
+  require('../src/queues/eventReminders') as typeof import('../src/queues/eventReminders');
+const { shutdownReminder15 } =
+  require('../src/extensions/queues/reminder15') as typeof import('../src/extensions/queues/reminder15');
 /* eslint-enable @typescript-eslint/no-require-imports */
 
 const rand = () => Math.random().toString(36).slice(2, 10);
@@ -31,14 +33,12 @@ describe('Room features — roles, moderation, lifecycle', () => {
   beforeAll(async () => {
     await connectRedis();
     app = createApp();
-    // `createApp()` builds the legacy surface only; the `/api/ext/*` extension
-    // routers are mounted by bootstrap() (gated by EXTENSIONS_ENABLED, default
-    // true). Mirror that here so the extension endpoints this suite exercises
-    // (hand-raise restriction settings) are reachable, exactly as in prod.
-    mountExtensions(app);
   }, 30_000);
 
   afterAll(async () => {
+    for (const id of rooms) await cancelEventReminder(id).catch(() => undefined);
+    await shutdownReminders();
+    await shutdownReminder15();
     for (const id of rooms) await prisma.room.delete({ where: { id } }).catch(() => undefined);
     for (const id of users) await prisma.user.delete({ where: { id } }).catch(() => undefined);
     await prisma.$disconnect();
@@ -245,13 +245,16 @@ describe('Room features — roles, moderation, lifecycle', () => {
     expect(n).toBeGreaterThanOrEqual(1);
   });
 
-  // 12 — room flagged for replay recording
-  it('12. A room is flagged for replay recording (recordingEnabled persisted)', async () => {
+  // 12 — release kill-switch: clients cannot opt into room recording.
+  it('12. Room recording stays disabled even when a client requests it', async () => {
     const host = await register();
-    const roomId = await liveRoom(host, { recordingEnabled: true });
-    const res = await request(app).get(`/api/rooms/${roomId}`).set(auth(host.token));
-    expect(res.status).toBe(200);
-    expect(res.body.data.recordingEnabled).toBe(true);
+    const res = await request(app)
+      .post('/api/rooms')
+      .set(auth(host.token))
+      .send({ title: 'Recording must stay off', recordingEnabled: true });
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe('ROOM_011');
+    expect(await prisma.room.count({ where: { hostId: host.id, recordingEnabled: true } })).toBe(0);
   });
 
   // 13 — room ended by a moderator (End Room)

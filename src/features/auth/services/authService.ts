@@ -1,5 +1,11 @@
 import { apiClient } from '../../../shared/services/api/apiClient';
-import type { AuthSession, AuthUser } from '../types/auth.types';
+import { legalDocumentVersion } from '../../../config/env';
+import type {
+  AccountState,
+  AuthSession,
+  AuthUser,
+  LegalAcceptancePayload,
+} from '../types/auth.types';
 
 /**
  * Live auth service wired to the Express backend (Module 1: Phone + OTP).
@@ -34,6 +40,16 @@ interface RawMe {
   bio?: string | null;
   interests?: string[];
   hasCompletedOnboarding?: boolean;
+  termsAcceptedVersion?: string | null;
+  termsAcceptedAt?: string | null;
+  privacyNoticeAcknowledgedVersion?: string | null;
+  privacyNoticeAcknowledgedAt?: string | null;
+  legalAcceptanceLocale?: string | null;
+  legalDocumentVersion?: string;
+  legalAcceptanceRequired?: boolean;
+  accountState?: AccountState;
+  deletedAt?: string | null;
+  permanentDeletionAt?: string | null;
   createdAt?: string;
 }
 
@@ -47,7 +63,7 @@ interface CheckUsernameResponse {
   data: { available: boolean };
 }
 
-const mapUser = (raw: RawMe): AuthUser => ({
+export const mapAuthUser = (raw: RawMe): AuthUser => ({
   id: raw.id,
   username: raw.username ?? '',
   displayName: raw.displayName ?? raw.username ?? '',
@@ -56,24 +72,50 @@ const mapUser = (raw: RawMe): AuthUser => ({
   bio: raw.bio ?? null,
   interests: raw.interests ?? [],
   hasCompletedOnboarding: raw.hasCompletedOnboarding ?? false,
+  termsAcceptedVersion: raw.termsAcceptedVersion ?? null,
+  termsAcceptedAt: raw.termsAcceptedAt ?? null,
+  privacyNoticeAcknowledgedVersion: raw.privacyNoticeAcknowledgedVersion ?? null,
+  privacyNoticeAcknowledgedAt: raw.privacyNoticeAcknowledgedAt ?? null,
+  legalAcceptanceLocale: raw.legalAcceptanceLocale ?? null,
+  legalDocumentVersion: raw.legalDocumentVersion ?? legalDocumentVersion,
+  legalAcceptanceRequired:
+    raw.legalAcceptanceRequired ??
+    (raw.termsAcceptedVersion !== legalDocumentVersion ||
+      raw.privacyNoticeAcknowledgedVersion !== legalDocumentVersion),
+  accountState: raw.accountState ?? (raw.deletedAt ? 'PENDING_DELETION' : 'ACTIVE'),
+  deletedAt: raw.deletedAt ?? null,
+  permanentDeletionAt: raw.permanentDeletionAt ?? null,
   createdAt: raw.createdAt ?? new Date().toISOString(),
 });
 
 export const authService = {
-  async requestOtp(phoneNumber: string): Promise<{ sent: true; expiresIn: number }> {
-    const res = await apiClient.post<SendOtpResponse>('/auth/send-otp', { phoneNumber });
+  async requestOtp(
+    phoneNumber: string,
+    legalAcceptance: LegalAcceptancePayload,
+  ): Promise<{ sent: true; expiresIn: number }> {
+    const res = await apiClient.post<SendOtpResponse>('/auth/send-otp', {
+      phoneNumber,
+      ageConfirmed: true,
+      ...legalAcceptance,
+    });
     return res.data.data;
   },
 
   async verifyOtp(
     phoneNumber: string,
     code: string,
+    legalAcceptance: LegalAcceptancePayload,
   ): Promise<{ session: AuthSession; user: AuthUser; isNewUser: boolean }> {
     const res = await apiClient.post<VerifyOtpResponse>('/auth/verify-otp', {
       phoneNumber,
       code,
+      ageConfirmed: true,
+      ...legalAcceptance,
     });
-    return res.data.data;
+    return {
+      ...res.data.data,
+      user: mapAuthUser(res.data.data.user),
+    };
   },
 
   /**
@@ -90,19 +132,20 @@ export const authService = {
         user: RawMe;
         accessToken: string;
         refreshToken: string;
+        scope: 'active' | 'account_recovery';
         isNewUser: boolean;
       };
     }
     const res = await apiClient.post<DevLoginResponse>('/auth/dev-login');
-    const { user, accessToken, refreshToken, isNewUser } = res.data.data;
+    const { user, accessToken, refreshToken, scope, isNewUser } = res.data.data;
     // Backend's access-token TTL is 15 min (JWT_ACCESS_TTL). The
     // `expiresAt` on AuthSession is a client-side hint used by the
     // refresh-before-expiry logic; mirroring the TTL is enough.
     const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
     return {
-      user: mapUser(user),
+      user: mapAuthUser(user),
       isNewUser,
-      session: { accessToken, refreshToken, expiresAt },
+      session: { accessToken, refreshToken, scope, expiresAt },
     };
   },
 
@@ -122,17 +165,50 @@ export const authService = {
 
   async setUsername(username: string): Promise<{ user: AuthUser }> {
     const res = await apiClient.patch<MeEnvelope>('/users/me/username', { username });
-    return { user: mapUser(res.data.data) };
+    return { user: mapAuthUser(res.data.data) };
   },
 
   async getMe(): Promise<AuthUser> {
     const res = await apiClient.get<MeEnvelope>('/users/me');
-    return mapUser(res.data.data);
+    return mapAuthUser(res.data.data);
+  },
+
+  async acceptLegalDocuments(
+    legalAcceptance: LegalAcceptancePayload,
+  ): Promise<
+    Pick<
+      AuthUser,
+      | 'termsAcceptedVersion'
+      | 'termsAcceptedAt'
+      | 'privacyNoticeAcknowledgedVersion'
+      | 'privacyNoticeAcknowledgedAt'
+      | 'legalAcceptanceLocale'
+      | 'legalDocumentVersion'
+      | 'legalAcceptanceRequired'
+    >
+  > {
+    const res = await apiClient.post<{
+      success: true;
+      data: RawMe;
+    }>('/auth/legal-acceptance', legalAcceptance);
+    const accepted = res.data.data;
+    return {
+      termsAcceptedVersion: accepted.termsAcceptedVersion ?? null,
+      termsAcceptedAt: accepted.termsAcceptedAt ?? null,
+      privacyNoticeAcknowledgedVersion: accepted.privacyNoticeAcknowledgedVersion ?? null,
+      privacyNoticeAcknowledgedAt: accepted.privacyNoticeAcknowledgedAt ?? null,
+      legalAcceptanceLocale: accepted.legalAcceptanceLocale ?? null,
+      legalDocumentVersion: accepted.legalDocumentVersion ?? legalDocumentVersion,
+      legalAcceptanceRequired:
+        accepted.legalAcceptanceRequired ??
+        (accepted.termsAcceptedVersion !== legalDocumentVersion ||
+          accepted.privacyNoticeAcknowledgedVersion !== legalDocumentVersion),
+    };
   },
 
   async setInterests(interests: string[]): Promise<{ user: AuthUser }> {
     const res = await apiClient.patch<MeEnvelope>('/users/me/interests', { interests });
-    return { user: mapUser(res.data.data) };
+    return { user: mapAuthUser(res.data.data) };
   },
 
   async completeOnboarding(input: {
@@ -144,7 +220,7 @@ export const authService = {
     interests?: string[];
   }): Promise<{ user: AuthUser }> {
     const res = await apiClient.patch<MeEnvelope>('/users/me/onboarding', input);
-    return { user: mapUser(res.data.data) };
+    return { user: mapAuthUser(res.data.data) };
   },
 
   async signOut(): Promise<void> {

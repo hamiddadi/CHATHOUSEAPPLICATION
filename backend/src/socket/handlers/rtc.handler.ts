@@ -4,6 +4,7 @@ import * as sfu from '../../webrtc/mediasoup.manager';
 import { canPublishInRoom, isActiveRoomParticipant } from '../../webrtc/roomAuthz';
 import { env } from '../../config/env';
 import { getUserId } from '../socket.middleware';
+import { assertCurrentLegalAcceptance } from '../../modules/auth/legal-acceptance';
 
 interface RoomScoped {
   roomId: string;
@@ -80,23 +81,20 @@ export const registerRtcHandlers = (socket: Socket): void => {
     'rtc:create-transport',
     guard<RoomScoped, unknown>('rtc:create-transport', async p => {
       await requireMember(p.roomId);
-      return sfu.createWebRtcTransport(p.roomId);
+      return sfu.createWebRtcTransport(p.roomId, me(), socket.id);
     }),
   );
 
   socket.on(
     'rtc:connect-transport',
     guard<ConnectPayload, { connected: true }>('rtc:connect-transport', async p => {
-      // Defence in depth: every other rtc:* event verifies room membership.
-      // Resolve the transport's room and require the caller is a member before
-      // attaching DTLS parameters, so a client guessing a transportId can't
-      // sabotage a transport in a room it never joined.
-      // TODO(audit): tag each transport with its ownerUserId in
-      // createWebRtcTransport and re-check ownership here for full isolation.
+      // Resolve the transport's room and re-check membership. The manager also
+      // verifies ownership by exact user + socket so another room member
+      // cannot connect or sabotage a peer's guessed transport id.
       const roomId = sfu.getTransportRoomId(p.transportId);
       if (!roomId) throw new Error('TRANSPORT_NOT_FOUND');
       await requireMember(roomId);
-      await sfu.connectTransport(p.transportId, p.dtlsParameters);
+      await sfu.connectTransport(p.transportId, p.dtlsParameters, me(), socket.id);
       return { connected: true };
     }),
   );
@@ -109,9 +107,10 @@ export const registerRtcHandlers = (socket: Socket): void => {
       // promotion flow and produce audio anyway.
       const roomId = sfu.getTransportRoomId(p.transportId);
       if (!roomId) throw new Error('TRANSPORT_NOT_FOUND');
+      await assertCurrentLegalAcceptance(me());
       const allowed = await canPublishInRoom(roomId, me());
       if (!allowed) throw new Error('NOT_A_SPEAKER');
-      const producerId = await sfu.produce(p.transportId, p.kind, p.rtpParameters, me());
+      const producerId = await sfu.produce(p.transportId, p.kind, p.rtpParameters, me(), socket.id);
       return { producerId };
     }),
   );
@@ -120,14 +119,21 @@ export const registerRtcHandlers = (socket: Socket): void => {
     'rtc:consume',
     guard<ConsumePayload, unknown>('rtc:consume', async p => {
       await requireMember(p.roomId);
-      return sfu.consume(p.roomId, p.consumerTransportId, p.producerId, p.rtpCapabilities);
+      return sfu.consume(
+        p.roomId,
+        p.consumerTransportId,
+        p.producerId,
+        p.rtpCapabilities,
+        me(),
+        socket.id,
+      );
     }),
   );
 
   socket.on(
     'rtc:resume-consumer',
     guard<ResumePayload, { resumed: true }>('rtc:resume-consumer', async p => {
-      await sfu.resumeConsumer(p.consumerId);
+      await sfu.resumeConsumer(p.consumerId, me(), socket.id);
       return { resumed: true };
     }),
   );

@@ -1,15 +1,23 @@
 import { z } from 'zod';
+import { publicContentString } from '../../utils/publicContentModeration';
+import { decodeChatCursor } from '../chat/chat.cursor';
+import { decodeGroupCursor } from './groups.cursor';
+
+export const MAX_GROUP_MEMBERS = 50;
 
 export const createGroupSchema = z.object({
   // Optional group name; when omitted the client falls back to member names.
-  title: z.string().trim().min(1).max(80).optional(),
+  title: publicContentString(z.string().trim().min(1).max(80)).optional(),
   // The OTHER members (the creator is added implicitly). A group is 3+ people,
   // so we require at least two others — a single pick is a 1:1 DM instead.
-  memberIds: z.array(z.string().min(1)).min(2).max(50),
+  memberIds: z
+    .array(z.string().min(1))
+    .min(2)
+    .max(MAX_GROUP_MEMBERS - 1),
 });
 
 export const sendGroupMessageSchema = z.object({
-  content: z.string().trim().min(1).max(2000),
+  content: publicContentString(z.string().trim().min(1).max(2000)),
 });
 
 // Voice note: the client uploads the clip to /upload/voice first, then posts
@@ -23,26 +31,55 @@ export const sendGroupVoiceSchema = z.object({
 export const listGroupMessagesSchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(30),
   // ISO 8601 cursor — return messages strictly older than this.
-  before: z.string().datetime({ offset: true }).optional(),
+  before: z
+    .string()
+    .refine(value => decodeChatCursor(value) !== null, { message: 'Invalid message cursor' })
+    .optional(),
+  paginated: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform(value => value === 'true'),
 });
 
+export const listGroupsSchema = z
+  .object({
+    // Keep the legacy array response while bounding the relation graph loaded
+    // for each group (members + latest message).
+    limit: z.coerce.number().int().min(1).max(100).default(50),
+    cursor: z
+      .string()
+      .max(1024)
+      .refine(value => decodeGroupCursor(value) !== null, { message: 'Invalid group cursor' })
+      .optional(),
+    paginated: z
+      .enum(['true', 'false'])
+      .default('false')
+      .transform(value => value === 'true'),
+  })
+  .superRefine((input, ctx) => {
+    if (input.cursor && !input.paginated) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['paginated'],
+        message: 'paginated=true is required when cursor is provided',
+      });
+    }
+  });
+
 export const addGroupMembersSchema = z.object({
-  userIds: z.array(z.string().min(1)).min(1).max(50),
+  userIds: z.array(z.string().min(1)).min(1).max(MAX_GROUP_MEMBERS),
 });
 
 export const renameGroupSchema = z.object({
   // An empty (or whitespace-only) title clears the custom name and reverts the
   // group to its auto-generated member-name label (title column is nullable).
-  title: z
-    .string()
-    .trim()
-    .max(80)
-    .transform(t => (t.length === 0 ? null : t)),
+  title: publicContentString(z.string().trim().max(80)).transform(t => (t.length === 0 ? null : t)),
 });
 
 export type CreateGroupInput = z.infer<typeof createGroupSchema>;
 export type SendGroupMessageInput = z.infer<typeof sendGroupMessageSchema>;
 export type SendGroupVoiceInput = z.infer<typeof sendGroupVoiceSchema>;
 export type ListGroupMessagesInput = z.infer<typeof listGroupMessagesSchema>;
+export type ListGroupsInput = z.infer<typeof listGroupsSchema>;
 export type AddGroupMembersInput = z.infer<typeof addGroupMembersSchema>;
 export type RenameGroupInput = z.infer<typeof renameGroupSchema>;

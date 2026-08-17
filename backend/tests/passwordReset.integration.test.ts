@@ -108,4 +108,205 @@ describe('Password reset flow', () => {
     expect(res.status).toBe(401);
     expect(res.body.error.code).toBe('AUTH_003');
   });
+
+  it('does not reveal an existing email when the mail provider fails', async () => {
+    const username = `pr_mail_${rand()}`;
+    const email = `${username}@test.local`;
+    const reg = await request(app)
+      .post('/api/auth/register')
+      .send({ username, email, password: 'old-password-123' });
+    expect(reg.status).toBe(201);
+    createdIds.push(reg.body.data.user.id as string);
+
+    const sendSpy = jest
+      .spyOn(mailer, 'sendMail')
+      .mockRejectedValueOnce(new Error('simulated provider outage'));
+    try {
+      const existing = await request(app).post('/api/auth/forgot-password').send({ email });
+      const unknown = await request(app)
+        .post('/api/auth/forgot-password')
+        .send({ email: `unknown_${rand()}@test.local` });
+
+      expect(existing.status).toBe(200);
+      expect(unknown.status).toBe(200);
+      expect(existing.body).toEqual(unknown.body);
+      expect(sendSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      sendSpy.mockRestore();
+    }
+  });
+
+  it('keeps the generic response but issues no token or email for inactive accounts', async () => {
+    const fixtures: Array<{ id: string; email: string }> = [];
+    for (const state of ['deleted', 'suspended'] as const) {
+      const username = `pr_${state}_${rand()}`;
+      const email = `${username}@test.local`;
+      const reg = await request(app)
+        .post('/api/auth/register')
+        .send({ username, email, password: 'old-password-123' });
+      expect(reg.status).toBe(201);
+      const id = reg.body.data.user.id as string;
+      createdIds.push(id);
+      fixtures.push({ id, email });
+      await prisma.user.update({
+        where: { id },
+        data:
+          state === 'deleted'
+            ? { deletedAt: new Date() }
+            : { suspendedUntil: new Date(Date.now() + 60 * 60_000) },
+      });
+    }
+
+    const sendSpy = jest.spyOn(mailer, 'sendMail').mockResolvedValue(undefined);
+    try {
+      const unknown = await request(app)
+        .post('/api/auth/forgot-password')
+        .send({ email: `unknown_${rand()}@test.local` });
+      expect(unknown.status).toBe(200);
+
+      for (const fixture of fixtures) {
+        const blocked = await request(app)
+          .post('/api/auth/forgot-password')
+          .send({ email: fixture.email });
+        expect(blocked.status).toBe(200);
+        expect(blocked.body).toEqual(unknown.body);
+      }
+
+      expect(sendSpy).not.toHaveBeenCalled();
+      expect(
+        await prisma.passwordResetToken.count({
+          where: { userId: { in: fixtures.map(fixture => fixture.id) } },
+        }),
+      ).toBe(0);
+    } finally {
+      sendSpy.mockRestore();
+    }
+  });
+
+  it('consumes a reset token exactly once under concurrent device retries', async () => {
+    const username = `pr_race_${rand()}`;
+    const email = `${username}@test.local`;
+    const oldPassword = 'old-password-123';
+    const newPassword = 'concurrent-new-password-456';
+
+    const reg = await request(app)
+      .post('/api/auth/register')
+      .send({ username, email, password: oldPassword });
+    expect(reg.status).toBe(201);
+    createdIds.push(reg.body.data.user.id as string);
+
+    const token = await captureToken(async () => {
+      const res = await request(app).post('/api/auth/forgot-password').send({ email });
+      expect(res.status).toBe(200);
+    });
+    expect(token).toHaveLength(64);
+
+    const attempts = await Promise.all(
+      Array.from({ length: 2 }, () =>
+        request(app).post('/api/auth/reset-password').send({ token, newPassword }),
+      ),
+    );
+    expect(attempts.map(res => res.status).sort((a, b) => a - b)).toEqual([200, 401]);
+    expect(attempts.filter(res => res.status === 401)[0]?.body.error.code).toBe('AUTH_003');
+
+    const login = await request(app)
+      .post('/api/auth/login')
+      .send({ identifier: email, password: newPassword });
+    expect(login.status).toBe(200);
+  });
+
+  it('does not consume a reset token or change credentials while the account is suspended', async () => {
+    const username = `pr_suspended_${rand()}`;
+    const email = `${username}@test.local`;
+    const oldPassword = 'old-password-123';
+    const newPassword = 'must-not-land-456';
+    const reg = await request(app)
+      .post('/api/auth/register')
+      .send({ username, email, password: oldPassword });
+    expect(reg.status).toBe(201);
+    const userId = reg.body.data.user.id as string;
+    createdIds.push(userId);
+
+    const token = await captureToken(async () => {
+      const res = await request(app).post('/api/auth/forgot-password').send({ email });
+      expect(res.status).toBe(200);
+    });
+    const tokenRecord = await prisma.passwordResetToken.findFirstOrThrow({
+      where: { userId, usedAt: null },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true },
+    });
+    const before = await prisma.user.findUniqueOrThrow({
+      where: { id: userId },
+      select: { passwordHash: true, tokenVersion: true },
+    });
+    await prisma.user.update({
+      where: { id: userId },
+      data: { suspendedUntil: new Date(Date.now() + 60 * 60_000) },
+    });
+
+    const blocked = await request(app)
+      .post('/api/auth/reset-password')
+      .send({ token, newPassword });
+    expect(blocked.status).toBe(403);
+    expect(blocked.body.error.code).toBe('AUTH_007');
+    await expect(
+      prisma.user.findUniqueOrThrow({
+        where: { id: userId },
+        select: { passwordHash: true, tokenVersion: true },
+      }),
+    ).resolves.toEqual(before);
+    await expect(
+      prisma.passwordResetToken.findUniqueOrThrow({
+        where: { id: tokenRecord.id },
+        select: { usedAt: true },
+      }),
+    ).resolves.toEqual({ usedAt: null });
+  });
+
+  it('does not consume a reset token or change credentials after soft deletion', async () => {
+    const username = `pr_deleted_${rand()}`;
+    const email = `${username}@test.local`;
+    const oldPassword = 'old-password-123';
+    const newPassword = 'must-not-land-456';
+    const reg = await request(app)
+      .post('/api/auth/register')
+      .send({ username, email, password: oldPassword });
+    expect(reg.status).toBe(201);
+    const userId = reg.body.data.user.id as string;
+    createdIds.push(userId);
+
+    const token = await captureToken(async () => {
+      const res = await request(app).post('/api/auth/forgot-password').send({ email });
+      expect(res.status).toBe(200);
+    });
+    const tokenRecord = await prisma.passwordResetToken.findFirstOrThrow({
+      where: { userId, usedAt: null },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true },
+    });
+    const before = await prisma.user.findUniqueOrThrow({
+      where: { id: userId },
+      select: { passwordHash: true, tokenVersion: true },
+    });
+    await prisma.user.update({ where: { id: userId }, data: { deletedAt: new Date() } });
+
+    const blocked = await request(app)
+      .post('/api/auth/reset-password')
+      .send({ token, newPassword });
+    expect(blocked.status).toBe(401);
+    expect(blocked.body.error.code).toBe('AUTH_003');
+    await expect(
+      prisma.user.findUniqueOrThrow({
+        where: { id: userId },
+        select: { passwordHash: true, tokenVersion: true },
+      }),
+    ).resolves.toEqual(before);
+    await expect(
+      prisma.passwordResetToken.findUniqueOrThrow({
+        where: { id: tokenRecord.id },
+        select: { usedAt: true },
+      }),
+    ).resolves.toEqual({ usedAt: null });
+  });
 });

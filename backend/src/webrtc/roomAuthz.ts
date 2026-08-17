@@ -8,7 +8,13 @@ import { prisma } from '../config/database';
  */
 export const isActiveRoomParticipant = async (roomId: string, userId: string): Promise<boolean> => {
   const row = await prisma.participant.findFirst({
-    where: { roomId, userId, leftAt: null },
+    where: {
+      roomId,
+      userId,
+      leftAt: null,
+      admissionConfirmedAt: { not: null },
+      room: { isLive: true, endedAt: null },
+    },
     select: { id: true },
   });
   return row !== null;
@@ -21,9 +27,21 @@ export const isActiveRoomParticipant = async (roomId: string, userId: string): P
  * directly emitting `rtc:produce`.
  */
 export const canPublishInRoom = async (roomId: string, userId: string): Promise<boolean> => {
-  const row = await prisma.participant.findFirst({
-    where: { roomId, userId, leftAt: null, role: { in: ['HOST', 'MODERATOR', 'SPEAKER'] } },
-    select: { id: true },
+  const row = await prisma.participant.findUnique({
+    where: { userId_roomId: { roomId, userId } },
+    select: {
+      role: true,
+      leftAt: true,
+      admissionConfirmedAt: true,
+      room: { select: { hostId: true, isLive: true, endedAt: true } },
+    },
   });
-  return row !== null;
+  return (
+    row !== null &&
+    row.leftAt === null &&
+    row.admissionConfirmedAt !== null &&
+    row.room.isLive &&
+    row.room.endedAt === null &&
+    (row.room.hostId === userId || row.role === 'MODERATOR' || row.role === 'SPEAKER')
+  );
 };

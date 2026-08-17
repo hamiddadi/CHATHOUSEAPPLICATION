@@ -2,7 +2,7 @@
 
 > Application audio live facon Clubhouse — React Native / Expo (SDK 55), temps reel WebSocket (`socket.io-client`) + audio **LiveKit** (`@livekit/react-native`), push (`expo-notifications`), i18n FR/EN, roles guest / standard / admin, Android + iOS.
 >
-> **Perimetre teste** : 50 ecrans · 381 boutons/interactions · 991 cas de test deja rediges (un fichier par ecran sous `docs/qa/screens/01-…` a `50-…`).
+> **Perimetre teste** : 50 ecrans · 385 boutons/interactions · 991 cas de test deja rediges (inventaire actualise le 10 aout 2026 ; un fichier par ecran sous `docs/qa/screens/01-…` a `50-…`).
 > **Document maitre** : ce fichier est le plan de reference. Chaque ecran possede sa propre matrice de boutons + cas dans `docs/qa/screens/`.
 
 | Champ                        | Valeur                                                                             |
@@ -20,7 +20,7 @@
 
 ### 1.1 Objectif
 
-Garantir que **chacun des 50 ecrans** de ChatHouse, **chacun de leurs 381 boutons/interactions** et **chacun des 991 cas de test** se comportent conformement a la specification : sur **Android et iOS**, **OS recents et anciens**, **reseaux variables** (3G / 4G / 5G / Wi-Fi avec pertes, latence, reconnexion), pour les **trois familles de roles** (guest, standard, admin) et leurs **roles derives en room** (listener / speaker / moderator / host).
+Garantir que **chacun des 50 ecrans** de ChatHouse, **chacun de leurs 385 boutons/interactions** et **chacun des 991 cas de test** se comportent conformement a la specification : sur **Android et iOS**, **OS recents et anciens**, **reseaux variables** (3G / 4G / 5G / Wi-Fi avec pertes, latence, reconnexion), pour les **trois familles de roles** (guest, standard, admin) et leurs **roles derives en room** (listener / speaker / moderator / host).
 
 ### 1.2 Perimetre fonctionnel (14 domaines, 50 ecrans)
 

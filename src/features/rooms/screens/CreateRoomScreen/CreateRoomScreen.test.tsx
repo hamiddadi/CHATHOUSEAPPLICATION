@@ -13,9 +13,34 @@
  *    we assert it does not crash and stays on-screen).
  */
 import React from 'react';
-import { fireEvent, waitFor } from '@testing-library/react-native';
+import { Alert } from 'react-native';
+import { act, fireEvent, waitFor } from '@testing-library/react-native';
 import { renderScreen, mockAuthenticated, resetAuth } from '../../../../test-utils/renderScreen';
+import { roomService } from '../../services/roomService';
+import type { Room } from '../../../../shared/types/domain';
 import { CreateRoomScreen } from './CreateRoomScreen';
+
+const createdRoom = (): Room => ({
+  id: 'room-created',
+  title: 'A valid room title',
+  description: null,
+  category: 'tech',
+  categoryEmoji: '💻',
+  visibility: 'public',
+  houseId: null,
+  houseName: null,
+  hostId: 'user-test-1',
+  speakers: [],
+  listeners: [],
+  speakersCount: 0,
+  listenersCount: 0,
+  isLive: true,
+  isRecording: false,
+  chatEnabled: true,
+  chatVisibility: 'ALL',
+  startedAt: new Date(0).toISOString(),
+  scheduledFor: null,
+});
 
 describe('CreateRoomScreen', () => {
   beforeEach(() => {
@@ -23,6 +48,7 @@ describe('CreateRoomScreen', () => {
   });
   afterEach(() => {
     resetAuth();
+    jest.restoreAllMocks();
   });
 
   const mount = () => renderScreen(<CreateRoomScreen />, { route: { name: 'CreateRoom' } });
@@ -56,6 +82,16 @@ describe('CreateRoomScreen', () => {
     expect(getByLabelText('Schedule +30 min')).toBeTruthy();
   });
 
+  it('exposes topic chips as checked multi-selection controls', () => {
+    const { getByRole } = mount();
+    const tech = getByRole('checkbox', { name: 'tech' });
+    expect(tech.props.accessibilityState).toEqual({ checked: false });
+    fireEvent.press(tech);
+    expect(getByRole('checkbox', { name: 'tech' }).props.accessibilityState).toEqual({
+      checked: true,
+    });
+  });
+
   it('does not navigate when the disabled Start CTA is pressed with an empty title', () => {
     const { navigation, getByText } = mount();
     // Title is empty → canStart is false → Button is disabled → onPress undefined.
@@ -63,18 +99,63 @@ describe('CreateRoomScreen', () => {
     expect(navigation.goBack).not.toHaveBeenCalled();
   });
 
-  it('attempts to create the room after a valid title is entered (no crash on API failure)', async () => {
-    const { getByText, getByPlaceholderText } = mount();
+  it('creates a live room and navigates to it after a valid title is entered', async () => {
+    const createSpy = jest.spyOn(roomService, 'create').mockResolvedValue(createdRoom());
+    const { getByText, getByPlaceholderText, navigation } = mount();
     // createRoom.topicPlaceholder → "What do you want to talk about?".
     fireEvent.changeText(
       getByPlaceholderText('What do you want to talk about?'),
       'A valid room title',
     );
     fireEvent.press(getByText('Start Room'));
-    // The mutation fires against an absent API → rejects → handled by the catch
-    // (Alert). We only assert the press didn't throw and the screen survives.
     await waitFor(() => {
-      expect(getByText('Start a Room')).toBeTruthy();
+      expect(createSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ title: 'A valid room title' }),
+        expect.stringMatching(/^rn-/),
+      );
+      expect(navigation.replace).toHaveBeenCalledWith('Room', { roomId: 'room-created' });
+    });
+  });
+
+  it('coalesces two presses in the same tick into one room creation action', async () => {
+    let resolveCreate!: (room: Room) => void;
+    const createSpy = jest
+      .spyOn(roomService, 'create')
+      .mockReturnValue(new Promise(resolve => (resolveCreate = resolve)));
+    const { getByText, getByPlaceholderText } = mount();
+    fireEvent.changeText(
+      getByPlaceholderText('What do you want to talk about?'),
+      'One tap, one room',
+    );
+
+    act(() => {
+      fireEvent.press(getByText('Start Room'));
+      fireEvent.press(getByText('Start Room'));
+    });
+    await waitFor(() => expect(createSpy).toHaveBeenCalledTimes(1));
+
+    await act(async () => resolveCreate(createdRoom()));
+  });
+
+  it('releases the submission latch after an error so the user can try again', async () => {
+    jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
+    const createSpy = jest
+      .spyOn(roomService, 'create')
+      .mockRejectedValueOnce({ kind: 'validation', message: 'Invalid room' })
+      .mockResolvedValue(createdRoom());
+    const { getByText, getByPlaceholderText, navigation } = mount();
+    fireEvent.changeText(
+      getByPlaceholderText('What do you want to talk about?'),
+      'Retry this room',
+    );
+
+    fireEvent.press(getByText('Start Room'));
+    await waitFor(() => expect(createSpy).toHaveBeenCalledTimes(1));
+    fireEvent.press(getByText('Start Room'));
+
+    await waitFor(() => {
+      expect(createSpy).toHaveBeenCalledTimes(2);
+      expect(navigation.replace).toHaveBeenCalledWith('Room', { roomId: 'room-created' });
     });
   });
 });

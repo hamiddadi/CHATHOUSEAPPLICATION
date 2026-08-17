@@ -213,7 +213,7 @@ export const SetupProfileScreen: React.FC = () => {
             onPress={pickImage}
             accessibilityRole="imagebutton"
             accessibilityLabel={t('onboarding.setupProfile.addPhoto', 'Add a photo')}
-            className="items-center justify-center bg-surface w-32 h-32 rounded-full overflow-hidden border border-surface-border"
+            className="items-center justify-center bg-surface w-32 h-32 rounded-full overflow-hidden border border-outline"
           >
             {avatarUri ? (
               <Image
@@ -243,7 +243,7 @@ export const SetupProfileScreen: React.FC = () => {
               disabled={twitter.importing}
               accessibilityRole="button"
               accessibilityLabel={t('onboarding.setupProfile.importFromX', 'Import from X')}
-              className="mt-md flex-row items-center gap-sm px-lg py-sm rounded-pill bg-surface border border-surface-border"
+              className="mt-md flex-row items-center gap-sm px-lg py-sm rounded-pill bg-surface border border-outline"
               style={twitter.importing ? setupStyles.importingBtn : undefined}
             >
               <MaterialIcons name="alternate-email" size={16} color={colors.text} />

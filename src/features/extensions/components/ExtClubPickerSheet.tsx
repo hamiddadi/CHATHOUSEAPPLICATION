@@ -33,24 +33,29 @@ export const ExtClubPickerSheet: React.FC<Props> = ({
 }) => {
   const [clubs, setClubs] = useState<ClubLite[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const [retryAttempt, setRetryAttempt] = useState(0);
 
   useEffect(() => {
     if (!visible) return;
     let cancelled = false;
     setLoading(true);
+    setLoadError(false);
     clubsListApi
       .myClubs()
       .then(items => {
         if (!cancelled) setClubs(items);
       })
-      .catch(() => undefined) // 401/500 → keep the empty roster, no unhandled rejection
+      .catch(() => {
+        if (!cancelled) setLoadError(true);
+      })
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
     return () => {
       cancelled = true;
     };
-  }, [visible]);
+  }, [retryAttempt, visible]);
 
   return (
     <ExtBottomSheet visible={visible} onClose={onClose} sheetStyle={styles.sheet}>
@@ -58,7 +63,26 @@ export const ExtClubPickerSheet: React.FC<Props> = ({
       <Text style={styles.subtitle}>The room will appear on the Club page.</Text>
 
       {loading ? (
-        <ActivityIndicator style={styles.loader} />
+        <ActivityIndicator
+          style={styles.loader}
+          color={colors.primary}
+          accessibilityRole="progressbar"
+          accessibilityLabel="Loading Clubs"
+        />
+      ) : loadError ? (
+        <View style={styles.errorState}>
+          <Text style={styles.error} accessibilityRole="alert">
+            Couldn't load your Clubs.
+          </Text>
+          <Pressable
+            style={styles.retry}
+            onPress={() => setRetryAttempt(attempt => attempt + 1)}
+            accessibilityRole="button"
+            accessibilityLabel="Retry"
+          >
+            <Text style={styles.retryText}>Retry</Text>
+          </Pressable>
+        </View>
       ) : (
         <FlatList
           data={[null, ...clubs] as (ClubLite | null)[]}
@@ -75,6 +99,7 @@ export const ExtClubPickerSheet: React.FC<Props> = ({
                   onClose();
                 }}
                 accessibilityRole="radio"
+                accessibilityLabel={item?.name ?? 'No Club (personal room)'}
                 accessibilityState={{ selected: isSelected }}
               >
                 {item ? (
@@ -102,11 +127,20 @@ export const ExtClubPickerSheet: React.FC<Props> = ({
               </Pressable>
             );
           }}
-          ListEmptyComponent={<Text style={styles.empty}>You don't belong to any Club yet.</Text>}
+          ListFooterComponent={
+            clubs.length === 0 ? (
+              <Text style={styles.empty}>You don't belong to any Club yet.</Text>
+            ) : null
+          }
         />
       )}
 
-      <Pressable style={styles.cancel} onPress={onClose}>
+      <Pressable
+        style={styles.cancel}
+        onPress={onClose}
+        accessibilityRole="button"
+        accessibilityLabel="Cancel"
+      >
         <Text style={styles.cancelText}>Cancel</Text>
       </Pressable>
     </ExtBottomSheet>
@@ -121,6 +155,16 @@ const styles = StyleSheet.create({
     maxHeight: '80%',
   },
   loader: { marginVertical: 24 },
+  errorState: { alignItems: 'center', gap: 12, paddingVertical: 16 },
+  error: { color: colors.danger, textAlign: 'center' },
+  retry: {
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    backgroundColor: colors.primary,
+  },
+  retryText: { color: colors.onPrimary, fontWeight: '600', fontSize: 15 },
   title: { fontSize: 18, fontWeight: '700', marginTop: 12, color: colors.text },
   subtitle: { color: colors.textMuted, marginTop: 2, marginBottom: 8 },
   row: {
@@ -141,6 +185,6 @@ const styles = StyleSheet.create({
   meta: { fontSize: 12, color: colors.textMuted, marginTop: 1 },
   check: { fontSize: 18, color: colors.primary, fontWeight: '700' },
   empty: { textAlign: 'center', color: colors.textDim, paddingVertical: 24 },
-  cancel: { marginTop: 8, paddingVertical: 12, alignItems: 'center' },
+  cancel: { minHeight: 44, marginTop: 8, paddingVertical: 12, alignItems: 'center' },
   cancelText: { fontSize: 15, color: colors.textMuted },
 });

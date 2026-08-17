@@ -18,7 +18,7 @@
   - **Upload en cours** : `uploading=true` pendant l'appel `uploadAvatar` (uniquement si icone choisie).
   - **Permission galerie refusee** : `Alert.alert(t('houses.create.errorAccessTitle'), t('houses.create.errorAccessBody'))`.
   - **Echec creation / upload** : `Alert.alert(t('houses.create.errorTitle'), errorMessage(e, t('houses.create.errorBody')))`.
-- **Note localisation (defaut de l'ecran)** : les locales (`src/core/i18n/locales/fr.json:718` et `en.json:718`) ne definissent pour `houses.create` que `title`, `namePlaceholder`, `descPlaceholder`, `submit`. TOUTES les autres cles utilisees par le code (`submitBtn`, `nameLabel`, `descLabel`, `privacyLabel`, `privacyOpen`/`privacyOpenDesc`, `privacyPrivate`/`privacyPrivateDesc`, `closeA11y`, `uploadIconA11y`/`replaceIconA11y`, `uploadIcon`/`replaceIcon`, `errorAccessTitle`/`errorAccessBody`, `errorTitle`/`errorBody`) sont ABSENTES et retombent sur le defaut anglais inline du `t(key, defaut)`. Consequences observables : le bouton de creation s'affiche "Create House" (et non "Creer"), le placeholder du nom s'affiche "Nom de la House" (FR present) mais le label au-dessus s'affiche "House name" (EN). C'est une incoherence FR/EN reelle a verifier en cas de test multilingue.
+- **Note localisation** : toutes les cles `houses.create.*` actuellement utilisees par `CreateHouseScreen` sont presentes dans les locales FR et EN (`title`, champs nom/description/regles, trois niveaux de confidentialite, upload/remplacement d'icone, erreurs et bouton submit). Les valeurs anglaises passees a `t()` ne servent plus que de repli defensif ; en locale FR, le bouton est bien rendu « Créer la House » et le label « Nom de la house ».
 
 ## Matrice bouton
 

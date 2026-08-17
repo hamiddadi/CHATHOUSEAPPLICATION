@@ -5,28 +5,31 @@
 - **Fichier** : `src/features/houses/screens/HouseListScreen/HouseListScreen.tsx`
 - **Route** : `HouseList` (dans `RoomStackParamList`). Navigue vers `HouseDetail` (param `{ houseId }`) et `CreateHouse`.
 - **Roles requis** : tout utilisateur authentifie (`standard`, `admin`). Un `guest` non authentifie n'atteint pas cet ecran (il vit dans la stack des rooms protegee). Aucune permission systeme (micro/notif/localisation/stockage) n'est requise pour afficher la liste.
-- **Source de donnees** : hook `useHouses(tab)` -> `@tanstack/react-query` -> `houseService.list(filter)` -> `GET /clubs?filter={mine|discover}` (REST, enveloppe `Envelope<HouseSummary[]>`). Le backend mappe `/api/clubs` sur le domaine House.
+- **Source de donnees** : hook `useHouses(tab)` -> `@tanstack/react-query` -> `houseService.list(filter)` -> `GET /clubs?filter={mine|discover}`. Une recherche non vide filtre localement `mine` (nom + categorie, insensible aux accents/casse) ; dans `discover`, `useHouseSearch` appelle `searchService.clubs` apres 250 ms de debounce et exclut defensivement les clubs prives.
 - **Comportements temps-reel** : AUCUN flux WebSocket / LiveKit / push n'est branche sur cet ecran. La liste n'est PAS live ; la fraicheur depend de react-query (refetch manuel via pull-to-refresh, invalidation apres `create/join/accept/setRole` declenches depuis d'autres ecrans). A noter pour la couverture : ce n'est donc pas un ecran "realtime core" - tous les boutons sont `isRealtime=false`.
 - **Onglets** : segmented control 2 etats - `mine` ("My Houses", defaut au montage) et `discover` ("Discover"). Le changement d'onglet change la `queryKey` (`houses/list/mine` vs `houses/list/discover`) donc declenche une nouvelle requete par filtre.
 - **Etats de donnees pertinents** :
-  - **Chargement** : `isLoading` -> `Loader` plein ecran (`accessibilityLabel = t('houses.loading', 'Loading houses')`).
-  - **Erreur** : `isError` -> `EmptyState` titre `t('houses.errorTitle', "Couldn't load houses")` + corps `t('houses.errorBody', 'Check your connection.')`. ATTENTION : pas de bouton "Reessayer" dans cet etat (seul le retour arriere ou le changement d'onglet permet de relancer). A signaler comme manque.
-  - **Liste vide** : `data = []` -> FlatList vide (aucun `ListEmptyComponent` defini -> ecran simplement vide sous les onglets ; pas de message). A signaler comme manque UX.
+  - **Chargement** : `Loader` plein ecran, avec libelle distinct « Loading houses » ou « Searching houses ».
+  - **Erreur** : `EmptyState` contextualise liste/recherche avec bouton `Retry`, qui relance la requete courante.
+  - **Liste vide / aucun resultat** : `ListEmptyComponent` avec CTA `Create a house` sans requete, ou `Clear search` pendant une recherche.
   - **Hors-ligne / latence** : `GET /clubs` echoue -> etat erreur ; un retour/reentree relance la requete.
 - **Pre-conditions globales** : utilisateur connecte avec token valide ; backend `/clubs` accessible ; au moins un house existant pour les cas "liste pleine".
 
 ## Matrice bouton
 
-| #   | Bouton                | Emplacement                   | Type                                   | Locator reel                                                                                                                 | Pre-condition                            | Priorite |
-| --- | --------------------- | ----------------------------- | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- | -------- |
-| 1   | Retour                | Header (gauche)               | navigation                             | `accessibilityLabel="Back"` (MaterialIcons `arrow-back`)                                                                     | Ecran monte                              | P1       |
-| 2   | Onglet "My Houses"    | Sous le header (TabToggle)    | toggle                                 | `getByText` `t('houses.tabs.mine', 'My Houses')` ; `accessibilityRole="tab"`, `accessibilityState.selected`                  | Ecran monte                              | P1       |
-| 3   | Onglet "Discover"     | Sous le header (TabToggle)    | toggle                                 | `getByText` `t('houses.tabs.discover', 'Discover')` ; `accessibilityRole="tab"`, `accessibilityState.selected`               | Ecran monte                              | P1       |
-| 4   | Cellule house (ligne) | Corps / cellule de liste      | list-item                              | `accessibilityLabel={\`Open house ${house.name}\`}`(template ; ex.`Open house Indie Hackers`) ; `accessibilityRole="button"` | Au moins 1 house dans la liste filtree   | P0       |
-| 5   | Pull-to-refresh       | Corps (FlatList)              | realtime-action (refetch REST, non WS) | Geste tirer-vers-le-bas ; `FlatList.onRefresh` lie a `refetch()` ; indicateur `refreshing={isFetching}`                      | Liste affichee (pas etat loading/erreur) | P1       |
-| 6   | FAB Creer une house   | Bas-droite (overlay flottant) | fab                                    | `accessibilityLabel="Create a new house"` (MaterialIcons `add`)                                                              | Ecran monte (utilisateur authentifie)    | P1       |
+| #   | Bouton / controle     | Emplacement                   | Type                                   | Locator reel                                                                                                   | Pre-condition                          | Priorite |
+| --- | --------------------- | ----------------------------- | -------------------------------------- | -------------------------------------------------------------------------------------------------------------- | -------------------------------------- | -------- |
+| 1   | Retour                | Header (gauche)               | navigation                             | `accessibilityLabel="Back"` (MaterialIcons `arrow-back`)                                                       | Ecran monte                            | P1       |
+| 2   | Onglet "My Houses"    | Sous le header (TabToggle)    | toggle                                 | `getByText` `t('houses.tabs.mine', 'My Houses')` ; `accessibilityRole="tab"`, `accessibilityState.selected`    | Ecran monte                            | P1       |
+| 3   | Onglet "Discover"     | Sous le header (TabToggle)    | toggle                                 | `getByText` `t('houses.tabs.discover', 'Discover')` ; `accessibilityRole="tab"`, `accessibilityState.selected` | Ecran monte                            | P1       |
+| 4   | Recherche houses      | Sous les onglets              | input-submit                           | `accessibilityLabel=t('houses.searchA11y')` ; placeholder `houses.searchPlaceholder`                           | Ecran monte                            | P1       |
+| 5   | Effacer la recherche  | Dans le champ (droite)        | icon                                   | `accessibilityLabel=t('houses.clearSearchA11y')`                                                               | Requete non vide                       | P2       |
+| 6   | Cellule house (ligne) | Corps / cellule de liste      | list-item                              | `accessibilityLabel={\`Open house ${house.name}\`}`;`accessibilityRole="button"`                               | Au moins 1 house dans la liste filtree | P0       |
+| 7   | Pull-to-refresh       | Corps (FlatList)              | realtime-action (refetch REST, non WS) | `FlatList.onRefresh` relance la liste ou la recherche Discover courante                                        | Liste affichee                         | P1       |
+| 8   | Action d'EmptyState   | Corps                         | submit                                 | `Retry`, `Create a house` ou `Clear search` selon l'etat                                                       | Erreur / vide / aucun resultat         | P1       |
+| 9   | FAB Creer une house   | Bas-droite (overlay flottant) | fab                                    | `accessibilityLabel="Create a new house"` (MaterialIcons `add`)                                                | Ecran monte (utilisateur authentifie)  | P1       |
 
-> Remarque : il n'y a PAS de bouton recherche (l'affordance a ete volontairement retiree, cf. commentaire dans le code : un spacer `View w-6` garde le titre centre). Il n'y a PAS de bouton "Reessayer" dans l'etat erreur, ni d'action dans l'etat vide. Le chevron `chevron-right` de chaque ligne est decoratif (il est inclus dans la zone pressable de la cellule, ce n'est pas un bouton independant).
+> Remarque : la recherche est integree sous les onglets ; elle filtre la liste chargee dans `My Houses` et interroge le catalogue public dans `Discover`. Le chevron `chevron-right` de chaque ligne reste decoratif (inclus dans la zone pressable, pas un bouton independant).
 
 ## Cas de test
 
@@ -121,7 +124,7 @@
 - **Pre-conditions** : compte `standard`, Wi-Fi, au moins une house dans l'onglet courant (ex. "Indie Hackers")
 - **Etapes** :
   1. Ouvrir HouseList, onglet `My Houses`.
-  2. Reperer la cellule "Indie Hackers" (avatar squircle, nom, `categorie + emoji`, nombre de membres formate, chevron).
+  2. Reperer la cellule "Indie Hackers" (avatar squircle, nom, nombre de membres formate, chevron).
   3. Taper la cellule.
 - **Resultat attendu** : animation de press (scale 0.98) ; `navigation.navigate('HouseDetail', { houseId: 'h1' })` ; ouverture de l'ecran detail de la house "Indie Hackers".
 - **Critere d'acceptation (OK/KO)** : OK si l'ecran HouseDetail s'ouvre avec le bon `houseId` ; KO si mauvaise house, pas de navigation, ou crash.
@@ -151,7 +154,7 @@
   1. Activer le lecteur d'ecran et la police XXL.
   2. Balayer jusqu'a la premiere cellule house.
   3. Ecouter l'annonce, puis double-taper pour ouvrir.
-- **Resultat attendu** : la cellule est annoncee comme "Open house Indie Hackers, bouton" (label `Open house ${name}`, role `button`) ; le nom, la categorie+emoji et le compteur de membres restent lisibles (numberOfLines geres, pas de chevauchement) en police agrandie ; double-tap ouvre le detail.
+- **Resultat attendu** : la cellule est annoncee comme "Open house Indie Hackers, bouton" (label `Open house ${name}`, role `button`) ; le nom et le compteur de membres restent lisibles en police agrandie ; double-tap ouvre le detail.
 - **Critere d'acceptation (OK/KO)** : OK si la cellule entiere est un seul element focusable correctement nomme et activable ; KO si elements eclates, mal nommes, ou texte tronque illisible.
 - **Donnees de test** : `house.name='Indie Hackers'`
 - **Duree estimee** : 4 min
@@ -254,7 +257,7 @@
 - **Donnees de test** : 15 houses de test dans l'onglet `My Houses`
 - **Duree estimee** : 5 min
 
-### HOUSE-LIST-017 - Etat erreur sans bouton "Reessayer" : recuperation par re-fetch (erreur/limite, defaut UX)
+### HOUSE-LIST-017 - Etat erreur et bouton Retry
 
 - **Type** : Erreur/Limite
 - **Priorite** : P1
@@ -262,23 +265,22 @@
 - **Etapes** :
   1. Forcer un echec sur `GET /clubs` (mock 500 ou mode avion).
   2. Ouvrir HouseList et observer l'`EmptyState` d'erreur.
-  3. Chercher un bouton "Reessayer".
-  4. Restaurer le reseau, puis basculer d'onglet ou faire un retour/reentree pour relancer.
-- **Resultat attendu** : l'`EmptyState` affiche "Couldn't load houses" + "Check your connection." ; AUCUN bouton "Reessayer" n'est present (a remonter comme defaut UX) ; la seule recuperation est le changement d'onglet (nouvelle queryKey) ou retour+reentree. Apres reseau restaure et bascule d'onglet, la liste se charge.
-- **Critere d'acceptation (OK/KO)** : OK si l'etat erreur s'affiche correctement et qu'une recuperation par bascule d'onglet fonctionne ; KO si crash, ou si aucune voie de recuperation ne marche. (Defaut a ticketer : absence de retry direct.)
+  3. Restaurer le reseau puis activer `Retry`.
+- **Resultat attendu** : l'`EmptyState` affiche le message d'erreur liste ou recherche ; `Retry` relance exactement la requete courante et la liste reapparait sans changer d'onglet.
+- **Critere d'acceptation (OK/KO)** : OK si la recuperation directe fonctionne et si le bouton reste accessible ; KO si aucune requete ne repart ou si l'ecran reste bloque.
 - **Donnees de test** : reponse mock `500 Internal Server Error` sur `/clubs?filter=mine`
 - **Duree estimee** : 4 min
 
-### HOUSE-LIST-018 - Etat liste vide (erreur/limite, defaut UX)
+### HOUSE-LIST-018 - Recherche Mine / Discover, aucun resultat et effacement
 
 - **Type** : Erreur/Limite
 - **Priorite** : P2
-- **Pre-conditions** : compte `standard` neuf sans aucune house, Wi-Fi, onglet `My Houses`
+- **Pre-conditions** : compte `standard`, Wi-Fi ; `My Houses` contient « Équipe Créative » ; le catalogue public contient « Product Builders » et un club prive non membre.
 - **Etapes** :
-  1. Se connecter avec un compte n'appartenant a aucune house.
-  2. Ouvrir HouseList, onglet `My Houses` (reponse `data: []`).
-  3. Observer la zone sous les onglets.
-- **Resultat attendu** : la FlatList est vide ; il n'y a PAS de `ListEmptyComponent` ni de message d'invite ("Aucune house, creez-en une") -> zone vide (a remonter comme defaut UX) ; le FAB `Create a new house` reste accessible pour creer une premiere house.
-- **Critere d'acceptation (OK/KO)** : OK si l'app ne crashe pas avec liste vide et que le FAB permet de creer ; KO si crash ou si la liste vide laisse l'utilisateur sans piste. (Defaut a ticketer : pas d'empty state contextualise.)
-- **Donnees de test** : compte neuf `std_empty_01`
-- **Duree estimee** : 3 min
+  1. Dans `My Houses`, saisir `equipe creative` sans accents puis verifier le resultat local.
+  2. Passer a `Discover`, saisir `Product`, attendre le debounce, puis observer la requete de recherche et les resultats.
+  3. Saisir une valeur sans resultat, puis activer `Clear search`.
+- **Resultat attendu** : la recherche Mine est insensible aux accents/casse ; Discover n'interroge l'API qu'apres 250 ms et n'affiche aucun club prive ; l'etat « No houses found » propose `Clear search`, qui restaure la liste Discover.
+- **Critere d'acceptation (OK/KO)** : OK si les deux modes, l'exclusion private et l'effacement fonctionnent sans resultat obsolete ; KO si fuite de club prive, requete par frappe ou liste incoherente.
+- **Donnees de test** : compte `std_test_01`, houses ci-dessus.
+- **Duree estimee** : 5 min

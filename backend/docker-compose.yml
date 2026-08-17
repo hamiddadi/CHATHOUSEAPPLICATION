@@ -55,11 +55,23 @@ services:
       # inert for local testing but must never ship to production.
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-dev_only_access_secret_change_me_0123456789abcdef}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-dev_only_refresh_secret_change_me_0123456789abcdef}
+      JWT_ACCESS_TTL: ${JWT_ACCESS_TTL:-15m}
+      JWT_REFRESH_TTL: ${JWT_REFRESH_TTL:-7d}
+      JWT_ISSUER: ${JWT_ISSUER:-chathouse-api}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-chathouse-app}
+      JWT_LEGACY_NO_ISS_AUD_ACCEPT_UNTIL: ${JWT_LEGACY_NO_ISS_AUD_ACCEPT_UNTIL:-}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8081}
+      PUBLIC_URL: ${PUBLIC_URL:-http://localhost:4000}
+      MEDIA_STORAGE_DRIVER: local
+      MEDIA_URL_SIGNING_SECRET: ${MEDIA_URL_SIGNING_SECRET:-dev_media_signing_secret_change_me_0123456789abcdef}
+      ROOM_RECORDING_ENABLED: 'false'
+      EGRESS_ENABLED: 'false'
       # Dev/QA OTP bypass — these numbers skip the real SMS and log in with
       # OTP_TEST_CODE. Hard-gated to non-production in otp.service, so inert
       # whenever NODE_ENV=production. Override or clear via the host env / .env.
-      OTP_TEST_NUMBERS: ${OTP_TEST_NUMBERS:-550728585}
+      # Opt in explicitly for bypass accounts; an empty default prevents a
+      # copied dev stack from silently accepting the well-known test OTP.
+      OTP_TEST_NUMBERS: ${OTP_TEST_NUMBERS:-}
       OTP_TEST_CODE: ${OTP_TEST_CODE:-000000}
       # ─── mediasoup (phase 4) — narrow UDP port range to reduce host ports
       # exposed. Widen to 40000-49999 when load-testing many simultaneous
@@ -84,47 +96,50 @@ services:
       # override to: '[{"urls":"stun:127.0.0.1:3478"},{"urls":"turn:127.0.0.1:3478","username":"chathouse","credential":"chathouse"}]'
       ICE_SERVERS_JSON: ${ICE_SERVERS_JSON:-[{"urls":"stun:stun.l.google.com:19302"}]}
       # ─── LiveKit (live-audio engine) ─────────────────────────────────────
-      # Token signing is a purely-local HMAC with KEY/SECRET, so these three
-      # vars alone flip /rooms/:id/livekit-token from 503 → 200. The `livekit`
-      # service below makes the issued token actually connectable from a host
-      # browser. LIVEKIT_URL is handed to clients, so it must be host-reachable
+      # Token signing is local, while room provisioning uses the internal
+      # endpoint below. LIVEKIT_URL is handed to clients, so it must be
+      # host-reachable
       # (127.0.0.1 for same-host; set the LAN IP to test from a phone, exactly
       # like MEDIASOUP_ANNOUNCED_IP above). Dev creds only — never use in prod.
       # SECRET must be ≥ 32 chars (LiveKit server requirement). The URL is handed
       # to the phone in the /livekit-token response, so it must be phone-reachable
       # — driven by the same LAN_IP knob as MEDIASOUP_ANNOUNCED_IP above.
       LIVEKIT_URL: ws://${LAN_IP:-127.0.0.1}:7880
+      # Room provisioning/admin calls originate inside the API container and
+      # must use Docker service DNS, never the phone-facing loopback URL.
+      LIVEKIT_INTERNAL_URL: http://livekit:7880
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-devkey}
       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-devsecretdevsecretdevsecretdevsecret}
-      LIVEKIT_TOKEN_TTL_SECONDS: ${LIVEKIT_TOKEN_TTL_SECONDS:-3600}
+      LIVEKIT_TOKEN_TTL_SECONDS: ${LIVEKIT_TOKEN_TTL_SECONDS:-300}
     ports:
-      - '4000:4000'
-      - '40000-40499:40000-40499/udp'
+      - '${DEV_BIND_ADDRESS:-127.0.0.1}:4000:4000'
+      - '${DEV_BIND_ADDRESS:-127.0.0.1}:40000-40499:40000-40499/udp'
     volumes:
-      # Persist uploaded avatars / voice notes on the host so they survive
-      # container recreation and rebuilds. Matches the app's
-      # UPLOADS_DIR = <repo>/backend/uploads (upload.service.ts). The dir is
-      # git-ignored (except .gitkeep) and served back via /uploads static route.
-      - ./uploads:/app/uploads
+      # Unserved local fallback for development only. Production is forced to
+      # use private S3-compatible storage by env validation.
+      - ./private-media:/app/private-media
 
   # ─── LiveKit server (live audio) — dev single node ───
   # Self-hosted so the token issued by /livekit-token is actually connectable
   # in dev. Key/secret MUST match the api's LIVEKIT_API_KEY / LIVEKIT_API_SECRET
   # above. Redis isn't needed for a single node (see livekit/livekit.yaml).
   livekit:
-    image: livekit/livekit-server:v1.8
+    image: livekit/livekit-server:v1.12.0
     container_name: chathouse-livekit
     restart: unless-stopped
-    command: ['--config', '/etc/livekit.yaml']
+    # Keep the signalling URL returned by the API and LiveKit's advertised ICE
+    # node on the same explicit address. For a USB-only Android test, launch
+    # with LAN_IP=127.0.0.1 and reverse TCP 7880 + 7881 through adb.
+    command: ['--config', '/etc/livekit.yaml', '--node-ip', '${LAN_IP:-127.0.0.1}']
     environment:
       LIVEKIT_KEYS: '${LIVEKIT_API_KEY:-devkey}: ${LIVEKIT_API_SECRET:-devsecretdevsecretdevsecretdevsecret}'
     volumes:
       # Dev config moves the media UDP range below the Windows ephemeral range.
       - ./livekit/livekit.dev.yaml:/etc/livekit.yaml:ro
     ports:
-      - '7880:7880'
-      - '7881:7881'
-      - '41100-41199:41100-41199/udp'
+      - '${DEV_BIND_ADDRESS:-127.0.0.1}:7880:7880'
+      - '${DEV_BIND_ADDRESS:-127.0.0.1}:7881:7881'
+      - '${DEV_BIND_ADDRESS:-127.0.0.1}:41100-41199:41100-41199/udp'
 
   # ─── coturn STUN/TURN server (phase 5) ───────────────
   # Disabled in the default profile — local testing often works over host

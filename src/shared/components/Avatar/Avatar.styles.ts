@@ -47,14 +47,45 @@ export const getStatusColor = (status: AvatarStatus): string => {
 };
 
 /** Deterministic fallback tint so the same seed always produces the same color. */
-const FALLBACK_TINTS = ['#558dff', '#2f3f92', '#00a754', '#232846', '#b0c6ff'];
+export const AVATAR_FALLBACK_TINTS = [
+  colors.primaryContainer,
+  palette.secondaryContainer,
+  colors.accentContainer,
+  colors.surfaceHigh,
+  colors.primary,
+];
 
 export const getFallbackTint = (seed?: string): string => {
-  if (!seed) return '#232846';
+  if (!seed) return colors.surfaceHigh;
   let hash = 0;
   for (let i = 0; i < seed.length; i++) {
     hash = (hash * 31 + seed.charCodeAt(i)) | 0;
   }
-  const idx = Math.abs(hash) % FALLBACK_TINTS.length;
-  return FALLBACK_TINTS[idx] ?? '#232846';
+  const idx = Math.abs(hash) % AVATAR_FALLBACK_TINTS.length;
+  return AVATAR_FALLBACK_TINTS[idx] ?? colors.surfaceHigh;
 };
+
+const relativeLuminance = (hex: string): number => {
+  const value = hex.replace('#', '');
+  const channels = [0, 2, 4].map(offset => Number.parseInt(value.slice(offset, offset + 2), 16));
+  const [red = 0, green = 0, blue = 0] = channels.map(channel => {
+    const normalized = channel / 255;
+    return normalized <= 0.04045 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+};
+
+const contrastRatio = (foreground: string, background: string): number => {
+  const foregroundLuminance = relativeLuminance(foreground);
+  const backgroundLuminance = relativeLuminance(background);
+  return (
+    (Math.max(foregroundLuminance, backgroundLuminance) + 0.05) /
+    (Math.min(foregroundLuminance, backgroundLuminance) + 0.05)
+  );
+};
+
+/** Pick the more legible of the theme's light and dark text roles for a fallback tint. */
+export const getFallbackForeground = (background: string): string =>
+  contrastRatio(colors.text, background) >= contrastRatio(colors.background, background)
+    ? colors.text
+    : colors.background;

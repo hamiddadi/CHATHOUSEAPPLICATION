@@ -6,11 +6,12 @@
  * non-member to assert the mutation runs and navigates back on success.
  */
 import React from 'react';
-import { fireEvent, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, waitFor } from '@testing-library/react-native';
 import { groupKeys } from '../../hooks/useGroups';
 import { profileKeys } from '../../../profile/hooks/useProfile';
 import type { User } from '../../../../shared/types/domain';
 import { renderScreen, mockAuthenticated, resetAuth } from '../../../../test-utils/renderScreen';
+import { profileService } from '../../../profile/services/profileService';
 import { groupService, type GroupConversation } from '../../services/groupService';
 import { AddGroupMembersScreen } from './AddGroupMembersScreen';
 
@@ -49,7 +50,7 @@ const followUser = (id: string, username: string): User =>
 
 // useFollowing is now a useInfiniteQuery → seed the paged cache shape.
 const page = (following: User[]) => ({
-  pages: [{ items: following, nextCursor: null }],
+  pages: [{ items: following, nextCursor: null, hasMore: false }],
   pageParams: [undefined],
 });
 
@@ -76,6 +77,26 @@ describe('AddGroupMembersScreen', () => {
     expect(getAllByText('Add people').length).toBeGreaterThan(0);
   });
 
+  it('shows a retryable error instead of an empty candidate list when loading fails', async () => {
+    const followingSpy = jest
+      .spyOn(profileService, 'following')
+      .mockRejectedValue(new Error('offline'));
+    const { findByText, getAllByText, getByText, queryByText } = renderScreen(
+      <AddGroupMembersScreen />,
+      {
+        route: { name: 'AddGroupMembers', params: { conversationId: GROUP_ID } },
+        seedQueryData: [{ key: [...groupKeys.detail(GROUP_ID)], data: group() }],
+      },
+    );
+
+    expect(await findByText("Couldn't load messages")).toBeTruthy();
+    expect(queryByText('No one to message yet')).toBeNull();
+    expect(getAllByText('Add people').length).toBeGreaterThan(0);
+
+    fireEvent.press(getByText('Retry'));
+    await waitFor(() => expect(followingSpy).toHaveBeenCalledTimes(2));
+  });
+
   it('close button calls navigation.goBack', () => {
     const { navigation, getByLabelText } = renderAdd([]);
     fireEvent.press(getByLabelText('Close'));
@@ -97,7 +118,7 @@ describe('AddGroupMembersScreen', () => {
     fireEvent.press(cta);
 
     await waitFor(() => {
-      expect(addSpy).toHaveBeenCalledWith(GROUP_ID, ['peer-new']);
+      expect(addSpy).toHaveBeenCalledWith(GROUP_ID, ['peer-new'], expect.stringMatching(/^rn-/));
     });
     await waitFor(() => {
       expect(navigation.goBack).toHaveBeenCalledTimes(1);
@@ -110,6 +131,23 @@ describe('AddGroupMembersScreen', () => {
     // NewMessageScreen), so a screen reader announces who it toggles.
     const row = getByLabelText('dave');
     expect(row.props.accessibilityRole).toBe('checkbox');
+  });
+
+  it('turns a same-tick double press into one member-add mutation', async () => {
+    let resolveAdd!: (value: GroupConversation) => void;
+    const addSpy = jest
+      .spyOn(groupService, 'addMembers')
+      .mockReturnValue(new Promise(resolve => (resolveAdd = resolve)));
+    const { getByText } = renderAdd([followUser('peer-new', 'dave')]);
+    fireEvent.press(getByText('dave'));
+    const addButton = await waitFor(() => getByText(/^Add 1$/));
+
+    act(() => {
+      fireEvent.press(addButton);
+      fireEvent.press(addButton);
+    });
+    await waitFor(() => expect(addSpy).toHaveBeenCalledTimes(1));
+    await act(async () => resolveAdd(group()));
   });
 
   it('keeps a selection visible as a removable chip when the filter hides its row', () => {
@@ -125,9 +163,11 @@ describe('AddGroupMembersScreen', () => {
 
   it('loads the next page of candidates when the list end is reached', async () => {
     const { profileService } = require('../../../profile/services/profileService');
-    const spy = jest
-      .spyOn(profileService, 'following')
-      .mockResolvedValue({ items: [followUser('peer-zoe', 'zoe')], nextCursor: null });
+    const spy = jest.spyOn(profileService, 'following').mockResolvedValue({
+      items: [followUser('peer-zoe', 'zoe')],
+      nextCursor: null,
+      hasMore: false,
+    });
 
     const { UNSAFE_getByType } = renderScreen(<AddGroupMembersScreen />, {
       route: { name: 'AddGroupMembers', params: { conversationId: GROUP_ID } },
@@ -136,7 +176,13 @@ describe('AddGroupMembersScreen', () => {
         {
           key: [...profileKeys.following(ME)],
           data: {
-            pages: [{ items: [followUser('peer-new', 'dave')], nextCursor: 'cursor-1' }],
+            pages: [
+              {
+                items: [followUser('peer-new', 'dave')],
+                nextCursor: 'cursor-1',
+                hasMore: true,
+              },
+            ],
             pageParams: [undefined],
           },
         },

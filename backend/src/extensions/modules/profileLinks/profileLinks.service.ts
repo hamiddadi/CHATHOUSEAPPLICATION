@@ -1,24 +1,18 @@
+import { randomUUID } from 'node:crypto';
+import { prisma, runWriteWithRetry } from '../../../config/database';
 import { redis } from '../../../config/redis';
 import { AppError } from '../../../middlewares/error.middleware';
-import { readJson, writeJson } from '../../utils/redisJson';
-import { extError } from '../../utils/ExtAppError';
+import { extError, type ExtAppError } from '../../utils/ExtAppError';
+import { ensureUserExtensionImported } from '../../utils/legacyExtensionImport';
 import { premiumService } from '../premium/premium.service';
 
 /**
- * Custom links on a user profile (Module 2.2 / PROFIL-008).
- *
- * The legacy `User` model only has `twitter` and `instagram` columns. This
- * extension stores up to 5 additional named links per user (blog, podcast,
- * Substack, etc.) in Redis without schema migration.
- *
- * Layout : `ext:profile:links:<userId>` = JSON array
+ * Custom links on a user profile. PostgreSQL is authoritative; the legacy
+ * Redis JSON array is imported exactly once on first access.
  */
-
-// Premium gating: free accounts get a small allowance; premium unlocks the
-// full set. The cap is enforced server-side (the client only hints the upsell).
 const FREE_MAX_LINKS = 2;
 const PREMIUM_MAX_LINKS = 5;
-const TTL_S = 365 * 24 * 3600;
+const IMPORT_NAMESPACE = 'profile-links-v1';
 const key = (userId: string) => `ext:profile:links:${userId}`;
 
 export interface ProfileLink {
@@ -28,16 +22,9 @@ export interface ProfileLink {
   icon?: string | null;
 }
 
-// Reject hosts that resolve to internal infrastructure. A profile link is
-// only rendered client-side today, but a future server-side preview/fetch
-// would otherwise be an SSRF sink (e.g. http://169.254.169.254/...). Cheap
-// to gate now while we own the validation. NB: this is a literal-host guard,
-// not a DNS-resolution guard — a hostname that resolves to a private IP can
-// still slip through; tighten with a resolver check if a server fetch lands.
 const isPrivateHost = (hostname: string): boolean => {
   const h = hostname.toLowerCase().replace(/^\[|\]$/g, '');
   if (h === 'localhost' || h.endsWith('.localhost') || h.endsWith('.local')) return true;
-  // IPv6 loopback / unspecified / unique-local / link-local
   if (
     h === '::1' ||
     h === '::' ||
@@ -47,7 +34,6 @@ const isPrivateHost = (hostname: string): boolean => {
   ) {
     return true;
   }
-  // IPv4 loopback / private (RFC1918) / link-local / unspecified
   const m = h.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
   if (m) {
     const [a, b] = [Number(m[1]), Number(m[2])];
@@ -59,16 +45,11 @@ const isPrivateHost = (hostname: string): boolean => {
   return false;
 };
 
-const validateUrl = (s: string): void => {
-  if (s.length > 500) {
-    throw new AppError('VALIDATION_001', 'URL too long');
-  }
-  // Single source of truth: parse with the WHATWG URL parser instead of the
-  // loose regex (the router's Zod .url() is the first gate; this is defence
-  // in depth + the private-host check).
+const validateUrl = (value: string): void => {
+  if (value.length > 500) throw new AppError('VALIDATION_001', 'URL too long');
   let parsed: URL;
   try {
-    parsed = new URL(s);
+    parsed = new URL(value);
   } catch {
     throw new AppError('VALIDATION_001', 'URL must be http/https');
   }
@@ -80,20 +61,70 @@ const validateUrl = (s: string): void => {
   }
 };
 
-const newId = (): string => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+const newId = (): string => randomUUID();
 
-const read = async (userId: string): Promise<ProfileLink[]> => {
-  const arr = await readJson<ProfileLink[]>(key(userId));
-  return Array.isArray(arr) ? arr : [];
-};
-
-const write = async (userId: string, links: ProfileLink[]): Promise<void> => {
-  if (links.length === 0) {
-    await redis.del(key(userId));
-  } else {
-    await writeJson(key(userId), links, TTL_S);
+const parseLegacy = (raw: string | null): ProfileLink[] => {
+  if (!raw) return [];
+  try {
+    const value = JSON.parse(raw) as unknown;
+    if (!Array.isArray(value)) return [];
+    return value
+      .flatMap(item => {
+        if (!item || typeof item !== 'object') return [];
+        const row = item as Record<string, unknown>;
+        if (
+          typeof row.id !== 'string' ||
+          typeof row.label !== 'string' ||
+          typeof row.url !== 'string'
+        ) {
+          return [];
+        }
+        return [
+          {
+            id: row.id.slice(0, 64),
+            label: row.label.slice(0, 40),
+            url: row.url.slice(0, 500),
+            icon: typeof row.icon === 'string' ? row.icon.slice(0, 16) : null,
+          },
+        ];
+      })
+      .slice(0, PREMIUM_MAX_LINKS);
+  } catch {
+    return [];
   }
 };
+
+const ensureImported = async (userId: string): Promise<void> => {
+  await ensureUserExtensionImported(
+    IMPORT_NAMESPACE,
+    userId,
+    async () => parseLegacy(await redis.get(key(userId))),
+    async (tx, links) => {
+      if (links.length === 0) return;
+      await tx.profileLink.createMany({
+        data: links.map((link, position) => ({ ...link, userId, position })),
+        skipDuplicates: true,
+      });
+    },
+  );
+};
+
+const read = async (userId: string): Promise<ProfileLink[]> => {
+  await ensureImported(userId);
+  return prisma.profileLink.findMany({
+    where: { userId },
+    select: { id: true, label: true, url: true, icon: true },
+    orderBy: [{ position: 'asc' }, { createdAt: 'asc' }],
+  });
+};
+
+const capError = (premium: boolean): ExtAppError | AppError =>
+  premium
+    ? new AppError('VALIDATION_001', `Limit of ${PREMIUM_MAX_LINKS} links reached`)
+    : extError(
+        'PREMIUM_REQUIRED',
+        `Free accounts can add up to ${FREE_MAX_LINKS} links - upgrade to Premium for ${PREMIUM_MAX_LINKS}.`,
+      );
 
 export const profileLinksService = {
   async list(userId: string): Promise<ProfileLink[]> {
@@ -107,33 +138,41 @@ export const profileLinksService = {
     validateUrl(input.url);
     const label = input.label.trim().slice(0, 40);
     if (label.length < 1) throw new AppError('VALIDATION_001', 'Label required');
-    const current = await read(userId);
+    await ensureImported(userId);
     const premium = await premiumService.isPremium(userId);
     const cap = premium ? PREMIUM_MAX_LINKS : FREE_MAX_LINKS;
-    if (current.length >= cap) {
-      // Free user hitting the free cap → PREMIUM_REQUIRED so the client can show
-      // the upsell; a premium user at the hard cap gets a plain validation error.
-      if (!premium) {
-        throw extError(
-          'PREMIUM_REQUIRED',
-          `Free accounts can add up to ${FREE_MAX_LINKS} links — upgrade to Premium for ${PREMIUM_MAX_LINKS}.`,
-        );
-      }
-      throw new AppError('VALIDATION_001', `Limit of ${PREMIUM_MAX_LINKS} links reached`);
-    }
-    const next: ProfileLink[] = [
-      ...current,
-      { id: newId(), label, url: input.url, icon: input.icon ?? null },
-    ];
-    await write(userId, next);
-    return next;
+
+    await runWriteWithRetry(() =>
+      prisma.$transaction(
+        async tx => {
+          await tx.$queryRaw`SELECT "id" FROM "User" WHERE "id" = ${userId} FOR UPDATE`;
+          const aggregate = await tx.profileLink.aggregate({
+            where: { userId },
+            _count: { _all: true },
+            _max: { position: true },
+          });
+          if (aggregate._count._all >= cap) throw capError(premium);
+          await tx.profileLink.create({
+            data: {
+              id: newId(),
+              userId,
+              label,
+              url: input.url,
+              icon: input.icon ?? null,
+              position: (aggregate._max.position ?? -1) + 1,
+            },
+          });
+        },
+        { maxWait: 10_000, timeout: 15_000 },
+      ),
+    );
+    return read(userId);
   },
 
   async remove(userId: string, linkId: string): Promise<ProfileLink[]> {
-    const current = await read(userId);
-    const next = current.filter(l => l.id !== linkId);
-    await write(userId, next);
-    return next;
+    await ensureImported(userId);
+    await prisma.profileLink.deleteMany({ where: { id: linkId, userId } });
+    return read(userId);
   },
 
   async update(
@@ -141,22 +180,17 @@ export const profileLinksService = {
     linkId: string,
     patch: { label?: string; url?: string; icon?: string | null },
   ): Promise<ProfileLink[]> {
-    const current = await read(userId);
-    const next = current.map(l => {
-      if (l.id !== linkId) return l;
-      const updated = { ...l };
-      if (patch.label !== undefined) {
-        const trimmed = patch.label.trim().slice(0, 40);
-        if (trimmed.length > 0) updated.label = trimmed;
-      }
-      if (patch.url !== undefined) {
-        validateUrl(patch.url);
-        updated.url = patch.url;
-      }
-      if (patch.icon !== undefined) updated.icon = patch.icon;
-      return updated;
+    await ensureImported(userId);
+    if (patch.url !== undefined) validateUrl(patch.url);
+    const label = patch.label?.trim().slice(0, 40);
+    await prisma.profileLink.updateMany({
+      where: { id: linkId, userId },
+      data: {
+        ...(label ? { label } : {}),
+        ...(patch.url !== undefined ? { url: patch.url } : {}),
+        ...(patch.icon !== undefined ? { icon: patch.icon } : {}),
+      },
     });
-    await write(userId, next);
-    return next;
+    return read(userId);
   },
 };

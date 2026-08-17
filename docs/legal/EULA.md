@@ -1,118 +1,219 @@
-# Chathouse — End User License Agreement (EULA)
+# ChatHouse — Terms of Use and End User License Agreement
 
-**Last updated: 2026-06-03**
+**Document version:** `2026-07-29`
+**Status:** DRAFT — NOT PUBLISHED
+**Language:** English (`en`)
 
-> Launch-ready draft. Have counsel review and fill the bracketed placeholders
-> (`[…]`) before publishing. Host at a stable public URL and reference it in App
-> Store Connect / Google Play and at sign-up. This EULA satisfies the
-> user-generated-content requirements of App Store Review Guideline 1.2.
+**Effective date:** [publication date]
 
-This End User License Agreement ("**Agreement**") is between you and
-[Legal entity name] ("**Chathouse**", "**we**", "**us**"). By creating an account
-or using the Chathouse app ("**App**"), you agree to this Agreement. If you do not
-agree, do not use the App.
+> **Release blocker — not publishable yet.** Replace every bracketed field,
+> confirm the operational moderation and child-safety process, obtain legal
+> review, and capture acceptance of the immutable published version during
+> account creation. This draft is structured to include Apple's minimum custom
+> EULA subjects but is not legal advice or proof of Store compliance.
 
-## 1. License
+This agreement ("**Agreement**") is between the user ("**you**") and [full
+registered legal name and legal form], registered at [complete registered
+address and country] ("**ChatHouse**", "**we**", "**us**"), concerning the
+ChatHouse mobile application and related service ("**App**").
 
-We grant you a limited, non-exclusive, non-transferable, revocable license to use
-the App on devices you own or control, for personal, non-commercial use, subject
-to this Agreement and the platform terms (Apple Media Services / Google Play).
+By explicitly accepting this Agreement and creating an account, you agree to
+its terms and the incorporated Community Guidelines and Child Safety Standards.
+If you do not agree, do not create an account or use the App.
 
-## 2. Eligibility
+## 1. Eligibility and accounts
 
-You must be at least **16** years old (or the older of 16 and the minimum age of
-digital consent in your country) to use the App.
+You must be at least 16 years old, or the higher minimum age required in your
+country. You must provide accurate account information, keep control of your
+phone number and one-time codes, and notify support if you suspect unauthorized
+access. You are responsible for activity under your account to the extent
+permitted by law.
 
-## 3. Accounts
+## 2. License and platform scope
 
-You are responsible for activity under your account and for keeping your login
-(phone number / one-time codes) secure. Provide accurate information and keep it
-current. We may suspend or terminate accounts that violate this Agreement.
+We grant you a limited, personal, non-exclusive, non-transferable,
+non-sublicensable and revocable license to install and use the App on devices
+you own or control, solely for lawful, non-commercial use and subject to this
+Agreement.
 
-## 4. User-generated content
+For an App obtained from Apple's App Store, the license is limited to
+Apple-branded products that you own or control and as permitted by the Apple
+Media Services Usage Rules, except that the App may be accessed and used by
+other accounts associated with the purchaser through Family Sharing, volume
+purchasing or other Apple-authorized features.
 
-The App lets you broadcast live audio, send text and voice messages, and create
-profiles, room titles, and reactions ("**User Content**"). You retain ownership of
-your User Content. You grant us a worldwide, non-exclusive, royalty-free license
-to host, transmit, and display your User Content **solely to operate and provide
-the App** (for example, transmitting your audio to other participants in a room).
+You must also comply with all applicable third-party terms when using the App,
+including the Apple Media Services Terms and Conditions or Google Play Terms of
+Service.
 
-You are solely responsible for your User Content and represent that you have the
-rights to share it and that it does not violate this Agreement or any law.
+## 3. User content and permissions
 
-## 5. Acceptable use — zero tolerance for objectionable content
+The App lets users broadcast live audio, send text and voice messages, create
+profiles, rooms and reactions, and submit reports ("**User Content**"). You
+retain ownership of your User Content.
 
-There is **no tolerance for objectionable content or abusive behavior**. You must
-not, and must not allow others to, use the App to:
+You grant us a worldwide, non-exclusive, royalty-free license to host, store,
+reproduce, transmit, format and display User Content only as needed to operate,
+secure and improve the App, comply with your instructions, enforce this
+Agreement and meet legal obligations. The license ends when the content is
+deleted from our systems, subject to content already delivered to another user,
+the recovery/backup cycle and narrow lawful retention.
 
-- harass, bully, threaten, defame, or impersonate anyone;
-- post or transmit content that is hateful, sexually explicit, violent, illegal,
-  or that exploits or endangers minors;
-- share content that infringes intellectual-property or privacy rights;
-- spam, defraud, phish, or distribute malware;
-- record or share others' audio or personal information without lawful basis or
-  required consent;
-- attempt to disrupt, reverse-engineer, scrape, or circumvent security or rate
-  limits of the App.
+You represent that you have the rights and permissions needed to submit User
+Content and that it does not violate law, another person's rights or this
+Agreement.
 
-## 6. Safety tools (moderation, reporting, blocking)
+## 4. Prohibited conduct and content
 
-We provide, and you agree to use responsibly, the following safeguards:
+There is no tolerance for objectionable content or abusive behavior. You must
+not use the App to:
 
-- **Report:** you can report a user or a room from within the App.
-- **Block:** you can block a user to stop further interaction.
-- **Review & enforcement:** we review reports and may remove content, and warn,
-  suspend, or terminate accounts. We act on objectionable-content reports and on
-  abusive users **within 24 hours** where feasible, by removing the content and/or
-  ejecting the user who provided it.
+- harass, bully, threaten, stalk, defame, discriminate against or impersonate
+  another person;
+- publish hateful, sexually explicit, non-consensual intimate, violent,
+  exploitative, fraudulent or otherwise illegal content;
+- sexually exploit or abuse a child, groom a child, solicit sexual content from
+  a child, or create, possess, distribute or facilitate child sexual abuse
+  material;
+- infringe intellectual-property, privacy, publicity or other rights;
+- record or disclose another person's audio or personal information without a
+  lawful basis and all required consent;
+- spam, phish, defraud, distribute malware or manipulate engagement;
+- scrape, reverse-engineer, disrupt or circumvent access controls, moderation,
+  security or rate limits, except where a non-waivable law permits it;
+- use the App in violation of sanctions, export-control or other applicable law.
 
-By using the App you acknowledge these tools and our enforcement rights.
+The incorporated Community Guidelines and Child Safety Standards provide
+additional examples and reporting information.
 
-## 7. Purchases (tips & premium)
+## 5. Reporting, blocking and enforcement
 
-Tips and premium subscriptions are processed through the platform and/or Stripe.
-Subscriptions renew until cancelled; manage or cancel in your platform account
-settings. Except where required by law or platform policy, payments are
-non-refundable. Prices and features may change with notice.
+Users can report users and rooms and block users within the App. Depending on
+the feature, hosts and moderators can mute, remove or ban disruptive
+participants. We assess reports and may remove or restrict content, end a room,
+warn a user, limit features, preserve evidence, or suspend or terminate an
+account.
 
-## 8. Privacy
+We prioritize reports based on apparent severity, immediacy and legal
+obligations. We do not promise a fixed response time that the moderation
+operation has not formally adopted. Emergencies should be reported to local
+emergency services; the in-app report tool is not an emergency service.
 
-Your use of the App is also governed by our Privacy Policy (`PRIVACY-POLICY.md`),
-which explains what data we process and your rights.
+Known or suspected child sexual abuse material is handled under the Child
+Safety Standards, including preservation and reporting to competent authorities
+where required by law.
 
-## 9. Disclaimers
+## 6. Purchases
 
-THE APP IS PROVIDED "AS IS" AND "AS AVAILABLE" WITHOUT WARRANTIES OF ANY KIND, TO
-THE MAXIMUM EXTENT PERMITTED BY LAW. We do not warrant that the App will be
-uninterrupted, secure, or error-free.
+The current Android and iOS release configuration does not initiate tips,
+premium checkout or other digital purchases. If digital goods or subscriptions
+are introduced, the applicable platform billing method, renewal, cancellation,
+price and refund disclosures will be presented before purchase.
 
-## 10. Limitation of liability
+Except where applicable law or platform rules require otherwise, payments are
+non-refundable. An entitlement or purchase history created outside the current
+mobile build may still appear on an account.
 
-TO THE MAXIMUM EXTENT PERMITTED BY LAW, CHATHOUSE WILL NOT BE LIABLE FOR INDIRECT,
-INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES, OR LOSS OF DATA, PROFITS,
-OR GOODWILL. Some jurisdictions do not allow these limitations, so they may not
-apply to you.
+## 7. Privacy
 
-## 11. Termination
+The [ChatHouse Privacy Policy](https://api.chathouse.app/privacy) explains the
+data we process, the service providers involved, retention and user rights. The
+Privacy Policy is a notice; accepting this Agreement does not convert every
+processing activity into consent.
 
-You may stop using the App and delete your account at any time. We may suspend or
-terminate your access for violations of this Agreement. Sections that by their
-nature should survive (ownership, disclaimers, liability) survive termination.
+## 8. Ownership and intellectual property
 
-## 12. Apple & Google specific terms
+Except for User Content, ChatHouse and its licensors own the App, software,
+design, trademarks and related intellectual-property rights. No right is
+granted except the limited license in this Agreement.
 
-This Agreement is between you and Chathouse, not Apple or Google. The platform
-providers are not responsible for the App or its content, and are third-party
-beneficiaries entitled to enforce this Agreement. Maintenance, support, and
-warranty obligations are ours, not the platform's, subject to applicable law and
-platform terms.
+If a third party claims that the App or your possession and use of it infringes
+intellectual-property rights, ChatHouse—not Apple—is responsible for the
+investigation, defence, settlement and discharge of that claim to the extent
+required by this Agreement and applicable law.
 
-## 13. Governing law & changes
+## 9. Maintenance, support and product claims
 
-This Agreement is governed by the laws of [jurisdiction], without regard to
-conflict-of-laws rules. We may update this Agreement; material changes will be
-notified in-app, and continued use constitutes acceptance.
+ChatHouse is solely responsible for providing any maintenance and support
+specified in this Agreement or required by law. Apple and Google have no
+obligation to furnish maintenance or support.
 
-## 14. Contact
+ChatHouse, not Apple, is responsible for addressing claims relating to the App
+or your possession or use of it, including product-liability, regulatory or
+consumer-protection claims, to the extent required by applicable law.
 
-[Legal entity name], [address] — contact@weasydoo.com.
+Support contact: [operated support email address], [operated support telephone
+number].
+
+## 10. Warranty and App Store refund
+
+THE APP IS PROVIDED "AS IS" AND "AS AVAILABLE" WITHOUT WARRANTIES EXCEPT THOSE
+THAT CANNOT LAWFULLY BE EXCLUDED. WE DO NOT WARRANT UNINTERRUPTED OR ERROR-FREE
+OPERATION.
+
+For an App obtained from Apple's App Store, if the App fails to conform to an
+applicable warranty, you may notify Apple and Apple will refund the purchase
+price, if any. To the maximum extent permitted by law, Apple has no other
+warranty obligation for the App. ChatHouse is responsible for any other claims,
+losses, liabilities, damages, costs or expenses attributable to a failure to
+conform to an applicable warranty.
+
+## 11. Limitation of liability
+
+TO THE MAXIMUM EXTENT PERMITTED BY LAW, CHATHOUSE WILL NOT BE LIABLE FOR
+INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL OR PUNITIVE DAMAGES OR LOSS OF
+DATA, PROFITS OR GOODWILL. [Insert counsel-reviewed liability cap and mandatory
+consumer-law carve-outs for the governing jurisdiction.]
+
+Nothing in this Agreement excludes liability or consumer rights that cannot
+lawfully be excluded.
+
+## 12. Legal and export compliance
+
+You represent that you are not located in a country subject to a United States
+Government embargo or designated as supporting terrorism and that you are not
+listed on a United States Government list of prohibited or restricted parties.
+You must also comply with all other sanctions, export-control and local laws
+applicable to you and the App.
+
+## 13. Suspension, termination and account deletion
+
+You may stop using the App and request account deletion at any time in
+**Settings → Privacy → Delete my account** or through the published
+[account-deletion page](https://api.chathouse.app/account-deletion).
+
+We may restrict or terminate access when reasonably necessary to enforce this
+Agreement, protect users or the service, or comply with law. Where appropriate
+and legally permitted, we will provide notice or an appeal path. Provisions that
+by their nature should survive—including ownership, disclaimers, liability and
+dispute terms—survive termination.
+
+## 14. Changes
+
+We may update this Agreement. Material changes will be identified by a new
+version and communicated before they take effect as required by law. Where
+renewed acceptance is required, continued access to relevant features will
+depend on that acceptance. Merely changing a file without recording the version
+accepted by a user is not sufficient.
+
+## 15. Governing law and disputes
+
+This Agreement is governed by the laws of [governing country/state], without
+regard to conflict-of-laws rules, and disputes are subject to [competent courts
+or agreed dispute mechanism]. Mandatory consumer protections and jurisdiction
+rights in a user's country of residence remain unaffected.
+
+## 16. Apple and Google relationship
+
+This Agreement is between you and ChatHouse, not Apple or Google. Apple and its
+subsidiaries are third-party beneficiaries of this Agreement and, when you
+accept it, Apple has the right to enforce it against you as a third-party
+beneficiary. No other person is a third-party beneficiary unless applicable
+platform terms require it.
+
+## 17. Developer contact
+
+- [Full registered legal name and legal form]
+- [Complete registered address and country]
+- Email: [operated support/legal email address]
+- Telephone: [operated business/support telephone number]

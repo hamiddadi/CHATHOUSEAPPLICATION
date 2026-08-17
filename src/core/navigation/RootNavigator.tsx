@@ -1,10 +1,9 @@
 import React from 'react';
-import { NavigationContainer } from '@react-navigation/native';
+import { DarkTheme, NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { StatusBar } from 'react-native';
 import { useAuthStore } from '../../features/auth/store/authStore';
-import { useExtColorScheme } from '../../features/extensions';
-import { AccountRestorationGate } from '../../features/privacy';
+import { AccountRestorationGate, LegalAcceptanceGate } from '../../features/privacy';
 import { Loader } from '../../shared/components/Loader';
 import { AnimatedSplashScreen } from '../../shared/components/AnimatedSplashScreen';
 import { colors } from '../../shared/constants/theme';
@@ -15,6 +14,19 @@ import { MainNavigator } from './MainNavigator';
 import { OnboardingNavigator } from './OnboardingNavigator';
 
 const RootStack = createNativeStackNavigator<RootStackParamList>();
+
+const navigationTheme = {
+  ...DarkTheme,
+  colors: {
+    ...DarkTheme.colors,
+    primary: colors.primary,
+    background: colors.background,
+    card: colors.surface,
+    text: colors.text,
+    border: colors.border,
+    notification: colors.danger,
+  },
+};
 
 interface RootNavigatorProps {
   onReady?: () => void;
@@ -33,7 +45,6 @@ export const RootNavigator: React.FC<RootNavigatorProps> = ({ onReady }) => {
   const status = useAuthStore(s => s.status);
   const isHydrating = useAuthStore(s => s.isHydrating);
   const user = useAuthStore(s => s.user);
-  const colorScheme = useExtColorScheme();
 
   if (isHydrating) {
     return <AnimatedSplashScreen />;
@@ -68,15 +79,14 @@ export const RootNavigator: React.FC<RootNavigatorProps> = ({ onReady }) => {
       linking={linking}
       initialState={initialState}
       onReady={onReady}
+      theme={navigationTheme}
       fallback={<Loader fullscreen />}
     >
-      <StatusBar
-        barStyle={colorScheme === 'dark' ? 'light-content' : 'dark-content'}
-        backgroundColor={colors.background}
-      />
+      <StatusBar barStyle="light-content" backgroundColor={colors.background} />
       {/* RGPD grace-period restoration prompt — offers "Restore my account" when
           a soft-deleted user signs back in within the 30-day window. */}
       <AccountRestorationGate />
+      <LegalAcceptanceGate />
 
       <RootStack.Navigator
         screenOptions={{

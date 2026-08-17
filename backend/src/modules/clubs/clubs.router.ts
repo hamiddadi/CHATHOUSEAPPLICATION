@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { requireAuth } from '../../middlewares/auth.middleware';
+import { requireCurrentLegalAcceptance } from '../auth/legal-acceptance';
 import { clubsController } from './clubs.controller';
 
 export const clubsRouter: Router = Router();
@@ -8,9 +9,9 @@ export const clubsRouter: Router = Router();
 clubsRouter.use(requireAuth);
 
 clubsRouter.get('/', asyncHandler(clubsController.list));
-clubsRouter.post('/', asyncHandler(clubsController.create));
+clubsRouter.post('/', requireCurrentLegalAcceptance, asyncHandler(clubsController.create));
 clubsRouter.get('/:id', asyncHandler(clubsController.get));
-clubsRouter.patch('/:id', asyncHandler(clubsController.update));
+clubsRouter.patch('/:id', requireCurrentLegalAcceptance, asyncHandler(clubsController.update));
 clubsRouter.delete('/:id', asyncHandler(clubsController.remove));
 // Membership actions (idempotent). Repeating an action is a no-op-ish call
 // that returns a differentiated status rather than a 500/duplicate-key:

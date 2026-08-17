@@ -23,9 +23,9 @@ const getFilters = (t: TFunction): { value: Filter; label: string }[] => [
   { value: 'clubs', label: t('extensions.activity.filters.clubs', 'Clubs') },
 ];
 
-// Cap the in-memory feed so a long-lived session with a busy realtime stream
-// doesn't grow `items` (and the FlatList window) without bound.
-const MAX_ITEMS = 200;
+// Bound only transient socket rows. Persisted server pages must remain intact
+// so scrolling can expose the complete notification history.
+const MAX_PENDING_LIVE_ITEMS = 50;
 
 // Prefix marking a synthetic live (socket-driven) entry that the server hasn't
 // persisted yet. Shared by the prepend handlers and the merge/dedupe logic so
@@ -33,9 +33,15 @@ const MAX_ITEMS = 200;
 const LIVE_PREFIX = 'live-';
 const isLiveId = (id: string): boolean => id.startsWith(LIVE_PREFIX);
 
-/** Prepend a live socket entry, capping the list length. */
-const prependCapped = (prev: ActivityItem[], next: ActivityItem): ActivityItem[] =>
-  [next, ...prev].slice(0, MAX_ITEMS);
+/** Prepend a live socket entry while retaining every persisted history row. */
+const prependCapped = (prev: ActivityItem[], next: ActivityItem): ActivityItem[] => {
+  let liveCount = 0;
+  return [next, ...prev].filter(item => {
+    if (!isLiveId(item.id)) return true;
+    liveCount += 1;
+    return liveCount <= MAX_PENDING_LIVE_ITEMS;
+  });
+};
 
 /**
  * Memoized feed row. Extracted + `React.memo`'d so that a state change driven
@@ -102,28 +108,22 @@ export const ExtActivityFeedScreen: React.FC<{ onTapItem?: (item: ActivityItem) 
   // Only the most recent request is allowed to commit.
   const reqIdRef = useRef(0);
 
-  // Page size mirrors the backend default (50). A full page means there may be
-  // more; a short page means we've reached the end.
-  const PAGE_SIZE = 50;
-
   const fetchItems = useCallback(async () => {
     const myId = ++reqIdRef.current;
     try {
-      const next = await activityApi.list(filter);
+      const page = await activityApi.list(filter);
       if (reqIdRef.current !== myId) return; // a newer filter request superseded this one
       setError(false);
-      // A full page means older entries may remain; derive the next cursor from
-      // the oldest server row's createdAt (the REST body carries no cursor).
-      setNextCursor(next.length >= PAGE_SIZE ? (next[next.length - 1]?.createdAt ?? null) : null);
+      setNextCursor(page.hasMore ? page.nextCursor : null);
       // Merge: server entries win, but keep live socket entries the server
       // hasn't persisted yet — deduping by targetType+targetId so a live entry
       // and its later server counterpart don't both appear.
       setItems(prev => {
-        const serverKeys = new Set(next.map(i => `${i.targetType}:${i.targetId}`));
+        const serverKeys = new Set(page.items.map(i => `${i.targetType}:${i.targetId}`));
         const survivingLive = prev.filter(
           i => isLiveId(i.id) && !serverKeys.has(`${i.targetType}:${i.targetId}`),
         );
-        return [...survivingLive, ...next].slice(0, MAX_ITEMS);
+        return [...survivingLive.slice(0, MAX_PENDING_LIVE_ITEMS), ...page.items];
       });
     } catch {
       if (reqIdRef.current !== myId) return;
@@ -143,11 +143,11 @@ export const ExtActivityFeedScreen: React.FC<{ onTapItem?: (item: ActivityItem) 
     try {
       const page = await activityApi.list(filter, nextCursor);
       if (reqIdRef.current !== myId) return; // a filter change superseded this page
-      setNextCursor(page.length >= PAGE_SIZE ? (page[page.length - 1]?.createdAt ?? null) : null);
+      setNextCursor(page.hasMore ? page.nextCursor : null);
       setItems(prev => {
         const seen = new Set(prev.map(i => i.id));
-        const fresh = page.filter(i => !seen.has(i.id));
-        return [...prev, ...fresh].slice(0, MAX_ITEMS);
+        const fresh = page.items.filter(i => !seen.has(i.id));
+        return [...prev, ...fresh];
       });
     } catch {
       /* keep the current page; onEndReached will retry on the next scroll */
@@ -301,7 +301,7 @@ export const ExtActivityFeedScreen: React.FC<{ onTapItem?: (item: ActivityItem) 
         ))}
       </View>
       {loading ? (
-        <ActivityIndicator style={styles.loader} />
+        <ActivityIndicator style={styles.loader} color={colors.primary} />
       ) : error ? (
         <View style={styles.empty}>
           <Text style={styles.emptyText}>
@@ -329,7 +329,9 @@ export const ExtActivityFeedScreen: React.FC<{ onTapItem?: (item: ActivityItem) 
           contentContainerStyle={styles.list}
           renderItem={renderItem}
           ListFooterComponent={
-            loadingMore ? <ActivityIndicator style={styles.footerLoader} /> : null
+            loadingMore ? (
+              <ActivityIndicator style={styles.footerLoader} color={colors.primary} />
+            ) : null
           }
           ListEmptyComponent={
             <View style={styles.empty}>

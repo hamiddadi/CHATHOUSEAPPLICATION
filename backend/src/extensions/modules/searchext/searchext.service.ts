@@ -1,5 +1,6 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '../../../config/database';
+import { discoverableRoomWhere } from '../../../modules/rooms/rooms.access';
 
 /**
  * Extended live-room search with language/topic filters (Module 13.4 /
@@ -31,10 +32,10 @@ export interface SearchRoomsFilter {
 }
 
 export const searchExtService = {
-  async rooms(filter: SearchRoomsFilter) {
+  async rooms(viewerId: string, filter: SearchRoomsFilter) {
     const limit = Math.min(filter.limit ?? 30, 100);
     const where: Prisma.RoomWhereInput = {
-      isPrivate: false,
+      AND: [discoverableRoomWhere(viewerId)],
       endedAt: null,
     };
     if (filter.liveOnly !== false) where.isLive = true;

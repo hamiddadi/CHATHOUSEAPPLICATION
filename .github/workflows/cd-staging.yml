@@ -1,181 +1,398 @@
-# ─────────────────────────────────────────────────────────────────────────────
-# CD — Deploy to Staging
-#
-# Trigger: every push to `main` (auto), or manual via the Actions tab.
-# Flow:   build & push the API image to GHCR  →  SSH-deploy to the staging host
-#          →  health-check (retry)  →  auto-rollback on failure  →  Slack notify.
-#
-# The image is built from CONTEXT ./backend with ./backend/Dockerfile (a
-# multi-stage node:20-slim build that compiles mediasoup natively and runs
-# `node dist/app.js` under tini, EXPOSE 4000).
-#
-# Required secrets (see backend/docs/deployment/runbook.md for the full list):
-#   GITHUB_TOKEN (auto)  STAGING_HOST  STAGING_USER  STAGING_SSH_KEY
-#   SLACK_WEBHOOK_URL
-# ─────────────────────────────────────────────────────────────────────────────
-name: CD — Deploy to Staging
+name: CD - Deploy to Staging
 
 on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      allow_one_way_livekit_revocation_upgrade:
+        description: 'Authorize the audited first v1 cutover with no pre-v1 API rollback'
+        required: true
+        default: false
+        type: boolean
+      allow_one_way_database_role_upgrade:
+        description: 'Authorize the audited first DB-role v1 cutover with no pre-v1 API rollback'
+        required: true
+        default: false
+        type: boolean
+      acknowledge_one_way_state_contract_v2_cutover:
+        description: 'Acknowledge irreversible state-contract v2 cutover with no pre-v2 API rollback'
+        required: true
+        default: false
+        type: boolean
 
 concurrency:
-  # Never run two staging deploys at once; let the in-flight one finish so we
-  # don't race two `docker compose up` on the same host.
   group: cd-staging
   cancel-in-progress: false
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}/api
+  NODE_VERSION: '22.23.1'
 
 jobs:
-  # ───────────────────────── Build & push image to GHCR ──────────────────────
+  full-ci:
+    name: Full CI gate
+    uses: ./.github/workflows/ci.yml
+    secrets: inherit
+
+  image-coordinates:
+    name: Resolve lowercase GHCR image name
+    runs-on: ubuntu-latest
+    outputs:
+      image_name: ${{ steps.normalize.outputs.name }}
+    steps:
+      - name: Normalize repository path for OCI
+        id: normalize
+        shell: bash
+        run: |
+          set -euo pipefail
+          image_name="${GITHUB_REPOSITORY,,}/api"
+          if [[ ! "$image_name" =~ ^[a-z0-9][a-z0-9._/-]+$ ]]; then
+            echo "Invalid lowercase image name: ${image_name}" >&2
+            exit 1
+          fi
+          echo "name=${image_name}" >> "$GITHUB_OUTPUT"
+
+  verify:
+    name: Quality gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Frontend quality
+        run: |
+          npm ci
+          npm run quality
+      - name: Backend quality
+        working-directory: backend
+        run: |
+          npm ci
+          npx prisma generate
+          npx eslint "src/**/*.ts" --max-warnings 0
+          npx tsc --noEmit -p tsconfig.json
+
   build-and-push:
-    name: Build & push image
+    name: Build and push image
+    needs: [verify, full-ci, image-coordinates]
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
     outputs:
-      image_sha: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:staging-${{ github.sha }}
-      image_latest: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:staging-latest
+      image_ref: ${{ steps.image.outputs.ref }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build & push
-        uses: docker/build-push-action@v6
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           context: ./backend
           file: ./backend/Dockerfile
           push: true
           tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:staging-${{ github.sha }}
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:staging-latest
-          # GitHub Actions cache keeps the native mediasoup C++ build warm
-          # across runs so staging deploys stay fast.
+            ${{ env.REGISTRY }}/${{ needs.image-coordinates.outputs.image_name }}:staging-${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ needs.image-coordinates.outputs.image_name }}:staging-latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
           labels: |
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
 
-  # ───────────────────────── Deploy to staging host ──────────────────────────
+      - name: Resolve immutable image digest
+        id: image
+        env:
+          IMAGE_REPOSITORY: ${{ env.REGISTRY }}/${{ needs.image-coordinates.outputs.image_name }}
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$IMAGE_REPOSITORY" =~ ^[a-z0-9][a-z0-9._/-]+$ ]]; then
+            echo "Invalid lowercase image repository: ${IMAGE_REPOSITORY}" >&2
+            exit 1
+          fi
+          if [[ ! "$IMAGE_DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+            echo "Build did not return a valid sha256 image digest" >&2
+            exit 1
+          fi
+          IMAGE_REF="${IMAGE_REPOSITORY}@${IMAGE_DIGEST}"
+          echo "ref=${IMAGE_REF}" >> "$GITHUB_OUTPUT"
+          echo "Staging image resolved to immutable digest ${IMAGE_REF}"
+
   deploy-staging:
     name: Deploy to staging
     needs: build-and-push
     runs-on: ubuntu-latest
     environment: staging
+    permissions:
+      contents: read
+      packages: read
     steps:
-      - name: SSH deploy + health-gate + auto-rollback
-        uses: appleboy/ssh-action@v1.2.0
+      - name: Checkout deployment files
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Build versioned infrastructure bundle
         env:
-          NEW_IMAGE: ${{ needs.build-and-push.outputs.image_sha }}
-          REGISTRY: ${{ env.REGISTRY }}
-          REGISTRY_USER: ${{ github.actor }}
-          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEPLOY_BUNDLE_NAME: chathouse-infra-${{ github.sha }}.tgz
+        run: |
+          set -euo pipefail
+          tar -czf "$DEPLOY_BUNDLE_NAME" -C backend \
+            docker-compose.prod.yml \
+            Caddyfile \
+            livekit/livekit.yaml \
+            scripts/deploy \
+            scripts/backup \
+            docker/backup \
+            docker/monitoring
+
+      - name: Upload infrastructure bundle
+        uses: appleboy/scp-action@ff85246acaad7bdce478db94a363cd2bf7c90345 # v1.0.0
         with:
           host: ${{ secrets.STAGING_HOST }}
           username: ${{ secrets.STAGING_USER }}
           key: ${{ secrets.STAGING_SSH_KEY }}
-          envs: NEW_IMAGE,REGISTRY,REGISTRY_USER,REGISTRY_TOKEN
+          fingerprint: ${{ secrets.STAGING_HOST_FINGERPRINT }}
+          source: chathouse-infra-${{ github.sha }}.tgz
+          target: /tmp
+          overwrite: true
+
+      - name: Synchronize, deploy, health-gate, and auto-rollback
+        uses: appleboy/ssh-action@7eaf76671a0d7eec5d98ee897acda4f968735a17 # v1.2.0
+        env:
+          NEW_IMAGE: ${{ needs.build-and-push.outputs.image_ref }}
+          REGISTRY: ${{ env.REGISTRY }}
+          REGISTRY_USER: ${{ github.actor }}
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEPLOY_BUNDLE: /tmp/chathouse-infra-${{ github.sha }}.tgz
+          DEPLOY_DIR: ${{ vars.DEPLOY_DIR || '/opt/chathouse/backend' }}
+          BASE_URL: ${{ vars.BASE_URL || 'http://localhost:4000' }}
+          API_SERVICE: ${{ vars.API_SERVICE || 'api' }}
+          REQUIRE_PUBLIC_ENDPOINTS: 'true'
+          PUBLIC_API_URL: ${{ vars.PUBLIC_API_URL }}
+          PUBLIC_APP_URL: ${{ vars.PUBLIC_APP_URL }}
+          ALLOW_ONE_WAY_LIVEKIT_REVOCATION_UPGRADE: ${{ inputs.allow_one_way_livekit_revocation_upgrade || 'false' }}
+          ALLOW_ONE_WAY_DATABASE_ROLE_UPGRADE: ${{ inputs.allow_one_way_database_role_upgrade || 'false' }}
+          ACKNOWLEDGE_ONE_WAY_STATE_CONTRACT_V2_CUTOVER: ${{ inputs.acknowledge_one_way_state_contract_v2_cutover || 'false' }}
+        with:
+          host: ${{ secrets.STAGING_HOST }}
+          username: ${{ secrets.STAGING_USER }}
+          key: ${{ secrets.STAGING_SSH_KEY }}
+          fingerprint: ${{ secrets.STAGING_HOST_FINGERPRINT }}
+          envs: NEW_IMAGE,REGISTRY,REGISTRY_USER,REGISTRY_TOKEN,DEPLOY_BUNDLE,DEPLOY_DIR,BASE_URL,API_SERVICE,REQUIRE_PUBLIC_ENDPOINTS,PUBLIC_API_URL,PUBLIC_APP_URL,ALLOW_ONE_WAY_LIVEKIT_REVOCATION_UPGRADE,ALLOW_ONE_WAY_DATABASE_ROLE_UPGRADE,ACKNOWLEDGE_ONE_WAY_STATE_CONTRACT_V2_CUTOVER
           script_stop: true
+          # Match production: bounded migrations + cutover retain cleanup and
+          # rollback/health margin.
+          command_timeout: 90m
           script: |
             set -euo pipefail
             log() { printf '%s [deploy] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
 
-            # The deploy dir holds docker-compose.yml + .env for the API stack.
-            DEPLOY_DIR="${DEPLOY_DIR:-/opt/chathouse/backend}"
-            cd "$DEPLOY_DIR"
+            [ -f "$DEPLOY_BUNDLE" ] || {
+              log "Deployment bundle not found: ${DEPLOY_BUNDLE}"
+              exit 1
+            }
+            install -d -m 0750 "$DEPLOY_DIR"
+            [ -f "$DEPLOY_DIR/.env" ] || {
+              log "Host-managed env is missing: ${DEPLOY_DIR}/.env"
+              exit 1
+            }
+
+            STATE_DIR="$DEPLOY_DIR/.deploy-state"
+            install -d -m 0700 "$STATE_DIR"
+            PREVIOUS_COMPOSE="$STATE_DIR/docker-compose.prod.previous.yml"
+            HAD_PREVIOUS_COMPOSE=0
+            if [ -f "$DEPLOY_DIR/docker-compose.prod.yml" ]; then
+              cp "$DEPLOY_DIR/docker-compose.prod.yml" "$PREVIOUS_COMPOSE"
+              chmod 0600 "$PREVIOUS_COMPOSE"
+              HAD_PREVIOUS_COMPOSE=1
+            else
+              rm -f "$PREVIOUS_COMPOSE"
+            fi
+
+            STAGE_DIR="$(mktemp -d /tmp/chathouse-infra.XXXXXX)"
+            COMPOSE_ACTIVATED=0
+            restore_compose() {
+              [ "$COMPOSE_ACTIVATED" -eq 1 ] || return 0
+              if [ "$HAD_PREVIOUS_COMPOSE" -eq 1 ]; then
+                restore_tmp="$(mktemp "$DEPLOY_DIR/.docker-compose.prod.restore.XXXXXX")"
+                if ! install -m 0640 "$PREVIOUS_COMPOSE" "$restore_tmp"; then
+                  rm -f "$restore_tmp"
+                  return 1
+                fi
+                if ! mv -f "$restore_tmp" "$DEPLOY_DIR/docker-compose.prod.yml"; then
+                  rm -f "$restore_tmp"
+                  return 1
+                fi
+                log "Restored the previous Compose definition atomically"
+              else
+                rm -f "$DEPLOY_DIR/docker-compose.prod.yml" || return 1
+                log "Removed candidate Compose definition; none existed before deployment"
+              fi
+              COMPOSE_ACTIVATED=0
+            }
+            cleanup() {
+              status=$?
+              trap - EXIT
+              if [ "$status" -ne 0 ] && ! restore_compose; then
+                log "CRITICAL: failed to restore the previous Compose definition"
+                status=1
+              fi
+              case "$STAGE_DIR" in /tmp/chathouse-infra.*) rm -rf "$STAGE_DIR" ;; esac
+              rm -f "$DEPLOY_BUNDLE"
+              exit "$status"
+            }
+            interrupt() {
+              trap - TERM INT HUP
+              log "Deployment shell interrupted; forcing failure cleanup"
+              exit 1
+            }
+            trap interrupt TERM INT HUP
+            trap cleanup EXIT
+            if tar -tzf "$DEPLOY_BUNDLE" | grep -Eq '(^/|(^|/)\.\.(/|$))'; then
+              log "Unsafe path found in deployment bundle"
+              exit 1
+            fi
+            tar -xzf "$DEPLOY_BUNDLE" -C "$STAGE_DIR"
+            for required in \
+              docker-compose.prod.yml \
+              Caddyfile \
+              scripts/deploy/deploy-image.sh \
+              scripts/deploy/state-contract-deploy-guard.sh \
+              scripts/deploy/livekit-deploy-guard.sh \
+              scripts/deploy/health-check.sh; do
+              [ -f "$STAGE_DIR/$required" ] || {
+                log "Bundle is missing required file: ${required}"
+                exit 1
+              }
+            done
+
+            # The archive contains only the versioned allowlist above. It has no
+            # .env, secret file, media directory, or Docker volume data.
+            # Install support files first, then atomically switch the Compose
+            # definition. The EXIT trap restores its exact previous state on
+            # every later failure, including pull/config/health failures.
+            tar --exclude='docker-compose.prod.yml' -xzf "$DEPLOY_BUNDLE" \
+              --no-same-owner \
+              --no-same-permissions \
+              -C "$DEPLOY_DIR"
+            chmod 0755 "$DEPLOY_DIR"/scripts/deploy/*.sh "$DEPLOY_DIR"/scripts/backup/*.sh
+            candidate_compose="$(mktemp "$DEPLOY_DIR/.docker-compose.prod.candidate.XXXXXX")"
+            install -m 0640 "$STAGE_DIR/docker-compose.prod.yml" "$candidate_compose"
+            mv -f "$candidate_compose" "$DEPLOY_DIR/docker-compose.prod.yml"
+            COMPOSE_ACTIVATED=1
 
             log "Logging in to ${REGISTRY}"
             echo "$REGISTRY_TOKEN" | docker login "$REGISTRY" -u "$REGISTRY_USER" --password-stdin
 
-            # Record the currently-running image so we can roll back to it.
-            PREV_IMAGE="$(docker inspect --format '{{.Config.Image}}' chathouse-api 2>/dev/null || echo '')"
-            log "Previous image: ${PREV_IMAGE:-<none>}"
-            log "New image:      ${NEW_IMAGE}"
-
-            log "Pulling ${NEW_IMAGE}"
-            docker pull "$NEW_IMAGE"
-
-            # Point compose at the freshly-built tag and recreate only the api
-            # service (DB/Redis stay up).
-            export CHATHOUSE_API_IMAGE="$NEW_IMAGE"
-            log "Recreating api service"
-            docker compose up -d --no-deps --pull always api || \
-              docker compose up -d --no-deps api
-
-            # ── Health gate: poll /health up to 10×, 5s apart ──
-            HEALTH_URL="${HEALTH_URL:-http://localhost:4000/health}"
-            ok=0
-            for i in $(seq 1 10); do
-              code="$(curl -fsS -o /tmp/health.json -w '%{http_code}' "$HEALTH_URL" || echo 000)"
-              if [ "$code" = "200" ] && grep -q '"database":true' /tmp/health.json && grep -q '"redis":true' /tmp/health.json; then
-                log "Health OK on attempt ${i}"
-                ok=1
-                break
-              fi
-              log "Health attempt ${i}/10 failed (http=${code}); retrying in 5s"
-              sleep 5
-            done
-
-            if [ "$ok" -ne 1 ]; then
-              log "Health checks FAILED — rolling back"
-              if [ -n "$PREV_IMAGE" ]; then
-                export CHATHOUSE_API_IMAGE="$PREV_IMAGE"
-                docker pull "$PREV_IMAGE" || true
-                docker compose up -d --no-deps api
-                log "Rolled back to ${PREV_IMAGE}"
-              else
-                log "No previous image recorded — cannot auto-rollback"
-              fi
-              exit 1
-            fi
-
-            log "Deploy succeeded: ${NEW_IMAGE}"
-            # Prune dangling images to keep the host disk in check.
+            DEPLOY_DIR="$DEPLOY_DIR" \
+              COMPOSE_FILE="$DEPLOY_DIR/docker-compose.prod.yml" \
+              ROLLBACK_COMPOSE_FILE="$PREVIOUS_COMPOSE" \
+              BASE_URL="$BASE_URL" \
+              API_SERVICE="$API_SERVICE" \
+              REQUIRE_PUBLIC_ENDPOINTS="$REQUIRE_PUBLIC_ENDPOINTS" \
+              PUBLIC_API_URL="$PUBLIC_API_URL" \
+              PUBLIC_APP_URL="$PUBLIC_APP_URL" \
+              ALLOW_ONE_WAY_LIVEKIT_REVOCATION_UPGRADE="$ALLOW_ONE_WAY_LIVEKIT_REVOCATION_UPGRADE" \
+              ALLOW_ONE_WAY_DATABASE_ROLE_UPGRADE="$ALLOW_ONE_WAY_DATABASE_ROLE_UPGRADE" \
+              ACKNOWLEDGE_ONE_WAY_STATE_CONTRACT_V2_CUTOVER="$ACKNOWLEDGE_ONE_WAY_STATE_CONTRACT_V2_CUTOVER" \
+              "$DEPLOY_DIR/scripts/deploy/deploy-image.sh" "$NEW_IMAGE"
+            COMPOSE_ACTIVATED=0
             docker image prune -f >/dev/null 2>&1 || true
 
-  # ───────────────────────── Slack notification ──────────────────────────────
+  attest-staging-candidate:
+    name: Attest tested staging candidate
+    needs: [build-and-push, deploy-staging, image-coordinates]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Record the exact image accepted by staging
+        env:
+          IMAGE_REF: ${{ needs.build-and-push.outputs.image_ref }}
+          IMAGE_NAME: ${{ needs.image-coordinates.outputs.image_name }}
+          SOURCE_SHA: ${{ github.sha }}
+          REPOSITORY: ${{ github.repository }}
+          WORKFLOW_RUN_ID: ${{ github.run_id }}
+          WORKFLOW_RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          expected_prefix="${REGISTRY}/${IMAGE_NAME}@sha256:"
+          case "$IMAGE_REF" in
+            "$expected_prefix"*) ;;
+            *)
+              echo "Candidate does not belong to ${REGISTRY}/${IMAGE_NAME}" >&2
+              exit 1
+              ;;
+          esac
+          digest="${IMAGE_REF#*@}"
+          if [[ ! "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+            echo "Candidate is not an immutable sha256 image digest" >&2
+            exit 1
+          fi
+          jq -n \
+            --arg schema_version '1' \
+            --arg repository "$REPOSITORY" \
+            --arg source_sha "$SOURCE_SHA" \
+            --arg image_ref "$IMAGE_REF" \
+            --arg run_id "$WORKFLOW_RUN_ID" \
+            --arg run_attempt "$WORKFLOW_RUN_ATTEMPT" \
+            '{
+              schema_version: $schema_version,
+              repository: $repository,
+              source_sha: $source_sha,
+              image_ref: $image_ref,
+              staging_workflow_run_id: $run_id,
+              staging_workflow_run_attempt: $run_attempt
+            }' > staging-release-candidate.json
+
+      - name: Publish immutable staging evidence
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: staging-release-candidate-${{ github.sha }}
+          path: staging-release-candidate.json
+          if-no-files-found: error
+          retention-days: 90
+
   notify:
     name: Notify Slack
-    needs: deploy-staging
+    needs: [deploy-staging, attest-staging-candidate]
     runs-on: ubuntu-latest
     if: always()
+    permissions:
+      contents: read
+    env:
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      DEPLOY_RESULT: ${{ needs.deploy-staging.result }}
+      ATTESTATION_RESULT: ${{ needs.attest-staging-candidate.result }}
+      REPOSITORY: ${{ github.repository }}
+      REVISION: ${{ github.sha }}
+      ACTOR: ${{ github.actor }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
-      - name: Compose message
-        id: msg
-        run: |
-          if [ "${{ needs.deploy-staging.result }}" = "success" ]; then
-            echo "emoji=:white_check_mark:" >> "$GITHUB_OUTPUT"
-            echo "text=Staging deploy SUCCEEDED" >> "$GITHUB_OUTPUT"
-          else
-            echo "emoji=:x:" >> "$GITHUB_OUTPUT"
-            echo "text=Staging deploy FAILED (result=${{ needs.deploy-staging.result }})" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Post to Slack
+      - name: Post result
         if: ${{ env.SLACK_WEBHOOK_URL != '' }}
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: |
-          payload=$(cat <<JSON
-          {
-            "text": "${{ steps.msg.outputs.emoji }} *${{ steps.msg.outputs.text }}*\n• repo: ${{ github.repository }}\n• sha: \`${{ github.sha }}\`\n• actor: ${{ github.actor }}\n• run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          }
-          JSON
-          )
-          curl -fsS -X POST -H 'Content-Type: application/json' -d "$payload" "$SLACK_WEBHOOK_URL"
+          set -euo pipefail
+          if [ "$DEPLOY_RESULT" = "success" ] && [ "$ATTESTATION_RESULT" = "success" ]; then
+            verdict="Staging deploy SUCCEEDED"
+          else
+            verdict="Staging release gate FAILED (deploy=${DEPLOY_RESULT}, attestation=${ATTESTATION_RESULT})"
+          fi
+          payload="$(jq -n \
+            --arg text "${verdict}\nrepo: ${REPOSITORY}\nsha: ${REVISION}\nactor: ${ACTOR}\nrun: ${RUN_URL}" \
+            '{text: $text}')"
+          curl -fsS \
+            --connect-timeout 5 \
+            --max-time 15 \
+            --retry 2 \
+            -X POST \
+            -H 'Content-Type: application/json' \
+            -d "$payload" \
+            "$SLACK_WEBHOOK_URL"

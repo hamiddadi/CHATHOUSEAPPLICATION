@@ -29,7 +29,7 @@ export const WaitlistScreen: React.FC = () => {
       await Share.share({
         message: t(
           'auth.waitlist.shareMessage',
-          "I'm waiting for my Chathouse access — join the waitlist to help me move up: https://app.chathouse.com",
+          "I'm waiting for my ChatHouse access — join the waitlist to help me move up: https://app.chathouse.com",
         ),
         url: 'https://app.chathouse.com',
       });

@@ -5,6 +5,7 @@ import { Button } from '../../../../../shared/components/Button';
 
 interface ProfileActionButtonsProps {
   isFollowedByMe: boolean;
+  followRequestedByMe: boolean;
   /** Drives the Follow/Following button spinner. */
   followLoading: boolean;
   /** Disables the wave button while the mutation is in flight. */
@@ -14,7 +15,7 @@ interface ProfileActionButtonsProps {
 }
 
 const ProfileActionButtons: React.FC<ProfileActionButtonsProps> = memo(
-  ({ isFollowedByMe, followLoading, waveLoading, onToggleFollow, onWave }) => {
+  ({ isFollowedByMe, followRequestedByMe, followLoading, waveLoading, onToggleFollow, onWave }) => {
     const { t } = useTranslation();
     return (
       <View className="flex-row items-center gap-sm mt-md w-full">
@@ -23,9 +24,11 @@ const ProfileActionButtons: React.FC<ProfileActionButtonsProps> = memo(
             label={
               isFollowedByMe
                 ? t('profile.followingState', 'Following')
-                : t('profile.follow', 'Follow')
+                : followRequestedByMe
+                  ? t('profile.requested', 'Requested')
+                  : t('profile.follow', 'Follow')
             }
-            variant={isFollowedByMe ? 'ghost' : 'primary'}
+            variant={isFollowedByMe || followRequestedByMe ? 'ghost' : 'primary'}
             size="md"
             fullWidth
             loading={followLoading}

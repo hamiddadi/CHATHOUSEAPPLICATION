@@ -45,7 +45,7 @@ export const AnimatedSplashScreen: React.FC = () => {
         <View className="bg-primary/10 p-xl rounded-full mb-md">
           <MaterialIcons name="mic" size={64} color={colors.primary} />
         </View>
-        <Text className="text-h1 font-display text-ink tracking-widest">CHATHOUSE</Text>
+        <Text className="text-xxxl font-display text-ink tracking-widest">CHATHOUSE</Text>
       </Animated.View>
     </View>
   );

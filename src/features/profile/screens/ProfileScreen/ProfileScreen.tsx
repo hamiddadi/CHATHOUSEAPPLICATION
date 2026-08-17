@@ -25,9 +25,12 @@ import { useBlock, useReport, useWave } from '../../../social/hooks/useSocial';
 import type { ReportReason } from '../../../social/services/socialService';
 import { useHouses } from '../../../houses/hooks/useHouses';
 import { useMyRoomHistory, useUserUpcomingEvents } from '../../../rooms/hooks/useRooms';
-import { useUserReplays } from '../../../rooms/hooks/useRecordings';
 import { formatScheduled } from '../../../../shared/utils/formatScheduled';
-import { ExtBadgesRow, ExtProfileLinks } from '../../../extensions';
+import {
+  areExternalDigitalPurchasesAllowed,
+  ExtBadgesRow,
+  ExtProfileLinks,
+} from '../../../extensions';
 import ProfileHeaderBar from './partials/ProfileHeaderBar';
 import ProfileIdentity from './partials/ProfileIdentity';
 import ProfileStats from './partials/ProfileStats';
@@ -61,6 +64,7 @@ export const ProfileScreen: React.FC = () => {
   const myId = useAuthStore(s => s.user?.id) ?? meQuery.data?.id;
   const userId = route.params?.userId ?? myId ?? '';
   const isSelf = !!myId && userId === myId;
+  const paidDigitalFeaturesAllowed = areExternalDigitalPurchasesAllowed();
 
   const { data: user, isLoading, isError, refetch } = useProfile(userId);
   const follow = useFollow();
@@ -82,10 +86,8 @@ export const ProfileScreen: React.FC = () => {
   const roomHistory = useMyRoomHistory(10);
   // Public scheduled rooms this user is hosting — shown to every viewer.
   const upcomingEvents = useUserUpcomingEvents(userId);
-  // Published public replays of rooms this user hosted (#75).
-  const replays = useUserReplays(userId);
   // Who viewed my profile (#76) — premium, self only.
-  const viewers = useProfileViewers(isSelf);
+  const viewers = useProfileViewers(isSelf && paidDigitalFeaturesAllowed);
 
   // Navigate to EditProfile in the CURRENT host stack (EditProfile is
   // registered in both the Rooms and Settings navigators) so editing from a
@@ -113,10 +115,6 @@ export const ProfileScreen: React.FC = () => {
     (roomId: string) => navigation.navigate('RoomsTab', { screen: 'Room', params: { roomId } }),
     [navigation],
   );
-  const goReplays = useCallback(
-    () => navigation.navigate('RoomsTab', { screen: 'Replays' }),
-    [navigation],
-  );
 
   const handleBack = useCallback(() => navigation.goBack(), [navigation]);
   const handleToggleFollow = useCallback(() => {
@@ -125,8 +123,9 @@ export const ProfileScreen: React.FC = () => {
     // error, but without this the button gives no feedback on a network
     // failure (mirrors EditProfileScreen's save-error Alert).
     const onError = (): void => Alert.alert(t('common.error'), t('profile.actionFailed'));
-    if (user.isFollowedByMe) unfollow.mutate(user.id, { onError });
-    else follow.mutate(user.id, { onError });
+    if (user.isFollowedByMe || user.followRequestedByMe) {
+      unfollow.mutate(user.id, { onError });
+    } else follow.mutate(user.id, { onError });
   }, [follow, t, unfollow, user]);
   const handleShare = useCallback(async () => {
     if (!user) return;
@@ -135,13 +134,13 @@ export const ProfileScreen: React.FC = () => {
     try {
       await Share.share({
         title: handle,
-        message: `${handle} sur Chathouse — ${url}`,
+        message: t('profile.shareMessage', { handle, url }),
         url,
       });
     } catch {
       /* user cancelled — no-op */
     }
-  }, [user]);
+  }, [t, user]);
 
   const handleWave = useCallback(() => {
     if (!user) return;
@@ -299,6 +298,7 @@ export const ProfileScreen: React.FC = () => {
           {!isSelf && (
             <ProfileActionButtons
               isFollowedByMe={user.isFollowedByMe}
+              followRequestedByMe={user.followRequestedByMe ?? false}
               followLoading={follow.isPending || unfollow.isPending}
               waveLoading={wave.isPending}
               onToggleFollow={handleToggleFollow}
@@ -351,36 +351,7 @@ export const ProfileScreen: React.FC = () => {
           </View>
         ) : null}
 
-        {(replays.data?.length ?? 0) > 0 ? (
-          <View className="gap-md">
-            <Text className="text-sm font-body-bold text-ink-muted uppercase tracking-wider">
-              {t('profile.publicReplays', 'Replays publics')}
-            </Text>
-            {replays.data?.map(rep => (
-              <Pressable
-                key={rep.id}
-                onPress={goReplays}
-                accessibilityRole="button"
-                className="flex-row items-center gap-md p-md rounded-md bg-overlay-white-5"
-              >
-                <Text className="text-lg">▶️</Text>
-                <View className="flex-1">
-                  <Text className="text-md font-body-bold text-ink" numberOfLines={1}>
-                    {rep.roomTitle ?? t('profile.replay', 'Replay')}
-                  </Text>
-                  {rep.durationMs ? (
-                    <Text className="text-xs font-body text-ink-muted">
-                      {Math.max(1, Math.round(rep.durationMs / 60000))} min
-                    </Text>
-                  ) : null}
-                </View>
-                <Text className="text-ink-muted text-base">›</Text>
-              </Pressable>
-            ))}
-          </View>
-        ) : null}
-
-        {isSelf ? (
+        {isSelf && paidDigitalFeaturesAllowed ? (
           <View className="gap-md">
             <Text className="text-sm font-body-bold text-ink-muted uppercase tracking-wider">
               {t('profile.whoViewed', 'Qui a vu mon profil')}

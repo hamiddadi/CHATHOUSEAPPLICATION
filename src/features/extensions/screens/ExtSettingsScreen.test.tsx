@@ -72,14 +72,9 @@ describe('ExtSettingsScreen', () => {
   });
 
   it('toggling a privacy switch calls privacyApi.update', async () => {
-    const { getByText, getAllByRole } = renderScreen(<ExtSettingsScreen />, {});
+    const { getByLabelText, getByText } = renderScreen(<ExtSettingsScreen />, {});
     await waitFor(() => expect(getByText('Private profile')).toBeTruthy(), WAIT);
-    // The first Switch in the tree is "Spatial audio"; flip "Private profile"
-    // by toggling its row switch via the accessible switch role list. We assert
-    // the screen wires switches to the privacy/audio update calls without crash.
-    const switches = getAllByRole('switch');
-    expect(switches.length).toBeGreaterThan(0);
-    fireEvent(switches[switches.length - 1], 'valueChange', true);
+    fireEvent(getByLabelText('Private profile'), 'valueChange', true);
     await waitFor(() => expect(mockPrivacyUpdate).toHaveBeenCalled(), WAIT);
   });
 

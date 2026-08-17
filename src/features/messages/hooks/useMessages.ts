@@ -7,7 +7,11 @@ import {
   type QueryClient,
 } from '@tanstack/react-query';
 import { messageService } from '../services/messageService';
+import type { ConversationPage, MessagePage } from '../services/messageService';
 import type { Conversation, Message } from '../../../shared/types/domain';
+import type { ContentReportReason } from '../../../shared/types/moderation';
+import { createIdempotencyKey } from '../../../shared/utils/idempotency';
+import { retryTransientMutation } from '../../../shared/services/api/retryPolicy';
 
 export const messageKeys = {
   all: ['messages'] as const,
@@ -17,12 +21,13 @@ export const messageKeys = {
   unread: () => [...messageKeys.all, 'unread'] as const,
 };
 
-// Matches the backend default (chat.schema listMessagesSchema limit=30). A
-// short page (< PAGE_SIZE) means the start of the history was reached.
+// Matches the backend default (chat.schema listMessagesSchema limit=30).
+// Pagination ends only when the backend returns `nextCursor: null`.
 export const MESSAGES_PAGE_SIZE = 30;
 
 /** Cache shape of a paginated thread: pages of ascending messages, page 0 = newest. */
-type MessagesCache = InfiniteData<Message[], string | undefined>;
+type MessagesCache = InfiniteData<MessagePage, string | undefined>;
+type ConversationsCache = InfiniteData<ConversationPage, string | undefined>;
 
 export const useUnreadMessageCount = () =>
   useQuery<number>({
@@ -32,9 +37,13 @@ export const useUnreadMessageCount = () =>
   });
 
 export const useConversations = () =>
-  useQuery<Conversation[]>({
+  useInfiniteQuery({
     queryKey: messageKeys.conversations(),
-    queryFn: () => messageService.conversations(),
+    queryFn: ({ pageParam }: { pageParam: string | undefined }) =>
+      messageService.conversations(pageParam),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (lastPage: ConversationPage) => lastPage.nextCursor ?? undefined,
+    select: (data: ConversationsCache) => data.pages.flatMap(page => page.items),
   });
 
 export const useConversation = (id: string) =>
@@ -46,9 +55,9 @@ export const useConversation = (id: string) =>
 
 /**
  * Cursor-paginated thread history. Page 0 holds the latest messages; each
- * `fetchNextPage` loads strictly OLDER ones via the `before` cursor (the ISO
- * `sentAt` of the oldest message loaded so far). `select` flattens the pages
- * back into one chronological Message[] so consumers keep the plain shape.
+ * `fetchNextPage` loads strictly OLDER ones via the opaque `nextCursor` returned
+ * by the previous page. `select` flattens the pages back into one chronological
+ * Message[] so consumers keep the plain shape.
  */
 export const useConversationMessages = (id: string) =>
   useInfiniteQuery({
@@ -56,11 +65,9 @@ export const useConversationMessages = (id: string) =>
     queryFn: ({ pageParam }: { pageParam: string | undefined }) =>
       messageService.messages(id, { before: pageParam, limit: MESSAGES_PAGE_SIZE }),
     initialPageParam: undefined as string | undefined,
-    // A full page means older history may remain; its first (oldest) message
-    // becomes the next cursor. A short page ends the scroll.
-    getNextPageParam: (lastPage: Message[]) =>
-      lastPage.length === MESSAGES_PAGE_SIZE ? lastPage[0]?.sentAt : undefined,
-    select: (data: MessagesCache) => [...data.pages].reverse().flat(),
+    // The backend owns the total-order boundary and explicitly signals the end.
+    getNextPageParam: (lastPage: MessagePage) => lastPage.nextCursor ?? undefined,
+    select: (data: MessagesCache) => [...data.pages].reverse().flatMap(page => page.items),
     enabled: id.length > 0,
   });
 
@@ -69,21 +76,51 @@ export const useConversationMessages = (id: string) =>
 const appendToThread = (qc: QueryClient, message: Message): void => {
   qc.setQueryData<MessagesCache>(messageKeys.messages(message.conversationId), prev =>
     prev
-      ? { ...prev, pages: prev.pages.map((page, i) => (i === 0 ? [...page, message] : page)) }
-      : { pages: [[message]], pageParams: [undefined] },
+      ? prev.pages.some(page => page.items.some(existing => existing.id === message.id))
+        ? prev
+        : {
+            ...prev,
+            pages: prev.pages.map((page, i) =>
+              i === 0 ? { ...page, items: [...page.items, message] } : page,
+            ),
+          }
+      : { pages: [{ items: [message], nextCursor: null }], pageParams: [undefined] },
   );
 };
 
 export const useSendMessage = () => {
   const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({ conversationId, text }: { conversationId: string; text: string }) =>
-      messageService.send(conversationId, text),
+  const mutation = useMutation({
+    mutationFn: ({
+      conversationId,
+      text,
+      idempotencyKey,
+    }: {
+      conversationId: string;
+      text: string;
+      idempotencyKey: string;
+    }) => messageService.send(conversationId, text, idempotencyKey),
+    retry: retryTransientMutation,
     onSuccess: message => {
       appendToThread(qc, message);
       void qc.invalidateQueries({ queryKey: messageKeys.conversations() });
     },
   });
+  type Variables = { conversationId: string; text: string };
+  const withKey = (variables: Variables) => ({
+    ...variables,
+    // This wrapper runs once per mutate/mutateAsync call. TanStack Query keeps
+    // the resulting variables object for every transport retry, so all retries
+    // carry the same key while a new user action receives a fresh one.
+    idempotencyKey: createIdempotencyKey(),
+  });
+  return {
+    ...mutation,
+    mutate: (variables: Variables, options?: Parameters<typeof mutation.mutate>[1]) =>
+      mutation.mutate(withKey(variables), options),
+    mutateAsync: (variables: Variables, options?: Parameters<typeof mutation.mutateAsync>[1]) =>
+      mutation.mutateAsync(withKey(variables), options),
+  };
 };
 
 export const useDeleteMessage = () => {
@@ -97,7 +134,13 @@ export const useDeleteMessage = () => {
     onSuccess: (_res, { messageId, conversationId }) => {
       qc.setQueryData<MessagesCache>(messageKeys.messages(conversationId), prev =>
         prev
-          ? { ...prev, pages: prev.pages.map(page => page.filter(m => m.id !== messageId)) }
+          ? {
+              ...prev,
+              pages: prev.pages.map(page => ({
+                ...page,
+                items: page.items.filter(message => message.id !== messageId),
+              })),
+            }
           : prev,
       );
       void qc.invalidateQueries({ queryKey: messageKeys.conversations() });
@@ -105,23 +148,44 @@ export const useDeleteMessage = () => {
   });
 };
 
+export const useReportMessage = () =>
+  useMutation({
+    mutationFn: ({ messageId, reason }: { messageId: string; reason: ContentReportReason }) =>
+      messageService.report(messageId, reason),
+  });
+
 export const useSendVoiceMessage = () => {
   const qc = useQueryClient();
-  return useMutation({
+  const mutation = useMutation({
     mutationFn: ({
       conversationId,
       audioUrl,
       durationMs,
+      idempotencyKey,
     }: {
       conversationId: string;
       audioUrl: string;
       durationMs: number;
-    }) => messageService.sendVoice(conversationId, audioUrl, durationMs),
+      idempotencyKey: string;
+    }) => messageService.sendVoice(conversationId, audioUrl, durationMs, idempotencyKey),
+    retry: retryTransientMutation,
     onSuccess: message => {
       appendToThread(qc, message);
       void qc.invalidateQueries({ queryKey: messageKeys.conversations() });
     },
   });
+  type Variables = { conversationId: string; audioUrl: string; durationMs: number };
+  const withKey = (variables: Variables) => ({
+    ...variables,
+    idempotencyKey: createIdempotencyKey(),
+  });
+  return {
+    ...mutation,
+    mutate: (variables: Variables, options?: Parameters<typeof mutation.mutate>[1]) =>
+      mutation.mutate(withKey(variables), options),
+    mutateAsync: (variables: Variables, options?: Parameters<typeof mutation.mutateAsync>[1]) =>
+      mutation.mutateAsync(withKey(variables), options),
+  };
 };
 
 export const useMarkConversationRead = () => {

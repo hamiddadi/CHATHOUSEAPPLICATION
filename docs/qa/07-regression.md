@@ -2,7 +2,7 @@
 
 > **ChatHouse** — app audio live facon Clubhouse (React Native / Expo SDK 55, temps reel WebSocket `socket.io-client` + audio **LiveKit** `@livekit/react-native`, push `expo-notifications`, i18n FR/EN, roles guest / standard / admin, Android + iOS, reseaux variables 3G/4G/5G/Wi-Fi).
 >
-> **Perimetre de reference** : 50 ecrans · 381 boutons/controles · 991 cas de test rediges dans `docs/qa/screens/01-…` a `50-…`.
+> **Perimetre de reference** : 50 ecrans · 385 boutons/controles · 991 cas de test rediges dans `docs/qa/screens/01-…` a `50-…` (inventaire actualise le 10 aout 2026).
 > **But de ce document** : ne **pas** rejouer les 991 cas a chaque correctif. Apres un changement (refonte UI, evolution API/WebSocket, fix temps-reel), selectionner **par impact** le sous-ensemble strictement necessaire — puis confirmer la non-regression.
 
 | Champ           | Valeur                                                                                                                                                                       |

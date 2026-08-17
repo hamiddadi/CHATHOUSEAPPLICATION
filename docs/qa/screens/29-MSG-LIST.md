@@ -15,17 +15,17 @@
   - **Liste vide** : aucune conversation ET aucun groupe -> `EmptyState` titre `messages.empty` ("Pas encore de conversations") + `messages.startHint`. Si des groupes existent mais aucune conversation 1:1, **pas** d'empty-state (le `ListEmptyComponent` ne s'affiche que si `groups.length === 0`).
   - **Non lus** : `convo.unreadCount > 0` -> pastille primaire avec le compteur + apercu en gras ; idem pour `group.unreadCount`.
   - **Hors-ligne** : `useConversations`/`useGroups` (React Query) servent le cache si dispo ; le pull-to-refresh relance `refetch` (echec -> reste sur le cache ou bascule en `isError` si aucun cache). Les MAJ socket ne remontent pas tant que le socket n'est pas reconnecte.
-  - **Note bande "Online"** : `OnlineUsersList` est monte dans le header SANS prop `users`, donc il **retourne `null` actuellement** (aucune source de presence cablee, cf. TODO audit). L'item utilisateur en ligne (`Open chat with {name}`) n'est rendu QUE si `users` est fourni — documente ici comme element conditionnel (P2, non actif en l'etat).
+  - **Bande "Online" active** : `MessagesScreen` interroge `usePresenceAvailable()` (`GET /api/ext/presence/available`), valide et deduplique les pairs puis fournit `onlineUsers` a `OnlineUsersList`. La bande est rendue uniquement si l'API retourne au moins un pair valide ; elle reste masquee si la liste est vide ou si cette source non critique echoue. Aucun utilisateur fictif n'est injecte.
 
 ## Matrice bouton
 
-| #   | Bouton                          | Emplacement                                   | Type                        | Locator reel                                                                       | Pre-condition                                                   | Priorite |
-| --- | ------------------------------- | --------------------------------------------- | --------------------------- | ---------------------------------------------------------------------------------- | --------------------------------------------------------------- | -------- |
-| 1   | Compose / nouvelle conversation | Header (icone `edit`)                         | navigation                  | `accessibilityLabel` = `t('messages.newChatA11y')` = "Nouvelle conversation"       | Authentifie                                                     | P1       |
-| 2   | Ligne conversation 1:1          | Corps (cellule de liste pressable)            | list-item / realtime-action | `accessibilityLabel` = `` `Open chat with ${other.displayName}` ``                 | >=1 conversation chargee                                        | P0       |
-| 3   | Ligne groupe                    | Header (section "Groupes", cellule pressable) | list-item / realtime-action | `accessibilityLabel` = `` `Open group ${title}` ``                                 | >=1 groupe charge                                               | P1       |
-| 4   | Pull-to-refresh                 | Corps (FlatList `onRefresh`)                  | realtime-action             | `refreshing={isFetching}` / `onRefresh={refetch}` (pas de label — geste de tirage) | Liste rendue (pas en `isLoading`/`isError`)                     | P1       |
-| 5   | Item utilisateur en ligne       | Header (bande "Online", horizontale)          | navigation                  | `accessibilityLabel` = `` `Open chat with ${user.name}` ``                         | Prop `users` fournie a `OnlineUsersList` (non cablee en l'etat) | P2       |
+| #   | Bouton                          | Emplacement                                   | Type                        | Locator reel                                                                                 | Pre-condition                                              | Priorite |
+| --- | ------------------------------- | --------------------------------------------- | --------------------------- | -------------------------------------------------------------------------------------------- | ---------------------------------------------------------- | -------- |
+| 1   | Compose / nouvelle conversation | Header (icone `edit`)                         | navigation                  | `accessibilityLabel` = `t('messages.newChatA11y')` = "Nouvelle conversation"                 | Authentifie                                                | P1       |
+| 2   | Ligne conversation 1:1          | Corps (cellule de liste pressable)            | list-item / realtime-action | `accessibilityLabel` = `` `Open chat with ${other.displayName}` ``                           | >=1 conversation chargee                                   | P0       |
+| 3   | Ligne groupe                    | Header (section "Groupes", cellule pressable) | list-item / realtime-action | `accessibilityLabel` = `` `Open group ${title}` ``                                           | >=1 groupe charge                                          | P1       |
+| 4   | Pull-to-refresh                 | Corps (FlatList `onRefresh`)                  | realtime-action             | `refreshing={isFetching}` / `onRefresh={refetch}` (pas de label — geste de tirage)           | Liste rendue (pas en `isLoading`/`isError`)                | P1       |
+| 5   | Item utilisateur en ligne       | Header (bande "Online", horizontale)          | navigation                  | `accessibilityLabel = t('messages.openChatA11y', { name })` ; hint `messages.onlineChatHint` | `/ext/presence/available` retourne au moins un pair valide | P2       |
 
 > Aucun toggle/switch, checkbox, FAB, lien legal, swipe ni long-press sur cet ecran. Pas de bouton "retour" (ecran racine d'onglet). Le bouton compose (1) et les cellules (2, 3) sont les seuls actionnables systematiquement rendus ; le pull-to-refresh (4) est un geste ; l'item online (5) est conditionnel.
 
@@ -229,47 +229,47 @@
 - **Donnees de test** : N/A.
 - **Duree estimee** : 4 min
 
-### MSG-LIST-015 - Item utilisateur en ligne (bande "Online") — etat actuel non cable
+### MSG-LIST-015 - Item utilisateur en ligne (bande "Online") — source de presence reelle
 
 - **Type** : Fonctionnel positif
 - **Priorite** : P2
-- **Pre-conditions** : compte `standard`, Wi-Fi. ATTENTION : en l'etat, `MessagesScreen` monte `OnlineUsersList` SANS prop `users`, donc la bande retourne `null` et aucun item n'est rendu.
+- **Pre-conditions** : compte `standard`, Wi-Fi ; l'endpoint `/api/ext/presence/available` retourne au moins un utilisateur suivi, disponible et dote d'un `id` backend valide.
 - **Etapes** :
   1. Ouvrir Messages avec la build courante.
-  2. Chercher une bande horizontale "Online" en haut de liste.
-  3. (Pre-requis dev pour activer le cas : alimenter `OnlineUsersList` avec `users=[{ id, name, avatar }]` portant de vrais ids backend.)
-  4. Si la bande est rendue, taper un item (label "Open chat with {name}").
-- **Resultat attendu** : etat courant -> aucune bande affichee (comportement attendu, evite de naviguer vers une conversation inexistante). Une fois `users` cable -> tap navigue vers `ChatDetail` avec `conversationId = resolveConversationId(user.id)` ou `user.id` par defaut.
-- **Critere d'acceptation (OK/KO)** : OK si la bande est absente sans prop `users` (pas de mock fantome) et, si cablee, ouvre `ChatDetail` avec le bon id ; KO si une bande mock apparait ou navigue vers un id `conv-{id}` fabrique.
-- **Donnees de test** : `users = [{ id: 'u9', name: 'Jordan', avatar: 'https://…' }]`.
+  2. Verifier la bande horizontale "En ligne" en haut de liste.
+  3. Taper l'item annonce "Ouvrir la conversation avec {name}".
+  4. Refaire le test avec une reponse vide, puis une erreur de presence.
+- **Resultat attendu** : avec un pair valide, la bande affiche son nom/avatar et le tap navigue vers `ChatDetail` avec `conversationId` egal exactement au `peer.id` backend. Avec une liste vide ou une erreur de cette source non critique, la bande est masquee sans utilisateur fictif et le reste de l'ecran demeure utilisable.
+- **Critere d'acceptation (OK/KO)** : OK si la presence reelle pilote la bande, le bon pair est ouvert et aucun id `conv-{id}` n'est fabrique ; KO si la bande reste absente avec une reponse valide, affiche un mock ou navigue vers un autre id.
+- **Donnees de test** : reponse API avec `{ id: 'u9', displayName: 'Jordan', avatarUrl: 'https://…' }`, puis `[]`.
 - **Duree estimee** : 3 min
 
 ### MSG-LIST-016 - Item utilisateur en ligne : multi-clic + image avatar en echec
 
 - **Type** : Erreur/Limite
 - **Priorite** : P2
-- **Pre-conditions** : compte `standard`, `OnlineUsersList` cable avec un `users` dont une `avatar` URL est cassee, reseau latence.
+- **Pre-conditions** : compte `standard` ; `/api/ext/presence/available` retourne un pair dont `avatarUrl` est cassee ; reseau avec latence.
 - **Etapes** :
-  1. Activer la bande "Online" (prop `users` fournie, voir MSG-LIST-015).
+  1. Ouvrir Messages et attendre la bande "En ligne" alimentee par l'API (voir MSG-LIST-015).
   2. Observer un avatar dont l'URL echoue.
   3. Taper 4 fois rapidement sur l'item.
-- **Resultat attendu** : l'avatar bascule sur l'image par defaut (`DEFAULTS.avatar` via `onError` de `PulsingAvatar`), le halo vert pulse sans bloquer le tap. Une seule navigation `ChatDetail`. Nom tronque a 8 caracteres avec ellipse si trop long.
-- **Critere d'acceptation (OK/KO)** : OK si fallback avatar applique et une seule navigation ; KO si image cassee persistante, crash ou double-empilement.
-- **Donnees de test** : `users = [{ id: 'u9', name: 'Jonathan-le-long', avatar: 'https://invalid.example/x.png' }]`.
+- **Resultat attendu** : l'avatar bascule sur `DEFAULTS.avatar` via `onError`, le halo vert ne bloque pas le tap et le nom est tronque a 8 caracteres avec ellipse. Le code ne possede pas de verrou synchrone propre a cet item : le test doit donc detecter et signaler tout double-empilement de `ChatDetail` lors des taps rapides.
+- **Critere d'acceptation (OK/KO)** : OK si fallback avatar applique, aucun crash et une seule route utile ouverte ; KO si image cassee persistante, crash ou double-empilement.
+- **Donnees de test** : reponse API avec `{ id: 'u9', displayName: 'Jonathan-le-long', avatarUrl: 'https://invalid.example/x.png' }`.
 - **Duree estimee** : 4 min
 
 ### MSG-LIST-017 - Accessibilite item utilisateur en ligne (lecteur d'ecran + halo anime)
 
 - **Type** : Accessibilite
 - **Priorite** : P2
-- **Pre-conditions** : compte `standard`, `OnlineUsersList` cable, TalkBack/VoiceOver actif, reduction des animations activee dans le systeme, police agrandie.
+- **Pre-conditions** : compte `standard` ; presence API non vide ; TalkBack/VoiceOver actif ; reduction des animations activee dans le systeme ; police agrandie.
 - **Etapes** :
-  1. Activer la bande "Online".
+  1. Ouvrir Messages et attendre la bande "En ligne" issue de la presence API.
   2. Balayer jusqu'a un item utilisateur.
   3. Ecouter l'annonce ; double-taper.
-- **Resultat attendu** : annonce "Open chat with {name}, bouton". L'avatar pulsant (decoratif, `pointerEvents="none"` sur le ring) n'interfere pas avec le focus ; le pictogramme de presence n'est pas annonce parasitement. Double-tap ouvre `ChatDetail`.
-- **Critere d'acceptation (OK/KO)** : OK si label lu et action declenchee ; KO si halo capte le focus ou nom non annonce.
-- **Donnees de test** : `users = [{ id: 'u9', name: 'Jordan', avatar: 'https://…' }]`.
+- **Resultat attendu** : annonce localisee "Ouvrir la conversation avec {name}, bouton", suivie de l'indice de disponibilite. Le ring decoratif (`pointerEvents="none"`) n'interfere pas avec le focus et le double-tap ouvre `ChatDetail`. Limite connue a verifier : `PulsingAvatar` ne consulte pas encore la preference systeme de reduction des animations, donc le halo continue actuellement de pulser.
+- **Critere d'acceptation (OK/KO)** : OK pour navigation/a11y si le label et l'indice sont lus et l'action declenchee ; consigner separement le non-respect de la reduction des animations tant qu'il n'est pas corrige. KO si le halo capte le focus ou si le nom n'est pas annonce.
+- **Donnees de test** : reponse API avec `{ id: 'u9', displayName: 'Jordan', avatarUrl: 'https://…' }`.
 - **Duree estimee** : 4 min
 
 ### MSG-LIST-018 - Etats vides / erreur / chargement (couverture transverse de l'ecran)

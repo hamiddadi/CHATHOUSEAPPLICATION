@@ -1,4 +1,5 @@
 import { apiClient } from '../../../shared/services/api/apiClient';
+import { assertExternalDigitalPurchasesAllowed } from '../utils/digitalPurchases';
 
 /**
  * Premium subscription (Stripe-hosted Checkout + billing portal).
@@ -22,12 +23,14 @@ export const premiumApi = {
     return data;
   },
   async checkout(currency?: string): Promise<{ url: string }> {
+    assertExternalDigitalPurchasesAllowed();
     const { data } = await apiClient.post<{ url: string }>('/ext/premium/checkout', {
       ...(currency ? { currency } : {}),
     });
     return data;
   },
   async portal(): Promise<{ url: string }> {
+    assertExternalDigitalPurchasesAllowed();
     const { data } = await apiClient.post<{ url: string }>('/ext/premium/portal', {});
     return data;
   },

@@ -8,6 +8,8 @@ import type {
   UserSummary,
 } from '../../../shared/types/domain';
 import type { Envelope } from '../../../shared/types/api';
+import type { ContentReportReason, ContentReportResult } from '../../../shared/types/moderation';
+import { clearRoomSocketAdmission } from './roomSocketAdmission';
 
 /**
  * Backend is now authoritative for rooms. The service translates the
@@ -26,8 +28,8 @@ export interface CreateRoomInput {
   coHostIds?: readonly string[];
   isPrivate?: boolean;
   chatEnabled?: boolean;
-  // Host opt-in: record the room for later Replay (audio-only). Only takes
-  // effect when the backend has egress configured (otherwise a harmless no-op).
+  // Future host opt-in for Replays. The initial public release keeps the
+  // backend kill-switch off, so a true value is rejected and the UI stays hidden.
   recordingEnabled?: boolean;
   maxSpeakers?: number;
 }
@@ -87,6 +89,15 @@ interface RawRoom {
   _count?: { rsvps?: number; participants?: number };
   knownSpeakers?: RawUser[];
   hasKnownSpeakers?: boolean;
+}
+
+export interface RoomJoinResult {
+  room: Room;
+  /**
+   * `true` only when this POST transitioned the Participant from absent/left
+   * to active. `null` denotes an older backend response without the field.
+   */
+  changed: boolean | null;
 }
 
 // Feed page size requested from GET /rooms/feed (backend caps at 50). Exported
@@ -279,33 +290,49 @@ export const roomService = {
     return res.data.data.map(toSummary);
   },
 
-  async create(input: CreateRoomInput): Promise<Room> {
+  async create(input: CreateRoomInput, idempotencyKey: string): Promise<Room> {
     const trimmed = input.title.trim();
     if (trimmed.length === 0) throw new Error('Title is required');
     const { isPrivate, roomType } = visibilityToBackend(input.visibility, input.isPrivate);
-    const res = await apiClient.post<Envelope<RawRoom>>('/rooms', {
-      title: trimmed,
-      description: input.description?.trim() || undefined,
-      isPrivate,
-      roomType,
-      chatEnabled: input.chatEnabled ?? true,
-      recordingEnabled: input.recordingEnabled ?? false,
-      maxSpeakers: input.maxSpeakers,
-      clubId: input.houseId ?? undefined,
-      scheduledFor: input.scheduledFor ?? undefined,
-      topics: input.topics ?? [],
-      coHostIds: input.coHostIds ?? [],
-    });
+    const res = await apiClient.post<Envelope<RawRoom>>(
+      '/rooms',
+      {
+        title: trimmed,
+        description: input.description?.trim() || undefined,
+        isPrivate,
+        roomType,
+        chatEnabled: input.chatEnabled ?? true,
+        recordingEnabled: input.recordingEnabled ?? false,
+        maxSpeakers: input.maxSpeakers,
+        clubId: input.houseId ?? undefined,
+        scheduledFor: input.scheduledFor ?? undefined,
+        topics: input.topics ?? [],
+        coHostIds: input.coHostIds ?? [],
+      },
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    );
     return toRoom(res.data.data);
   },
 
-  async join(roomId: string): Promise<{ joined: true }> {
-    await apiClient.post(`/rooms/${roomId}/join`);
-    return { joined: true };
+  async join(roomId: string): Promise<RoomJoinResult> {
+    // The backend returns the authoritative post-join room, including the
+    // caller's Participant row. Preserve it instead of discarding the payload:
+    // RoomScreen can seed its cache before hand-raises and LiveKit start.
+    const res = await apiClient.post<Envelope<RawRoom & { changed?: unknown }>>(
+      `/rooms/${roomId}/join`,
+    );
+    const payload = res.data.data;
+    return {
+      room: toRoom(payload),
+      // Compatibility with an older API is deliberately conservative: an
+      // unknown outcome must not make the client leave a pre-existing session.
+      changed: typeof payload.changed === 'boolean' ? payload.changed : null,
+    };
   },
 
   async leave(roomId: string): Promise<{ left: true }> {
     await apiClient.post(`/rooms/${roomId}/leave`);
+    clearRoomSocketAdmission(roomId);
     return { left: true };
   },
 
@@ -384,6 +411,7 @@ export const roomService = {
 
   async end(roomId: string): Promise<{ ended: true }> {
     await apiClient.delete(`/rooms/${roomId}`);
+    clearRoomSocketAdmission(roomId);
     return { ended: true };
   },
 
@@ -443,6 +471,7 @@ export const roomService = {
   async sendMessage(
     roomId: string,
     content: string,
+    idempotencyKey: string,
     replyToId?: string,
   ): Promise<{
     id: string;
@@ -459,10 +488,14 @@ export const roomService = {
         user: RawUser;
         replyTo: { id: string; content: string; user: RawUser } | null;
       }>
-    >(`/rooms/${roomId}/messages`, {
-      content,
-      ...(replyToId ? { replyToId } : {}),
-    });
+    >(
+      `/rooms/${roomId}/messages`,
+      {
+        content,
+        ...(replyToId ? { replyToId } : {}),
+      },
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    );
     return {
       id: res.data.data.id,
       content: res.data.data.content,
@@ -478,8 +511,24 @@ export const roomService = {
     };
   },
 
-  async sendReaction(roomId: string, emoji: string): Promise<{ ok: true }> {
-    await apiClient.post(`/rooms/${roomId}/reactions`, { emoji });
+  async reportMessage(
+    roomId: string,
+    messageId: string,
+    reason: ContentReportReason,
+  ): Promise<ContentReportResult> {
+    const res = await apiClient.post<Envelope<ContentReportResult>>(
+      `/rooms/${roomId}/messages/${messageId}/report`,
+      { reason },
+    );
+    return res.data.data;
+  },
+
+  async sendReaction(roomId: string, emoji: string, idempotencyKey: string): Promise<{ ok: true }> {
+    await apiClient.post(
+      `/rooms/${roomId}/reactions`,
+      { emoji },
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    );
     return { ok: true };
   },
 

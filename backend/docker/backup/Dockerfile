@@ -14,6 +14,7 @@ FROM alpine:3.20
 
 # postgresql16-client => matching pg_dump/psql for a PostgreSQL 16 server.
 # aws-cli            => optional S3 upload (S3_BACKUP_BUCKET).
+# docker-cli         => runs the immutable API candidate only during restore drills.
 # bash               => the backup/restore scripts require bash (set -o pipefail, arrays).
 # tzdata             => correct local time for cron + log timestamps.
 # dcron              => lightweight cron daemon (crond).
@@ -21,6 +22,7 @@ FROM alpine:3.20
 RUN apk add --no-cache \
       postgresql16-client \
       aws-cli \
+      docker-cli \
       bash \
       tzdata \
       dcron \

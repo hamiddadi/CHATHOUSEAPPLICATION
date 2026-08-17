@@ -7,7 +7,7 @@
  * but never blocks the flow.
  */
 import React from 'react';
-import { Alert, Linking, type AlertButton } from 'react-native';
+import { Alert, Linking, StyleSheet, type AlertButton } from 'react-native';
 import { fireEvent, waitFor } from '@testing-library/react-native';
 import { renderScreen, mockAuthenticated, resetAuth } from '../../../../test-utils/renderScreen';
 import { pushService } from '../../../notifications/services/pushService';
@@ -24,7 +24,7 @@ describe('NotificationsPermissionScreen', () => {
   });
 
   it('mounts without throwing and shows the title, benefits and both CTAs', () => {
-    const { getByText, toJSON } = renderScreen(<NotificationsPermissionScreen />, {
+    const { getByTestId, getByText, toJSON } = renderScreen(<NotificationsPermissionScreen />, {
       route: { name: 'NotificationsPermission' },
     });
     expect(toJSON()).toBeTruthy();
@@ -33,6 +33,11 @@ describe('NotificationsPermissionScreen', () => {
     expect(getByText('Not now')).toBeTruthy();
     // One of the benefit rows.
     expect(getByText('Never miss a direct message.')).toBeTruthy();
+    expect(
+      StyleSheet.flatten(
+        getByTestId('notifications-permission-scroll').props.contentContainerStyle,
+      ),
+    ).toMatchObject({ flexGrow: 1 });
   });
 
   it('Not now skips straight to SuggestedFollows without registering', () => {
@@ -103,6 +108,7 @@ describe('NotificationsPermissionScreen', () => {
 
   it('Enable still advances even when backend registration rejects', async () => {
     jest.spyOn(pushService, 'registerWithBackend').mockRejectedValue(new Error('no native module'));
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
     const { getByText, navigation } = renderScreen(<NotificationsPermissionScreen />, {
       route: { name: 'NotificationsPermission' },
     });
@@ -110,5 +116,25 @@ describe('NotificationsPermissionScreen', () => {
     await waitFor(() => {
       expect(navigation.navigate).toHaveBeenCalledWith('SuggestedFollows');
     });
+    expect(alertSpy).toHaveBeenCalledWith(
+      "Notifications weren't enabled",
+      'ChatHouse could not finish enabling notifications. You can continue; ChatHouse will try again automatically the next time you open the app.',
+    );
+  });
+
+  it('Enable (registration error) advances and explains that activation did not finish', async () => {
+    jest.spyOn(pushService, 'registerWithBackend').mockResolvedValue('error');
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
+    const { getByText, navigation } = renderScreen(<NotificationsPermissionScreen />, {
+      route: { name: 'NotificationsPermission' },
+    });
+    fireEvent.press(getByText('Enable notifications'));
+    await waitFor(() => {
+      expect(alertSpy).toHaveBeenCalledWith(
+        "Notifications weren't enabled",
+        'ChatHouse could not finish enabling notifications. You can continue; ChatHouse will try again automatically the next time you open the app.',
+      );
+    });
+    expect(navigation.navigate).toHaveBeenCalledWith('SuggestedFollows');
   });
 });

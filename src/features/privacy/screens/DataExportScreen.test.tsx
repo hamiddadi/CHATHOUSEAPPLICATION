@@ -1,25 +1,34 @@
-/**
- * Render-test for DataExportScreen. Mounts the GDPR data-export screen and
- * exercises its primary CTA (Generate & share) plus the post-export controls
- * (Copy to clipboard / Clear clipboard) that only appear after a successful
- * export. `privacyService.exportMyData`, `Share.share` and the Clipboard
- * native module are spied so the success path runs deterministically without a
- * network or real native side-effect.
- */
 import React from 'react';
-import { Alert, Share } from 'react-native';
-import Clipboard from '@react-native-clipboard/clipboard';
+import { Alert } from 'react-native';
+import NativeShare from 'react-native-share';
+import { unlink, writeFile } from '@dr.pogodin/react-native-fs';
 import { fireEvent, waitFor } from '@testing-library/react-native';
 import { renderScreen, mockAuthenticated, resetAuth } from '../../../test-utils/renderScreen';
 import { privacyService } from '../services/privacyService';
 import { DataExportScreen } from './DataExportScreen';
 
+jest.mock('react-native-share', () => ({
+  __esModule: true,
+  default: { open: jest.fn() },
+}));
+
+jest.mock('@dr.pogodin/react-native-fs', () => ({
+  CachesDirectoryPath: '/private-cache',
+  writeFile: jest.fn(async () => undefined),
+  unlink: jest.fn(async () => undefined),
+}));
+
 const FAKE_ARCHIVE = '{"user":"export","messages":[],"profile":{"id":"user-test-1"}}';
+const openShare = NativeShare.open as jest.Mock;
+const writeExportFile = writeFile as jest.Mock;
+const unlinkExportFile = unlink as jest.Mock;
 
 describe('DataExportScreen', () => {
   beforeEach(() => {
+    jest.clearAllMocks();
     mockAuthenticated();
   });
+
   afterEach(() => {
     resetAuth();
     jest.restoreAllMocks();
@@ -32,37 +41,48 @@ describe('DataExportScreen', () => {
     expect(getByText('Generate and share my export')).toBeTruthy();
   });
 
-  it('export CTA calls the service then opens the Share sheet, revealing the Copy button', async () => {
+  it('writes a private JSON attachment, shares it, then removes the temporary file', async () => {
     const exportSpy = jest.spyOn(privacyService, 'exportMyData').mockResolvedValue(FAKE_ARCHIVE);
-    const shareSpy = jest
-      .spyOn(Share, 'share')
-      .mockResolvedValue({ action: 'sharedAction' } as never);
+    openShare.mockResolvedValue({ success: true, message: 'shared' });
 
     const { getByText } = renderScreen(<DataExportScreen />);
     fireEvent.press(getByText('Generate and share my export'));
 
     await waitFor(() => expect(exportSpy).toHaveBeenCalledTimes(1));
-    expect(shareSpy).toHaveBeenCalledWith(expect.objectContaining({ message: FAKE_ARCHIVE }));
-    // Post-export controls now render (lastBytes !== null).
-    await waitFor(() => expect(getByText('Copy to clipboard')).toBeTruthy());
+    await waitFor(() =>
+      expect(writeExportFile).toHaveBeenCalledWith(
+        expect.stringMatching(/^\/private-cache\/chathouse-export-\d{4}-\d{2}-\d{2}\.json$/),
+        FAKE_ARCHIVE,
+        'utf8',
+      ),
+    );
+    expect(openShare).toHaveBeenCalledWith(
+      expect.objectContaining({
+        url: expect.stringMatching(/^file:\/\/\/private-cache\/chathouse-export-/),
+        type: 'application/json',
+        failOnCancel: false,
+        useInternalStorage: true,
+      }),
+    );
+    await waitFor(() => expect(unlinkExportFile).toHaveBeenCalledTimes(1));
+    expect(getByText(/JSON export shared/)).toBeTruthy();
   });
 
-  it('does NOT reveal the Copy button when the user dismisses the Share sheet', async () => {
+  it('does not report success when the share sheet is dismissed', async () => {
     jest.spyOn(privacyService, 'exportMyData').mockResolvedValue(FAKE_ARCHIVE);
-    // User dismissed the sheet → nothing left the device → no success UI.
-    jest.spyOn(Share, 'share').mockResolvedValue({ action: 'dismissedAction' } as never);
+    openShare.mockResolvedValue({ success: false, message: 'dismissed', dismissedAction: true });
 
     const { getByText, queryByText } = renderScreen(<DataExportScreen />);
     fireEvent.press(getByText('Generate and share my export'));
 
-    // Wait for the share flow to settle, then assert the post-export controls
-    // never appeared (lastBytes stayed null).
-    await waitFor(() => expect(Share.share).toHaveBeenCalledTimes(1));
-    expect(queryByText('Copy to clipboard')).toBeNull();
+    await waitFor(() => expect(openShare).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(unlinkExportFile).toHaveBeenCalledTimes(1));
+    expect(queryByText(/JSON export shared/)).toBeNull();
   });
 
-  it('alerts when the export request fails (service rejects)', async () => {
-    jest.spyOn(privacyService, 'exportMyData').mockRejectedValue(new Error('boom'));
+  it('alerts on failure and still removes a file that was already written', async () => {
+    jest.spyOn(privacyService, 'exportMyData').mockResolvedValue(FAKE_ARCHIVE);
+    openShare.mockRejectedValue(new Error('share failed'));
     const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
 
     const { getByText } = renderScreen(<DataExportScreen />);
@@ -70,26 +90,18 @@ describe('DataExportScreen', () => {
 
     await waitFor(() => expect(alertSpy).toHaveBeenCalledTimes(1));
     expect(alertSpy.mock.calls[0]?.[0]).toBe('Error');
+    expect(unlinkExportFile).toHaveBeenCalledTimes(1);
   });
 
-  it('Copy then Clear clipboard buttons write to and wipe the native clipboard', async () => {
-    jest.spyOn(privacyService, 'exportMyData').mockResolvedValue(FAKE_ARCHIVE);
-    jest.spyOn(Share, 'share').mockResolvedValue({ action: 'sharedAction' } as never);
-    const setStringSpy = jest.spyOn(Clipboard, 'setString').mockReturnValue(undefined as never);
+  it('alerts without attempting cleanup when the export request itself fails', async () => {
+    jest.spyOn(privacyService, 'exportMyData').mockRejectedValue(new Error('boom'));
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
 
     const { getByText } = renderScreen(<DataExportScreen />);
-
-    // 1. Export to populate the in-memory archive + reveal the Copy button.
     fireEvent.press(getByText('Generate and share my export'));
-    await waitFor(() => expect(getByText('Copy to clipboard')).toBeTruthy());
 
-    // 2. Copy → writes the full archive, then the Clear button appears.
-    fireEvent.press(getByText('Copy to clipboard'));
-    await waitFor(() => expect(setStringSpy).toHaveBeenCalledWith(FAKE_ARCHIVE));
-    await waitFor(() => expect(getByText('Clear clipboard')).toBeTruthy());
-
-    // 3. Clear → writes an empty string to wipe it.
-    fireEvent.press(getByText('Clear clipboard'));
-    await waitFor(() => expect(setStringSpy).toHaveBeenCalledWith(''));
+    await waitFor(() => expect(alertSpy).toHaveBeenCalledTimes(1));
+    expect(writeExportFile).not.toHaveBeenCalled();
+    expect(unlinkExportFile).not.toHaveBeenCalled();
   });
 });

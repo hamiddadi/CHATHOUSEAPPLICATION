@@ -1,0 +1,305 @@
+name: Go-Live Preflight - Android and iOS
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_ref:
+        description: Branch, tag, or full commit SHA to validate
+        required: true
+        default: main
+        type: string
+      android_artifact_run_id:
+        description: Successful Actions run ID containing the signed production AAB
+        required: true
+        type: string
+      android_artifact_name:
+        description: Artifact name containing one production .aab
+        required: true
+        default: android-production-aab
+        type: string
+      ios_artifact_run_id:
+        description: Same successful mobile-artifact run ID containing the signed production IPA and .xcarchive
+        required: true
+        type: string
+      ios_artifact_name:
+        description: Fixed artifact name containing one production IPA and .xcarchive tarball
+        required: true
+        default: ios-production-xcarchive
+        type: string
+
+concurrency:
+  group: go-live-preflight-${{ inputs.release_ref }}
+  cancel-in-progress: false
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  verify-existing-release-evidence:
+    name: Verify existing production evidence (no build, signing, upload, or deploy)
+    runs-on: macos-latest
+    environment: production
+    steps:
+      - name: Checkout the explicitly requested release revision
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ inputs.release_ref }}
+          fetch-depth: 0
+
+      - name: Resolve the exact source commit
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          source_sha="$(git rev-parse 'HEAD^{commit}')"
+          if [[ ! "$source_sha" =~ ^[a-f0-9]{40}$ ]]; then
+            echo "release_ref did not resolve to a full commit SHA" >&2
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$source_sha" origin/main; then
+            echo "release_ref must be a reviewed commit reachable from origin/main" >&2
+            exit 1
+          fi
+          if [ -n "$(git status --porcelain --untracked-files=all)" ]; then
+            echo "Release checkout contains tracked or untracked modifications" >&2
+            exit 1
+          fi
+          echo "sha=${source_sha}" >> "$GITHUB_OUTPUT"
+          echo "Preflight source: \`${source_sha}\`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Require successful artifact runs for this exact commit
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+          ANDROID_RUN_ID: ${{ inputs.android_artifact_run_id }}
+          IOS_RUN_ID: ${{ inputs.ios_artifact_run_id }}
+          ANDROID_ARTIFACT_NAME: ${{ inputs.android_artifact_name }}
+          IOS_ARTIFACT_NAME: ${{ inputs.ios_artifact_name }}
+        run: |
+          set -euo pipefail
+          if [ "$ANDROID_ARTIFACT_NAME" != android-production-aab ] \
+            || [ "$IOS_ARTIFACT_NAME" != ios-production-xcarchive ]; then
+            echo "Production artifact names are fixed and cannot be overridden" >&2
+            exit 1
+          fi
+          if [ "$ANDROID_RUN_ID" != "$IOS_RUN_ID" ]; then
+            echo "Android and iOS artifacts must come from the same workflow run" >&2
+            exit 1
+          fi
+          validate_run() {
+            local platform="$1"
+            local run_id="$2"
+            if [[ ! "$run_id" =~ ^[1-9][0-9]*$ ]]; then
+              echo "${platform} artifact run ID must be numeric" >&2
+              exit 1
+            fi
+            local run
+            run="$(gh api "/repos/${REPOSITORY}/actions/runs/${run_id}")"
+            local run_repository
+            local run_sha
+            local run_conclusion
+            local run_event
+            local run_head_branch
+            local workflow_id
+            local workflow
+            local workflow_path
+            run_repository="$(jq -r '.repository.full_name // empty' <<< "$run")"
+            run_sha="$(jq -r '.head_sha // empty' <<< "$run")"
+            run_conclusion="$(jq -r '.conclusion // empty' <<< "$run")"
+            run_event="$(jq -r '.event // empty' <<< "$run")"
+            run_head_branch="$(jq -r '.head_branch // empty' <<< "$run")"
+            workflow_id="$(jq -r '.workflow_id // empty' <<< "$run")"
+            if [[ ! "$workflow_id" =~ ^[1-9][0-9]*$ ]]; then
+              echo "${platform} artifact run has no valid workflow_id" >&2
+              exit 1
+            fi
+            workflow="$(gh api "/repos/${REPOSITORY}/actions/workflows/${workflow_id}")"
+            workflow_path="$(jq -r '.path // empty' <<< "$workflow")"
+            if [ "$run_repository" != "$REPOSITORY" ] \
+              || [ "$run_sha" != "$SOURCE_SHA" ] \
+              || [ "$run_conclusion" != success ] \
+              || [ "$run_event" != workflow_dispatch ] \
+              || [ "$run_head_branch" != main ] \
+              || [ "$workflow_path" != .github/workflows/mobile-store-artifacts.yml ]; then
+              echo "${platform} artifact run is not the successful protected mobile workflow_dispatch run for ${REPOSITORY}@${SOURCE_SHA}" >&2
+              exit 1
+            fi
+          }
+          validate_run "Android and iOS" "$ANDROID_RUN_ID"
+
+      - name: Download the existing signed Android artifact
+        id: download-android
+        continue-on-error: true
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: ${{ inputs.android_artifact_name }}
+          path: ${{ runner.temp }}/go-live/android
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.android_artifact_run_id }}
+
+      - name: Download the existing signed iOS artifact
+        id: download-ios
+        continue-on-error: true
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: ${{ inputs.ios_artifact_name }}
+          path: ${{ runner.temp }}/go-live/ios
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.ios_artifact_run_id }}
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: '22.23.1'
+
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Materialize protected inputs without logging their contents
+        shell: bash
+        env:
+          MOBILE_ENV_BASE64: ${{ secrets.MOBILE_PRODUCTION_ENV_BASE64 }}
+          BACKEND_ENV_BASE64: ${{ secrets.BACKEND_PRODUCTION_ENV_BASE64 }}
+          FIREBASE_ANDROID_BASE64: ${{ secrets.FIREBASE_ANDROID_CONFIG_BASE64 }}
+          FIREBASE_IOS_BASE64: ${{ secrets.FIREBASE_IOS_CONFIG_BASE64 }}
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 }}
+          METRICS_TOKEN_BASE64: ${{ secrets.METRICS_TOKEN_BASE64 }}
+          STORE_EVIDENCE_BASE64: ${{ vars.GO_LIVE_STORE_EVIDENCE_BASE64 }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/go-live/config"
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const target = process.env.RUNNER_TEMP + '/go-live/config';
+          const files = {
+            MOBILE_ENV_BASE64: 'mobile.env.production',
+            BACKEND_ENV_BASE64: 'backend.env.production',
+            FIREBASE_ANDROID_BASE64: 'google-services.json',
+            FIREBASE_IOS_BASE64: 'GoogleService-Info.plist',
+            ANDROID_KEYSTORE_BASE64: 'android-upload.jks',
+            METRICS_TOKEN_BASE64: 'metrics-token',
+            STORE_EVIDENCE_BASE64: 'go-live-evidence.json',
+          };
+          for (const [variable, filename] of Object.entries(files)) {
+            const encoded = process.env[variable] || '';
+            if (!encoded) continue;
+            const decoded = Buffer.from(encoded, 'base64');
+            if (!decoded.length) throw new Error(`${variable} is not valid non-empty base64`);
+            fs.writeFileSync(path.join(target, filename), decoded, { mode: 0o600 });
+          }
+          NODE
+
+      - name: Locate downloaded artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          android_aab=''
+          android_aab_count=0
+          ios_tar=''
+          ios_tar_count=0
+          ios_ipa=''
+          ios_ipa_count=0
+          while IFS= read -r -d '' candidate; do
+            android_aab="$candidate"
+            android_aab_count="$((android_aab_count + 1))"
+          done < <(find "$RUNNER_TEMP/go-live/android" -type f -name '*.aab' -print0 2>/dev/null)
+          while IFS= read -r -d '' candidate; do
+            ios_tar="$candidate"
+            ios_tar_count="$((ios_tar_count + 1))"
+          done < <(
+            find "$RUNNER_TEMP/go-live/ios" -type f \
+              \( -name '*.xcarchive.tgz' -o -name '*.xcarchive.tar.gz' \) -print0 2>/dev/null
+          )
+          while IFS= read -r -d '' candidate; do
+            ios_ipa="$candidate"
+            ios_ipa_count="$((ios_ipa_count + 1))"
+          done < <(find "$RUNNER_TEMP/go-live/ios" -type f -name '*.ipa' -print0 2>/dev/null)
+
+          if [ "$android_aab_count" -ne 1 ]; then
+            echo "Expected exactly one downloaded production AAB; found ${android_aab_count}" >&2
+            exit 1
+          fi
+          if [ "$ios_tar_count" -ne 1 ]; then
+            echo "Expected exactly one downloaded xcarchive tarball; found ${ios_tar_count}" >&2
+            exit 1
+          fi
+          if [ "$ios_ipa_count" -ne 1 ]; then
+            echo "Expected exactly one downloaded production IPA; found ${ios_ipa_count}" >&2
+            exit 1
+          fi
+
+          [ -s "$android_aab" ] && [ -s "$ios_tar" ] && [ -s "$ios_ipa" ] || {
+            echo "A downloaded production artifact is empty" >&2
+            exit 1
+          }
+
+          tar -tzf "$ios_tar" > "$RUNNER_TEMP/go-live/ios-tar-entries.txt"
+          if [ ! -s "$RUNNER_TEMP/go-live/ios-tar-entries.txt" ] \
+            || LC_ALL=C grep -Eq '(^/|(^|/)\.\.(/|$)|\\)' "$RUNNER_TEMP/go-live/ios-tar-entries.txt"; then
+            echo "Empty or unsafe path found in the iOS archive tarball" >&2
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/go-live/ios-extracted"
+          tar -xzf "$ios_tar" -C "$RUNNER_TEMP/go-live/ios-extracted"
+          ios_archive=''
+          ios_archive_count=0
+          while IFS= read -r -d '' candidate; do
+            ios_archive="$candidate"
+            ios_archive_count="$((ios_archive_count + 1))"
+          done < <(
+            find "$RUNNER_TEMP/go-live/ios-extracted" -type d -name '*.xcarchive' -print0
+          )
+          if [ "$ios_archive_count" -ne 1 ]; then
+            echo "Expected exactly one extracted xcarchive; found ${ios_archive_count}" >&2
+            exit 1
+          fi
+          {
+            echo "GO_LIVE_ANDROID_AAB=${android_aab}"
+            echo "GO_LIVE_IOS_ARCHIVE=${ios_archive}"
+            echo "GO_LIVE_IOS_ARCHIVE_TARBALL=${ios_tar}"
+            echo "GO_LIVE_IOS_IPA=${ios_ipa}"
+          } >> "$GITHUB_ENV"
+
+      - name: Run the single read-only Go-Live preflight
+        shell: bash
+        env:
+          GO_LIVE_EXPECTED_SHA: ${{ steps.source.outputs.sha }}
+          GO_LIVE_ENV_FILE: ${{ runner.temp }}/go-live/config/mobile.env.production
+          GO_LIVE_BACKEND_ENV_FILE: ${{ runner.temp }}/go-live/config/backend.env.production
+          GO_LIVE_ANDROID_FIREBASE: ${{ runner.temp }}/go-live/config/google-services.json
+          GO_LIVE_IOS_FIREBASE: ${{ runner.temp }}/go-live/config/GoogleService-Info.plist
+          GO_LIVE_METRICS_TOKEN_SECRET_FILE: ${{ runner.temp }}/go-live/config/metrics-token
+          GO_LIVE_STORE_EVIDENCE: ${{ runner.temp }}/go-live/config/go-live-evidence.json
+          GO_LIVE_REPORT: ${{ runner.temp }}/go-live-preflight.json
+          CHATHOUSE_UPLOAD_STORE_FILE: ${{ runner.temp }}/go-live/config/android-upload.jks
+          CHATHOUSE_UPLOAD_STORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_STORE_PASSWORD }}
+          CHATHOUSE_UPLOAD_KEY_ALIAS: ${{ secrets.ANDROID_UPLOAD_KEY_ALIAS }}
+          CHATHOUSE_UPLOAD_KEY_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEY_PASSWORD }}
+          CHATHOUSE_ALLOW_DEBUG_RELEASE_SIGNING: 'false'
+          GO_LIVE_IOS_TEAM_ID: ${{ vars.IOS_TEAM_ID }}
+          GO_LIVE_ANDROID_APP_SIGNING_SHA256: ${{ vars.ANDROID_APP_SIGNING_SHA256 }}
+          GO_LIVE_API_HEALTH_URL: ${{ vars.API_HEALTH_URL }}
+          GO_LIVE_SUPPORT_URL: ${{ vars.SUPPORT_URL }}
+          GO_LIVE_PRIVACY_URL: ${{ vars.PRIVACY_URL }}
+          GO_LIVE_TERMS_URL: ${{ vars.TERMS_URL }}
+          GO_LIVE_ACCOUNT_DELETION_URL: ${{ vars.ACCOUNT_DELETION_URL }}
+          GO_LIVE_APP_URL: ${{ vars.APP_URL }}
+          GO_LIVE_LIVEKIT_HTTPS_URL: ${{ vars.LIVEKIT_HTTPS_URL }}
+        run: node scripts/go-live-preflight.mjs
+
+      - name: Upload the non-secret preflight report
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: go-live-preflight-${{ steps.source.outputs.sha }}
+          path: ${{ runner.temp }}/go-live-preflight.json
+          if-no-files-found: warn
+          retention-days: 90

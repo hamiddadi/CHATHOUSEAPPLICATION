@@ -87,7 +87,7 @@ const styles = StyleSheet.create({
     paddingTop: spacing.sm,
     backgroundColor: colors.background,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(255,255,255,0.05)',
+    borderTopColor: colors.glass,
   },
   iconBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   center: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.sm },

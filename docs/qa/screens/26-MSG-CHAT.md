@@ -10,34 +10,37 @@
   - **Envoi de message texte** : `useSendMessage` -> `messageService.send` (POST), puis injection optimiste dans le cache `messageKeys.messages(id)` et invalidation de la liste de conversations.
   - **Envoi de message vocal** : `useVoiceMessage` -> enregistrement local -> `voiceService.upload` -> `useSendVoiceMessage` -> meme cache que texte.
   - **Marquage lu** : a l'ouverture, si `unreadCount > 0`, `useMarkConversationRead` est declenche une fois (POST), ce qui invalide `conversations`, `unread` (badge d'onglet) et `conversation(id)`.
-- **Pre-conditions globales** : session valide (token), reseau pour POST/socket. La voix necessite la permission micro et un build EAS dev-client (module natif `expo-audio` indisponible en Expo Go). Socket temps-reel via `getSocket()` (peut etre `null` -> degradation silencieuse, pas de typing).
+  - **Presence du pair** : `usePeerPresence(peerId)` affiche le point online uniquement lorsque le serveur renvoie `visible=true` et `isOnline=true`.
+  - **Appel prive** : le bouton Appeler cree une room `closed` a deux via REST, puis navigue vers la room LiveKit ; un verrou immediat et l'etat pending evitent les doubles creations.
+- **Pre-conditions globales** : session valide (token), reseau pour POST/socket. La voix necessite la permission micro et un build natif ; sur iOS, cette permission est demandee puis revérifiée via le module WebRTC natif. Socket temps-reel via `getSocket()` (peut etre `null` -> degradation silencieuse, pas de typing).
 - **Etats de donnees pertinents** :
   - **Chargement** : `isLoading` des messages -> `Loader` plein ecran (`accessibilityLabel="Loading messages"`).
   - **Liste vide** : aucun message -> FlatList inversee vide, header + barre de saisie presents.
   - **Non lus** : `conversation.unreadCount > 0` -> marquage lu auto a l'ouverture.
   - **Hors-ligne** : POST en echec -> toast d'erreur via `useApiErrorToast` (texte conserve dans le champ pour reessai) ; socket non connecte -> typing degrade.
-  - **Presence** : `isOnline` est cable en dur a `false` (TODO audit) -> le point de statut vert n'est jamais affiche.
+  - **Presence** : point vert conditionne par la reponse de presence et ses regles de confidentialite ; aucune presence n'est revelee si `visible=false`.
   - **Brouillon non vide** : la barre affiche le bouton **Envoyer** (gradient) ; brouillon vide -> bouton **Micro**.
   - **Enregistrement vocal actif** (`voice.isActive`) -> la barre de saisie est remplacee par `VoiceRecordingBar` (annuler / minuteur / envoyer).
 
 ## Matrice bouton
 
-| #   | Bouton                          | Emplacement                                    | Type                            | Locator reel                                                                                                           | Pre-condition                                   | Priorite |
-| --- | ------------------------------- | ---------------------------------------------- | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- | -------- |
-| 1   | Retour                          | Header (gauche)                                | navigation                      | `accessibilityLabel = t('chat.backA11y')` = « Retour »                                                                 | Ecran ouvert                                    | P1       |
-| 2   | Appeler                         | Header (droite)                                | icon                            | `accessibilityLabel = t('chat.callA11y')` = « Appeler »                                                                | Ecran ouvert                                    | P2       |
-| 3   | Plus d'options                  | Header (droite)                                | menu                            | `accessibilityLabel = t('chat.moreA11y')` = « Plus d'options »                                                         | Ecran ouvert                                    | P2       |
-| 4   | Inserer un emoji                | Barre de saisie (gauche)                       | icon                            | `accessibilityLabel = t('chat.emojiA11y')` = « Inserer un emoji »                                                      | Ecran ouvert                                    | P2       |
-| 5   | Champ de message                | Barre de saisie (centre)                       | input-submit                    | `placeholder = t('chat.inputPlaceholder')` = « Ecrire un message… »                                                    | Ecran ouvert                                    | P0       |
-| 6   | Joindre un fichier              | Barre de saisie (droite du champ)              | icon                            | `accessibilityLabel = t('chat.attachA11y')` = « Joindre un fichier »                                                   | Ecran ouvert                                    | P2       |
-| 7   | Envoyer (texte)                 | Barre de saisie (bouton final)                 | submit / realtime-action        | `accessibilityLabel = t('chat.sendA11y')` = « Envoyer le message »                                                     | Brouillon non vide (`canSend`)                  | P0       |
-| 8   | Micro (demarrer enr.)           | Barre de saisie (bouton final, brouillon vide) | realtime-action                 | `accessibilityLabel = t('chat.micA11y')` = « Enregistrer un message vocal »                                            | Brouillon vide + permission micro               | P0       |
-| 9   | Annuler l'enregistrement        | Barre d'enregistrement (gauche)                | destructive                     | `accessibilityLabel = t('voice.cancelA11y')` = « Annuler l'enregistrement »                                            | `voice.isActive` ; desactive si upload en cours | P1       |
-| 10  | Envoyer le message vocal        | Barre d'enregistrement (droite)                | realtime-action                 | `accessibilityLabel = t('voice.sendA11y')` = « Envoyer le message vocal »                                              | `voice.isActive` ; desactive si upload en cours | P0       |
-| 11  | Lire / Pause (bulle vocale)     | Corps / bulle de message vocal                 | realtime-action (lecture audio) | `accessibilityLabel = t('voice.playA11y')` (« Lire le message vocal ») ou `t('voice.pauseA11y')` (« Mettre en pause ») | Message `kind='voice'` avec `audioUrl`          | P1       |
-| 12  | Liste des messages (defilement) | Corps (FlatList inversee)                      | list-item (scroll)              | FlatList `inverted` (pas de pull-to-refresh, pas de `onPress` sur bulle)                                               | Au moins 1 message                              | P2       |
+| #   | Bouton                          | Emplacement                                    | Type                            | Locator reel                                                                       | Pre-condition                                   | Priorite |
+| --- | ------------------------------- | ---------------------------------------------- | ------------------------------- | ---------------------------------------------------------------------------------- | ----------------------------------------------- | -------- |
+| 1   | Retour                          | Header (gauche)                                | navigation                      | `accessibilityLabel = t('chat.backA11y')` = « Retour »                             | Ecran ouvert                                    | P1       |
+| 2   | Appeler                         | Header (droite)                                | realtime-action                 | `accessibilityLabel = t('chat.callA11y')` ; etat busy/disabled pendant la creation | Ecran ouvert                                    | P1       |
+| 3   | Plus d'options                  | Header (droite)                                | menu                            | `accessibilityLabel = t('chat.moreA11y')`                                          | Ecran ouvert                                    | P1       |
+| 4   | Signaler l'utilisateur          | Alert / sheet de motifs                        | destructive                     | action `t('profile.report')`, puis motifs spam/harassment/fake_profile/other       | Menu ouvert                                     | P1       |
+| 5   | Bloquer l'utilisateur           | Alert de confirmation                          | destructive                     | action `t('profile.block')`, confirmation destructive                              | Menu ouvert                                     | P1       |
+| 6   | Inserer un emoji                | Barre de saisie (gauche)                       | icon                            | `accessibilityLabel = t('chat.emojiA11y')`                                         | Ecran ouvert                                    | P2       |
+| 7   | Champ de message                | Barre de saisie (centre)                       | input-submit                    | `placeholder = t('chat.inputPlaceholder')`                                         | Ecran ouvert                                    | P0       |
+| 8   | Envoyer (texte)                 | Barre de saisie (bouton final)                 | submit / realtime-action        | `accessibilityLabel = t('chat.sendA11y')`                                          | Brouillon non vide (`canSend`)                  | P0       |
+| 9   | Micro (demarrer enr.)           | Barre de saisie (bouton final, brouillon vide) | realtime-action                 | `accessibilityLabel = t('chat.micA11y')`                                           | Brouillon vide + permission micro               | P0       |
+| 10  | Annuler l'enregistrement        | Barre d'enregistrement (gauche)                | destructive                     | `accessibilityLabel = t('voice.cancelA11y')`                                       | `voice.isActive` ; desactive si upload en cours | P1       |
+| 11  | Envoyer le message vocal        | Barre d'enregistrement (droite)                | realtime-action                 | `accessibilityLabel = t('voice.sendA11y')`                                         | `voice.isActive` ; desactive si upload en cours | P0       |
+| 12  | Lire / Pause (bulle vocale)     | Corps / bulle de message vocal                 | realtime-action (lecture audio) | `accessibilityLabel = t('voice.playA11y')` ou `t('voice.pauseA11y')`               | Message `kind='voice'` avec `audioUrl`          | P1       |
+| 13  | Liste des messages (defilement) | Corps (FlatList inversee)                      | list-item (scroll)              | FlatList `inverted`                                                                | Au moins 1 message                              | P2       |
 
-> Note : il n'y a **aucun** pull-to-refresh, aucun long-press, aucun swipe, aucune action `onPress` sur les bulles de message ni de FAB sur cet ecran. Les bulles ne sont pressables que pour la commande lecture/pause des messages vocaux (#11). Les boutons **Appeler**, **Plus d'options** et **Joindre un fichier** ne sont pas implementes de bout en bout et declenchent une `Alert` « Cette fonctionnalite arrive bientot ».
+> Note : il n'y a aucun pull-to-refresh, swipe ni FAB. Le long-press d'une bulle ouvre les actions message (suppression de son message ou signalement d'un message recu). L'appel et les options utilisateur sont implementes de bout en bout. Le trombone n'est volontairement pas rendu : aucun pipeline de piece jointe n'est revendique.
 
 ## Cas de test
 
@@ -82,79 +85,79 @@
 - **Donnees de test** : conversation `peer-1`.
 - **Duree estimee** : 3 min
 
-### MSG-CHAT-004 - Appeler affiche « bientot disponible »
+### MSG-CHAT-004 - Appeler cree une room privee a deux
 
 - **Type** : Fonctionnel positif
-- **Priorite** : P2
+- **Priorite** : P1
 - **Pre-conditions** : compte `standard` ; conversation ouverte ; Wi-Fi.
 - **Etapes** :
   1. Ouvrir la conversation.
   2. Taper l'icone « Appeler » (combine, en haut a droite).
-- **Resultat attendu** : une `Alert` s'affiche avec le titre « Appel vocal » et le corps « Cette fonctionnalite arrive bientot. » ; aucun appel reseau, aucun acces micro.
-- **Critere d'acceptation (OK/KO)** : OK si l'alerte « Appel vocal » apparait et se ferme sur OK ; KO si crash ou comportement different.
+- **Resultat attendu** : un seul `POST /rooms` cree une room `closed`, `coHostIds=[peerId]`, `maxSpeakers=2`, chat et recording desactives ; l'app ouvre ensuite `Main > RoomsTab > Room` avec l'id cree.
+- **Critere d'acceptation (OK/KO)** : OK si la room privee correcte s'ouvre ; KO si aucune creation, mauvais destinataire ou navigation incorrecte.
 - **Donnees de test** : conversation `peer-1`.
 - **Duree estimee** : 1 min
 
-### MSG-CHAT-005 - Appeler : taps repetes n'empilent pas les alertes
+### MSG-CHAT-005 - Appeler : taps repetes ne creent qu'une room
 
 - **Type** : Erreur/Limite
-- **Priorite** : P2
+- **Priorite** : P1
 - **Pre-conditions** : compte `standard` ; conversation ouverte ; reseau indifferent.
 - **Etapes** :
   1. Taper 3 fois rapidement sur « Appeler ».
-  2. Fermer l'alerte.
-- **Resultat attendu** : une seule alerte visible (ou alertes sequentielles fermables une a une) sans blocage de l'UI ; pas de crash.
-- **Critere d'acceptation (OK/KO)** : OK si l'UI reste reactive apres fermeture ; KO si l'ecran est gele ou empile des alertes ingerables.
+  2. Observer l'etat du bouton pendant la requete puis la navigation.
+- **Resultat attendu** : bouton busy/disabled, une seule mutation de creation et une seule navigation malgre les taps.
+- **Critere d'acceptation (OK/KO)** : OK si une seule room existe ; KO si rooms ou navigations multiples.
 - **Donnees de test** : conversation `peer-1`.
 - **Duree estimee** : 1 min
 
 ### MSG-CHAT-006 - Appeler accessible au lecteur d'ecran
 
 - **Type** : Accessibilite
-- **Priorite** : P2
+- **Priorite** : P1
 - **Pre-conditions** : compte `standard` ; TalkBack/VoiceOver actif ; grande police.
 - **Etapes** :
   1. Activer le lecteur d'ecran.
   2. Balayer jusqu'au bouton « Appeler » du header.
-- **Resultat attendu** : annonce « Appeler, bouton » (`chat.callA11y`) ; double-tap ouvre l'alerte, dont le contenu est annonce.
-- **Critere d'acceptation (OK/KO)** : OK si le libelle vocal = « Appeler » ; KO sinon.
+- **Resultat attendu** : annonce « Appeler, bouton » ; pendant la creation, l'etat occupe/desactive est expose, puis la room s'ouvre.
+- **Critere d'acceptation (OK/KO)** : OK si le libelle, l'etat busy et l'activation sont accessibles ; KO sinon.
 - **Donnees de test** : conversation `peer-1`.
 - **Duree estimee** : 2 min
 
-### MSG-CHAT-007 - Plus d'options affiche « bientot disponible »
+### MSG-CHAT-007 - Plus d'options expose les actions de surete
 
 - **Type** : Fonctionnel positif
-- **Priorite** : P2
+- **Priorite** : P1
 - **Pre-conditions** : compte `standard` ; conversation ouverte ; Wi-Fi.
 - **Etapes** :
   1. Taper l'icone « Plus d'options » (trois points verticaux, en haut a droite).
-- **Resultat attendu** : `Alert` titre « Options de la conversation » + corps « Cette fonctionnalite arrive bientot. ».
-- **Critere d'acceptation (OK/KO)** : OK si l'alerte attendue apparait ; KO sinon.
+- **Resultat attendu** : l'Alert affiche le pair et les actions `Signaler`, `Bloquer` (destructive) et `Annuler`.
+- **Critere d'acceptation (OK/KO)** : OK si les trois choix sont presents et correctement localises ; KO sinon.
 - **Donnees de test** : conversation `peer-1`.
 - **Duree estimee** : 1 min
 
-### MSG-CHAT-008 - Plus d'options : multi-clic rapide
+### MSG-CHAT-008 - Signaler le pair avec un motif
 
-- **Type** : Erreur/Limite
-- **Priorite** : P2
+- **Type** : Fonctionnel positif
+- **Priorite** : P1
 - **Pre-conditions** : compte `standard` ; conversation ouverte.
 - **Etapes** :
-  1. Taper 3 fois rapidement sur « Plus d'options ».
-  2. Fermer la/les alerte(s).
-- **Resultat attendu** : UI reste reactive, pas de blocage ni crash.
-- **Critere d'acceptation (OK/KO)** : OK si l'app reste utilisable apres fermeture ; KO sinon.
+  1. Ouvrir « Plus d'options », choisir `Signaler`.
+  2. Dans la sheet, choisir `Harcèlement`.
+- **Resultat attendu** : la sheet expose quatre motifs ; un seul appel report est envoye avec `{reason:'harassment'}`, puis la sheet se ferme et le remerciement s'affiche.
+- **Critere d'acceptation (OK/KO)** : OK si le bon pair et le bon motif sont transmis ; KO sinon.
 - **Donnees de test** : conversation `peer-1`.
 - **Duree estimee** : 1 min
 
-### MSG-CHAT-009 - Plus d'options accessible au lecteur d'ecran
+### MSG-CHAT-009 - Bloquer le pair apres confirmation
 
-- **Type** : Accessibilite
-- **Priorite** : P2
-- **Pre-conditions** : compte `standard` ; TalkBack/VoiceOver actif ; grande police ; contraste eleve.
+- **Type** : Fonctionnel destructif
+- **Priorite** : P1
+- **Pre-conditions** : compte `standard` ; conversation ouverte ; Wi-Fi.
 - **Etapes** :
-  1. Balayer jusqu'au bouton « Plus d'options ».
-- **Resultat attendu** : annonce « Plus d'options, bouton » (`chat.moreA11y`) ; cible tactile suffisante.
-- **Critere d'acceptation (OK/KO)** : OK si libelle vocal = « Plus d'options » ; KO sinon.
+  1. Ouvrir « Plus d'options », choisir `Bloquer`, puis confirmer l'action destructive.
+- **Resultat attendu** : un appel block cible le `peerId` ; apres succes, la conversation se ferme via `goBack`. Annuler ne declenche aucun appel.
+- **Critere d'acceptation (OK/KO)** : OK si confirmation, API et sortie sont coherentes ; KO si blocage sans confirmation ou mauvais utilisateur.
 - **Donnees de test** : conversation `peer-1`.
 - **Duree estimee** : 2 min
 
@@ -238,40 +241,40 @@
 - **Donnees de test** : texte « Ligne 1\nLigne 2\nLigne 3 ».
 - **Duree estimee** : 3 min
 
-### MSG-CHAT-016 - Joindre un fichier affiche « bientot disponible »
+### MSG-CHAT-016 - La piece jointe n'est pas exposee sans pipeline
 
-- **Type** : Fonctionnel positif
-- **Priorite** : P2
-- **Pre-conditions** : compte `standard` ; conversation ouverte ; Wi-Fi.
-- **Etapes** :
-  1. Taper l'icone « Joindre un fichier » (trombone, a droite du champ).
-- **Resultat attendu** : `Alert` titre « Piece jointe » + corps « Cette fonctionnalite arrive bientot. » ; aucun selecteur de fichier ouvert.
-- **Critere d'acceptation (OK/KO)** : OK si l'alerte « Piece jointe » apparait ; KO sinon.
-- **Donnees de test** : conversation `peer-1`.
-- **Duree estimee** : 1 min
-
-### MSG-CHAT-017 - Joindre un fichier : multi-clic rapide
-
-- **Type** : Erreur/Limite
+- **Type** : Verification de surface
 - **Priorite** : P2
 - **Pre-conditions** : compte `standard` ; conversation ouverte.
 - **Etapes** :
-  1. Taper 3 fois rapidement sur « Joindre un fichier ».
-  2. Fermer l'alerte.
-- **Resultat attendu** : UI reactive, pas de double selecteur ni crash.
-- **Critere d'acceptation (OK/KO)** : OK si l'app reste utilisable ; KO sinon.
+  1. Parcourir la barre de saisie visuellement puis au lecteur d'ecran.
+- **Resultat attendu** : aucun bouton trombone ni action `chat.attachA11y` n'est rendu ; emoji, champ et send/mic restent correctement alignes.
+- **Critere d'acceptation (OK/KO)** : OK si aucune affordance morte n'est exposee ; KO si un bouton sans pipeline reapparait.
 - **Donnees de test** : conversation `peer-1`.
 - **Duree estimee** : 1 min
 
-### MSG-CHAT-018 - Joindre un fichier accessible au lecteur d'ecran
+### MSG-CHAT-017 - Echec de creation d'appel et retry
+
+- **Type** : Erreur/Limite
+- **Priorite** : P1
+- **Pre-conditions** : compte `standard` ; conversation ouverte ; premier `POST /rooms` en echec, second en succes.
+- **Etapes** :
+  1. Taper Appeler et observer l'erreur.
+  2. Retablir le backend puis retaper Appeler.
+- **Resultat attendu** : l'erreur passe par le toast API, le verrou et l'etat disabled sont liberes ; le second essai cree et ouvre la room.
+- **Critere d'acceptation (OK/KO)** : OK si retry possible sans remonter l'ecran ; KO si bouton bloque ou creation double.
+- **Donnees de test** : conversation `peer-1`.
+- **Duree estimee** : 1 min
+
+### MSG-CHAT-018 - Options et sheet de signalement accessibles
 
 - **Type** : Accessibilite
 - **Priorite** : P2
 - **Pre-conditions** : compte `standard` ; TalkBack/VoiceOver actif ; grande police.
 - **Etapes** :
-  1. Balayer jusqu'au bouton trombone.
-- **Resultat attendu** : annonce « Joindre un fichier, bouton » (`chat.attachA11y`).
-- **Critere d'acceptation (OK/KO)** : OK si libelle vocal = « Joindre un fichier » ; KO sinon.
+  1. Balayer jusqu'a « Plus d'options », ouvrir `Signaler`, parcourir le titre, les quatre motifs et Fermer.
+- **Resultat attendu** : le bouton Plus est annonce ; la sheet est traitee comme vue modale, chaque motif est un bouton nomme, et le focus ne fuit pas vers la conversation.
+- **Critere d'acceptation (OK/KO)** : OK si toutes les actions sont annoncees et activables ; KO si focus perdu ou libelle absent.
 - **Donnees de test** : conversation `peer-1`.
 - **Duree estimee** : 2 min
 

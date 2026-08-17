@@ -1,5 +1,5 @@
 import React, { memo } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import { spacing } from '../../../../../shared/constants/theme';
 import type { RoomParticipant } from '../../../../../shared/types/domain';
@@ -14,9 +14,20 @@ interface StageGridProps {
   onParticipantPress: (participant: RoomParticipant) => void;
 }
 
+const MAX_COLUMNS = 5;
+const MIN_COLUMN_WIDTH = 80;
+
+export const getStageColumnCount = (viewportWidth: number): number => {
+  const availableWidth = Math.max(0, viewportWidth - spacing.xxl * 2);
+  return Math.max(1, Math.min(MAX_COLUMNS, Math.floor(availableWidth / MIN_COLUMN_WIDTH)));
+};
+
 const StageGrid: React.FC<StageGridProps> = memo(
   ({ speakers, speakingLiveByUser, viewerCanModerate, onParticipantPress }) => {
     const { t } = useTranslation();
+    const { width } = useWindowDimensions();
+    const columns = getStageColumnCount(width);
+    const speakerWidth = `${100 / columns}%` as `${number}%`;
     return (
       <View className="mb-huge">
         <SectionLabel label={`⭐ ${t('room.stage')}`} emphasis />
@@ -27,11 +38,15 @@ const StageGrid: React.FC<StageGridProps> = memo(
               <Pressable
                 key={s.id}
                 onPress={() => onParticipantPress(s)}
-                accessibilityRole={viewerCanModerate ? 'button' : undefined}
+                accessibilityRole="button"
                 accessibilityLabel={
-                  viewerCanModerate ? `Actions pour ${s.displayName}` : s.displayName
+                  viewerCanModerate
+                    ? t('room.participantActionsA11y', 'Actions for {{name}}', {
+                        name: s.displayName,
+                      })
+                    : t('room.profileA11y', 'Profile of {{name}}', { name: s.displayName })
                 }
-                style={styles.speakerPress}
+                style={[styles.speakerPress, { width: speakerWidth }]}
               >
                 <SpeakerCell speaker={s} isSpeakingLive={isSpeakingLive} />
               </Pressable>
@@ -51,7 +66,7 @@ const styles = StyleSheet.create({
     rowGap: spacing.md,
   },
   speakerPress: {
-    width: '20%',
+    alignItems: 'center',
   },
 });
 

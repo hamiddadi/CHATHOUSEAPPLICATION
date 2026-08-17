@@ -15,11 +15,21 @@
  */
 import { create } from 'zustand';
 import type { Socket } from 'socket.io-client';
-import { getSocket } from '../../../shared/services/realtime/socketClient';
+import { getSocket, onReconnect } from '../../../shared/services/realtime/socketClient';
 import { errorMessage } from '../../../shared/utils/errorMessage';
+import { reportException } from '../../../core/observability/reporter';
 import { useAuthStore } from '../../auth/store/authStore';
 import { useCurrentRoomStore } from '../store/currentRoomStore';
-import { startRoomAudio, type RoomAudioHandle } from './roomAudioService';
+import {
+  MIC_PERMISSION_DENIED_ERROR,
+  startRoomAudio,
+  type RoomAudioHandle,
+} from './roomAudioService';
+import {
+  clearRoomSocketAdmission,
+  ensureRoomSocketAdmission,
+  RoomSocketAdmissionError,
+} from './roomSocketAdmission';
 
 export type RoomAudioStatus =
   | 'idle'
@@ -49,11 +59,29 @@ export const useRoomAudioStore = create<RoomAudioState>(() => ({
   scores: EMPTY_SCORES,
 }));
 
+const surfaceRoomAudioError = (error: unknown, roomId: string): void => {
+  const message = errorMessage(error, 'unknown');
+  const status: RoomAudioStatus = message.includes('@livekit/react-native not installed')
+    ? 'unsupported'
+    : 'error';
+
+  // Expected user decisions and an unavailable optional native module are not
+  // incidents. Everything else remains available to consent-gated reporting.
+  if (status === 'error' && message !== MIC_PERMISSION_DENIED_ERROR) {
+    reportException(error, { feature: 'room-audio', roomId });
+  }
+  useRoomAudioStore.setState(state => (state.roomId === roomId ? { status, error: message } : {}));
+};
+
 let handle: RoomAudioHandle | null = null;
 // The room we're currently bound to (or starting). Guards against double-start
 // and lets an in-flight start detect that a stop()/switch raced ahead of it.
 let boundRoomId: string | null = null;
 let startInFlight: Promise<void> | null = null;
+let stopInFlight: Promise<void> | null = null;
+let retryInFlight: Promise<void> | null = null;
+let sessionGeneration = 0;
+let cancelStartWait: (() => void) | null = null;
 
 const setScore = (key: string, speaking: boolean): void => {
   useRoomAudioStore.setState(s => {
@@ -87,6 +115,7 @@ let roomLifecycleCleanup: (() => void) | null = null;
 
 const bindRoomLifecycle = (socket: Socket, roomId: string): void => {
   roomLifecycleCleanup?.();
+  let reconnectGeneration = 0;
   const endSession = (): void => {
     useCurrentRoomStore.getState().clear(); // drop the mini-bar
     void roomAudioSession.stop(); // stop LiveKit + foreground service
@@ -102,7 +131,39 @@ const bindRoomLifecycle = (socket: Socket, roomId: string): void => {
   };
   socket.on('room:ended', endedHandler);
   socket.on('room:user_kicked', kickedHandler);
+  // This subscription outlives RoomScreen. A user can minimize to the
+  // mini-bar, then reconnect Socket.IO; waiting until the next LiveKit token
+  // renewal would exceed the server's presence grace and falsely reap them.
+  const unsubscribeReconnect = onReconnect(() => {
+    const generation = ++reconnectGeneration;
+    void (async () => {
+      let lastError: unknown;
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+          await ensureRoomSocketAdmission(socket, roomId);
+          return;
+        } catch (error) {
+          lastError = error;
+          if (boundRoomId !== roomId || generation !== reconnectGeneration) return;
+          if (error instanceof RoomSocketAdmissionError && error.reason === 'denied') break;
+          if (attempt < 2) {
+            await new Promise(resolve => setTimeout(resolve, 250 * 2 ** attempt));
+          }
+        }
+      }
+      if (boundRoomId !== roomId || generation !== reconnectGeneration) return;
+      if (
+        lastError &&
+        !(lastError instanceof RoomSocketAdmissionError && lastError.reason === 'denied')
+      ) {
+        reportException(lastError, { feature: 'room-socket-readmission', roomId });
+      }
+      endSession();
+    })();
+  });
   roomLifecycleCleanup = () => {
+    reconnectGeneration += 1;
+    unsubscribeReconnect();
     socket.off('room:ended', endedHandler);
     socket.off('room:user_kicked', kickedHandler);
     roomLifecycleCleanup = null;
@@ -117,6 +178,7 @@ export const roomAudioSession = {
    */
   async start(roomId: string): Promise<void> {
     if (!roomId) return;
+    if (stopInFlight) await stopInFlight;
     // Already live (or starting) for this exact room → nothing to do.
     if (boundRoomId === roomId && (handle || startInFlight)) {
       return startInFlight ?? Promise.resolve();
@@ -125,6 +187,7 @@ export const roomAudioSession = {
     if (boundRoomId && boundRoomId !== roomId) await this.stop();
 
     boundRoomId = roomId;
+    const generation = ++sessionGeneration;
     useRoomAudioStore.setState({
       roomId,
       status: 'connecting',
@@ -134,17 +197,25 @@ export const roomAudioSession = {
 
     startInFlight = (async () => {
       try {
-        const socket = await getSocket();
+        // Audio startup owns a visible error/retry state, so unlike passive
+        // subscription hooks it must not remain pending forever while offline.
+        const cancelled = new Promise<null>(resolve => {
+          const cancel = (): void => resolve(null);
+          if (sessionGeneration === generation) cancelStartWait = cancel;
+        });
+        const socket = await Promise.race([getSocket(10_000), cancelled]);
+        if (sessionGeneration !== generation || boundRoomId !== roomId) return;
         if (!socket) throw new Error('socket not connected');
         // Bind BEFORE the (slow) LiveKit connect, and even if it later throws
         // (mic denied → the user stays in the room as a listener): the
         // room-closed/kicked teardown must work in both cases. Guarded on
         // boundRoomId so a stop()/switch that raced ahead doesn't get its
         // fresh listeners clobbered by this stale start.
-        if (boundRoomId === roomId) bindRoomLifecycle(socket, roomId);
+        bindRoomLifecycle(socket, roomId);
         const h = await startRoomAudio({
           socket,
           roomId,
+          isCancelled: () => sessionGeneration !== generation || boundRoomId !== roomId,
           onLocalScore: level => setScore(SELF_KEY, level >= SPEAKING_THRESHOLD),
           onPeerScore: ev => setScore(ev.userId, ev.speaking || ev.volume >= SPEAKING_THRESHOLD),
           onPeerGone: userId => dropScore(userId),
@@ -157,22 +228,34 @@ export const roomAudioSession = {
               return { status: next === 'connected' ? 'live' : 'reconnecting' };
             });
           },
+          onError: error => {
+            if (sessionGeneration === generation && boundRoomId === roomId) {
+              surfaceRoomAudioError(error, roomId);
+            }
+          },
         });
         // A stop()/switch happened while we were connecting — discard.
-        if (boundRoomId !== roomId) {
+        if (sessionGeneration !== generation || boundRoomId !== roomId) {
           await h.close();
           return;
         }
         handle = h;
-        useRoomAudioStore.setState(s => (s.roomId === roomId ? { status: 'live' } : {}));
+        if (h.initialMicPermissionDenied) {
+          // Retain the receive-only handle before surfacing the error. This is
+          // what lets the user keep hearing the room and retry after granting
+          // microphone permission in Settings.
+          surfaceRoomAudioError(new Error(MIC_PERMISSION_DENIED_ERROR), roomId);
+        } else {
+          useRoomAudioStore.setState(s => (s.roomId === roomId ? { status: 'live' } : {}));
+        }
       } catch (err) {
-        const msg = errorMessage(err, 'unknown');
-        const status: RoomAudioStatus = msg.includes('@livekit/react-native not installed')
-          ? 'unsupported'
-          : 'error';
-        useRoomAudioStore.setState(s => (s.roomId === roomId ? { status, error: msg } : {}));
+        if (sessionGeneration !== generation || boundRoomId !== roomId) return;
+        surfaceRoomAudioError(err, roomId);
       } finally {
-        if (boundRoomId === roomId) startInFlight = null;
+        if (sessionGeneration === generation && boundRoomId === roomId) {
+          startInFlight = null;
+          cancelStartWait = null;
+        }
       }
     })();
 
@@ -181,17 +264,79 @@ export const roomAudioSession = {
 
   /** Tear the session down. Call on an explicit leave / kick / room-end. */
   async stop(): Promise<void> {
+    ++sessionGeneration;
+    cancelStartWait?.();
+    cancelStartWait = null;
+    const pendingStart = startInFlight;
+    const admissionRoomId = boundRoomId;
     boundRoomId = null;
     startInFlight = null;
+    if (admissionRoomId) clearRoomSocketAdmission(admissionRoomId);
     roomLifecycleCleanup?.();
     const h = handle;
     handle = null;
     useRoomAudioStore.setState({ roomId: null, status: 'idle', error: null, scores: new Map() });
-    if (h) await h.close();
+    const previousStop = stopInFlight;
+    const cleanup = (async () => {
+      if (previousStop) await previousStop;
+      if (h) await h.close();
+      if (pendingStart) await pendingStart;
+    })();
+    stopInFlight = cleanup;
+    try {
+      await cleanup;
+    } finally {
+      if (stopInFlight === cleanup) stopInFlight = null;
+    }
+  },
+
+  /**
+   * Replace a failed live handle with a fresh socket/LiveKit session. `start()`
+   * is intentionally idempotent while a handle exists, so error recovery needs
+   * this explicit close-and-restart boundary. Concurrent retry taps share the
+   * same operation and cannot create duplicate native rooms/listeners.
+   */
+  async retry(roomId: string): Promise<void> {
+    if (!roomId) return;
+    if (retryInFlight) return retryInFlight;
+
+    const retry = (async () => {
+      if (boundRoomId || handle || startInFlight) {
+        // `stop()` advances the generation exactly once. If another explicit
+        // leave/stop happens while cleanup is pending, do not reopen audio
+        // after that newer user intent has won the race.
+        const expectedGeneration = sessionGeneration + 1;
+        await this.stop();
+        if (sessionGeneration !== expectedGeneration) return;
+      }
+      await this.start(roomId);
+    })();
+    retryInFlight = retry;
+    try {
+      await retry;
+    } finally {
+      if (retryInFlight === retry) retryInFlight = null;
+    }
   },
 
   async setMuted(muted: boolean): Promise<void> {
-    await handle?.setMuted(muted);
+    if (!handle || !boundRoomId) return;
+    const roomId = boundRoomId;
+    try {
+      await handle.setMuted(muted);
+      // Returning from Settings and successfully enabling capture is the
+      // recovery boundary for a previous mic-denied state.
+      if (!muted) {
+        useRoomAudioStore.setState(state =>
+          state.roomId === roomId && state.error === MIC_PERMISSION_DENIED_ERROR
+            ? { status: 'live', error: null }
+            : {},
+        );
+      }
+    } catch (error) {
+      surfaceRoomAudioError(error, roomId);
+      throw error;
+    }
   },
 
   setPeerVolume(userId: string, volume: number): void {

@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
 import type { AppRole } from '@prisma/client';
 import { prisma } from '../config/database';
+import { env } from '../config/env';
 import { redis } from '../config/redis';
 import { verifyAccessToken } from '../utils/jwt';
 import { AppError } from './error.middleware';
@@ -18,29 +19,33 @@ declare module 'express-serve-static-core' {
     /**
      * Platform role resolved during requireAuth. requireRole reuses it to
      * avoid a second identical DB read on the admin surface.
-     * TODO(audit): once access tokens carry a jti, this can move into the
-     * token instead of a per-request DB lookup.
      */
     appRole?: AppRole;
+    /** True only for the signed, recovery-scoped deletion-grace session. */
+    accountRecovery?: boolean;
   }
 }
 
-// Index the blacklist by a SHA-256 digest of the token rather than the raw
-// JWT. The access token has no jti to key on (only refresh tokens do, see
-// jwt.ts), so hashing keeps Redis keys fixed-size and avoids persisting a
-// replayable bearer token verbatim in Redis.
-// TODO(audit): add a `jti` claim to signAccessToken (jwt.ts/auth.service.ts)
-// and blacklist by jti to drop the per-request hashing entirely.
+// New tokens use their non-secret jti as the blacklist identifier. Tokens
+// minted before the jti rollout keep the prior SHA-256 fallback, so existing
+// sessions remain valid and already-revoked legacy tokens stay revoked.
 // Exported so the socket auth layer keys the blacklist identically — otherwise
 // a token revoked on HTTP logout would still be accepted over the socket.
-export const blacklistKey = (token: string): string =>
-  `blacklist:${createHash('sha256').update(token).digest('hex')}`;
+export const blacklistKey = (token: string, jti?: string): string =>
+  jti ? `blacklist:jti:${jti}` : `blacklist:${createHash('sha256').update(token).digest('hex')}`;
 
 // Lockout-propagation window for the suspension cache: how long a cached
 // suspended/clear verdict is trusted before requireAuth re-reads the DB.
 // Exported so the socket auth layer reuses the SAME window and verdict format
 // (`0:<tokenVersion>`), keeping HTTP and realtime revocation in lock-step.
 export const SUSPENSION_CACHE_TTL_SECONDS = 60;
+
+const bearerTokenFromRequest = (req: Request): string | null => {
+  const header = req.headers.authorization;
+  if (!header || !header.startsWith('Bearer ')) return null;
+  const token = header.slice('Bearer '.length).trim();
+  return token.length > 0 ? token : null;
+};
 
 /**
  * Verify the bearer access token on every protected route. Supports the
@@ -49,17 +54,37 @@ export const SUSPENSION_CACHE_TTL_SECONDS = 60;
  */
 export const requireAuth: RequestHandler = async (req, _res, next) => {
   try {
-    const header = req.headers.authorization;
-    if (!header || !header.startsWith('Bearer ')) {
-      return next(new AppError('AUTH_003'));
-    }
-    const token = header.slice('Bearer '.length).trim();
-    if (token.length === 0) return next(new AppError('AUTH_003'));
-
-    const isRevoked = await redis.get(blacklistKey(token));
-    if (isRevoked) return next(new AppError('AUTH_004'));
+    const token = bearerTokenFromRequest(req);
+    if (!token) return next(new AppError('AUTH_003'));
 
     const claims = verifyAccessToken(token);
+    // A recovery bearer is deny-by-default. Only the three explicitly mounted
+    // recovery surfaces use requireAccountRecoveryAuth/requireAnySession.
+    if (claims.scope === 'account_recovery') {
+      return next(new AppError('ACCOUNT_002'));
+    }
+    const isRevoked = await redis.get(blacklistKey(token, claims.jti));
+    if (isRevoked) return next(new AppError('AUTH_004'));
+
+    // An impersonation token is valid only while the original actor remains
+    // an active SUPER_ADMIN on the exact tokenVersion captured at mint time.
+    // This makes logout-all, password reset, suspension, deletion or demotion
+    // revoke the delegated session immediately.
+    if (claims.act) {
+      const actor = await prisma.user.findUnique({
+        where: { id: claims.act.sub },
+        select: { appRole: true, suspendedUntil: true, deletedAt: true, tokenVersion: true },
+      });
+      if (
+        !actor ||
+        actor.deletedAt ||
+        actor.appRole !== 'SUPER_ADMIN' ||
+        (actor.suspendedUntil !== null && actor.suspendedUntil > new Date()) ||
+        actor.tokenVersion !== claims.act.tv
+      ) {
+        return next(new AppError('AUTH_004'));
+      }
+    }
 
     // Suspension check — locked users keep a valid JWT but can't transact.
     // Cached briefly in Redis to avoid a DB round-trip on every request;
@@ -69,6 +94,7 @@ export const requireAuth: RequestHandler = async (req, _res, next) => {
     const cacheKey = `user:susp:${claims.sub}`;
     const cached = await redis.get(cacheKey);
     if (cached === '1') return next(new AppError('AUTH_007'));
+    if (cached === 'd') return next(new AppError('AUTH_003'));
     // The clean cached verdict is `0:<tokenVersion>` so the cache-hit path can
     // still enforce AUTH-03 (token revocation) without a DB read. A bare legacy
     // '0' or any unexpected value is treated as a miss and re-read, so a
@@ -80,7 +106,7 @@ export const requireAuth: RequestHandler = async (req, _res, next) => {
     if (cachedTv !== null) {
       // AUTH-03: reject an access token minted before a cross-device logout /
       // password reset (which bumps the user's tokenVersion + drops this cache).
-      if (claims.tv !== undefined && claims.tv !== cachedTv) {
+      if (claims.tv !== cachedTv) {
         return next(new AppError('AUTH_004'));
       }
       // appRole stays unset on the cache-hit path (as before); requireRole
@@ -88,17 +114,17 @@ export const requireAuth: RequestHandler = async (req, _res, next) => {
     } else {
       const user = await prisma.user.findUnique({
         where: { id: claims.sub },
-        select: { suspendedUntil: true, appRole: true, tokenVersion: true },
+        select: { suspendedUntil: true, deletedAt: true, appRole: true, tokenVersion: true },
       });
-      // A valid JWT for a user that no longer exists (hard-purged) is
-      // unauthorized. NOTE: a soft-deleted (deletion-requested) account is
-      // deliberately NOT blocked here — it must still reach
-      // POST /me/cancel-deletion during the grace period (and GDPR export).
-      // MODE-07's "strip powers" intent is enforced in requireRole's deletedAt
-      // check; blocking all of requireAuth on bare deletedAt breaks self-cancel.
+      // A valid JWT for a hard-purged or soft-deleted account is unauthorized.
+      // Explicit recovery uses a separately signed scope and middleware below.
       if (!user) return next(new AppError('AUTH_003'));
+      if (user.deletedAt) {
+        await redis.setEx(cacheKey, SUSPENSION_CACHE_TTL_SECONDS, 'd');
+        return next(new AppError('AUTH_003'));
+      }
       // AUTH-03: same revocation check against the authoritative DB value.
-      if (claims.tv !== undefined && claims.tv !== user.tokenVersion) {
+      if (claims.tv !== user.tokenVersion) {
         return next(new AppError('AUTH_004'));
       }
       const now = new Date();
@@ -129,9 +155,71 @@ export const requireAuth: RequestHandler = async (req, _res, next) => {
   }
 };
 
+/**
+ * Authenticate the narrow session issued after credentials are proven for a
+ * self-deleted account. It never consults the regular `d` cache marker because
+ * deletion is required here; every request revalidates the grace window,
+ * suspension and tokenVersion authoritatively.
+ */
+export const requireAccountRecoveryAuth: RequestHandler = async (req, _res, next) => {
+  try {
+    const token = bearerTokenFromRequest(req);
+    if (!token) return next(new AppError('AUTH_003'));
+    const claims = verifyAccessToken(token);
+    if (claims.scope !== 'account_recovery' || claims.act) {
+      return next(new AppError('ACCOUNT_002'));
+    }
+    if (await redis.get(blacklistKey(token, claims.jti))) {
+      return next(new AppError('AUTH_004'));
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: claims.sub },
+      select: { deletedAt: true, suspendedUntil: true, tokenVersion: true },
+    });
+    if (!user) return next(new AppError('AUTH_003'));
+    if (claims.tv !== user.tokenVersion) return next(new AppError('AUTH_004'));
+    const now = new Date();
+    if (user.suspendedUntil && user.suspendedUntil > now) {
+      return next(new AppError('AUTH_007'));
+    }
+    const cutoff = new Date(now.getTime() - env.ACCOUNT_DELETION_GRACE_DAYS * 24 * 60 * 60 * 1000);
+    if (!user.deletedAt) return next(new AppError('ACCOUNT_002'));
+    if (user.deletedAt <= cutoff) return next(new AppError('AUTH_003'));
+
+    req.userId = claims.sub;
+    req.accessToken = token;
+    req.accountRecovery = true;
+    next();
+  } catch (err) {
+    return next(err);
+  }
+};
+
+/** Accept an active session or the recovery scope, used only by me/logout. */
+export const requireAnySession: RequestHandler = (req, res, next) => {
+  try {
+    const token = bearerTokenFromRequest(req);
+    if (!token) return next(new AppError('AUTH_003'));
+    const claims = verifyAccessToken(token);
+    return claims.scope === 'account_recovery'
+      ? requireAccountRecoveryAuth(req, res, next)
+      : requireAuth(req, res, next);
+  } catch (err) {
+    return next(err);
+  }
+};
+
 export const revokeAccessToken = async (token: string, ttlSeconds: number): Promise<void> => {
-  if (ttlSeconds <= 0) return;
-  await redis.setEx(blacklistKey(token), ttlSeconds, '1');
+  if (!Number.isFinite(ttlSeconds) || ttlSeconds <= 0) return;
+  const claims = verifyAccessToken(token);
+  // Never retain a revocation key past the signed token lifetime, even if a
+  // future caller accidentally supplies an excessive TTL.
+  const signedTtl =
+    typeof claims.exp === 'number' ? Math.max(0, claims.exp - Math.floor(Date.now() / 1000)) : 0;
+  const boundedTtl = Math.min(Math.floor(ttlSeconds), signedTtl);
+  if (boundedTtl <= 0) return;
+  await redis.setEx(blacklistKey(token, claims.jti), boundedTtl, '1');
 };
 
 // AUTH-03: drop the cached suspension/tokenVersion verdict so the next
@@ -141,8 +229,27 @@ export const invalidateUserAuthCache = async (userId: string): Promise<void> => 
   await redis.del(`user:susp:${userId}`);
 };
 
+/** Prime a fail-closed verdict as soon as account deletion commits. */
+export const markUserDeletedInAuthCache = async (userId: string): Promise<void> => {
+  await redis.setEx(`user:susp:${userId}`, SUSPENSION_CACHE_TTL_SECONDS, 'd');
+};
+
 export const requireUserId = (req: Request, _res: Response, next: NextFunction): void => {
   if (!req.userId) return next(new AppError('AUTH_003'));
+  next();
+};
+
+/**
+ * Privileged operator routes must always use the operator's primary session.
+ * An impersonation token deliberately carries the target user as `sub`; letting
+ * it enter the admin surface would authorize and audit the target identity
+ * instead of the human named by `act.sub`.
+ *
+ * Mount this only after `requireAuth`, which verifies the actor claim and sets
+ * `req.impersonatorId` when the bearer is delegated.
+ */
+export const requirePrimarySession: RequestHandler = (req, _res, next) => {
+  if (req.impersonatorId) return next(new AppError('AUTH_008'));
   next();
 };
 
@@ -172,6 +279,10 @@ export const requireRole = (minimum: AppRole): RequestHandler => {
   const min = ROLE_RANK[minimum];
   return async (req, _res, next) => {
     try {
+      // Defense in depth for every privileged surface, including extension
+      // routers that use requireAdmin directly instead of the central admin
+      // router's requirePrimarySession middleware.
+      if (req.impersonatorId) return next(new AppError('AUTH_008'));
       if (!req.userId) return next(new AppError('AUTH_003'));
       let appRole = req.appRole;
       if (appRole === undefined) {

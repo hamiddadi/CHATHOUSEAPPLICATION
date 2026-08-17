@@ -23,6 +23,7 @@ describe('tokenStorage', () => {
     accessToken: 'at-abc',
     refreshToken: 'rt-xyz',
     expiresAt: '2030-01-01T00:00:00.000Z',
+    scope: 'active' as const,
   };
 
   afterEach(async () => {
@@ -40,9 +41,42 @@ describe('tokenStorage', () => {
     expect(await tokenStorage.get()).toEqual(session);
   });
 
+  it('treats a pre-scope persisted session as active during the rollout', async () => {
+    (Keychain.getGenericPassword as jest.Mock).mockResolvedValueOnce({
+      username: 'chathouse',
+      password: JSON.stringify({
+        accessToken: session.accessToken,
+        refreshToken: session.refreshToken,
+        expiresAt: session.expiresAt,
+      }),
+    });
+
+    expect(await tokenStorage.get()).toEqual(session);
+  });
+
+  it('keeps a rotated session available in memory when Keychain persistence fails', async () => {
+    const rotated = { ...session, accessToken: 'rotated-access' };
+    (Keychain.setGenericPassword as jest.Mock).mockRejectedValueOnce(
+      new Error('Keychain unavailable'),
+    );
+
+    await expect(tokenStorage.set(rotated)).rejects.toThrow('Keychain unavailable');
+    expect(await tokenStorage.get()).toEqual(rotated);
+  });
+
   it('clear removes the entry', async () => {
     await tokenStorage.set(session);
     await tokenStorage.clear();
+    expect(await tokenStorage.get()).toBeNull();
+  });
+
+  it('tombstones the in-process session when native Keychain deletion fails', async () => {
+    await tokenStorage.set(session);
+    (Keychain.resetGenericPassword as jest.Mock).mockRejectedValueOnce(
+      new Error('Keychain reset unavailable'),
+    );
+
+    await expect(tokenStorage.clear()).rejects.toThrow('Keychain reset unavailable');
     expect(await tokenStorage.get()).toBeNull();
   });
 
@@ -50,6 +84,14 @@ describe('tokenStorage', () => {
     (Keychain.getGenericPassword as jest.Mock).mockResolvedValueOnce({
       username: 'chathouse',
       password: 'not-json',
+    });
+    expect(await tokenStorage.get()).toBeNull();
+  });
+
+  it('returns null when stored JSON does not match the session contract', async () => {
+    (Keychain.getGenericPassword as jest.Mock).mockResolvedValueOnce({
+      username: 'chathouse',
+      password: JSON.stringify({ accessToken: 'at-abc', expiresAt: 'not-a-date' }),
     });
     expect(await tokenStorage.get()).toBeNull();
   });

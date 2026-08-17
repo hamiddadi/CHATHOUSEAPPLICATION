@@ -1,8 +1,8 @@
 /**
  * HouseInvitationScreen render + button tests. Route carries { houseId,
- * inviteToken }. The screen reads the house via `useHouse(houseId)`; we seed
- * `houseKeys.detail` so the populated invite card (with the Accept/Decline CTAs)
- * renders instead of the loader. We exercise: header back (goBack), Decline
+ * inviteToken }. The screen reads the house through an invitation-scoped cache
+ * key; we seed `houseKeys.invitation` so the populated invite card (with the
+ * Accept/Decline CTAs) renders instead of the loader. We exercise: header back (goBack), Decline
  * (goBack), and Accept — asserting the signed invite TOKEN is forwarded to the
  * accept service (so the backend can verify it) and that on success we replace
  * to HouseDetail. We also cover the idempotent "already a member" path and the
@@ -40,7 +40,7 @@ const ROUTE = {
   params: { houseId: 'house-1', inviteToken: TOKEN },
 };
 
-const seed = (house: House) => [{ key: [...houseKeys.detail(house.id)], data: house }];
+const seed = (house: House) => [{ key: [...houseKeys.invitation(house.id)], data: house }];
 
 describe('HouseInvitationScreen', () => {
   beforeEach(() => {

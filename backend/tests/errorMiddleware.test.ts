@@ -9,6 +9,8 @@ import {
   notFoundHandler,
 } from '../src/middlewares/error.middleware';
 import { asyncHandler } from '../src/utils/asyncHandler';
+import { logger } from '../src/config/logger';
+import { REDACTED_URL_CAPABILITY } from '../src/utils/sanitizeRequestUrl';
 
 const buildApp = (handler: express.RequestHandler): express.Express => {
   const app = express();
@@ -73,6 +75,43 @@ describe('errorMiddleware', () => {
     const res = await request(app).get('/boom');
     expect(res.status).toBe(500);
     expect(res.body.error.code).toBe('SERVER_001');
+  });
+
+  it('delegates failures after streaming headers have already been sent', () => {
+    const error = new Error('stream database failure');
+    const next = jest.fn();
+    const status = jest.fn();
+    const json = jest.fn();
+
+    errorMiddleware(
+      error,
+      { method: 'GET', originalUrl: '/api/users/me/export' } as express.Request,
+      { headersSent: true, status, json } as unknown as express.Response,
+      next,
+    );
+
+    expect(next).toHaveBeenCalledWith(error);
+    expect(status).not.toHaveBeenCalled();
+    expect(json).not.toHaveBeenCalled();
+  });
+
+  it('redacts a private-media capability and query string from error logs', async () => {
+    const signature = 's'.repeat(43);
+    const logSpy = jest.spyOn(logger, 'error').mockImplementation(() => logger);
+    const app = express();
+    app.get('/media/:id/:signature', () => {
+      throw new Error('storage unavailable');
+    });
+    app.use(errorMiddleware);
+
+    const res = await request(app).get(`/media/object-1/${signature}?download=secret`);
+
+    expect(res.status).toBe(500);
+    const logged = JSON.stringify(logSpy.mock.calls);
+    expect(logged).toContain(`/media/object-1/${REDACTED_URL_CAPABILITY}`);
+    expect(logged).not.toContain(signature);
+    expect(logged).not.toContain('download=secret');
+    logSpy.mockRestore();
   });
 
   it('notFoundHandler returns NOT_FOUND_001', async () => {

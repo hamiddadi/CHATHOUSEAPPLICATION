@@ -1,10 +1,13 @@
-import { Prisma } from '@prisma/client';
+import { MediaKind, Prisma } from '@prisma/client';
 import type { ClubMemberRole } from '@prisma/client';
-import { prisma } from '../../config/database';
-import { redis } from '../../config/redis';
-import { logger } from '../../config/logger';
+import { prisma, runWriteWithRetry } from '../../config/database';
 import { AppError } from '../../middlewares/error.middleware';
+import { clubExtensionCleanupOutboxData } from '../../extensions/club-extension-cleanup.outbox';
 import { notificationsService } from '../notifications/notifications.service';
+import { getBlockedIdSet } from '../social/blocks';
+import { mediaService } from '../media/media.service';
+import { mediaReferenceFor } from '../media/media-url';
+import { runIdempotentCreate } from '../../utils/idempotency';
 import { clubInclude, privacyToDb, publicUser, toApi, toSummary } from './clubs.mapper';
 import type { ViewerMembership } from './clubs.mapper';
 import { clubInviteToken } from './clubs.invite-token';
@@ -16,6 +19,49 @@ const INVITE_LINK_BASE = 'https://app.chathouse.com';
 
 const buildInviteUrl = (clubId: string, token: string): string =>
   `${INVITE_LINK_BASE}/house/${clubId}/invite/${token}`;
+
+const inviterStillControlsClub = async (
+  clubId: string,
+  ownerId: string,
+  inviterId: string,
+): Promise<boolean> => {
+  if (inviterId === ownerId) {
+    return (
+      (await prisma.user.count({
+        where: { id: inviterId, deletedAt: null },
+      })) === 1
+    );
+  }
+  return (
+    (await prisma.clubMember.count({
+      where: {
+        clubId,
+        userId: inviterId,
+        role: { in: ['ADMIN', 'MODERATOR'] },
+        user: { deletedAt: null },
+      },
+    })) === 1
+  );
+};
+
+const validInviteTokenForClub = async (
+  token: string | undefined,
+  club: { id: string; ownerId: string },
+): Promise<boolean> => {
+  if (!token) return false;
+  const result = clubInviteToken.verify(token);
+  if (!result.ok || result.claims.clubId !== club.id) return false;
+  return inviterStillControlsClub(club.id, club.ownerId, result.claims.inviterId);
+};
+
+const activeClubForViewerWhere = (clubId: string, viewerId: string): Prisma.ClubWhereInput => ({
+  id: clubId,
+  owner: {
+    deletedAt: null,
+    blocksCreated: { none: { blockedId: viewerId } },
+    blocksReceived: { none: { blockerId: viewerId } },
+  },
+});
 
 /** Map the frontend's lowercase role to the Prisma ClubMemberRole enum. */
 const roleToDb = (role: 'admin' | 'moderator' | 'member'): ClubMemberRole => {
@@ -33,15 +79,38 @@ const slugify = (name: string): string =>
     .replace(/[^a-z0-9-]/g, '')
     .slice(0, 60);
 
+/**
+ * Pick a readable, unique slug while the caller holds the club-creation
+ * advisory lock. Keeping this lookup inside the creation transaction prevents
+ * two concurrent names that slugify identically from choosing the same value.
+ */
+const uniqueClubSlug = async (tx: Prisma.TransactionClient, name: string): Promise<string> => {
+  const root = slugify(name) || 'house';
+  for (let suffix = 0; ; suffix += 1) {
+    const tail = suffix === 0 ? '' : `-${suffix + 1}`;
+    const candidate = `${root.slice(0, 60 - tail.length)}${tail}`;
+    const exists = await tx.club.findUnique({ where: { slug: candidate }, select: { id: true } });
+    if (!exists) return candidate;
+  }
+};
+
 export const clubsService = {
   async list(viewerId: string, input: ListClubsInput) {
     const where: Prisma.ClubWhereInput =
       input.filter === 'mine'
-        ? { members: { some: { userId: viewerId } } }
+        ? {
+            owner: { deletedAt: null },
+            members: { some: { userId: viewerId } },
+          }
         : {
             // SOCIAL clubs are request-to-join; they must still be discoverable
             // (the FE routes the join through the clubreq request flow). Only
             // PRIVATE clubs and clubs the viewer already belongs to are hidden.
+            owner: {
+              deletedAt: null,
+              blocksCreated: { none: { blockedId: viewerId } },
+              blocksReceived: { none: { blockerId: viewerId } },
+            },
             privacy: { in: ['OPEN', 'SOCIAL'] },
             members: { none: { userId: viewerId } },
           };
@@ -73,20 +142,47 @@ export const clubsService = {
     });
   },
 
-  async get(viewerId: string, clubId: string) {
+  async get(viewerId: string, clubId: string, inviteToken?: string) {
+    // Resolve access from a minimal row before loading the bounded roster.
+    // This prevents a PRIVATE club from becoming an IDOR merely because an
+    // authenticated caller guessed its id.
+    const [clubAccess, viewerMembership] = await Promise.all([
+      prisma.club.findFirst({
+        where: {
+          id: clubId,
+          owner: {
+            deletedAt: null,
+            blocksCreated: { none: { blockedId: viewerId } },
+            blocksReceived: { none: { blockerId: viewerId } },
+          },
+        },
+        select: { id: true, ownerId: true, privacy: true },
+      }),
+      this.resolveViewerMembership(viewerId, clubId),
+    ]);
+    if (!clubAccess) throw new AppError('CLUB_001');
+
+    let viewerInvite: Awaited<ReturnType<typeof this.viewerInvite>> = null;
+    if (clubAccess.privacy === 'PRIVATE' && clubAccess.ownerId !== viewerId && !viewerMembership) {
+      viewerInvite = await this.viewerInvite(viewerId, clubId, clubAccess.ownerId);
+      const tokenAllowed = await validInviteTokenForClub(inviteToken, clubAccess);
+      if (!viewerInvite && !tokenAllowed) throw new AppError('CLUB_001');
+    }
+
     const club = await prisma.club.findUnique({
       where: { id: clubId },
       include: clubInclude,
     });
     if (!club) throw new AppError('CLUB_001');
-    const viewerMembership = await this.resolveViewerMembership(viewerId, clubId);
     const api = toApi(club, viewerId, viewerMembership);
     // Surface a pending invitation for the viewer so the detail screen can show
     // an "Accept invitation" CTA (a non-member landing on a PRIVATE house would
     // otherwise hit a dead end). Backed by the existing CLUB_INVITE notification
     // — no new persistence. Skip the lookup entirely when the viewer is already
     // a member (they have nothing to accept).
-    const viewerInvite = api.isJoinedByMe ? null : await this.viewerInvite(viewerId, clubId);
+    if (!api.isJoinedByMe && viewerInvite === null) {
+      viewerInvite = await this.viewerInvite(viewerId, clubId, club.ownerId);
+    }
     return { ...api, viewerInvite };
   },
 
@@ -99,6 +195,7 @@ export const clubsService = {
   async viewerInvite(
     viewerId: string,
     clubId: string,
+    ownerId?: string,
   ): Promise<{ pending: true; inviterId: string | null } | null> {
     const candidates = await prisma.notification.findMany({
       where: {
@@ -108,54 +205,121 @@ export const clubsService = {
       },
       select: { data: true },
     });
-    const invite = candidates.find(n => {
+    const invites = candidates.filter(n => {
       const d = n.data;
       if (!d || typeof d !== 'object' || Array.isArray(d)) return false;
       const payload = d as Record<string, unknown>;
       return payload.kind === undefined && payload.inviterId !== undefined;
     });
-    if (!invite) return null;
-    const payload = invite.data as Record<string, unknown>;
-    const inviterId = typeof payload.inviterId === 'string' ? payload.inviterId : null;
-    return { pending: true, inviterId };
+    if (invites.length === 0) return null;
+
+    const resolvedOwnerId =
+      ownerId ??
+      (
+        await prisma.club.findUnique({
+          where: { id: clubId },
+          select: { ownerId: true },
+        })
+      )?.ownerId;
+    if (!resolvedOwnerId) return null;
+
+    for (const invite of invites) {
+      const payload = invite.data as Record<string, unknown>;
+      const inviterId = typeof payload.inviterId === 'string' ? payload.inviterId : null;
+      if (inviterId && (await inviterStillControlsClub(clubId, resolvedOwnerId, inviterId))) {
+        return { pending: true, inviterId };
+      }
+    }
+    return null;
   },
 
-  async create(ownerId: string, input: CreateClubInput) {
-    // Limit: one club per user unless we add premium later.
-    const existingCount = await prisma.club.count({ where: { ownerId } });
-    if (existingCount >= 3) throw new AppError('CLUB_006');
-
-    const slug = slugify(input.name);
-    // Ensure slug uniqueness by appending a suffix if needed
-    let finalSlug = slug;
-    const existing = await prisma.club.findUnique({ where: { slug } });
-    if (existing) {
-      finalSlug = `${slug}-${Date.now().toString(36)}`;
+  async create(ownerId: string, input: CreateClubInput, idempotencyKey?: string) {
+    let canonicalIconUrl = input.iconUrl ?? null;
+    if (input.iconUrl) {
+      canonicalIconUrl = await mediaService.assertOwnedMediaUrl(
+        ownerId,
+        input.iconUrl,
+        MediaKind.AVATAR,
+      );
     }
 
-    const club = await prisma.$transaction(async tx => {
-      const created = await tx.club.create({
-        data: {
-          name: input.name.trim(),
-          slug: finalSlug,
-          description: input.description?.trim() || null,
-          rules: input.rules?.trim() || null,
-          privacy: privacyToDb(input.privacy),
-          category: input.category,
-          categoryEmoji: input.categoryEmoji,
-          iconUrl: input.iconUrl ?? null,
-          ownerId,
-          memberCount: 1,
-          members: {
-            create: { userId: ownerId, role: 'ADMIN' },
+    const name = input.name.trim();
+    const creation = await runIdempotentCreate({
+      userId: ownerId,
+      scope: 'clubs.create',
+      key: idempotencyKey,
+      payload: { ...input, iconUrl: canonicalIconUrl },
+      create: async tx => {
+        // Club creation is intentionally rare. A transaction-scoped advisory
+        // lock gives us one serial order for the global unique name/slug checks
+        // and for each owner's quota check. The lock is released at commit or
+        // rollback, so there is no stale distributed-lock state to clean up.
+        await tx.$queryRaw`
+          SELECT pg_advisory_xact_lock(hashtextextended('clubs:create', 0))::text
+        `;
+
+        // Re-check account activity and quota only after acquiring the lock;
+        // checks performed before the transaction are vulnerable to TOCTOU
+        // races from another device using a different idempotency key.
+        // IdempotencyKey's user FK already holds FOR KEY SHARE. NO KEY UPDATE
+        // still serializes account activity changes/deletion, while remaining
+        // compatible with another distinct idempotency claim waiting on the
+        // global club-create advisory lock (avoids a KEY SHARE/UPDATE cycle).
+        const owner = await tx.$queryRaw<{ id: string }[]>`
+          SELECT "id" FROM "User"
+          WHERE "id" = ${ownerId} AND "deletedAt" IS NULL
+          FOR NO KEY UPDATE`;
+        if (owner.length === 0) throw new AppError('USER_001');
+
+        const iconMediaObjectId = input.iconUrl
+          ? await mediaService.assertOwnedMediaUrlWithinTransaction(
+              tx,
+              ownerId,
+              input.iconUrl,
+              MediaKind.AVATAR,
+            )
+          : null;
+
+        const existingCount = await tx.club.count({ where: { ownerId } });
+        if (existingCount >= 3) throw new AppError('CLUB_006');
+
+        const nameTaken = await tx.club.findUnique({ where: { name }, select: { id: true } });
+        if (nameTaken) {
+          throw new AppError('VALIDATION_001', 'A club with this name already exists');
+        }
+
+        const finalSlug = await uniqueClubSlug(tx, name);
+        const created = await tx.club.create({
+          data: {
+            name,
+            slug: finalSlug,
+            description: input.description?.trim() || null,
+            rules: input.rules?.trim() || null,
+            privacy: privacyToDb(input.privacy),
+            category: input.category,
+            categoryEmoji: input.categoryEmoji,
+            iconUrl: canonicalIconUrl,
+            iconMediaObjectId,
+            ownerId,
+            memberCount: 1,
+            members: {
+              create: { userId: ownerId, role: 'ADMIN' },
+            },
           },
-        },
-        include: clubInclude,
-      });
-      return created;
+          select: { id: true },
+        });
+        return created.id;
+      },
     });
+
+    const club = await prisma.club.findUnique({
+      where: { id: creation.resourceId },
+      include: clubInclude,
+    });
+    if (!club) throw new AppError('CLUB_001');
     // The owner was just created as the sole ADMIN member and is always within
-    // the (single-member) slice; derive their membership from it directly.
+    // the (single-member) slice. The same holds for an idempotent replay, which
+    // loads the exact committed club instead of creating any new side effect.
     const ownerMember = club.members.find(m => m.userId === ownerId) ?? null;
     const viewerMembership: ViewerMembership = ownerMember
       ? { role: ownerMember.role, joinedAt: ownerMember.joinedAt, user: ownerMember.user }
@@ -164,7 +328,9 @@ export const clubsService = {
   },
 
   async join(viewerId: string, clubId: string) {
-    const club = await prisma.club.findUnique({ where: { id: clubId } });
+    const club = await prisma.club.findFirst({
+      where: activeClubForViewerWhere(clubId, viewerId),
+    });
     if (!club) throw new AppError('CLUB_001');
     if (club.privacy === 'PRIVATE') throw new AppError('CLUB_003');
     // CLUB-01: SOCIAL clubs are gated by an approval request that lives in the
@@ -174,18 +340,28 @@ export const clubsService = {
       throw new AppError('CLUB_003', 'Social club — request approval to join');
     }
 
-    const existing = await prisma.clubMember.findUnique({
-      where: { clubId_userId: { clubId, userId: viewerId } },
-    });
-    if (existing) throw new AppError('CLUB_004');
-
     try {
-      await prisma.$transaction([
-        prisma.clubMember.create({
+      await prisma.$transaction(async tx => {
+        const existing = await tx.clubMember.findUnique({
+          where: { clubId_userId: { clubId, userId: viewerId } },
+          select: { id: true },
+        });
+        if (existing) throw new AppError('CLUB_004');
+
+        const eligible = await tx.club.updateMany({
+          where: {
+            ...activeClubForViewerWhere(clubId, viewerId),
+            privacy: 'OPEN',
+          },
+          data: { memberCount: { increment: 1 } },
+        });
+        if (eligible.count !== 1) {
+          throw new AppError('CLUB_003', 'Club is no longer open');
+        }
+        await tx.clubMember.create({
           data: { clubId, userId: viewerId, role: 'MEMBER' },
-        }),
-        prisma.club.update({ where: { id: clubId }, data: { memberCount: { increment: 1 } } }),
-      ]);
+        });
+      });
     } catch (err) {
       // CLUB-04: lost a race with a concurrent join/accept — the unique
       // (clubId,userId) constraint fired. Surface as CLUB_004 instead of a
@@ -203,12 +379,19 @@ export const clubsService = {
     if (!club) throw new AppError('CLUB_001');
     if (club.ownerId === viewerId) throw new AppError('CLUB_005');
 
-    const res = await prisma.clubMember.deleteMany({
-      where: { clubId, userId: viewerId },
+    await prisma.$transaction(async tx => {
+      const removed = await tx.clubMember.deleteMany({
+        where: { clubId, userId: viewerId },
+      });
+      if (removed.count > 0) {
+        await tx.$executeRaw`
+          UPDATE "Club"
+          SET "memberCount" = GREATEST("memberCount" - 1, 1),
+              "updatedAt" = NOW()
+          WHERE "id" = ${clubId}`;
+      }
+      return removed;
     });
-    if (res.count > 0) {
-      await prisma.club.update({ where: { id: clubId }, data: { memberCount: { decrement: 1 } } });
-    }
     return { left: true as const };
   },
 
@@ -224,11 +407,13 @@ export const clubsService = {
     clubId: string,
     userIds: readonly string[],
   ): Promise<{ sent: number; token: string; url: string }> {
-    const club = await prisma.club.findUnique({ where: { id: clubId } });
+    const club = await prisma.club.findFirst({
+      where: activeClubForViewerWhere(clubId, inviterId),
+    });
     if (!club) throw new AppError('CLUB_001');
 
-    const inviterMember = await prisma.clubMember.findUnique({
-      where: { clubId_userId: { clubId, userId: inviterId } },
+    const inviterMember = await prisma.clubMember.findFirst({
+      where: { clubId, userId: inviterId, user: { deletedAt: null } },
     });
     if (!inviterMember) throw new AppError('CLUB_002');
     // CLUB-03: invites gatekeep entry into PRIVATE clubs (the only way in), so
@@ -249,12 +434,27 @@ export const clubsService = {
     const url = buildInviteUrl(clubId, token);
 
     // Skip users that are already members — no point inviting them.
-    const existingMembers = await prisma.clubMember.findMany({
-      where: { clubId, userId: { in: [...userIds] } },
-      select: { userId: true },
-    });
+    const uniqueCandidates = [...new Set(userIds)].filter(id => id !== inviterId);
+    const [existingMembers, activeUsers, inviterBlocked, ownerBlocked] = await Promise.all([
+      prisma.clubMember.findMany({
+        where: { clubId, userId: { in: uniqueCandidates } },
+        select: { userId: true },
+      }),
+      prisma.user.findMany({
+        where: { id: { in: uniqueCandidates }, deletedAt: null },
+        select: { id: true },
+      }),
+      getBlockedIdSet(inviterId),
+      club.ownerId === inviterId
+        ? Promise.resolve(new Set<string>())
+        : getBlockedIdSet(club.ownerId),
+    ]);
     const memberSet = new Set(existingMembers.map(m => m.userId));
-    const targets = userIds.filter(id => id !== inviterId && !memberSet.has(id));
+    const activeSet = new Set(activeUsers.map(user => user.id));
+    const targets = uniqueCandidates.filter(
+      id =>
+        activeSet.has(id) && !memberSet.has(id) && !inviterBlocked.has(id) && !ownerBlocked.has(id),
+    );
     if (targets.length === 0) return { sent: 0, token, url };
 
     // Route through notificationsService.create so each invitee also
@@ -268,6 +468,9 @@ export const clubsService = {
           title: 'Club invitation',
           body: `You've been invited to join ${club.name}`,
           data: { clubId, inviterId } as Prisma.InputJsonValue,
+          targetId: clubId,
+          targetType: 'club',
+          dedupeKey: `club-invite:${clubId}:${userId}`,
         }),
       ),
     );
@@ -276,8 +479,11 @@ export const clubsService = {
   },
 
   async acceptInvitation(viewerId: string, clubId: string, inviteToken?: string) {
-    const club = await prisma.club.findUnique({ where: { id: clubId } });
+    const club = await prisma.club.findFirst({
+      where: activeClubForViewerWhere(clubId, viewerId),
+    });
     if (!club) throw new AppError('CLUB_001');
+    const blocked = await getBlockedIdSet(viewerId);
 
     const existing = await prisma.clubMember.findUnique({
       where: { clubId_userId: { clubId, userId: viewerId } },
@@ -296,6 +502,7 @@ export const clubsService = {
     // Without either, any authenticated user could POST /accept and join any
     // club, bypassing the join() guard (CLUB_003).
     let authorised = false;
+    let consumedNotificationId: string | null = null;
 
     if (inviteToken) {
       const result = clubInviteToken.verify(inviteToken);
@@ -304,6 +511,14 @@ export const clubsService = {
       }
       // A well-signed token for a *different* club must not grant entry here.
       if (result.claims.clubId !== clubId) throw new AppError('CLUB_009');
+      // Revocation follows the inviter's current club role. A removed or
+      // demoted inviter cannot keep admitting members until token expiry.
+      if (
+        blocked.has(result.claims.inviterId) ||
+        !(await inviterStillControlsClub(clubId, club.ownerId, result.claims.inviterId))
+      ) {
+        throw new AppError('CLUB_009');
+      }
       authorised = true;
     }
 
@@ -319,7 +534,7 @@ export const clubsService = {
           type: 'CLUB_INVITE',
           data: { path: ['clubId'], equals: clubId },
         },
-        select: { data: true },
+        select: { id: true, data: true },
       });
       const invite = candidates.find(n => {
         const d = n.data;
@@ -328,6 +543,16 @@ export const clubsService = {
         return payload.kind === undefined && payload.inviterId !== undefined;
       });
       if (!invite) throw new AppError('CLUB_007');
+      const payload = invite.data as Record<string, unknown>;
+      const inviterId = typeof payload.inviterId === 'string' ? payload.inviterId : null;
+      if (
+        !inviterId ||
+        blocked.has(inviterId) ||
+        !(await inviterStillControlsClub(clubId, club.ownerId, inviterId))
+      ) {
+        throw new AppError('CLUB_007');
+      }
+      consumedNotificationId = invite.id;
       authorised = true;
     }
 
@@ -337,6 +562,13 @@ export const clubsService = {
           data: { clubId, userId: viewerId, role: 'MEMBER' },
         }),
         prisma.club.update({ where: { id: clubId }, data: { memberCount: { increment: 1 } } }),
+        ...(consumedNotificationId
+          ? [
+              prisma.notification.deleteMany({
+                where: { id: consumedNotificationId, userId: viewerId },
+              }),
+            ]
+          : []),
       ]);
     } catch (err) {
       // Lost a race with a concurrent join/accept — the unique (clubId,userId)
@@ -360,7 +592,9 @@ export const clubsService = {
     targetUserId: string,
     role: 'admin' | 'moderator' | 'member',
   ) {
-    const club = await prisma.club.findUnique({ where: { id: clubId } });
+    const club = await prisma.club.findFirst({
+      where: activeClubForViewerWhere(clubId, viewerId),
+    });
     if (!club) throw new AppError('CLUB_001');
 
     // Authorisation: viewer must be the owner or an ADMIN member.
@@ -373,8 +607,16 @@ export const clubsService = {
     // The owner's role is immutable — they always stay ADMIN.
     if (club.ownerId === targetUserId) throw new AppError('CLUB_002');
 
-    const targetMembership = await prisma.clubMember.findUnique({
-      where: { clubId_userId: { clubId, userId: targetUserId } },
+    const targetMembership = await prisma.clubMember.findFirst({
+      where: {
+        clubId,
+        userId: targetUserId,
+        user: {
+          deletedAt: null,
+          blocksCreated: { none: { blockedId: viewerId } },
+          blocksReceived: { none: { blockerId: viewerId } },
+        },
+      },
     });
     if (!targetMembership) throw new AppError('CLUB_002');
 
@@ -392,7 +634,9 @@ export const clubsService = {
    * instead). Decrements memberCount in the same transaction as the delete.
    */
   async removeMember(viewerId: string, clubId: string, targetUserId: string) {
-    const club = await prisma.club.findUnique({ where: { id: clubId } });
+    const club = await prisma.club.findFirst({
+      where: activeClubForViewerWhere(clubId, viewerId),
+    });
     if (!club) throw new AppError('CLUB_001');
 
     const viewerMembership = await prisma.clubMember.findUnique({
@@ -420,27 +664,64 @@ export const clubsService = {
    * Update club details. Only ADMIN members (typically the owner) can edit.
    */
   async update(viewerId: string, clubId: string, input: UpdateClubInput) {
-    const club = await prisma.club.findUnique({ where: { id: clubId } });
+    const club = await prisma.club.findFirst({
+      where: activeClubForViewerWhere(clubId, viewerId),
+    });
     if (!club) throw new AppError('CLUB_001');
     const membership = await prisma.clubMember.findUnique({
       where: { clubId_userId: { clubId, userId: viewerId } },
     });
     if (!membership || membership.role !== 'ADMIN') throw new AppError('CLUB_002');
+    const updated = await runWriteWithRetry(() =>
+      prisma.$transaction(
+        async tx => {
+          const caller = await tx.$queryRaw<{ id: string }[]>`
+            SELECT "id" FROM "User"
+            WHERE "id" = ${viewerId} AND "deletedAt" IS NULL
+            FOR UPDATE`;
+          if (caller.length === 0) throw new AppError('USER_001');
+          await tx.$queryRaw`SELECT "id" FROM "Club" WHERE "id" = ${clubId} FOR UPDATE`;
 
-    const data: Prisma.ClubUpdateInput = {};
-    if (input.name !== undefined) data.name = input.name.trim();
-    if (input.description !== undefined) data.description = input.description?.trim() || null;
-    if (input.rules !== undefined) data.rules = input.rules?.trim() || null;
-    if (input.iconUrl !== undefined) data.iconUrl = input.iconUrl;
-    if (input.category !== undefined) data.category = input.category;
-    if (input.categoryEmoji !== undefined) data.categoryEmoji = input.categoryEmoji;
-    if (input.privacy !== undefined) data.privacy = privacyToDb(input.privacy);
+          const currentClub = await tx.club.findFirst({
+            where: activeClubForViewerWhere(clubId, viewerId),
+            select: { id: true },
+          });
+          if (!currentClub) throw new AppError('CLUB_001');
+          const currentMembership = await tx.clubMember.findUnique({
+            where: { clubId_userId: { clubId, userId: viewerId } },
+            select: { role: true },
+          });
+          if (currentMembership?.role !== 'ADMIN') throw new AppError('CLUB_002');
 
-    const updated = await prisma.club.update({
-      where: { id: clubId },
-      data,
-      include: clubInclude,
-    });
+          const data: Prisma.ClubUncheckedUpdateInput = {};
+          if (input.name !== undefined) data.name = input.name.trim();
+          if (input.description !== undefined) data.description = input.description?.trim() || null;
+          if (input.rules !== undefined) data.rules = input.rules?.trim() || null;
+          if (input.iconUrl !== undefined) {
+            if (input.iconUrl) {
+              const sourceIconUrl = input.iconUrl;
+              const mediaId = await mediaService.assertOwnedMediaUrlWithinTransaction(
+                tx,
+                viewerId,
+                sourceIconUrl,
+                MediaKind.AVATAR,
+              );
+              data.iconUrl = mediaReferenceFor(mediaId, new URL(sourceIconUrl).origin);
+              data.iconMediaObjectId = mediaId;
+            } else {
+              data.iconUrl = null;
+              data.iconMediaObjectId = null;
+            }
+          }
+          if (input.category !== undefined) data.category = input.category;
+          if (input.categoryEmoji !== undefined) data.categoryEmoji = input.categoryEmoji;
+          if (input.privacy !== undefined) data.privacy = privacyToDb(input.privacy);
+
+          return tx.club.update({ where: { id: clubId }, data, include: clubInclude });
+        },
+        { maxWait: 10_000, timeout: 15_000 },
+      ),
+    );
     const viewerMembership = await this.resolveViewerMembership(viewerId, clubId);
     return toApi(updated, viewerId, viewerMembership);
   },
@@ -453,28 +734,15 @@ export const clubsService = {
     if (!club) throw new AppError('CLUB_001');
     if (club.ownerId !== viewerId) throw new AppError('CLUB_005');
 
-    await prisma.$transaction([
-      prisma.clubMember.deleteMany({ where: { clubId } }),
-      prisma.club.delete({ where: { id: clubId } }),
-    ]);
-
-    // CLUB-07: the clubreq + clubMeta extensions keep state in Redis keyed by
-    // clubId. Purge those keys so a deleted club leaves no orphaned join
-    // requests / metadata behind. Best-effort: a Redis hiccup must not fail an
-    // otherwise-successful deletion.
-    try {
-      const reqIndexKey = `ext:clubreq:club:${clubId}`;
-      const pendingUserIds = await redis.sMembers(reqIndexKey);
-      const keysToDelete = [
-        reqIndexKey,
-        ...pendingUserIds.map(uid => `ext:clubreq:${clubId}:${uid}`),
-        `ext:clubmeta:${clubId}`,
-        `ext:clubmeta:featured:${clubId}`,
-      ];
-      await redis.del(keysToDelete);
-    } catch (err) {
-      logger.warn('clubs.remove: extension key purge failed', { err, clubId });
-    }
+    await prisma.$transaction(async tx => {
+      const [lockedClub] = await tx.$queryRaw<{ ownerId: string }[]>`
+        SELECT "ownerId" FROM "Club" WHERE "id" = ${clubId} FOR UPDATE`;
+      if (!lockedClub) throw new AppError('CLUB_001');
+      if (lockedClub.ownerId !== viewerId) throw new AppError('CLUB_005');
+      await tx.clubMember.deleteMany({ where: { clubId } });
+      await tx.outboxEvent.create({ data: clubExtensionCleanupOutboxData(clubId, 'all') });
+      await tx.club.delete({ where: { id: clubId } });
+    });
 
     return { deleted: true as const };
   },

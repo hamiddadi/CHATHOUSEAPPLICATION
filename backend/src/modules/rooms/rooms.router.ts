@@ -2,6 +2,8 @@ import { Router } from 'express';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { requireAuth } from '../../middlewares/auth.middleware';
 import { socialController } from '../social/social.controller';
+import { contentReportsController } from '../reports/contentReports.controller';
+import { requireCurrentLegalAcceptance } from '../auth/legal-acceptance';
 import { roomsController } from './rooms.controller';
 
 export const roomsRouter: Router = Router();
@@ -9,7 +11,7 @@ export const roomsRouter: Router = Router();
 roomsRouter.use(requireAuth);
 
 roomsRouter.get('/', asyncHandler(roomsController.list));
-roomsRouter.post('/', asyncHandler(roomsController.create));
+roomsRouter.post('/', requireCurrentLegalAcceptance, asyncHandler(roomsController.create));
 // /feed — personalised Hallway ranking. Must sit before the `/:id`
 // catch-all so the literal path wins the route match.
 roomsRouter.get('/feed', asyncHandler(roomsController.feed));
@@ -44,17 +46,33 @@ roomsRouter.get('/:id/hand-raises', asyncHandler(roomsController.listHandRaises)
 roomsRouter.delete('/:id/hand-raises/:userId', asyncHandler(roomsController.dismissHandRaise));
 
 // In-room text chat (distinct from DMs under /api/chat).
-roomsRouter.post('/:id/messages', asyncHandler(roomsController.sendMessage));
+roomsRouter.post(
+  '/:id/messages',
+  requireCurrentLegalAcceptance,
+  asyncHandler(roomsController.sendMessage),
+);
 roomsRouter.get('/:id/messages', asyncHandler(roomsController.listMessages));
+roomsRouter.post(
+  '/:id/messages/:messageId/report',
+  asyncHandler(contentReportsController.roomMessage),
+);
 
 // Ephemeral emoji reactions.
-roomsRouter.post('/:id/reactions', asyncHandler(roomsController.reaction));
+roomsRouter.post(
+  '/:id/reactions',
+  requireCurrentLegalAcceptance,
+  asyncHandler(roomsController.reaction),
+);
 
 // Kick a participant (host or moderator only).
 roomsRouter.post('/:id/kick', asyncHandler(roomsController.kick));
 
 // Live room metadata edits (host/mod only)
-roomsRouter.patch('/:id/title', asyncHandler(roomsController.updateTitle));
+roomsRouter.patch(
+  '/:id/title',
+  requireCurrentLegalAcceptance,
+  asyncHandler(roomsController.updateTitle),
+);
 roomsRouter.patch('/:id/chat', asyncHandler(roomsController.toggleChat));
 roomsRouter.patch('/:id/lock', asyncHandler(roomsController.setLock));
 // Flip room type public↔private after creation (host only).
@@ -71,6 +89,6 @@ roomsRouter.post('/:id/ping/:userId', asyncHandler(roomsController.ping));
 roomsRouter.post('/:id/report', asyncHandler(socialController.reportRoom));
 
 // LiveKit token — fresh signed token bound to the caller's current role.
-// Active-participant gate is enforced inside the controller. Returns
+// Active-participant + live-room gates are enforced inside the service. Returns
 // 503 (LIVEKIT_001) when LIVEKIT_API_SECRET isn't configured.
 roomsRouter.get('/:id/livekit-token', asyncHandler(roomsController.livekitToken));

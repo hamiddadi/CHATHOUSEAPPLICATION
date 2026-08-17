@@ -6,6 +6,231 @@ apply plugin: "com.facebook.react"
 apply plugin: "com.google.gms.google-services"
 
 def projectRoot = rootDir.getAbsoluteFile().getParentFile().getAbsolutePath()
+def configuredVersionCode = System.getenv('VERSION_CODE') ?: project.findProperty('VERSION_CODE')
+def configuredVersionName = System.getenv('VERSION_NAME') ?: project.findProperty('VERSION_NAME')
+def configuredMapsApiKey = (
+    System.getenv('GOOGLE_MAPS_API_KEY') ?: project.findProperty('GOOGLE_MAPS_API_KEY') ?: ''
+).toString()
+def appVersionCode = configuredVersionCode ? configuredVersionCode.toString().toInteger() : 1
+def appVersionName = configuredVersionName ? configuredVersionName.toString() : '1.0.0'
+
+def containsReleasePlaceholder = { Object raw ->
+    def value = raw == null ? '' : raw.toString().toLowerCase()
+    value ==~ /.*(change[_-]?me|placeholder|replace[-_.]?with|your[-_.]?project|example\.(com|net|org|test)|__[a-z0-9_-]+__).*/
+}
+
+def isPrivateOrLocalHost = { String rawHost ->
+    // java.net.URI may retain brackets around an IPv6 literal depending on
+    // the JDK. Normalize them before applying the private-range checks.
+    def host = (rawHost ?: '').toLowerCase()
+    if (host.startsWith('[') && host.endsWith(']')) {
+        host = host.substring(1, host.length() - 1)
+    }
+    host.isEmpty() ||
+        host == 'localhost' ||
+        host.endsWith('.localhost') ||
+        host ==~ /^127\..*/ ||
+        host == '0.0.0.0' ||
+        host ==~ /^10\..*/ ||
+        host ==~ /^172\.(1[6-9]|2[0-9]|3[01])\..*/ ||
+        host ==~ /^192\.168\..*/ ||
+        host ==~ /^169\.254\..*/ ||
+        host == '::1' ||
+        host == '0:0:0:0:0:0:0:1' ||
+        host ==~ /^::ffff:127\..*/ ||
+        host ==~ /^f[cd][0-9a-f]{2}:.*/ ||
+        host ==~ /^fe[89ab][0-9a-f]:.*/
+}
+
+def validateProductionUrl = { String label, Object rawValue, String expectedScheme ->
+    def value = rawValue == null ? '' : rawValue.toString()
+    java.net.URI uri
+    try {
+        uri = new java.net.URI(value)
+    } catch (Exception ignored) {
+        throw new RuntimeException("$label is malformed in .env.production.")
+    }
+    def normalizedHost = (uri.host ?: '').replaceAll(/^\[|\]$/, '')
+    def isSingleLabelHost = normalizedHost &&
+        !normalizedHost.contains('.') &&
+        !normalizedHost.contains(':')
+    def invalidPort = uri.port == 0 ||
+        uri.port > 65535 ||
+        (uri.rawAuthority ?: '').endsWith(':')
+    if (
+        !expectedScheme.equalsIgnoreCase(uri.scheme) ||
+        !normalizedHost ||
+        uri.userInfo ||
+        isSingleLabelHost ||
+        invalidPort ||
+        containsReleasePlaceholder(value) ||
+        isPrivateOrLocalHost(normalizedHost)
+    ) {
+        throw new RuntimeException(
+            "$label must use ${expectedScheme}:// with a public, non-placeholder production host."
+        )
+    }
+}
+
+def readProductionEnv = { File envFile ->
+    def values = [:]
+    envFile.eachLine('UTF-8') { rawLine ->
+        def line = rawLine.replace('\r', '').trim()
+        if (line && !line.startsWith('#')) {
+            def separator = line.indexOf('=')
+            if (separator > 0) {
+                def key = line.substring(0, separator).trim()
+                def value = line.substring(separator + 1).trim()
+                if (
+                    value.length() >= 2 &&
+                    (
+                        (value.startsWith('"') && value.endsWith('"')) ||
+                        (value.startsWith("'") && value.endsWith("'"))
+                    )
+                ) {
+                    value = value.substring(1, value.length() - 1)
+                }
+                values[key] = value
+            }
+        }
+    }
+    values
+}
+
+def validateProductionFirebase = {
+    def firebaseConfigFile = file('google-services.json')
+    if (!firebaseConfigFile.exists()) {
+        throw new RuntimeException(
+            'android/app/google-services.json is required for a production release.'
+        )
+    }
+
+    def firebaseConfig
+    try {
+        firebaseConfig = new groovy.json.JsonSlurper().parse(firebaseConfigFile)
+    } catch (Exception ignored) {
+        throw new RuntimeException('android/app/google-services.json is not valid JSON.')
+    }
+
+    def firebaseClient = (firebaseConfig.client ?: []).find { client ->
+        client?.client_info?.android_client_info?.package_name == 'com.chathouse.app'
+    }
+    def projectId = firebaseConfig?.project_info?.project_id?.toString() ?: ''
+    def appId = firebaseClient?.client_info?.mobilesdk_app_id?.toString() ?: ''
+    def firebaseApiKey = (firebaseClient?.api_key ?: []).find()?.current_key?.toString() ?: ''
+    if (
+        !firebaseClient ||
+        !projectId ||
+        containsReleasePlaceholder(projectId) ||
+        !(appId ==~ /^\d+:\d+:android:[0-9A-Fa-f]+$/) ||
+        !(firebaseApiKey ==~ /^AIza[0-9A-Za-z_-]{35}$/)
+    ) {
+        throw new RuntimeException(
+            'google-services.json is a placeholder or does not match com.chathouse.app.'
+        )
+    }
+}
+
+def validateProductionReleaseConfiguration = {
+    if (System.getenv('ENVFILE') != '.env.production') {
+        throw new RuntimeException(
+            'Production release tasks require ENVFILE=.env.production. ' +
+            'Use scripts/build-release-aab.ps1.'
+        )
+    }
+    if (!(configuredVersionCode?.toString() ==~ /^[1-9]\d*$/)) {
+        throw new RuntimeException(
+            'Production release tasks require an explicit positive VERSION_CODE.'
+        )
+    }
+    if (
+        !(
+            configuredVersionName?.toString() ==~
+            /^[0-9]+(\.[0-9]+){1,3}([+-][0-9A-Za-z.-]+)?$/
+        )
+    ) {
+        throw new RuntimeException(
+            'Production release tasks require an explicit semantic VERSION_NAME.'
+        )
+    }
+    if (!(configuredMapsApiKey ==~ /^AIza[0-9A-Za-z_-]{35}$/)) {
+        throw new RuntimeException(
+            'Production release tasks require a valid GOOGLE_MAPS_API_KEY.'
+        )
+    }
+
+    def productionEnvFile = new File(projectRoot, '.env.production')
+    if (!productionEnvFile.exists()) {
+        throw new RuntimeException(
+            '.env.production is required for a production release.'
+        )
+    }
+    def productionEnv = readProductionEnv(productionEnvFile)
+    if (productionEnv['ENV'] != 'production') {
+        throw new RuntimeException('.env.production must contain ENV=production.')
+    }
+    if (productionEnv['REALTIME_ENABLED'] != 'true') {
+        throw new RuntimeException('.env.production must contain REALTIME_ENABLED=true.')
+    }
+    validateProductionUrl('API_BASE_URL', productionEnv['API_BASE_URL'], 'https')
+    validateProductionUrl('WS_BASE_URL', productionEnv['WS_BASE_URL'], 'wss')
+    validateProductionUrl('LIVEKIT_URL', productionEnv['LIVEKIT_URL'], 'wss')
+    validateProductionFirebase()
+}
+
+def releaseSigningProperties = [
+    'CHATHOUSE_UPLOAD_STORE_FILE',
+    'CHATHOUSE_UPLOAD_STORE_PASSWORD',
+    'CHATHOUSE_UPLOAD_KEY_ALIAS',
+    'CHATHOUSE_UPLOAD_KEY_PASSWORD'
+]
+def validateReleaseSigning = {
+    def missingSigningProperties = releaseSigningProperties.findAll { !project.hasProperty(it) }
+    if (!missingSigningProperties.isEmpty()) {
+        throw new RuntimeException(
+            "Release signing is required. Missing ${missingSigningProperties.join(', ')} " +
+            '(see docs/RELEASE-SIGNING.md).'
+        )
+    }
+    def releaseStoreName = new File(project.property('CHATHOUSE_UPLOAD_STORE_FILE').toString()).name
+    def releaseKeyAlias = project.property('CHATHOUSE_UPLOAD_KEY_ALIAS').toString()
+    def usesSharedDebugKey = releaseStoreName.equalsIgnoreCase('debug.keystore') ||
+        releaseKeyAlias.equalsIgnoreCase('androiddebugkey')
+    def allowsTechnicalDebugSigning = (
+        project.findProperty('CHATHOUSE_ALLOW_DEBUG_RELEASE_SIGNING') ?: 'false'
+    ).toString().toBoolean()
+    if (allowsTechnicalDebugSigning && !usesSharedDebugKey) {
+        throw new RuntimeException(
+            'CHATHOUSE_ALLOW_DEBUG_RELEASE_SIGNING=true is reserved for the shared ' +
+            'debug key used by non-production packaging checks.'
+        )
+    }
+    if (usesSharedDebugKey) {
+        if (allowsTechnicalDebugSigning) {
+            return
+        }
+        throw new RuntimeException(
+            'The shared Android debug key is forbidden for release tasks. ' +
+            'Use the real upload key, or explicitly opt in only for a non-production packaging check.'
+        )
+    }
+    validateProductionReleaseConfiguration()
+}
+
+// Inspect the resolved task graph instead of only the task names typed on the
+// command line. Aggregate tasks such as `build`, `assemble` and `bundle` can
+// include a Release variant even though their own names do not contain
+// "release"; they must not bypass the signing guard.
+gradle.taskGraph.whenReady { graph ->
+    def releaseTaskScheduled = graph.allTasks.any { task ->
+        def taskName = task.name.toLowerCase()
+        task.project == project &&
+            taskName ==~ /^(assemble|bundle|package|install|publish).*release.*$/
+    }
+    if (releaseTaskScheduled) {
+        validateReleaseSigning()
+    }
+}
 
 /**
  * This is the configuration block to customize your React Native Android app.
@@ -80,23 +305,42 @@ def enableMinifyInReleaseBuilds = (findProperty('android.enableMinifyInReleaseBu
  * give correct results when using with locales other than en-US. Note that
  * this variant is about 6MiB larger per architecture than default.
  */
-def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
+def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.0.1'
 
-apply from: new File(["node", "--print", "require('path').dirname(require.resolve('@sentry/react-native/package.json'))"].execute().text.trim(), "sentry.gradle")
+// The Sentry Gradle script only uploads release source maps; the runtime SDK
+// is autolinked independently. Apply the upload hook only when all credentials
+// are present so lint/packaging cannot fail halfway through because Sentry is
+// intentionally disabled or not provisioned yet.
+def sentryProperties = new Properties()
+def sentryPropertiesFile = file("$rootDir/sentry.properties")
+if (sentryPropertiesFile.exists()) {
+    sentryPropertiesFile.withInputStream { sentryProperties.load(it) }
+}
+def sentryUploadDisabled = System.getenv('SENTRY_DISABLE_AUTO_UPLOAD') == 'true'
+def sentryUploadConfigured = (
+    System.getenv('SENTRY_AUTH_TOKEN') &&
+    (System.getenv('SENTRY_ORG') ?: sentryProperties.getProperty('defaults.org')) &&
+    (System.getenv('SENTRY_PROJECT') ?: sentryProperties.getProperty('defaults.project'))
+)
+if (!sentryUploadDisabled && sentryUploadConfigured) {
+    apply from: new File(["node", "--print", "require('path').dirname(require.resolve('@sentry/react-native/package.json'))"].execute().text.trim(), "sentry.gradle")
+} else {
+    logger.lifecycle('Sentry source-map upload disabled: provide SENTRY_AUTH_TOKEN, SENTRY_ORG and SENTRY_PROJECT to enable it.')
+}
 
 android {
-    ndkVersion rootProject.ext.ndkVersion
+    ndkVersion = rootProject.ext.ndkVersion
 
-    buildToolsVersion rootProject.ext.buildToolsVersion
-    compileSdk rootProject.ext.compileSdkVersion
+    buildToolsVersion = rootProject.ext.buildToolsVersion
+    compileSdk = rootProject.ext.compileSdkVersion
 
-    namespace 'com.chathouse.app'
+    namespace = 'com.chathouse.app'
     defaultConfig {
-        applicationId 'com.chathouse.app'
-        minSdkVersion rootProject.ext.minSdkVersion
-        targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0.0"
+        applicationId = 'com.chathouse.app'
+        minSdk = rootProject.ext.minSdkVersion
+        targetSdk = rootProject.ext.targetSdkVersion
+        versionCode = appVersionCode
+        versionName = appVersionName
 
         // Google Maps Android API key. Injected at build time (NOT committed) so
         // the live key never lands in git history. Provide it via the
@@ -104,17 +348,16 @@ android {
         // `GOOGLE_MAPS_API_KEY=...` line in ~/.gradle/gradle.properties. Empty ⇒
         // the Map tab renders blank / crashes (Maps SDK rejects an empty key).
         manifestPlaceholders = [
-            GOOGLE_MAPS_API_KEY: (System.getenv("GOOGLE_MAPS_API_KEY") ?: project.findProperty("GOOGLE_MAPS_API_KEY") ?: "")
+            GOOGLE_MAPS_API_KEY: configuredMapsApiKey
         ]
 
-        buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }
     signingConfigs {
         debug {
-            storeFile file('debug.keystore')
-            storePassword 'android'
-            keyAlias 'androiddebugkey'
-            keyPassword 'android'
+            storeFile = file('debug.keystore')
+            storePassword = 'android'
+            keyAlias = 'androiddebugkey'
+            keyPassword = 'android'
         }
         // Real upload/release signing (de-Expo: EAS used to own this). The
         // keystore + passwords are NEVER committed — supply them out-of-band via
@@ -144,32 +387,38 @@ android {
                 // CHATHOUSE_UPLOAD_STORE_FILE is resolved relative to this module
                 // dir (android/app/); use an absolute path in CI if the keystore
                 // lives elsewhere.
-                storeFile file(CHATHOUSE_UPLOAD_STORE_FILE)
-                storePassword CHATHOUSE_UPLOAD_STORE_PASSWORD
-                keyAlias CHATHOUSE_UPLOAD_KEY_ALIAS
-                keyPassword CHATHOUSE_UPLOAD_KEY_PASSWORD
+                storeFile = file(CHATHOUSE_UPLOAD_STORE_FILE)
+                storePassword = CHATHOUSE_UPLOAD_STORE_PASSWORD
+                keyAlias = CHATHOUSE_UPLOAD_KEY_ALIAS
+                keyPassword = CHATHOUSE_UPLOAD_KEY_PASSWORD
             }
         }
     }
     buildTypes {
         debug {
-            signingConfig signingConfigs.debug
+            signingConfig = signingConfigs.debug
         }
         release {
-            // Use the real release keystore when the CHATHOUSE_UPLOAD_* properties
-            // are provided; otherwise fall back to debug signing so a local
-            // `assembleRelease` still produces an installable (NON-shippable) APK.
-            signingConfig project.hasProperty('CHATHOUSE_UPLOAD_STORE_FILE') ? signingConfigs.release : signingConfigs.debug
+            // Shared debug signing is rejected by the configuration guard unless
+            // a CI/local packaging check explicitly opts into the non-production
+            // CHATHOUSE_ALLOW_DEBUG_RELEASE_SIGNING flag.
+            signingConfig = signingConfigs.release
             def enableShrinkResources = findProperty('android.enableShrinkResourcesInReleaseBuilds') ?: 'false'
-            shrinkResources enableShrinkResources.toBoolean()
-            minifyEnabled enableMinifyInReleaseBuilds
-            proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
+            shrinkResources = enableShrinkResources.toBoolean()
+            minifyEnabled = enableMinifyInReleaseBuilds
+            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
             def enablePngCrunchInRelease = findProperty('android.enablePngCrunchInReleaseBuilds') ?: 'true'
-            crunchPngs enablePngCrunchInRelease.toBoolean()
+            crunchPngs = enablePngCrunchInRelease.toBoolean()
         }
     }
     androidResources {
-        ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:!CVS:!thumbs.db:!picasa.ini:!*~'
+        ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:!CVS:!thumbs.db:!picasa.ini:!*~'
+    }
+    lint {
+        abortOnError = true
+        // Third-party modules are linted by their own projects. Restrict this
+        // gate to ChatHouse sources so CI remains focused and reasonably fast.
+        checkDependencies = false
     }
 }
 
@@ -201,7 +450,7 @@ dependencies {
     // res/values/styles.xml (MainActivity launch theme). Previously pulled in
     // transitively by expo-splash-screen; added explicitly after that package was
     // removed in the de-Expo migration, or AAPT resource linking fails.
-    implementation("androidx.core:core-splashscreen:1.0.1")
+    implementation("androidx.core:core-splashscreen:1.2.0")
 
     // de-Expo: the optional animated-gif / animated-webp Fresco add-ons were
     // wired through the Expo version catalog (`expoLibs.versions.fresco`), which

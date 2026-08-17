@@ -6,15 +6,28 @@ import { getUserId } from '../socket.middleware';
 import { MAPS_CHANNEL } from '../channels';
 
 /**
- * All sockets that open the map join the `maps:presence` channel so every
- * location update fans out to every viewer. Backend-driven filtering (Ghost
- * Mode) happens in usersService.getOnlineLocations on REST reads — for
- * real-time updates we still emit, but an isVisible=false user's update is
- * suppressed at source here (we simply don't broadcast it).
+ * All sockets that open the map join the `maps:presence` channel so location
+ * updates can fan out to eligible viewers. Privacy filtering applies on both
+ * transports: Ghost Mode and blocks suppress the source, while realtime.ts
+ * shares exact GPS only with mutually accepted follows and quantises it for
+ * everyone else.
  */
-export const registerMapsHandlers = (io: Server, socket: Socket): void => {
+export const registerMapsHandlers = (_io: Server, socket: Socket): void => {
   const me = (): string => getUserId(socket);
-  void socket.join(MAPS_CHANNEL);
+
+  socket.on('maps:subscribe', async (ack?: (ok: boolean) => void) => {
+    try {
+      await socket.join(MAPS_CHANNEL);
+      ack?.(true);
+    } catch (err) {
+      logger.warn('maps:subscribe failed', { err, userId: me() });
+      ack?.(false);
+    }
+  });
+
+  socket.on('maps:unsubscribe', () => {
+    void socket.leave(MAPS_CHANNEL);
+  });
 
   socket.on('maps:update-location', async (payload: unknown, ack?: (ok: boolean) => void) => {
     try {
@@ -22,14 +35,7 @@ export const registerMapsHandlers = (io: Server, socket: Socket): void => {
       // never applied here, so raw/out-of-range/non-numeric coords could be
       // written straight to Float columns and fanned out to every viewer.
       const loc = locationSchema.parse(payload);
-      const updated = await usersService.setLocation(me(), loc);
-
-      // Broadcast to everyone watching the map, minus this socket.
-      socket.to(MAPS_CHANNEL).emit('maps:user-moved', {
-        userId: me(),
-        latitude: updated.latitude,
-        longitude: updated.longitude,
-      });
+      await usersService.setLocation(me(), loc);
       ack?.(true);
     } catch (err) {
       logger.warn('maps:update-location failed', { err });
@@ -41,10 +47,6 @@ export const registerMapsHandlers = (io: Server, socket: Socket): void => {
     try {
       const { isVisible } = visibilitySchema.parse(payload);
       const result = await usersService.setVisibility(me(), { isVisible });
-      if (!isVisible) {
-        // User entered Ghost Mode — drop them from every viewer's map.
-        io.to(MAPS_CHANNEL).emit('maps:user-offline', { userId: me() });
-      }
       ack?.(result.isVisible);
     } catch (err) {
       logger.warn('maps:toggle-visibility failed', { err });
@@ -52,7 +54,7 @@ export const registerMapsHandlers = (io: Server, socket: Socket): void => {
     }
   });
 
-  socket.on('disconnect', () => {
-    socket.to(MAPS_CHANNEL).emit('maps:user-offline', { userId: me() });
-  });
+  // Last-device disconnect handling is centralised in presence.handler. A map
+  // listener here used to remove a user's pin when only one of several devices
+  // disconnected.
 };

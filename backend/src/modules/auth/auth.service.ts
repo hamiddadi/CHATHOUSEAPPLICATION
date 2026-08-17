@@ -1,13 +1,23 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { hash, compare } from 'bcrypt';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../../config/database';
 import { env } from '../../config/env';
 import { AppError } from '../../middlewares/error.middleware';
 import { verifyRefreshToken, decodeTokenTtl } from '../../utils/jwt';
 import { revokeAccessToken, invalidateUserAuthCache } from '../../middlewares/auth.middleware';
 import { issueTokenPair } from '../../utils/issueTokenPair';
+import { disconnectUserSockets } from '../../socket/realtime';
 import { sendMail } from '../../config/mailer';
 import { logger } from '../../config/logger';
+import { scheduleBackgroundTask } from '../../utils/backgroundTasks';
+import { resolveAccountSessionScope } from './account-lifecycle';
+import {
+  currentLegalDocumentVersion,
+  legalAcceptanceSelect,
+  legalAcceptanceStatus,
+  resolveLegalAcceptance,
+} from './legal-acceptance';
 import type {
   ForgotPasswordInput,
   LoginInput,
@@ -28,6 +38,12 @@ const userToPublic = (u: {
   displayName: string | null;
   avatarUrl: string | null;
   bio: string | null;
+  termsAcceptedVersion: string | null;
+  termsAcceptedAt: Date | null;
+  privacyNoticeAcknowledgedVersion: string | null;
+  privacyNoticeAcknowledgedAt: Date | null;
+  legalAcceptanceLocale: string | null;
+  deletedAt?: Date | null;
 }) => ({
   id: u.id,
   username: u.username ?? '',
@@ -35,10 +51,27 @@ const userToPublic = (u: {
   displayName: u.displayName,
   avatarUrl: u.avatarUrl,
   bio: u.bio,
+  termsAcceptedVersion: u.termsAcceptedVersion,
+  termsAcceptedAt: u.termsAcceptedAt?.toISOString() ?? null,
+  privacyNoticeAcknowledgedVersion: u.privacyNoticeAcknowledgedVersion,
+  privacyNoticeAcknowledgedAt: u.privacyNoticeAcknowledgedAt?.toISOString() ?? null,
+  legalAcceptanceLocale: u.legalAcceptanceLocale,
+  accountState: u.deletedAt ? ('PENDING_DELETION' as const) : ('ACTIVE' as const),
+  deletedAt: u.deletedAt?.toISOString() ?? null,
+  permanentDeletionAt: u.deletedAt
+    ? new Date(
+        u.deletedAt.getTime() + env.ACCOUNT_DELETION_GRACE_DAYS * 24 * 60 * 60 * 1000,
+      ).toISOString()
+    : null,
+  ...legalAcceptanceStatus(u),
 });
 
 export const authService = {
   async register(input: RegisterInput) {
+    if (env.NODE_ENV !== 'test' && input.ageConfirmed !== true) {
+      throw new AppError('AGE_001');
+    }
+    const legalAcceptance = resolveLegalAcceptance(input);
     // Defensive normalization: the Zod schema already lowercases email, but
     // normalize here too so the uniqueness check and the stored value stay
     // consistent even if a future caller bypasses the schema. Username is
@@ -54,22 +87,51 @@ export const authService = {
     if (usernameTaken) throw new AppError('AUTH_006');
 
     const passwordHash = await hash(input.password, SALT_ROUNDS);
-    const user = await prisma.user.create({
-      data: {
-        username,
-        email,
-        passwordHash,
-        displayName: input.displayName ?? input.username,
-      },
-      select: {
-        id: true,
-        username: true,
-        email: true,
-        displayName: true,
-        avatarUrl: true,
-        bio: true,
-      },
-    });
+    let user;
+    try {
+      user = await prisma.user.create({
+        data: {
+          username,
+          email,
+          passwordHash,
+          displayName: input.displayName ?? input.username,
+          ...(input.ageConfirmed ? { ageConfirmedAt: new Date() } : {}),
+          ...legalAcceptance,
+        },
+        select: {
+          id: true,
+          username: true,
+          email: true,
+          displayName: true,
+          avatarUrl: true,
+          bio: true,
+          ...legalAcceptanceSelect,
+        },
+      });
+    } catch (error) {
+      // The availability reads above provide the friendly fast path, but two
+      // registrations can pass them concurrently. The database unique indexes
+      // are authoritative; translate their race winner into the same stable
+      // API errors instead of leaking a Prisma P2002 as SERVER_001.
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        const target = Array.isArray(error.meta?.['target'])
+          ? error.meta['target'].join(',')
+          : String(error.meta?.['target'] ?? '');
+        if (/email/i.test(target)) throw new AppError('AUTH_005');
+        if (/username/i.test(target)) throw new AppError('AUTH_006');
+
+        // Some Prisma/driver combinations omit the conflicting columns from
+        // P2002 metadata. Resolve that case from the now-committed winner so a
+        // known registration collision still cannot escape as a 500.
+        const [emailWinner, usernameWinner] = await Promise.all([
+          prisma.user.findUnique({ where: { email }, select: { id: true } }),
+          prisma.user.findUnique({ where: { username }, select: { id: true } }),
+        ]);
+        if (emailWinner) throw new AppError('AUTH_005');
+        if (usernameWinner) throw new AppError('AUTH_006');
+      }
+      throw error;
+    }
 
     const tokens = await issueTokenPair(user.id);
     return { user: userToPublic(user), ...tokens };
@@ -92,7 +154,8 @@ export const authService = {
     const ok = await compare(input.password, user.passwordHash);
     if (!ok) throw new AppError('AUTH_001');
 
-    const tokens = await issueTokenPair(user.id);
+    const scope = resolveAccountSessionScope(user);
+    const tokens = await issueTokenPair(user.id, { scope });
     return {
       user: userToPublic(user),
       ...tokens,
@@ -119,18 +182,17 @@ export const authService = {
       throw new AppError('AUTH_004');
     }
 
-    // AUTH-01: a suspended or soft-deleted (or vanished) account must not be
-    // able to extend its session via refresh, even though its JWT still
-    // verifies. Mirror requireAuth's verdicts (AUTH_007 suspended, AUTH_003
-    // absent/deleted).
+    // Recovery refresh tokens remain recovery-scoped. A signed scope can never
+    // be upgraded through refresh; only explicit cancel-deletion rotates the
+    // account to a fresh active token family.
     const user = await prisma.user.findUnique({
       where: { id: record.userId },
       select: { suspendedUntil: true, deletedAt: true },
     });
-    if (!user || user.deletedAt) throw new AppError('AUTH_003');
-    if (user.suspendedUntil && user.suspendedUntil > new Date()) {
-      throw new AppError('AUTH_007');
-    }
+    if (!user) throw new AppError('AUTH_003');
+    const authoritativeScope = resolveAccountSessionScope({ id: record.userId, ...user });
+    const requestedScope = claims.scope ?? 'active';
+    if (authoritativeScope !== requestedScope) throw new AppError('AUTH_003');
 
     // AUTH-02: atomic conditional rotation. Two concurrent refreshes with the
     // same jti both reach here, but only one wins the conditional update
@@ -142,74 +204,97 @@ export const authService = {
     });
     if (rotated.count !== 1) throw new AppError('AUTH_004');
 
-    return issueTokenPair(record.userId);
+    return issueTokenPair(record.userId, { scope: requestedScope });
   },
 
   async logout(userId: string, accessToken: string) {
-    // 1. Blacklist the caller's still-valid access token in Redis until exp.
     const ttl = decodeTokenTtl(accessToken);
-    await revokeAccessToken(accessToken, ttl);
 
-    // 2. Revoke every refresh token (cross-device logout) AND bump tokenVersion
+    // Revoke every refresh token (cross-device logout) AND bump tokenVersion
     //    so every OTHER device's still-valid access token is rejected at once
     //    (AUTH-03) — not just the caller's blacklisted one. Drop the auth cache
     //    so the next request re-reads the bumped version immediately.
-    await prisma.user.update({
-      where: { id: userId },
-      data: { tokenVersion: { increment: 1 } },
-    });
-    await prisma.refreshToken.updateMany({
-      where: { userId, revokedAt: null },
-      data: { revokedAt: new Date() },
-    });
-    await invalidateUserAuthCache(userId);
+    const revokedAt = new Date();
+    await prisma.$transaction([
+      prisma.user.update({
+        where: { id: userId },
+        data: { tokenVersion: { increment: 1 } },
+      }),
+      prisma.refreshToken.updateMany({
+        where: { userId, revokedAt: null },
+        data: { revokedAt },
+      }),
+    ]);
+    // Commit the durable fallback first. If Redis is unavailable, protected
+    // requests fail closed while it is down and tokenVersion remains the source
+    // of truth after recovery. Disconnect sockets before cache I/O so a failed
+    // Redis write cannot leave an already-revoked realtime session connected.
+    disconnectUserSockets(userId, 'logout');
+    await Promise.all([revokeAccessToken(accessToken, ttl), invalidateUserAuthCache(userId)]);
   },
 
   /**
    * Issue a one-shot password reset token. We store only the SHA-256 of the
    * raw token so a DB leak doesn't hand attackers live reset links. The raw
-   * token is the only thing emailed to the user. Intentionally returns
-   * `{ ok: true }` even when the email doesn't exist to avoid an oracle.
+   * token is the only thing emailed to the user. The entire lookup/delivery
+   * flow runs as a tracked background task in production so response status
+   * and provider latency cannot reveal whether the email exists.
    */
   async forgotPassword(input: ForgotPasswordInput) {
-    // Match the normalized (lowercase) email stored at registration time.
-    const user = await prisma.user.findUnique({ where: { email: input.email.toLowerCase() } });
-    // Phone-only users (no email) can't use password reset either.
-    if (!user || !user.email) {
-      // AUTH-06: equalize the cost of the two paths so response timing doesn't
-      // leak whether the address exists. The existent path generates a token
-      // and hashes it before any I/O; do the same throwaway work here so this
-      // branch's synchronous cost mirrors it. Same response either way
-      // (anti-enumeration).
-      hashResetToken(randomBytes(RESET_TOKEN_BYTES).toString('hex'));
-      return { ok: true };
-    }
+    const normalizedEmail = input.email.toLowerCase();
+    await scheduleBackgroundTask(
+      (async () => {
+        const raw = randomBytes(RESET_TOKEN_BYTES).toString('hex');
+        const tokenHash = hashResetToken(raw);
+        const expiresAt = new Date(Date.now() + RESET_TOKEN_TTL_MINUTES * 60 * 1000);
+        const issuedAt = new Date();
+        const recipient = await prisma.$transaction(async tx => {
+          // Serialize token issuance with account deletion/suspension. The
+          // generic HTTP response remains identical, but an inactive account
+          // must neither gain a fresh credential nor trigger outbound email.
+          await tx.$queryRaw`SELECT id FROM "User" WHERE email = ${normalizedEmail} FOR NO KEY UPDATE`;
+          const user = await tx.user.findUnique({
+            where: { email: normalizedEmail },
+            select: { id: true, email: true, deletedAt: true, suspendedUntil: true },
+          });
+          if (
+            !user?.email ||
+            user.deletedAt ||
+            (user.suspendedUntil && user.suspendedUntil > issuedAt)
+          ) {
+            return null;
+          }
 
-    const raw = randomBytes(RESET_TOKEN_BYTES).toString('hex');
-    const tokenHash = hashResetToken(raw);
-    const expiresAt = new Date(Date.now() + RESET_TOKEN_TTL_MINUTES * 60 * 1000);
+          // Invalidate every previous token and persist the replacement while
+          // the account-state lock is still held.
+          await tx.passwordResetToken.updateMany({
+            where: { userId: user.id, usedAt: null },
+            data: { usedAt: issuedAt },
+          });
+          await tx.passwordResetToken.create({
+            data: { tokenHash, userId: user.id, expiresAt },
+          });
+          return { id: user.id, email: user.email };
+        });
+        if (!recipient) return;
 
-    // Invalidate any previously-issued reset token for this user.
-    await prisma.passwordResetToken.updateMany({
-      where: { userId: user.id, usedAt: null },
-      data: { usedAt: new Date() },
-    });
-
-    await prisma.passwordResetToken.create({
-      data: { tokenHash, userId: user.id, expiresAt },
-    });
-
-    await sendMail({
-      to: user.email,
-      subject: 'Reset your Chathouse password',
-      text: `Use this token within ${RESET_TOKEN_TTL_MINUTES} minutes to reset your password:\n\n${raw}`,
-    });
-    // Never log the raw reset token, even in dev: logs are not a safe channel
-    // for a live, single-use credential. Log only a non-sensitive marker for
-    // manual testing; the raw token is delivered solely via email.
-    if (env.NODE_ENV === 'test') {
-      logger.debug(`[reset] token issued for user ${user.id} (ttl ${RESET_TOKEN_TTL_MINUTES}m)`);
-    }
+        await sendMail({
+          to: recipient.email,
+          subject: 'Reset your ChatHouse password',
+          text: `Use this token within ${RESET_TOKEN_TTL_MINUTES} minutes to reset your password:\n\n${raw}`,
+        });
+        // Never log the raw reset token, even in dev/test.
+        if (env.NODE_ENV === 'test') {
+          logger.debug(
+            `[reset] token issued for user ${recipient.id} (ttl ${RESET_TOKEN_TTL_MINUTES}m)`,
+          );
+        }
+      })(),
+      err =>
+        logger.error('password reset delivery task failed', {
+          err: err instanceof Error ? err.message : String(err),
+        }),
+    );
 
     return { ok: true };
   },
@@ -222,26 +307,52 @@ export const authService = {
     }
 
     const passwordHash = await hash(input.newPassword, SALT_ROUNDS);
-    await prisma.$transaction([
+    const now = new Date();
+    await prisma.$transaction(async tx => {
+      // Lock the account before the reset-token row. This matches the
+      // moderation/GDPR lock order and makes a concurrent suspension either
+      // happen wholly before (reject) or wholly after this reset. A valid
+      // email token must not mutate a moderation-locked account.
+      await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${record.userId} FOR UPDATE`;
+      const user = await tx.user.findUnique({
+        where: { id: record.userId },
+        select: { deletedAt: true, suspendedUntil: true },
+      });
+      if (!user) throw new AppError('AUTH_003');
+      if (user.suspendedUntil && user.suspendedUntil > now) {
+        throw new AppError('AUTH_007');
+      }
+      if (user.deletedAt) {
+        throw new AppError('AUTH_003', 'Reset token invalid or expired');
+      }
+
+      const consumed = await tx.passwordResetToken.updateMany({
+        where: {
+          id: record.id,
+          usedAt: null,
+          expiresAt: { gt: now },
+        },
+        data: { usedAt: now },
+      });
+      if (consumed.count !== 1) {
+        throw new AppError('AUTH_003', 'Reset token invalid or expired');
+      }
       // AUTH-03: bump tokenVersion in the same write so every access token
       // issued before the reset is rejected cross-device (a reset usually means
       // the account was compromised), not just the refresh tokens.
-      prisma.user.update({
+      await tx.user.update({
         where: { id: record.userId },
         data: { passwordHash, tokenVersion: { increment: 1 } },
-      }),
-      prisma.passwordResetToken.update({
-        where: { id: record.id },
-        data: { usedAt: new Date() },
-      }),
+      });
       // Revoke all refresh tokens — the user must reauthenticate on every
       // device after a password reset.
-      prisma.refreshToken.updateMany({
+      await tx.refreshToken.updateMany({
         where: { userId: record.userId, revokedAt: null },
-        data: { revokedAt: new Date() },
-      }),
-    ]);
+        data: { revokedAt: now },
+      });
+    });
     await invalidateUserAuthCache(record.userId);
+    disconnectUserSockets(record.userId, 'password_reset');
 
     return { ok: true };
   },
@@ -263,6 +374,12 @@ export const authService = {
     const username = 'devuser';
     const email = 'dev@chathouse.local';
     const displayName = 'Dev User';
+    const devLegalAcceptance = resolveLegalAcceptance({
+      termsAccepted: true,
+      privacyNoticeAcknowledged: true,
+      legalDocumentVersion: currentLegalDocumentVersion(),
+      legalLocale: 'en',
+    });
 
     // Upsert so repeat calls are idempotent. Force
     // `hasCompletedOnboarding: true` so the RootNavigator skips the
@@ -275,8 +392,13 @@ export const authService = {
         email,
         displayName,
         hasCompletedOnboarding: true,
+        ...devLegalAcceptance,
       },
-      update: { displayName, hasCompletedOnboarding: true },
+      update: {
+        displayName,
+        hasCompletedOnboarding: true,
+        ...devLegalAcceptance,
+      },
       select: {
         id: true,
         username: true,
@@ -285,6 +407,7 @@ export const authService = {
         avatarUrl: true,
         bio: true,
         hasCompletedOnboarding: true,
+        ...legalAcceptanceSelect,
       },
     });
 

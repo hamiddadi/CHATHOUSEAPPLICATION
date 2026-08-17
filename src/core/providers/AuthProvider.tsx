@@ -25,15 +25,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     void hydrateGhost();
   }, [hydrateAuth, hydrateGhost, signOut]);
 
-  // Self-heal an "authenticated but no user" state: hydrate() intentionally
-  // keeps the cached session (status='authenticated') when the cold-start
+  // Self-heal an active or recovery session with no user: hydrate()
+  // intentionally keeps the cached session when the cold-start
   // getMe fails transiently (network flap), expecting refreshMe to fill in the
   // profile — but nothing else triggers it. Left unfetched, `viewerId` stays
   // null and every user-dependent branch breaks (host detection, "me" in the
   // participant lists, mute-state hydration…). Retry a few times until the
   // profile lands.
   useEffect(() => {
-    if (status !== 'authenticated' || hasUser) return;
+    if ((status !== 'authenticated' && status !== 'restoration_required') || hasUser) return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout>;
     let attempts = 0;

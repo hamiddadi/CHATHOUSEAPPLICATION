@@ -2,7 +2,9 @@ import type { Server, Socket } from 'socket.io';
 import { prisma } from '../../config/database';
 import { roomChannel } from '../../socket/channels';
 import { getUserId } from '../../socket/socket.middleware';
+import { isPublicContentAllowed } from '../../utils/publicContentModeration';
 import { captionsService } from '../modules/captions/captions.service';
+import { assertCurrentLegalAcceptance } from '../../modules/auth/legal-acceptance';
 
 /**
  * Live-captions realtime relay (Module 16 / ACCESS-001..003).
@@ -30,7 +32,7 @@ interface CaptionPublishPayload {
   speakerName?: unknown;
 }
 
-const SPEAKER_ROLES = new Set(['HOST', 'MODERATOR', 'SPEAKER']);
+const SPEAKER_ROLES = new Set(['MODERATOR', 'SPEAKER']);
 const MAX_TEXT = 500;
 const MAX_ID = 64;
 const MAX_NAME = 80;
@@ -52,6 +54,9 @@ export const registerCaptionsRealtime = (io: Server, socket: Socket): void => {
       const speakerName =
         typeof payload?.speakerName === 'string' ? payload.speakerName.slice(0, MAX_NAME) : null;
       if (!roomId || !id || text === null) return;
+      // Captions are public UGC just like room-chat text. Drop the narrow,
+      // high-confidence violations handled by the shared classifier.
+      if (!isPublicContentAllowed(text)) return;
 
       // Joined the room channel? (cheap, in-memory)
       if (!socket.rooms.has(roomChannel(roomId))) return;
@@ -69,6 +74,7 @@ export const registerCaptionsRealtime = (io: Server, socket: Socket): void => {
       if (!(await captionsService.isEnabled(roomId))) return;
 
       const userId = getUserId(socket);
+      await assertCurrentLegalAcceptance(userId);
 
       // Speaker-role check (cached).
       const cacheKey = `${socket.id}:${roomId}`;
@@ -79,9 +85,20 @@ export const registerCaptionsRealtime = (io: Server, socket: Socket): void => {
       } else {
         const p = await prisma.participant.findUnique({
           where: { userId_roomId: { userId, roomId } },
-          select: { role: true },
+          select: {
+            role: true,
+            leftAt: true,
+            admissionConfirmedAt: true,
+            room: { select: { hostId: true, isLive: true, endedAt: true } },
+          },
         });
-        allowed = p ? SPEAKER_ROLES.has(p.role) : false;
+        allowed =
+          !!p &&
+          p.leftAt === null &&
+          p.admissionConfirmedAt !== null &&
+          p.room.isLive &&
+          p.room.endedAt === null &&
+          (p.room.hostId === userId || SPEAKER_ROLES.has(p.role));
         authzCache.set(cacheKey, { until: now + AUTHZ_TTL_MS, allowed });
       }
       if (!allowed) return;

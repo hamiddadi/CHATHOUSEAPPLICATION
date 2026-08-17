@@ -34,6 +34,10 @@ describe('QueryProvider', () => {
     expect(captured).toBe(queryClient);
   });
 
+  it('does not automatically replay mutations without an explicit idempotent opt-in', () => {
+    expect(queryClient.getDefaultOptions().mutations?.retry).toBe(false);
+  });
+
   it('drives TanStack onlineManager from the network store', () => {
     // Keep at least one subscriber so onlineManager doesn't tear down the
     // event listener between assertions (it cleans up when listener-less).

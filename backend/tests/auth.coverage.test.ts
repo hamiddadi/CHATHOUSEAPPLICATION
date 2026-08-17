@@ -1,5 +1,5 @@
+import express, { type Express } from 'express';
 import request from 'supertest';
-import type { Express } from 'express';
 
 process.env.DATABASE_URL =
   process.env.DATABASE_URL ??
@@ -11,6 +11,8 @@ const { createApp } = require('../src/app') as typeof import('../src/app');
 const { prisma } = require('../src/config/database') as typeof import('../src/config/database');
 const { connectRedis, disconnectRedis } =
   require('../src/config/redis') as typeof import('../src/config/redis');
+const { createRateLimiter } =
+  require('../src/middlewares/rateLimit.middleware') as typeof import('../src/middlewares/rateLimit.middleware');
 /* eslint-enable @typescript-eslint/no-require-imports */
 
 const rand = () => Math.random().toString(36).slice(2, 10);
@@ -89,32 +91,32 @@ describe('Auth — audit coverage gaps', () => {
     expect(res.body.error.code).toBe('AUTH_001');
   });
 
-  // 1.13 — Rate limit. authLimiter has `skipSuccessfulRequests: true`, so the
-  // bucket only fills with 4xx responses. The bucket is process-wide; to avoid
-  // starving other suites that register/login via the same bucket we keep
-  // `AUTH_RATE_LIMIT_MAX` high in `setup.env.ts`. Skip this check under the
-  // full-suite cap — verify standalone with `AUTH_RATE_LIMIT_MAX=10 jest -t
-  // 'rate limiter'`.
-  const max = Number(process.env.AUTH_RATE_LIMIT_MAX ?? '10');
-  const maybeIt = max <= 30 ? it : it.skip;
-  maybeIt(
-    'login rate limiter returns 429 RATE_LIMIT_001 under a burst of failed attempts',
-    async () => {
-      const identifier = `rate-${rand()}@test.local`;
-      let saw429 = false;
-      for (let i = 0; i < max + 20; i++) {
-        const res = await request(app)
-          .post('/api/auth/login')
-          .send({ identifier, password: 'wrong-password' });
-        if (res.status === 429) {
-          saw429 = true;
-          expect(res.body.error.code).toBe('RATE_LIMIT_001');
-          break;
-        }
-        expect([401, 429]).toContain(res.status);
-      }
-      expect(saw429).toBe(true);
-    },
-    60_000,
-  );
+  // 1.13 — Use a dedicated limiter instance and MemoryStore so this burst
+  // cannot consume the process-wide auth quota used by other integration
+  // suites. The route deliberately fails, matching authLimiter's
+  // skipSuccessfulRequests policy while exercising our real response contract.
+  it('login rate limiter returns 429 RATE_LIMIT_001 under an isolated burst', async () => {
+    const isolatedApp = express();
+    isolatedApp.use(express.json());
+    isolatedApp.post(
+      '/login',
+      createRateLimiter('rl:test-auth:', { max: 3, skipSuccessfulRequests: true }),
+      (_req, res) => res.status(401).json({ success: false }),
+    );
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const response = await request(isolatedApp).post('/login').send({ password: 'wrong' });
+      expect(response.status).toBe(401);
+    }
+
+    const limited = await request(isolatedApp).post('/login').send({ password: 'wrong' });
+    expect(limited.status).toBe(429);
+    expect(limited.body).toEqual({
+      success: false,
+      error: {
+        code: 'RATE_LIMIT_001',
+        message: expect.any(String),
+      },
+    });
+  });
 });

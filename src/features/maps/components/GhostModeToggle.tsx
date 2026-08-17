@@ -1,5 +1,5 @@
 import React, { useCallback } from 'react';
-import { Pressable, StyleSheet, Text } from 'react-native';
+import { Alert, Pressable, StyleSheet, Text } from 'react-native';
 import MaterialIcons from '@react-native-vector-icons/material-icons';
 import Animated from 'react-native-reanimated';
 import { useTranslation } from 'react-i18next';
@@ -9,7 +9,7 @@ import { useGhostModeStore } from '../store/ghostModeStore';
 const BUTTON_SIZE = 46;
 const ICON_SIZE = 22;
 const VISIBLE_COLOR = '#1E3A8A';
-const HIDDEN_COLOR = '#9CA3AF';
+const HIDDEN_COLOR = '#64748B';
 
 /**
  * See / Unsee toggle — floating white chip stacked under the recenter button.
@@ -24,8 +24,16 @@ export const GhostModeToggle: React.FC = () => {
   const press = useAnimatedPress({ scaleTo: 0.9 });
 
   const handlePress = useCallback(() => {
-    void toggle();
-  }, [toggle]);
+    void toggle().catch(() => {
+      Alert.alert(
+        t('explorer.maps.ghostUpdateErrorTitle', 'Visibility not changed'),
+        t(
+          'explorer.maps.ghostUpdateErrorBody',
+          'We could not confirm the change with the server. Check your connection and try again.',
+        ),
+      );
+    });
+  }, [t, toggle]);
 
   const isVisible = !isGhost;
   const icon: 'visibility' | 'visibility-off' = isVisible ? 'visibility' : 'visibility-off';

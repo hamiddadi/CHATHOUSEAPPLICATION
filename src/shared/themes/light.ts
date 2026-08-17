@@ -82,6 +82,8 @@ const lightColors = {
   info: lightPalette.primary,
 
   overlay: 'rgba(15, 23, 42, 0.5)',
+  modalBackdrop: 'rgba(15, 23, 42, 0.5)',
+  modalBackdropStrong: 'rgba(15, 23, 42, 0.58)',
   glass: 'rgba(15, 23, 42, 0.04)',
   glassStrong: 'rgba(15, 23, 42, 0.08)',
 

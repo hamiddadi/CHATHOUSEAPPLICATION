@@ -7,10 +7,13 @@
 import React from 'react';
 import { fireEvent, waitFor } from '@testing-library/react-native';
 import { messageKeys } from '../../hooks/useMessages';
-import { groupKeys } from '../../hooks/useGroups';
+import { GROUPS_PAGE_SIZE, groupKeys } from '../../hooks/useGroups';
+import { presenceAvailableKey } from '../../../extensions/hooks/usePresenceAvailable';
 import { renderScreen, mockAuthenticated, resetAuth } from '../../../../test-utils/renderScreen';
 import type { Conversation } from '../../../../shared/types/domain';
 import type { GroupConversation } from '../../services/groupService';
+import { messageService } from '../../services/messageService';
+import { groupService } from '../../services/groupService';
 import { MessagesScreen } from './MessagesScreen';
 
 const conversation = (overrides: Partial<Conversation> = {}): Conversation => ({
@@ -49,11 +52,26 @@ const group = (overrides: Partial<GroupConversation> = {}): GroupConversation =>
   ...overrides,
 });
 
+const seededConversations = (items: Conversation[], nextCursor: string | null = null) => ({
+  pages: [{ items, nextCursor }],
+  pageParams: [undefined],
+});
+
+const seededGroups = (
+  items: GroupConversation[],
+  nextCursor: string | null = null,
+  hasMore = nextCursor !== null,
+) => ({
+  pages: [{ items, nextCursor, hasMore }],
+  pageParams: [undefined],
+});
+
 describe('MessagesScreen', () => {
   beforeEach(() => {
     mockAuthenticated();
   });
   afterEach(() => {
+    jest.restoreAllMocks();
     resetAuth();
   });
 
@@ -61,8 +79,8 @@ describe('MessagesScreen', () => {
     const { getByText, getByLabelText } = renderScreen(<MessagesScreen />, {
       route: { name: 'MessagesList' },
       seedQueryData: [
-        { key: [...messageKeys.conversations()], data: [conversation()] },
-        { key: [...groupKeys.list()], data: [group()] },
+        { key: [...messageKeys.conversations()], data: seededConversations([conversation()]) },
+        { key: [...groupKeys.list()], data: seededGroups([group()]) },
       ],
     });
     await waitFor(() => {
@@ -77,7 +95,7 @@ describe('MessagesScreen', () => {
   it('header new-chat button navigates to NewMessage', () => {
     const { navigation, getByLabelText } = renderScreen(<MessagesScreen />, {
       route: { name: 'MessagesList' },
-      seedQueryData: [{ key: [...messageKeys.conversations()], data: [] }],
+      seedQueryData: [{ key: [...messageKeys.conversations()], data: seededConversations([]) }],
     });
     // accessibilityLabel resolves from i18n key messages.newChatA11y.
     const newChat = getByLabelText(/new|message|nouveau|conversation/i);
@@ -89,8 +107,8 @@ describe('MessagesScreen', () => {
     const { navigation, getByLabelText } = renderScreen(<MessagesScreen />, {
       route: { name: 'MessagesList' },
       seedQueryData: [
-        { key: [...messageKeys.conversations()], data: [conversation()] },
-        { key: [...groupKeys.list()], data: [] },
+        { key: [...messageKeys.conversations()], data: seededConversations([conversation()]) },
+        { key: [...groupKeys.list()], data: seededGroups([]) },
       ],
     });
     const row = await waitFor(() => getByLabelText('Open chat with Alice'));
@@ -102,12 +120,116 @@ describe('MessagesScreen', () => {
     const { navigation, getByLabelText } = renderScreen(<MessagesScreen />, {
       route: { name: 'MessagesList' },
       seedQueryData: [
-        { key: [...messageKeys.conversations()], data: [] },
-        { key: [...groupKeys.list()], data: [group()] },
+        { key: [...messageKeys.conversations()], data: seededConversations([]) },
+        { key: [...groupKeys.list()], data: seededGroups([group()]) },
       ],
     });
     const row = await waitFor(() => getByLabelText('Open group Design Crew'));
     fireEvent.press(row);
     expect(navigation.navigate).toHaveBeenCalledWith('GroupChat', { conversationId: 'group-1' });
+  });
+
+  it('renders the "online now" strip and opens a DM with the exact backend peer id', async () => {
+    const { navigation, getByLabelText, queryByLabelText } = renderScreen(<MessagesScreen />, {
+      route: { name: 'MessagesList' },
+      seedQueryData: [
+        { key: [...messageKeys.conversations()], data: seededConversations([]) },
+        { key: [...groupKeys.list()], data: seededGroups([]) },
+        {
+          key: [...presenceAvailableKey(20)],
+          data: [
+            {
+              id: 'usr_backend_9',
+              username: 'nina',
+              displayName: 'Nina',
+              avatarUrl: null,
+              lastSeenAt: null,
+              isOnline: true,
+            },
+            // Duplicate and malformed API rows must not create ambiguous or
+            // broken navigation targets.
+            {
+              id: 'usr_backend_9',
+              username: 'duplicate',
+              displayName: 'Duplicate Nina',
+              avatarUrl: null,
+              lastSeenAt: null,
+              isOnline: true,
+            },
+            {
+              id: '   ',
+              username: 'invalid',
+              displayName: 'Invalid Peer',
+              avatarUrl: null,
+              lastSeenAt: null,
+              isOnline: true,
+            },
+          ],
+        },
+      ],
+    });
+    const online = await waitFor(() => getByLabelText('Open chat with Nina'));
+    expect(online.props.accessibilityHint).toBe('This person is currently available to chat.');
+    expect(queryByLabelText('Open chat with Duplicate Nina')).toBeNull();
+    expect(queryByLabelText('Open chat with Invalid Peer')).toBeNull();
+    fireEvent.press(online);
+    expect(navigation.navigate).toHaveBeenCalledWith('ChatDetail', {
+      conversationId: 'usr_backend_9',
+    });
+  });
+
+  it('loads the next conversation page when the list reaches its end', async () => {
+    const alice = conversation();
+    const bob = conversation({
+      id: 'peer-2',
+      participants: [{ id: 'peer-2', username: 'bob', displayName: 'Bob', avatarUrl: null }],
+      lastMessage: {
+        ...conversation().lastMessage!,
+        id: 'message-bob',
+        conversationId: 'peer-2',
+        authorId: 'peer-2',
+        text: 'Second page',
+      },
+    });
+    const service = jest
+      .spyOn(messageService, 'conversations')
+      .mockResolvedValueOnce({ items: [alice], nextCursor: 'v1.page-two' })
+      .mockResolvedValueOnce({ items: [bob], nextCursor: null });
+    const { getByTestId, getByText } = renderScreen(<MessagesScreen />, {
+      route: { name: 'MessagesList' },
+      seedQueryData: [{ key: [...groupKeys.list()], data: seededGroups([]) }],
+    });
+
+    expect(await waitFor(() => getByText('Alice'))).toBeTruthy();
+    fireEvent(getByTestId('messages-list'), 'onEndReached');
+    expect(await waitFor(() => getByText('Bob'))).toBeTruthy();
+    expect(service).toHaveBeenNthCalledWith(2, 'v1.page-two');
+  });
+
+  it('loads the next group page when the list reaches its end', async () => {
+    const secondGroup = group({ id: 'group-2', title: 'Page Two Group' });
+    const service = jest.spyOn(groupService, 'list').mockResolvedValueOnce({
+      items: [secondGroup],
+      nextCursor: null,
+      hasMore: false,
+    });
+    const { getByTestId, getByText } = renderScreen(<MessagesScreen />, {
+      route: { name: 'MessagesList' },
+      seedQueryData: [
+        { key: [...messageKeys.conversations()], data: seededConversations([]) },
+        {
+          key: [...groupKeys.list()],
+          data: seededGroups([group()], 'v1.group-page-two'),
+        },
+      ],
+    });
+
+    expect(getByText('Design Crew')).toBeTruthy();
+    fireEvent(getByTestId('messages-list'), 'onEndReached');
+    expect(await waitFor(() => getByText('Page Two Group'))).toBeTruthy();
+    expect(service).toHaveBeenCalledWith({
+      cursor: 'v1.group-page-two',
+      limit: GROUPS_PAGE_SIZE,
+    });
   });
 });

@@ -25,8 +25,13 @@ const makeNotif = (overrides: Partial<AppNotification> = {}): AppNotification =>
   ...overrides,
 });
 
+const infinitePage = (notifs: AppNotification[], nextCursor: string | null = null) => ({
+  pages: [{ items: notifs, nextCursor, hasMore: nextCursor !== null }],
+  pageParams: [undefined],
+});
+
 const seedNotifs = (notifs: AppNotification[]) => [
-  { key: [...notificationKeys.list('all')], data: notifs },
+  { key: [...notificationKeys.list('all')], data: infinitePage(notifs) },
 ];
 
 describe('NotificationsScreen', () => {
@@ -49,14 +54,25 @@ describe('NotificationsScreen', () => {
     expect(getByText('Rooms')).toBeTruthy();
     expect(getByText('Social')).toBeTruthy();
     expect(getByText('Clubs')).toBeTruthy();
+    expect(getByText('Follow requests')).toBeTruthy();
+  });
+
+  it('opens the actionable follow-request inbox from the persistent entry point', () => {
+    const { getByLabelText, navigation } = renderScreen(<NotificationsScreen />, {
+      route: { name: 'Notifications', params: {} },
+      seedQueryData: seedNotifs([]),
+    });
+    fireEvent.press(getByLabelText('Open follow requests'));
+    expect(navigation.navigate).toHaveBeenCalledWith('FollowRequests');
   });
 
   it('renders the primed notification row', () => {
-    const { getByText } = renderScreen(<NotificationsScreen />, {
+    const { getByLabelText, getByText } = renderScreen(<NotificationsScreen />, {
       route: { name: 'Notifications', params: {} },
       seedQueryData: seedNotifs([makeNotif()]),
     });
     expect(getByText('Some One started following you.')).toBeTruthy();
+    expect(getByLabelText('Unread notification: Some One started following you.')).toBeTruthy();
   });
 
   it('shows the empty state when there are no notifications', () => {
@@ -93,7 +109,7 @@ describe('NotificationsScreen', () => {
       // unseeded query stays pending → loader, never the empty state).
       seedQueryData: [
         ...seedNotifs([makeNotif()]),
-        { key: [...notificationKeys.list('rooms')], data: [] },
+        { key: [...notificationKeys.list('rooms')], data: infinitePage([]) },
       ],
     });
     fireEvent.press(getByText('Rooms'));
@@ -114,6 +130,32 @@ describe('NotificationsScreen', () => {
     await waitFor(() =>
       expect(navigation.navigate).toHaveBeenCalledWith('Profile', { userId: 'actor-9' }),
     );
+  });
+
+  it('tapping a follow_request notification opens its accept/reject inbox', async () => {
+    const { getByText, navigation } = renderScreen(<NotificationsScreen />, {
+      route: { name: 'Notifications', params: {} },
+      seedQueryData: seedNotifs([
+        makeNotif({
+          kind: 'follow_request',
+          message: 'Someone requested to follow you.',
+        }),
+      ]),
+    });
+    fireEvent.press(getByText('Someone requested to follow you.'));
+    await waitFor(() => expect(navigation.navigate).toHaveBeenCalledWith('FollowRequests'));
+  });
+
+  it('shows the exact unread backend count instead of only loaded-page rows', () => {
+    const { getByText } = renderScreen(<NotificationsScreen />, {
+      route: { name: 'Notifications', params: {} },
+      seedQueryData: [
+        ...seedNotifs([makeNotif({ isRead: false })]),
+        { key: [...notificationKeys.unread()], data: 73 },
+      ],
+    });
+    expect(getByText('73 unread')).toBeTruthy();
+    expect(getByText('Mark all as read')).toBeTruthy();
   });
 
   it('tapping a room_starting notification deep-links to the Room', async () => {
@@ -190,6 +232,57 @@ describe('NotificationsScreen', () => {
         params: { screen: 'ChatDetail', params: { conversationId: 'peer-7' } },
       }),
     );
+  });
+
+  it('tapping a group NEW_MESSAGE opens GroupChat instead of a DM', async () => {
+    const { getByText, navigation } = renderScreen(<NotificationsScreen />, {
+      route: { name: 'Notifications', params: {} },
+      seedQueryData: seedNotifs([
+        makeNotif({
+          id: 'notif-group',
+          kind: 'new_message',
+          actor: { id: 'sender-7', username: 'sender', displayName: 'Sender', avatarUrl: null },
+          conversationId: 'group-42',
+          conversationType: 'group',
+          message: 'New message in Product team.',
+        }),
+      ]),
+    });
+    fireEvent.press(getByText('New message in Product team.'));
+    await waitFor(() =>
+      expect(navigation.navigate).toHaveBeenCalledWith('Main', {
+        screen: 'MessagesTab',
+        params: { screen: 'GroupChat', params: { conversationId: 'group-42' } },
+      }),
+    );
+  });
+
+  it('loads and appends the next notification page with the opaque cursor', async () => {
+    const cursor = 'v1.WyIyMDI2LTA4LTEwVDEyOjAwOjAwLjAwMFoiLCJuLTQ5Il0';
+    const listSpy = jest.spyOn(notificationService, 'list').mockResolvedValue({
+      items: [makeNotif({ id: 'notif-page-2', message: 'Older notification.' })],
+      nextCursor: null,
+      hasMore: false,
+    });
+    const { UNSAFE_getByType } = renderScreen(<NotificationsScreen />, {
+      route: { name: 'Notifications', params: {} },
+      seedQueryData: [
+        {
+          key: [...notificationKeys.list('all')],
+          data: infinitePage([makeNotif()], cursor),
+        },
+      ],
+    });
+
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { FlatList } = require('react-native');
+    UNSAFE_getByType(FlatList).props.onEndReached();
+
+    await waitFor(() => expect(listSpy).toHaveBeenCalledWith('all', cursor));
+    await waitFor(() => {
+      const rows = UNSAFE_getByType(FlatList).props.data as AppNotification[];
+      expect(rows.map(row => row.id)).toEqual(['notif-1', 'notif-page-2']);
+    });
   });
 
   it('load failure shows an error state whose Retry refetches the list', async () => {

@@ -26,7 +26,11 @@ const HandRaiseQueue: React.FC<HandRaiseQueueProps> = memo(
               onPress={() => onPromote(l)}
               accessibilityRole={viewerCanModerate ? 'button' : undefined}
               accessibilityLabel={
-                viewerCanModerate ? `Inviter ${l.displayName} à parler` : l.displayName
+                viewerCanModerate
+                  ? t('room.inviteUserToSpeakA11y', 'Invite {{name}} to speak', {
+                      name: l.displayName,
+                    })
+                  : l.displayName
               }
               style={styles.handRaisedCellWrap}
             >

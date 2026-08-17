@@ -8,11 +8,30 @@
  */
 import React from 'react';
 import { fireEvent } from '@testing-library/react-native';
+import { profileKeys } from '../features/profile/hooks/useProfile';
 import { SettingsScreen } from '../features/settings/screens/SettingsScreen/SettingsScreen';
 import { FollowersScreen } from '../features/profile/screens/FollowersScreen/FollowersScreen';
 import { RoomFeedScreen } from '../features/rooms/screens/RoomFeedScreen/RoomFeedScreen';
 import { RoomScreen } from '../features/rooms/screens/RoomScreen/RoomScreen';
 import { renderScreen, mockAuthenticated, resetAuth } from './renderScreen';
+
+const smokeUser = {
+  id: 'user-test-1',
+  username: 'tester',
+  displayName: 'Test User',
+  firstName: 'Test',
+  lastName: 'User',
+  bio: null,
+  avatarUrl: null,
+  twitter: null,
+  instagram: null,
+  followersCount: 0,
+  followingCount: 0,
+  isFollowedByMe: false,
+  isOnline: true,
+  createdAt: new Date(0).toISOString(),
+  invitedBy: null,
+};
 
 describe('screen render harness — smoke', () => {
   beforeEach(() => {
@@ -23,9 +42,11 @@ describe('screen render harness — smoke', () => {
   });
 
   it('mounts SettingsScreen and fires navigation on a button press', () => {
-    const { navigation, getByLabelText, toJSON } = renderScreen(<SettingsScreen />);
+    const { navigation, getByLabelText, toJSON } = renderScreen(<SettingsScreen />, {
+      seedQueryData: [{ key: [...profileKeys.me()], data: smokeUser }],
+    });
     expect(toJSON()).toBeTruthy();
-    // "Edit profile" is rendered unconditionally on the authed Settings screen.
+    // Prime the profile query so the smoke test exercises the populated branch.
     fireEvent.press(getByLabelText('Edit profile'));
     expect(navigation.navigate).toHaveBeenCalledWith('EditProfile');
   });

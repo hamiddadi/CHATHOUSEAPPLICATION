@@ -1,0 +1,66 @@
+appId: com.chathouse.app
+name: Complete first-launch carousel and persist completion
+tags:
+  - smoke
+  - release-gate
+  - offline
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+
+- extendedWaitUntil:
+    visible:
+      id: 'welcome-slides-screen'
+    timeout: 30000
+- assertVisible:
+    id: 'welcome-slide-welcome'
+- assertVisible:
+    id: 'welcome-progress-1-of-4'
+
+- tapOn:
+    id: 'welcome-next'
+- extendedWaitUntil:
+    visible:
+      id: 'welcome-progress-2-of-4'
+    timeout: 5000
+- assertVisible:
+    id: 'welcome-slide-rooms'
+
+- tapOn:
+    id: 'welcome-next'
+- extendedWaitUntil:
+    visible:
+      id: 'welcome-progress-3-of-4'
+    timeout: 5000
+- assertVisible:
+    id: 'welcome-slide-clubs'
+
+- tapOn:
+    id: 'welcome-next'
+- extendedWaitUntil:
+    visible:
+      id: 'welcome-progress-4-of-4'
+    timeout: 5000
+- assertVisible:
+    id: 'welcome-slide-topics'
+- assertNotVisible:
+    id: 'welcome-skip'
+
+- tapOn:
+    id: 'welcome-next'
+- extendedWaitUntil:
+    visible:
+      id: 'auth-get-started'
+    timeout: 10000
+
+# Completion is stored locally: restarting without clearing state must not
+# display the one-time carousel again.
+- stopApp
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: 'auth-get-started'
+    timeout: 45000
+- assertNotVisible:
+    id: 'welcome-slides-screen'

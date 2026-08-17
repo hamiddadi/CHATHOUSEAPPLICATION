@@ -1,4 +1,4 @@
-import React, { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import MaterialIcons from '@react-native-vector-icons/material-icons';
 import { useNavigation } from '@react-navigation/native';
@@ -44,7 +44,7 @@ const VISIBILITY_OPTIONS: readonly VisibilityOption[] = [
 // createRoom.visibility.*). Kept beside the options so the two stay in sync.
 const VISIBILITY_DEFAULTS: Record<VisibilityOption['key'], { label: string; description: string }> =
   {
-    public: { label: 'Open', description: 'Anyone in Chathouse can join' },
+    public: { label: 'Open', description: 'Anyone in ChatHouse can join' },
     social: { label: 'Social', description: 'Only people you follow can join' },
     closed: { label: 'Closed', description: 'Only people you invite' },
   };
@@ -111,7 +111,7 @@ const VisibilityRow: React.FC<VisibilityRowProps> = memo(
           <Text
             className={
               selected
-                ? 'text-xs font-body text-primary-on-container opacity-80'
+                ? 'text-xs font-body text-primary-on-container'
                 : 'text-xs font-body text-ink-muted'
             }
           >
@@ -136,8 +136,8 @@ const TopicChip: React.FC<TopicChipProps> = memo(({ topic, selected, onPress }) 
   return (
     <Pressable
       onPress={handlePress}
-      accessibilityRole="button"
-      accessibilityState={{ selected }}
+      accessibilityRole="checkbox"
+      accessibilityState={{ checked: selected }}
       style={[styles.chip, selected ? styles.chipSelected : styles.chipUnselected]}
     >
       <Text style={selected ? styles.chipLabelSelected : styles.chipLabelUnselected}>{topic}</Text>
@@ -178,12 +178,20 @@ interface CoHostSlotProps {
 }
 
 const CoHostSlot: React.FC<CoHostSlotProps> = memo(({ user, onRemove }) => {
+  const { t } = useTranslation();
   const handleRemove = useCallback(() => onRemove(user.id), [onRemove, user.id]);
   return (
     <View className="flex-row items-center gap-sm bg-overlay-white-5 rounded-pill px-sm py-xs">
       <Avatar uri={user.avatarUrl ?? undefined} name={user.displayName} sizeValue={24} />
       <Text className="text-xs text-ink">@{user.username}</Text>
-      <Pressable onPress={handleRemove} accessibilityRole="button" hitSlop={8}>
+      <Pressable
+        onPress={handleRemove}
+        accessibilityRole="button"
+        accessibilityLabel={t('createRoom.removeCoHostA11y', 'Remove {{name}} as co-host', {
+          name: user.displayName || user.username,
+        })}
+        className="w-[44px] h-[44px] items-center justify-center"
+      >
         <MaterialIcons name="close" size={16} color={colors.textMuted} />
       </Pressable>
     </View>
@@ -213,7 +221,6 @@ export const CreateRoomScreen: React.FC = () => {
   );
   const [topics, setTopics] = useState<Set<string>>(new Set());
   const [coHosts, setCoHosts] = useState<SearchHit[]>([]);
-  const [recordingEnabled, setRecordingEnabled] = useState(false);
   // Optional: attach the room to one of the user's houses (clubId). Default
   // null = a standalone room. Houses are membership-gated server-side, so we
   // only ever offer the user's own ('mine') houses here.
@@ -224,6 +231,10 @@ export const CreateRoomScreen: React.FC = () => {
   const [searchResults, setSearchResults] = useState<SearchHit[]>([]);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState(false);
+  // `isPending` changes on the next render. This synchronous latch prevents
+  // two presses in one event-loop turn from creating two mutation attempts
+  // (and therefore two different idempotency keys).
+  const submittingRef = useRef(false);
 
   useEffect(() => {
     const id = setTimeout(() => setDebouncedQuery(query.trim()), SEARCH_DEBOUNCE_MS);
@@ -302,23 +313,25 @@ export const CreateRoomScreen: React.FC = () => {
   }, []);
 
   const handleStart = useCallback(async () => {
-    let scheduledFor: string | undefined;
-    if (isScheduled) {
-      if (scheduleMode === 'custom') {
-        // The custom date was picked earlier and may now sit in the past (the
-        // sheet stayed open a while) — re-clamp it to at least one minute out so
-        // the backend never rejects a "scheduled in the past" room.
-        const picked = new Date(customScheduledFor).getTime();
-        const floor = Date.now() + 60_000;
-        scheduledFor = new Date(Math.max(picked, floor)).toISOString();
-      } else {
-        const preset = SCHEDULE_PRESETS.find(p => p.id === schedulePreset);
-        if (preset) {
-          scheduledFor = new Date(Date.now() + preset.minutes * 60_000).toISOString();
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+    try {
+      let scheduledFor: string | undefined;
+      if (isScheduled) {
+        if (scheduleMode === 'custom') {
+          // The custom date was picked earlier and may now sit in the past (the
+          // sheet stayed open a while) — re-clamp it to at least one minute out so
+          // the backend never rejects a "scheduled in the past" room.
+          const picked = new Date(customScheduledFor).getTime();
+          const floor = Date.now() + 60_000;
+          scheduledFor = new Date(Math.max(picked, floor)).toISOString();
+        } else {
+          const preset = SCHEDULE_PRESETS.find(p => p.id === schedulePreset);
+          if (preset) {
+            scheduledFor = new Date(Date.now() + preset.minutes * 60_000).toISOString();
+          }
         }
       }
-    }
-    try {
       const created = await createRoom.mutateAsync({
         title,
         description: description.trim() || undefined,
@@ -326,7 +339,7 @@ export const CreateRoomScreen: React.FC = () => {
         topics: [...topics],
         coHostIds: coHosts.map(u => u.id),
         scheduledFor,
-        recordingEnabled,
+        recordingEnabled: false,
         houseId,
       });
       // A live room is joinable immediately: replace the create modal with the
@@ -344,6 +357,8 @@ export const CreateRoomScreen: React.FC = () => {
         t('createRoom.errorTitle', 'Création impossible'),
         errorMessage(err, t('createRoom.errorBody', 'Impossible de créer la room. Réessaie.')),
       );
+    } finally {
+      submittingRef.current = false;
     }
   }, [
     createRoom,
@@ -357,12 +372,10 @@ export const CreateRoomScreen: React.FC = () => {
     scheduleMode,
     schedulePreset,
     customScheduledFor,
-    recordingEnabled,
     houseId,
     t,
   ]);
   const handleToggleSchedule = useCallback(() => setIsScheduled(prev => !prev), []);
-  const handleToggleRecording = useCallback(() => setRecordingEnabled(prev => !prev), []);
   const handleSelectPresetMode = useCallback(() => setScheduleMode('preset'), []);
   const handleSelectCustomMode = useCallback(() => setScheduleMode('custom'), []);
 
@@ -563,7 +576,7 @@ export const CreateRoomScreen: React.FC = () => {
             <View
               className={
                 isScheduled
-                  ? 'w-[22px] h-[22px] rounded-pill bg-white mt-xxs ml-[20px]'
+                  ? 'w-[22px] h-[22px] rounded-pill bg-primary-on mt-xxs ml-[20px]'
                   : 'w-[22px] h-[22px] rounded-pill bg-ink-muted mt-xxs ml-xxs'
               }
             />
@@ -645,39 +658,6 @@ export const CreateRoomScreen: React.FC = () => {
             )}
           </View>
         )}
-
-        <Pressable
-          onPress={handleToggleRecording}
-          accessibilityRole="switch"
-          accessibilityLabel={t('createRoom.recordLabel')}
-          accessibilityState={{ checked: recordingEnabled }}
-          className="flex-row items-center gap-md p-lg rounded-md bg-overlay-white-5 border border-overlay-white-10"
-        >
-          <MaterialIcons
-            name="fiber-manual-record"
-            size={24}
-            color={recordingEnabled ? colors.primary : colors.text}
-          />
-          <View className="flex-1">
-            <Text className="text-md font-body-bold text-ink">{t('createRoom.recordLabel')}</Text>
-            <Text className="text-xs font-body text-ink-muted">{t('createRoom.recordHint')}</Text>
-          </View>
-          <View
-            className={
-              recordingEnabled
-                ? 'w-[44px] h-[26px] bg-primary rounded-pill'
-                : 'w-[44px] h-[26px] bg-surface-high rounded-pill'
-            }
-          >
-            <View
-              className={
-                recordingEnabled
-                  ? 'w-[22px] h-[22px] rounded-pill bg-white mt-xxs ml-[20px]'
-                  : 'w-[22px] h-[22px] rounded-pill bg-ink-muted mt-xxs ml-xxs'
-              }
-            />
-          </View>
-        </Pressable>
 
         <Button
           label={t('createRoom.startRoom')}

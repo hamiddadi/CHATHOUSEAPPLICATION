@@ -85,17 +85,28 @@ export const InviteMemberScreen: React.FC = () => {
   const [invited, setInvited] = useState<Record<string, InviteState>>({});
   const debouncedQuery = useDebouncedValue(query.trim(), SEARCH_DEBOUNCE_MS);
 
-  const { data: users, isLoading } = useSearchUsers(debouncedQuery);
+  const {
+    data: users,
+    isLoading,
+    isError: isSearchError,
+    refetch: refetchSearch,
+  } = useSearchUsers(debouncedQuery);
   const inviteToHouse = useInviteToHouse();
   // Signed, shareable invite link (carries a token routable via the
-  // `house/:houseId/invite/:token` deep link). Falls back to a placeholder
-  // link display while it loads.
-  const { data: inviteLink } = useHouseInviteLink(route.params.houseId);
+  // `house/:houseId/invite/:token` deep link). Loading and failures are kept
+  // distinct so a failed request never looks like a link that is still loading.
+  const {
+    data: inviteLink,
+    isError: isInviteLinkError,
+    refetch: refetchInviteLink,
+  } = useHouseInviteLink(route.params.houseId);
 
   const handleClose = useCallback(() => navigation.goBack(), [navigation]);
 
   const inviteUrl = inviteLink?.url;
-  const displayLink = inviteUrl?.replace(/^https?:\/\//, '') ?? t('houses.invite.linkLoading', '…');
+  const displayLink = isInviteLinkError
+    ? t('common.error', 'Something went wrong')
+    : (inviteUrl?.replace(/^https?:\/\//, '') ?? t('houses.invite.linkLoading', '…'));
   const handleCopyLink = useCallback(async () => {
     if (!inviteUrl) return;
     try {
@@ -120,6 +131,14 @@ export const InviteMemberScreen: React.FC = () => {
       );
     }
   }, [inviteUrl, t]);
+
+  const handleRetryLink = useCallback(() => {
+    void refetchInviteLink();
+  }, [refetchInviteLink]);
+
+  const handleRetrySearch = useCallback(() => {
+    void refetchSearch();
+  }, [refetchSearch]);
 
   const handleInvite = useCallback(
     (id: string) => {
@@ -180,18 +199,28 @@ export const InviteMemberScreen: React.FC = () => {
             {displayLink}
           </Text>
           <Pressable
-            onPress={handleCopyLink}
-            disabled={!inviteUrl}
+            onPress={isInviteLinkError ? handleRetryLink : handleCopyLink}
+            disabled={!inviteUrl && !isInviteLinkError}
             accessibilityRole="button"
-            accessibilityLabel={t('houses.invite.copyA11y', 'Copy invite link')}
-            accessibilityState={{ disabled: !inviteUrl }}
+            accessibilityLabel={
+              isInviteLinkError
+                ? t('houses.invite.retryLinkA11y', 'Retry invite link')
+                : t('houses.invite.copyA11y', 'Copy invite link')
+            }
+            accessibilityState={{ disabled: !inviteUrl && !isInviteLinkError }}
             hitSlop={12}
           >
-            <MaterialIcons
-              name="content-copy"
-              size={18}
-              color={inviteUrl ? colors.primary : colors.textMuted}
-            />
+            {isInviteLinkError ? (
+              <Text className="text-xs font-body-bold text-primary">
+                {t('common.retry', 'Retry')}
+              </Text>
+            ) : (
+              <MaterialIcons
+                name="content-copy"
+                size={18}
+                color={inviteUrl ? colors.primary : colors.textMuted}
+              />
+            )}
           </Pressable>
         </View>
 
@@ -206,6 +235,13 @@ export const InviteMemberScreen: React.FC = () => {
 
       {isLoading ? (
         <Loader fullscreen accessibilityLabel={t('houses.invite.searching', 'Searching users')} />
+      ) : isSearchError ? (
+        <EmptyState
+          title={t('rooms.invite.searchErrorTitle', 'Search failed')}
+          description={t('rooms.invite.searchErrorBody', 'Check your connection and try again.')}
+          actionLabel={t('common.retry', 'Retry')}
+          onAction={handleRetrySearch}
+        />
       ) : (
         <FlatList
           data={users ?? []}

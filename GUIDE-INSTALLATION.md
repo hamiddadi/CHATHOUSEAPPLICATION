@@ -133,7 +133,7 @@ Autres cibles utiles (depuis `android/`) :
 
 ```bash
 ./gradlew app:assembleDebug                               # APK debug sans install → app/build/outputs/apk/debug/
-./gradlew app:assembleRelease                             # APK release (signé debug si creds absents)
+./gradlew app:assembleRelease                             # APK release (4 propriétés CHATHOUSE_UPLOAD_* obligatoires)
 ./gradlew app:assembleDebug -PreactNativeArchitectures=arm64-v8a   # build mono-ABI, + rapide
 ./gradlew app:signingReport                               # SHA-1 (pour Maps/Firebase)
 ./gradlew clean                                           # purge le cache de build

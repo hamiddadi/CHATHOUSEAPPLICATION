@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { publicContentString } from '../../utils/publicContentModeration';
 
 // Single source of truth for the club privacy enum so create + update can't
 // drift (create previously rejected SOCIAL while update accepted it — a club
@@ -6,11 +7,11 @@ import { z } from 'zod';
 export const clubPrivacyEnum = z.enum(['OPEN', 'SOCIAL', 'PRIVATE']);
 
 export const createClubSchema = z.object({
-  name: z.string().min(2).max(50),
-  description: z.string().max(500).optional(),
-  rules: z.string().max(2000).optional(),
+  name: publicContentString(z.string().min(2).max(50)),
+  description: publicContentString(z.string().max(500)).optional(),
+  rules: publicContentString(z.string().max(2000)).optional(),
   privacy: clubPrivacyEnum.default('OPEN'),
-  category: z.string().max(32).default('tech'),
+  category: publicContentString(z.string().max(32)).default('tech'),
   categoryEmoji: z.string().max(8).default('🏠'),
   iconUrl: z.string().url().max(500).nullish(),
 });
@@ -39,11 +40,11 @@ export const acceptInviteSchema = z.object({
 });
 
 export const updateClubSchema = z.object({
-  name: z.string().min(2).max(50).optional(),
-  description: z.string().max(500).optional(),
-  rules: z.string().max(2000).nullish(),
+  name: publicContentString(z.string().min(2).max(50)).optional(),
+  description: publicContentString(z.string().max(500)).optional(),
+  rules: publicContentString(z.string().max(2000)).nullish(),
   privacy: clubPrivacyEnum.optional(),
-  category: z.string().max(32).optional(),
+  category: publicContentString(z.string().max(32)).optional(),
   categoryEmoji: z.string().max(8).optional(),
   iconUrl: z.string().url().max(500).nullish(),
 });

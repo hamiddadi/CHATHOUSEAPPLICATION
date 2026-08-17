@@ -1,8 +1,19 @@
+import { MediaKind, Prisma, type MessageKind } from '@prisma/client';
 import { prisma } from '../../config/database';
+import { logger } from '../../config/logger';
 import { AppError } from '../../middlewares/error.middleware';
-import { notificationsService } from '../notifications/notifications.service';
-import { emitChatMessage } from '../../socket/realtime';
+import { mediaService } from '../media/media.service';
+import { scheduleBackgroundTask } from '../../utils/backgroundTasks';
+import { runIdempotentCreate } from '../../utils/idempotency';
+import {
+  notificationDeliveryOutboxData,
+  wakeNotificationDelivery,
+} from '../notifications/notification.outbox';
+import { sendMessageSchema } from './chat.schema';
 import type { ListMessagesInput, SendMessageInput, SendVoiceMessageInput } from './chat.schema';
+import { assertCanDirectMessageWithinTransaction } from './chat.policy';
+import { decodeChatCursor, encodeChatCursor } from './chat.cursor';
+import { messageDeliveryOutboxData, wakeMessageDelivery } from './message.outbox';
 
 const publicUser = {
   id: true,
@@ -13,152 +24,154 @@ const publicUser = {
 
 const conversationPair = (a: string, b: string): [string, string] => (a < b ? [a, b] : [b, a]);
 
-/**
- * Direct-message business rule: two users can only exchange DMs if they
- * follow each other. Enforced at the point of send (both REST and the
- * socket handler funnel through `chatService.send`), so there's no way
- * to bypass by skipping the API.
- */
-// #114: honour the RECIPIENT's DM privacy. 'everyone' opens DMs to anyone;
-// 'followers' lets people who follow the recipient message them; 'mutual'
-// (default) keeps the close-friends rule (both follow each other); 'nobody'
-// closes DMs entirely. All paths funnel through chatService.send, so the gate
-// can't be bypassed.
-const assertCanMessage = async (senderId: string, recipientId: string): Promise<void> => {
-  // A block is a symmetric cut: if either party blocked the other, no DM flows
-  // regardless of the recipient's dmPrivacy — including 'everyone'. The privacy
-  // gate below alone let a blocked user keep DMing a recipient open to everyone,
-  // since blocking only severs the follow graph (which 'followers'/'mutual' rely
-  // on) and never touched the Block table here.
-  const blocked = await prisma.block.findFirst({
-    where: {
-      OR: [
-        { blockerId: senderId, blockedId: recipientId },
-        { blockerId: recipientId, blockedId: senderId },
-      ],
-    },
-    select: { id: true },
-  });
-  if (blocked) throw new AppError('CHAT_004');
-
-  const recipient = await prisma.user.findUnique({
-    where: { id: recipientId },
-    select: { dmPrivacy: true },
-  });
-  const privacy = recipient?.dmPrivacy ?? 'mutual';
-  if (privacy === 'nobody') throw new AppError('CHAT_004');
-  if (privacy === 'everyone') return;
-
-  const rows = await prisma.follow.findMany({
-    where: {
-      OR: [
-        { followerId: senderId, followingId: recipientId },
-        { followerId: recipientId, followingId: senderId },
-      ],
-    },
-    select: { followerId: true, followingId: true },
-  });
-  const senderFollowsRecipient = rows.some(
-    r => r.followerId === senderId && r.followingId === recipientId,
-  );
-  const recipientFollowsSender = rows.some(
-    r => r.followerId === recipientId && r.followingId === senderId,
-  );
-
-  if (privacy === 'followers') {
-    if (!senderFollowsRecipient) throw new AppError('CHAT_004');
-    return;
-  }
-  // 'mutual' (default): both must follow each other.
-  if (!(senderFollowsRecipient && recipientFollowsSender)) throw new AppError('CHAT_004');
-};
+interface ConversationRow {
+  peerId: string;
+  peerUsername: string | null;
+  peerDisplayName: string | null;
+  peerAvatarUrl: string | null;
+  messageId: string;
+  messageContent: string | null;
+  messageKind: MessageKind;
+  messageAudioUrl: string | null;
+  messageAudioDurationMs: number | null;
+  messageSenderId: string;
+  messageRoomId: string | null;
+  messageReceiverId: string | null;
+  messageIsRead: boolean;
+  messageCreatedAt: Date;
+  senderUsername: string | null;
+  senderDisplayName: string | null;
+  senderAvatarUrl: string | null;
+  unreadCount: bigint;
+}
 
 export const chatService = {
   /**
-   * Conversation list with cursor pagination.
+   * Exact 1:1 conversation pagination, computed by PostgreSQL. The peer set
+   * comes from the full DM history, while lateral indexed lookups select one
+   * last message per peer and count only that page's unread messages. The
+   * application therefore retains at most `limit + 1` rows, irrespective of
+   * history size.
    *
-   * Note on accuracy: DM history has no dedicated `Conversation` table in
-   * the current Prisma schema, so the per-peer aggregation is still derived
-   * from the user's recent message window. We page the *conversation list*
-   * via a cursor on the peer's `lastMessage.createdAt` (returning `limit`
-   * conversations + a `nextCursor`), while keeping the unread tally scoped
-   * to the same window. The window is sized generously relative to `limit`
-   * so an active conversation can't crowd the others out of a single page.
-   *
-   * TODO(audit): introduce a `Conversation` model (groupBy on the user pair
-   * + an indexed unread count per pair) to make `unreadCount` exact and the
-   * list pageable purely at the DB level instead of aggregating in memory.
-   *
-   * `limit`/`cursor` are optional to keep the public signature
-   * backward-compatible with existing callers.
+   * New cursors contain `(createdAt,messageId)` so equal timestamps are
+   * stable. Timestamp-only cursors emitted by older servers remain accepted;
+   * their historical `< createdAt` semantics necessarily cannot distinguish
+   * rows tied at the boundary.
    */
   async listConversations(userId: string, limit = 30, cursor?: string) {
-    // Pull a window large enough to surface `limit` distinct peers even when
-    // a single conversation is very chatty. Bounded so it stays a single
-    // indexed query rather than an unbounded scan.
-    const windowSize = Math.min(500, Math.max(100, limit * 10));
-    const messages = await prisma.message.findMany({
-      where: {
-        OR: [{ senderId: userId }, { receiverId: userId }],
-        roomId: null,
+    const pageSize = Math.min(500, Math.max(1, Math.trunc(limit)));
+    const decodedCursor = cursor ? decodeChatCursor(cursor) : null;
+    if (cursor && !decodedCursor) throw new AppError('VALIDATION_001');
+
+    const cursorPredicate = decodedCursor
+      ? decodedCursor.messageId
+        ? Prisma.sql`AND (date_trunc('milliseconds', latest."createdAt"), latest."id") < (${decodedCursor.createdAt}, ${decodedCursor.messageId})`
+        : Prisma.sql`AND date_trunc('milliseconds', latest."createdAt") < ${decodedCursor.createdAt}`
+      : Prisma.empty;
+
+    const rows = await prisma.$queryRaw<ConversationRow[]>(Prisma.sql`
+      WITH "peerIds" AS MATERIALIZED (
+        SELECT message."receiverId" AS "peerId"
+        FROM "Message" message
+        WHERE message."senderId" = ${userId}
+          AND message."receiverId" IS NOT NULL
+          AND message."roomId" IS NULL
+        UNION
+        SELECT message."senderId" AS "peerId"
+        FROM "Message" message
+        WHERE message."receiverId" = ${userId}
+          AND message."roomId" IS NULL
+      ),
+      page AS MATERIALIZED (
+        SELECT
+          peer.id AS "peerId",
+          peer.username AS "peerUsername",
+          peer."displayName" AS "peerDisplayName",
+          peer."avatarUrl" AS "peerAvatarUrl",
+          latest.id AS "messageId",
+          latest.content AS "messageContent",
+          latest.kind AS "messageKind",
+          latest."audioUrl" AS "messageAudioUrl",
+          latest."audioDurationMs" AS "messageAudioDurationMs",
+          latest."senderId" AS "messageSenderId",
+          latest."roomId" AS "messageRoomId",
+          latest."receiverId" AS "messageReceiverId",
+          latest."isRead" AS "messageIsRead",
+          date_trunc('milliseconds', latest."createdAt") AS "messageCreatedAt"
+        FROM "peerIds" peers
+        JOIN "User" peer
+          ON peer.id = peers."peerId"
+         AND peer."deletedAt" IS NULL
+        CROSS JOIN LATERAL (
+          SELECT message.*
+          FROM "Message" message
+          WHERE message."roomId" IS NULL
+            AND (
+              (message."senderId" = ${userId} AND message."receiverId" = peers."peerId")
+              OR
+              (message."senderId" = peers."peerId" AND message."receiverId" = ${userId})
+            )
+          ORDER BY message."createdAt" DESC, message.id DESC
+          LIMIT 1
+        ) latest
+        WHERE TRUE ${cursorPredicate}
+        ORDER BY date_trunc('milliseconds', latest."createdAt") DESC, latest.id DESC
+        LIMIT ${pageSize + 1}
+      ),
+      "unreadCounts" AS (
+        SELECT
+          unreadMessage."senderId" AS "peerId",
+          COUNT(*)::bigint AS count
+        FROM "Message" unreadMessage
+        JOIN page unreadPeer ON unreadPeer."peerId" = unreadMessage."senderId"
+        WHERE unreadMessage."roomId" IS NULL
+          AND unreadMessage."receiverId" = ${userId}
+          AND unreadMessage."isRead" = false
+        GROUP BY unreadMessage."senderId"
+      )
+      SELECT
+        page.*,
+        sender.username AS "senderUsername",
+        sender."displayName" AS "senderDisplayName",
+        sender."avatarUrl" AS "senderAvatarUrl",
+        COALESCE(unread.count, 0)::bigint AS "unreadCount"
+      FROM page
+      JOIN "User" sender ON sender.id = page."messageSenderId"
+      LEFT JOIN "unreadCounts" unread ON unread."peerId" = page."peerId"
+      ORDER BY page."messageCreatedAt" DESC, page."messageId" DESC
+    `);
+
+    const hasMore = rows.length > pageSize;
+    const keptRows = hasMore ? rows.slice(0, pageSize) : rows;
+    const data = keptRows.map(row => ({
+      peer: {
+        id: row.peerId,
+        username: row.peerUsername,
+        displayName: row.peerDisplayName,
+        avatarUrl: row.peerAvatarUrl,
       },
-      orderBy: { createdAt: 'desc' },
-      include: {
-        sender: { select: publicUser },
+      lastMessage: {
+        id: row.messageId,
+        content: row.messageContent,
+        kind: row.messageKind,
+        audioUrl: row.messageAudioUrl,
+        audioDurationMs: row.messageAudioDurationMs,
+        senderId: row.messageSenderId,
+        roomId: row.messageRoomId,
+        receiverId: row.messageReceiverId,
+        isRead: row.messageIsRead,
+        createdAt: row.messageCreatedAt,
+        sender: {
+          id: row.messageSenderId,
+          username: row.senderUsername,
+          displayName: row.senderDisplayName,
+          avatarUrl: row.senderAvatarUrl,
+        },
       },
-      take: windowSize,
-    });
-
-    const byPeer = new Map<
-      string,
-      {
-        peerId: string;
-        lastMessage: (typeof messages)[number];
-        unreadCount: number;
-      }
-    >();
-
-    for (const m of messages) {
-      const peerId = m.senderId === userId ? (m.receiverId ?? '') : m.senderId;
-      if (!peerId) continue;
-      const entry = byPeer.get(peerId);
-      if (!entry) {
-        byPeer.set(peerId, {
-          peerId,
-          lastMessage: m,
-          unreadCount: m.receiverId === userId && !m.isRead ? 1 : 0,
-        });
-      } else if (m.receiverId === userId && !m.isRead) {
-        entry.unreadCount += 1;
-      }
-    }
-
-    const peerIds = Array.from(byPeer.keys());
-    const peers = await prisma.user.findMany({
-      where: { id: { in: peerIds } },
-      select: publicUser,
-    });
-    const peerById = new Map(peers.map(p => [p.id, p]));
-
-    const sorted = Array.from(byPeer.values())
-      .map(e => ({
-        peer: peerById.get(e.peerId),
-        lastMessage: e.lastMessage,
-        unreadCount: e.unreadCount,
-      }))
-      .filter(c => c.peer)
-      .sort((a, b) => b.lastMessage.createdAt.getTime() - a.lastMessage.createdAt.getTime());
-
-    // Cursor on lastMessage.createdAt: skip everything at or after the
-    // supplied cursor, then return at most `limit` conversations.
-    const cutoff = cursor ? new Date(cursor).getTime() : null;
-    const filtered =
-      cutoff === null ? sorted : sorted.filter(c => c.lastMessage.createdAt.getTime() < cutoff);
-    const data = filtered.slice(0, limit);
-    const hasMore = filtered.length > limit;
-    const nextCursor = hasMore
-      ? (data[data.length - 1]?.lastMessage.createdAt.toISOString() ?? null)
-      : null;
+      unreadCount: Number(row.unreadCount),
+    }));
+    const last = data[data.length - 1]?.lastMessage;
+    const nextCursor = hasMore && last ? encodeChatCursor(last.createdAt, last.id) : null;
 
     return { data, nextCursor, hasMore };
   },
@@ -171,7 +184,10 @@ export const chatService = {
    */
   async conversationWith(userId: string, peerId: string) {
     if (userId === peerId) throw new AppError('CHAT_001');
-    const peer = await prisma.user.findUnique({ where: { id: peerId }, select: publicUser });
+    const peer = await prisma.user.findFirst({
+      where: { id: peerId, deletedAt: null },
+      select: publicUser,
+    });
     if (!peer) throw new AppError('USER_001');
 
     const [lo, hi] = conversationPair(userId, peerId);
@@ -194,63 +210,121 @@ export const chatService = {
 
   async listWithPeer(userId: string, peerId: string, input: ListMessagesInput) {
     if (userId === peerId) throw new AppError('CHAT_001');
-    const [lo, hi] = conversationPair(userId, peerId);
-    const messages = await prisma.message.findMany({
-      where: {
-        roomId: null,
-        OR: [
-          { senderId: lo, receiverId: hi },
-          { senderId: hi, receiverId: lo },
-        ],
-        ...(input.before ? { createdAt: { lt: new Date(input.before) } } : {}),
-      },
-      orderBy: { createdAt: 'desc' },
-      take: input.limit,
-      include: { sender: { select: publicUser } },
-    });
-    return messages.reverse();
-  },
-
-  async send(senderId: string, receiverId: string, input: SendMessageInput) {
-    if (senderId === receiverId) throw new AppError('CHAT_001');
-    const peer = await prisma.user.findUnique({
-      where: { id: receiverId },
-      select: { id: true, username: true, displayName: true },
+    const peer = await prisma.user.findFirst({
+      where: { id: peerId, deletedAt: null },
+      select: { id: true },
     });
     if (!peer) throw new AppError('USER_001');
+    const [lo, hi] = conversationPair(userId, peerId);
+    const decodedCursor = input.before ? decodeChatCursor(input.before) : null;
+    if (input.before && !decodedCursor) throw new AppError('VALIDATION_001');
+    const cursorWhere: Prisma.MessageWhereInput = decodedCursor
+      ? decodedCursor.messageId
+        ? {
+            OR: [
+              { createdAt: { lt: decodedCursor.createdAt } },
+              { createdAt: decodedCursor.createdAt, id: { lt: decodedCursor.messageId } },
+            ],
+          }
+        : { createdAt: { lt: decodedCursor.createdAt } }
+      : {};
+    const rows = await prisma.message.findMany({
+      where: {
+        roomId: null,
+        AND: [
+          {
+            OR: [
+              { senderId: lo, receiverId: hi },
+              { senderId: hi, receiverId: lo },
+            ],
+          },
+          cursorWhere,
+        ],
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: input.limit + 1,
+      include: { sender: { select: publicUser } },
+    });
+    const hasMore = rows.length > input.limit;
+    const newestFirst = hasMore ? rows.slice(0, input.limit) : rows;
+    const oldest = newestFirst[newestFirst.length - 1];
+    const data = [...newestFirst].reverse();
+    return {
+      data,
+      hasMore,
+      nextCursor: hasMore && oldest ? encodeChatCursor(oldest.createdAt, oldest.id) : null,
+    };
+  },
 
-    await assertCanMessage(senderId, receiverId);
+  async send(
+    senderId: string,
+    receiverId: string,
+    input: SendMessageInput,
+    idempotencyKey?: string,
+  ) {
+    // `chat:send` reaches the service directly (without the REST controller),
+    // so validate again at the shared persistence boundary. This keeps the
+    // pre-publication content guard effective for both transports.
+    const validatedInput = sendMessageSchema.parse(input);
 
+    if (senderId === receiverId) throw new AppError('CHAT_001');
     const sender = await prisma.user.findUnique({
       where: { id: senderId },
       select: { username: true, displayName: true },
     });
     const handle = sender?.displayName ?? sender?.username ?? 'Someone';
 
-    const msg = await prisma.message.create({
-      data: {
-        senderId,
-        receiverId,
-        content: input.content,
+    const creation = await runIdempotentCreate({
+      userId: senderId,
+      scope: `chat.message:${receiverId}`,
+      key: idempotencyKey,
+      payload: { kind: 'TEXT', ...validatedInput },
+      create: async tx => {
+        await assertCanDirectMessageWithinTransaction(tx, senderId, receiverId);
+        const created = await tx.message.create({
+          data: {
+            senderId,
+            receiverId,
+            content: validatedInput.content,
+          },
+          select: { id: true },
+        });
+        const notification = await tx.notification.create({
+          data: {
+            userId: receiverId,
+            actorId: senderId,
+            type: 'NEW_MESSAGE',
+            title: handle,
+            body: validatedInput.content.slice(0, 160),
+            data: { messageId: created.id, senderId, conversation: 'dm' },
+            targetId: created.id,
+            targetType: 'message',
+          },
+          select: { id: true },
+        });
+        await tx.outboxEvent.createMany({
+          data: [
+            messageDeliveryOutboxData('direct', created.id),
+            notificationDeliveryOutboxData(notification.id, created.id),
+          ],
+        });
+        return created.id;
       },
+    });
+    const msg = await prisma.message.findUnique({
+      where: { id: creation.resourceId },
       include: { sender: { select: publicUser } },
     });
+    if (!msg) throw new AppError('CHAT_002');
 
-    // Push the message to both parties in realtime. REST is the only send path
-    // the clients use (they never emit `chat:send`), so this is what makes the
-    // recipient's conversation list / unread badge / open thread update live.
-    emitChatMessage(senderId, receiverId, msg);
-
-    // Fire-and-forget notification + push. The realtime emit above handles the
-    // in-app update; the Notification row is the offline fallback that lights
-    // up the bell badge next launch.
-    void notificationsService.create({
-      userId: receiverId,
-      type: 'NEW_MESSAGE',
-      title: handle,
-      body: input.content.slice(0, 160),
-      data: { messageId: msg.id, senderId, conversation: 'dm' },
-    });
+    // Both the first response and an Idempotency-Key replay repair the same
+    // durable aggregate. Stable outbox keys prevent duplicate database rows;
+    // downstream socket/push delivery is explicitly at-least-once.
+    await scheduleBackgroundTask(
+      Promise.all([wakeMessageDelivery('direct', msg.id), wakeNotificationDelivery(msg.id)]),
+      err =>
+        logger.warn('chat message delivery wake failed', { err, receiverId, messageId: msg.id }),
+    );
 
     return msg;
   },
@@ -261,15 +335,13 @@ export const chatService = {
    * {@link send} (same mutual-follow gate, same realtime emit), with a 🎤
    * notification body instead of the text preview.
    */
-  async sendVoice(senderId: string, receiverId: string, input: SendVoiceMessageInput) {
+  async sendVoice(
+    senderId: string,
+    receiverId: string,
+    input: SendVoiceMessageInput,
+    idempotencyKey?: string,
+  ) {
     if (senderId === receiverId) throw new AppError('CHAT_001');
-    const peer = await prisma.user.findUnique({
-      where: { id: receiverId },
-      select: { id: true, username: true, displayName: true },
-    });
-    if (!peer) throw new AppError('USER_001');
-
-    await assertCanMessage(senderId, receiverId);
 
     const sender = await prisma.user.findUnique({
       where: { id: senderId },
@@ -277,26 +349,63 @@ export const chatService = {
     });
     const handle = sender?.displayName ?? sender?.username ?? 'Someone';
 
-    const msg = await prisma.message.create({
-      data: {
-        senderId,
-        receiverId,
-        kind: 'VOICE',
-        audioUrl: input.audioUrl,
-        audioDurationMs: input.durationMs,
+    const canonicalAudioUrl = mediaService.canonicalizeVoiceMediaUrl(input.audioUrl);
+    const creation = await runIdempotentCreate({
+      userId: senderId,
+      scope: `chat.message:${receiverId}`,
+      key: idempotencyKey,
+      payload: { kind: 'VOICE', ...input, audioUrl: canonicalAudioUrl },
+      create: async tx => {
+        await assertCanDirectMessageWithinTransaction(tx, senderId, receiverId);
+        const mediaObjectId = await mediaService.assertOwnedMediaUrlWithinTransaction(
+          tx,
+          senderId,
+          canonicalAudioUrl,
+          MediaKind.VOICE,
+        );
+        const created = await tx.message.create({
+          data: {
+            senderId,
+            receiverId,
+            kind: 'VOICE',
+            audioUrl: canonicalAudioUrl,
+            audioDurationMs: input.durationMs,
+            mediaObjectId,
+          },
+          select: { id: true },
+        });
+        const notification = await tx.notification.create({
+          data: {
+            userId: receiverId,
+            actorId: senderId,
+            type: 'NEW_MESSAGE',
+            title: handle,
+            body: '🎤 Voice message',
+            data: { messageId: created.id, senderId, conversation: 'dm' },
+            targetId: created.id,
+            targetType: 'message',
+          },
+          select: { id: true },
+        });
+        await tx.outboxEvent.createMany({
+          data: [
+            messageDeliveryOutboxData('direct', created.id),
+            notificationDeliveryOutboxData(notification.id, created.id),
+          ],
+        });
+        return created.id;
       },
+    });
+    const msg = await prisma.message.findUnique({
+      where: { id: creation.resourceId },
       include: { sender: { select: publicUser } },
     });
+    if (!msg) throw new AppError('CHAT_002');
 
-    emitChatMessage(senderId, receiverId, msg);
-
-    void notificationsService.create({
-      userId: receiverId,
-      type: 'NEW_MESSAGE',
-      title: handle,
-      body: '🎤 Voice message',
-      data: { messageId: msg.id, senderId, conversation: 'dm' },
-    });
+    await scheduleBackgroundTask(
+      Promise.all([wakeMessageDelivery('direct', msg.id), wakeNotificationDelivery(msg.id)]),
+      err => logger.warn('chat voice delivery wake failed', { err, receiverId, messageId: msg.id }),
+    );
 
     return msg;
   },

@@ -6,6 +6,7 @@ import {
   requireAdmin,
   requireAuth,
   requireModerator,
+  requirePrimarySession,
   requireSuperAdmin,
 } from '../../middlewares/auth.middleware';
 import { adminController } from './admin.controller';
@@ -24,23 +25,30 @@ const requireGodmodeEnabled: RequestHandler = (_req, _res, next) => {
 // Tag every successful admin call as "godmode access" in the audit trail.
 // We only persist the breadcrumb when the role check passed, so failed
 // authn attempts don't pollute the log (those land in winston instead).
-const recordGodmodeAccess: RequestHandler = (req, _res, next) => {
+const recordGodmodeAccess: RequestHandler = async (req, _res, next) => {
   if (!req.userId) return next();
   const ctx = auditLogService.context(req);
-  // Fire-and-forget — record() swallows persistence errors itself.
-  void auditLogService.record({
-    actorId: req.userId,
-    action: 'GODMODE_ACCESS',
-    targetType: 'route',
-    targetId: req.path,
-    metadata: { method: req.method },
-    ip: ctx.ip,
-    userAgent: ctx.userAgent,
-  });
-  next();
+  // Audit availability is a prerequisite for entering the privileged route.
+  try {
+    await auditLogService.record({
+      actorId: req.userId,
+      action: 'GODMODE_ACCESS',
+      targetType: 'route',
+      targetId: req.path,
+      metadata: { method: req.method },
+      ip: ctx.ip,
+      userAgent: ctx.userAgent,
+    });
+    next();
+  } catch (err) {
+    next(err);
+  }
 };
 
-adminRouter.use(requireGodmodeEnabled, requireAuth);
+// Never let a delegated bearer enter the operator control plane. This guard is
+// central and precedes even /me, so no future admin route can accidentally rely
+// on the impersonated target's role or attribute its audit rows to that target.
+adminRouter.use(requireGodmodeEnabled, requireAuth, requirePrimarySession);
 
 // Whoami — accessible to any authed user so the client can probe whether
 // to show the godmode entry. The response only reveals the caller's own

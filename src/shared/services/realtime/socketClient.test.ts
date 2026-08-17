@@ -6,7 +6,9 @@
  *   the UNAUTHORIZED / TOKEN_REVOKED message codes used by the backend's
  *   socketAuth middleware, while ignoring plain network errors.
  */
+import { io } from 'socket.io-client';
 import { getSocket, disconnectSocket, onReconnect } from './socketClient';
+import { useSocketStore } from './socketStore';
 
 jest.mock('../../../config/env', () => ({
   env: {
@@ -37,6 +39,7 @@ type Handler = (...args: unknown[]) => void;
 interface FakeSocket {
   connected: boolean;
   on: jest.Mock;
+  off: jest.Mock;
   connect: jest.Mock;
   disconnect: jest.Mock;
   removeAllListeners: jest.Mock;
@@ -51,19 +54,30 @@ const makeFakeSocket = (): FakeSocket => {
   const push = (event: string, cb: Handler): void => {
     handlers.set(event, [...(handlers.get(event) ?? []), cb]);
   };
-  return {
+  const fake: FakeSocket = {
     connected: false,
     on: jest.fn((event: string, cb: Handler) => push(event, cb)),
+    off: jest.fn((event: string, cb: Handler) => {
+      handlers.set(
+        event,
+        (handlers.get(event) ?? []).filter(handler => handler !== cb),
+      );
+    }),
     connect: jest.fn(),
-    disconnect: jest.fn(),
-    removeAllListeners: jest.fn(),
+    disconnect: jest.fn(() => {
+      fake.connected = false;
+    }),
+    removeAllListeners: jest.fn(() => handlers.clear()),
     emit: jest.fn(),
     timeout: jest.fn(),
     io: { on: jest.fn(), removeAllListeners: jest.fn() },
     fire: (event: string, ...args: unknown[]) => {
+      if (event === 'connect') fake.connected = true;
+      if (event === 'disconnect' || event === 'connect_error') fake.connected = false;
       (handlers.get(event) ?? []).forEach(cb => cb(...args));
     },
   };
+  return fake;
 };
 
 // `mock` prefix → allowed inside the hoisted jest.mock factory above. The
@@ -72,6 +86,13 @@ const makeFakeSocket = (): FakeSocket => {
 let mockSocket = makeFakeSocket();
 
 const flush = (): Promise<void> => new Promise(resolve => setTimeout(resolve, 0));
+const connectCurrentSocket = async (): Promise<FakeSocket> => {
+  const pending = getSocket();
+  await flush();
+  mockSocket.fire('connect');
+  await expect(pending).resolves.toBe(mockSocket);
+  return mockSocket;
+};
 
 describe('socketClient', () => {
   beforeEach(() => {
@@ -80,13 +101,118 @@ describe('socketClient', () => {
     mockSocket = makeFakeSocket();
   });
 
+  describe('initial connection contract', () => {
+    it('does not resolve until the authenticated Socket.IO handshake connects', async () => {
+      let resolved = false;
+      const pending = getSocket().then(result => {
+        resolved = true;
+        return result;
+      });
+
+      await flush();
+      expect(resolved).toBe(false);
+      expect(mockSocket.connect).toHaveBeenCalledTimes(1);
+
+      mockSocket.fire('connect');
+      await expect(pending).resolves.toBe(mockSocket);
+    });
+
+    it('shares one pending handshake between concurrent callers', async () => {
+      const first = getSocket();
+      const second = getSocket();
+      await flush();
+
+      expect(mockSocket.connect).toHaveBeenCalledTimes(1);
+      mockSocket.fire('connect');
+      await expect(Promise.all([first, second])).resolves.toEqual([mockSocket, mockSocket]);
+    });
+
+    it('binds one-shot consumers when an offline first attempt later reconnects', async () => {
+      const onNotification = jest.fn();
+      let resolved = false;
+      const firstMount = getSocket().then(s => {
+        resolved = true;
+        s?.on('notification:new', onNotification);
+        return s;
+      });
+
+      await flush();
+      mockSocket.fire('connect_error', new Error('websocket error'));
+      await flush();
+
+      expect(resolved).toBe(false);
+      expect(mockSocket.disconnect).not.toHaveBeenCalled();
+      expect(io).toHaveBeenCalledTimes(1);
+
+      mockSocket.fire('connect');
+      await expect(firstMount).resolves.toBe(mockSocket);
+
+      mockSocket.fire('notification:new');
+      expect(onNotification).toHaveBeenCalledTimes(1);
+      expect(io).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps the default subscription wait alive through a long offline period', async () => {
+      jest.useFakeTimers();
+      try {
+        let resolved = false;
+        const pending = getSocket().then(result => {
+          resolved = true;
+          return result;
+        });
+
+        mockSocket.fire('connect_error', new Error('websocket error'));
+        jest.advanceTimersByTime(60_000);
+        await Promise.resolve();
+
+        expect(resolved).toBe(false);
+        expect(mockSocket.disconnect).not.toHaveBeenCalled();
+
+        mockSocket.fire('connect');
+        await expect(pending).resolves.toBe(mockSocket);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('times out without returning or destroying the unauthenticated singleton', async () => {
+      jest.useFakeTimers();
+      try {
+        const first = getSocket(100);
+        expect(mockSocket.connect).toHaveBeenCalledTimes(1);
+
+        jest.advanceTimersByTime(100);
+        await expect(first).resolves.toBeNull();
+        expect(mockSocket.disconnect).not.toHaveBeenCalled();
+        expect(mockSocket.removeAllListeners).not.toHaveBeenCalled();
+
+        const retry = getSocket(100);
+        expect(io).toHaveBeenCalledTimes(1);
+        mockSocket.fire('connect');
+        await expect(retry).resolves.toBe(mockSocket);
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('cancels a pending wait on logout without a stale status transition', async () => {
+      const pending = getSocket(1_000);
+      await flush();
+
+      disconnectSocket();
+
+      await expect(pending).resolves.toBeNull();
+      expect(mockSocket.disconnect).toHaveBeenCalledTimes(1);
+      expect(useSocketStore.getState().status).toBe('idle');
+    });
+  });
+
   describe('onReconnect', () => {
     it('fires on re-connections only, never on the first connect', async () => {
       const handler = jest.fn();
       const unsubscribe = onReconnect(handler);
 
-      await getSocket();
-      mockSocket.fire('connect');
+      await connectCurrentSocket();
       expect(handler).not.toHaveBeenCalled();
 
       mockSocket.fire('disconnect', 'transport close');
@@ -105,13 +231,11 @@ describe('socketClient', () => {
       const handler = jest.fn();
       const unsubscribe = onReconnect(handler);
 
-      await getSocket();
-      mockSocket.fire('connect');
+      await connectCurrentSocket();
       disconnectSocket();
 
       mockSocket = makeFakeSocket();
-      await getSocket();
-      mockSocket.fire('connect');
+      await connectCurrentSocket();
       expect(handler).not.toHaveBeenCalled();
 
       unsubscribe();
@@ -125,8 +249,7 @@ describe('socketClient', () => {
       const unsubBad = onReconnect(bad);
       const unsubGood = onReconnect(good);
 
-      await getSocket();
-      mockSocket.fire('connect');
+      await connectCurrentSocket();
       mockSocket.fire('connect');
 
       expect(bad).toHaveBeenCalledTimes(1);
@@ -138,9 +261,48 @@ describe('socketClient', () => {
   });
 
   describe('connect_error auth detection', () => {
+    it('lets a replacement login refresh while the logged-out socket probe is still pending', async () => {
+      let resolveOldRefresh: (() => void) | undefined;
+      mockGet
+        .mockImplementationOnce(
+          () =>
+            new Promise<void>(resolve => {
+              resolveOldRefresh = resolve;
+            }),
+        )
+        .mockResolvedValueOnce({ data: {} });
+
+      const oldPending = getSocket(1_000);
+      await flush();
+      const oldSocket = mockSocket;
+      oldSocket.fire('connect_error', new Error('UNAUTHORIZED'));
+      await flush();
+      expect(mockGet).toHaveBeenCalledTimes(1);
+
+      disconnectSocket();
+      await expect(oldPending).resolves.toBeNull();
+
+      mockSocket = makeFakeSocket();
+      const replacementPending = getSocket(1_000);
+      await flush();
+      mockSocket.fire('connect_error', new Error('UNAUTHORIZED'));
+      await flush();
+
+      expect(mockGet).toHaveBeenCalledTimes(2);
+      expect(mockSocket.connect).toHaveBeenCalledTimes(2);
+      mockSocket.fire('connect');
+      await expect(replacementPending).resolves.toBe(mockSocket);
+
+      expect(resolveOldRefresh).toBeDefined();
+      resolveOldRefresh?.();
+      await flush();
+      expect(oldSocket.connect).toHaveBeenCalledTimes(1);
+    });
+
     it('refreshes auth when the error carries a structured data.code', async () => {
       mockGet.mockResolvedValue({ data: {} });
-      await getSocket();
+      await connectCurrentSocket();
+      mockSocket.connect.mockClear();
 
       const err = Object.assign(new Error('handshake failed'), {
         data: { code: 'UNAUTHORIZED' },
@@ -155,7 +317,8 @@ describe('socketClient', () => {
 
     it('refreshes auth on a TOKEN_REVOKED message (backend socketAuth code)', async () => {
       mockGet.mockResolvedValue({ data: {} });
-      await getSocket();
+      await connectCurrentSocket();
+      mockSocket.connect.mockClear();
 
       mockSocket.fire('connect_error', new Error('TOKEN_REVOKED'));
       await flush();
@@ -165,7 +328,8 @@ describe('socketClient', () => {
 
     it('still matches the legacy "auth" message sniff', async () => {
       mockGet.mockResolvedValue({ data: {} });
-      await getSocket();
+      await connectCurrentSocket();
+      mockSocket.connect.mockClear();
 
       mockSocket.fire('connect_error', new Error('UNAUTHORIZED'));
       await flush();
@@ -174,7 +338,8 @@ describe('socketClient', () => {
     });
 
     it('does not refresh on a plain network connect_error', async () => {
-      await getSocket();
+      await connectCurrentSocket();
+      mockSocket.connect.mockClear();
 
       mockSocket.fire('connect_error', new Error('websocket error'));
       await flush();

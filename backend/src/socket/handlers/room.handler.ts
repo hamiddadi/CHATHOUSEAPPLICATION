@@ -1,10 +1,7 @@
 import type { Server, Socket } from 'socket.io';
+import { materializePrivateMediaUrls } from '../../modules/media/media-url';
 import { roomsService } from '../../modules/rooms/rooms.service';
 import { logger } from '../../config/logger';
-import {
-  closeRoom as closeSfuRoom,
-  closeProducersForUserInRoom,
-} from '../../webrtc/mediasoup.manager';
 import { roomChannel } from '../channels';
 import { emitMapUserUpdate } from '../realtime';
 import { getUserId } from '../socket.middleware';
@@ -37,20 +34,49 @@ export const registerRoomHandlers = (io: Server, socket: Socket): void => {
   const userId = (): string => getUserId(socket);
 
   socket.on('room:join', async (payload: JoinPayload, ack?: (ok: boolean) => void) => {
+    const joiningUserId = userId();
+    let joinedChannel = false;
+    let admission: Awaited<ReturnType<typeof roomsService.join>>['admission'] = null;
     try {
-      const room = await roomsService.join(payload.roomId, userId());
+      const room = await roomsService.join(payload.roomId, joiningUserId);
+      admission = room.admission;
       await socket.join(roomChannel(payload.roomId));
+      joinedChannel = true;
+      const confirmed = await roomsService.confirmSocketAdmission(payload.roomId, joiningUserId);
+      if (!confirmed) throw new Error('Socket room admission is no longer active');
+
       io.to(roomChannel(payload.roomId)).emit('room:user-joined', {
-        userId: userId(),
+        userId: joiningUserId,
         roomId: payload.roomId,
       });
       // Bridge to the map: joiners enter as listeners (blue hearing badge);
       // setMute later flips them to speaking/muted if they take the stage.
-      emitMapUserUpdate({ userId: userId(), isInRoom: true, isListener: true });
-      socket.emit('room:participants', { participants: room.participants });
+      await emitMapUserUpdate({
+        userId: joiningUserId,
+        isInRoom: true,
+        isListener: true,
+      }).catch(err => logger.warn('room:join map presence update failed', { err }));
+      socket.emit(
+        'room:participants',
+        materializePrivateMediaUrls({ participants: room.participants }),
+      );
       ack?.(true);
     } catch (err) {
       logger.warn('room:join failed', { err });
+      if (joinedChannel) {
+        try {
+          await socket.leave(roomChannel(payload.roomId));
+        } catch (leaveErr) {
+          logger.warn('room:join channel compensation failed', { err: leaveErr });
+        }
+      }
+      if (admission) {
+        await roomsService
+          .compensateUnconfirmedAdmission(payload.roomId, joiningUserId, admission)
+          .catch(compensationErr =>
+            logger.warn('room:join database compensation failed', { err: compensationErr }),
+          );
+      }
       ack?.(false);
     }
   });
@@ -58,17 +84,7 @@ export const registerRoomHandlers = (io: Server, socket: Socket): void => {
   socket.on('room:leave', async (payload: LeavePayload, ack?: (ok: boolean) => void) => {
     try {
       await roomsService.leave(payload.roomId, userId());
-      // Close any RTC producer this user had in this room — the Producer's
-      // `close` handler fans out `rtc:producer-closed` so peers stop consuming.
-      closeProducersForUserInRoom(payload.roomId, userId());
       await socket.leave(roomChannel(payload.roomId));
-      io.to(roomChannel(payload.roomId)).emit('room:user-left', {
-        userId: userId(),
-        roomId: payload.roomId,
-      });
-      // Bridge to the map: leaving clears every room-audio flag, so the marker
-      // falls back to the plain online badge.
-      emitMapUserUpdate({ userId: userId(), isInRoom: false });
       ack?.(true);
     } catch (err) {
       logger.warn('room:leave failed', { err });
@@ -111,9 +127,6 @@ export const registerRoomHandlers = (io: Server, socket: Socket): void => {
   socket.on('room:end', async (payload: EndPayload, ack?: (ok: boolean) => void) => {
     try {
       await roomsService.end(payload.roomId, userId());
-      // Release the SFU router + all producers for this room. `closeSfuRoom`
-      // is idempotent so it's safe if RTC wasn't in use for this room.
-      await closeSfuRoom(payload.roomId);
       // ROOM-06 fix: do NOT emit `room:ended` here — `roomsService.end()`
       // already broadcasts it via `emitRoomEnded`. Emitting again duplicated
       // the event for every client in the room.

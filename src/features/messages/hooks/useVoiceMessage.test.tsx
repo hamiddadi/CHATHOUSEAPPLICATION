@@ -1,6 +1,6 @@
 /**
  * Unit test for useVoiceMessage's error routing. A 403 on a voice send is the
- * mutual-follow gate (CHAT_004 — the same rule the text send hits), so it must
+ * DM privacy gate (CHAT_004 — the same rule the text send hits), so it must
  * surface the dedicated "message impossible" Alert, NOT a generic error toast.
  * Non-forbidden failures still fall through to the toast.
  */
@@ -39,7 +39,7 @@ describe('useVoiceMessage error routing', () => {
     jest.clearAllMocks();
   });
 
-  it('a 403 (CHAT_004) voice send shows the mutual-follow Alert, not a toast', async () => {
+  it('a 403 (CHAT_004) voice send shows the privacy Alert, not a toast', async () => {
     const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(() => undefined);
     // A normalized forbidden AppError, exactly what the interceptor rejects with.
     const send = jest.fn(async () => {
@@ -52,7 +52,7 @@ describe('useVoiceMessage error routing', () => {
     });
 
     await waitFor(() => expect(alertSpy).toHaveBeenCalledTimes(1));
-    // The follow-mutual alert is shown with a title + body (localized; we assert
+    // The privacy alert is shown with a title + body (localized; we assert
     // both are non-empty strings rather than pinning a language), and crucially
     // the generic error toast is NOT used for this gate.
     expect(typeof alertSpy.mock.calls[0]![0]).toBe('string');

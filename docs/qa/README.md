@@ -1,5 +1,10 @@
 # Plan & cas de tests QA — ChatHouse (50 écrans, Android + iOS)
 
+> **Migration note (2026-07):** this QA corpus predates the bare React Native
+> migration. Any reference to Expo Go, EAS or an Expo dev client means the
+> corresponding native Android/iOS debug or staging build. The canonical build
+> setup is [`docs/setup.md`](../setup.md); Expo tooling is no longer used.
+
 > Application **temps réel** type Clubhouse : audio live **LiveKit**, messagerie & présence **WebSocket** (`socket.io-client`), **push notifications**, i18n **FR/EN**, rôles **guest / standard / moderator / admin / super_admin**, plateformes **Android + iOS** (OS récents et anciens), réseaux **3G/4G/5G/Wi-Fi** avec pertes/latence/reconnexion.
 
 Cet ensemble couvre **tous les boutons et interactions** des 50 écrans réels de l'application. Chaque cas est **ancré dans le code** (vrais `accessibilityLabel` / clés i18n / handlers / événements WebSocket), donc directement exécutable par une équipe QA **manuelle** et par l'**automatisation** (Detox / Maestro / RTL).
@@ -9,7 +14,7 @@ Cet ensemble couvre **tous les boutons et interactions** des 50 écrans réels d
 | Indicateur                      | Valeur                                                                                                        |
 | ------------------------------- | ------------------------------------------------------------------------------------------------------------- |
 | Écrans couverts                 | **50 / 50**                                                                                                   |
-| Boutons & interactions recensés | **381**                                                                                                       |
+| Boutons & interactions recensés | **385** (inventaire actualisé le 10 août 2026)                                                                |
 | Cas de test détaillés           | **≈ 991** (positif + erreur/limite + accessibilité, + temps-réel multi-utilisateur sur les boutons critiques) |
 | Livrables transversaux          | **11**                                                                                                        |
 | Lignes de documentation         | **≈ 19 700**                                                                                                  |
@@ -29,12 +34,12 @@ Cet ensemble couvre **tous les boutons et interactions** des 50 écrans réels d
 | #   | Document                                                       | Contenu                                                                                                                                                                                   |
 | --- | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 00  | [Plan de test global](00-plan-overview.md)                     | Objectifs, périmètre, hors-périmètre, risques + mitigations, dépendances (comptes/données/builds EAS), matrice d'appareils Android/iOS, rôles & jeux de données, critères d'entrée/sortie |
-| 01  | [Matrice maîtresse écran × bouton](01-matrice-ecran-bouton.md) | Vue agrégée : synthèse par écran + grand tableau plat des 381 boutons (type, locator, temps-réel, priorité), totaux & répartitions                                                        |
+| 01  | [Matrice maîtresse écran × bouton](01-matrice-ecran-bouton.md) | Vue agrégée : synthèse par écran + grand tableau plat des 385 boutons (type, locator, temps-réel, priorité), totaux & répartitions                                                        |
 | 02  | [Priorisation P0/P1/P2](02-priorisation.md)                    | Définition des niveaux + listes justifiées + ordre d'exécution smoke                                                                                                                      |
 | 03  | [Scénarios temps-réel](03-scenarios-temps-reel.md)             | Multi-utilisateurs (room/messages), race conditions notifications, re-sync après reconnexion, cohérence multi-appareils                                                                   |
 | 04  | [Plan de test réseau](04-plan-reseau.md)                       | Profils dégradés (latence/bande passante/perte), coupure **pendant** action, idempotence, reconnexion WebSocket/LiveKit                                                                   |
 | 05  | [Accessibilité](05-accessibilite.md)                           | Checklist WCAG mobile + procédures pas-à-pas TalkBack / VoiceOver + cas A11Y réutilisables                                                                                                |
-| 06  | [Scripts d'automatisation](06-automatisation.md)               | **14 boutons critiques** × 3 pseudo-scripts (Detox + Maestro + RTL) avec assertions + stratégie d'automatisation                                                                          |
+| 06  | [Scripts d'automatisation](06-automatisation.md)               | Cible détaillée pour 14 boutons ; **3 flows Maestro réellement présents** au 10 août 2026 (`onboarding-carousel`, `auth-privacy-smoke`, `auth-consent-gate`) + stratégie d'automatisation |
 | 07  | [Régression ciblée](07-regression.md)                          | Suites smoke / régression UI / régression backend / régression temps-réel + table de traçabilité changement→cas                                                                           |
 | 08  | [Couverture & estimation](08-couverture-estimation.md)         | Matrice de couverture % (manuel/auto) + estimations de temps (campagne complète, smoke, run automatisé, matrice 4 devices)                                                                |
 | 09  | [Modèle de rapport d'anomalie](09-modele-anomalie.md)          | Template bug à copier-coller + barème de sévérité + cycle de vie + 2 exemples remplis                                                                                                     |
@@ -50,9 +55,9 @@ Cet ensemble couvre **tous les boutons et interactions** des 50 écrans réels d
 | auth          |      6 |      25 |          83 |
 | events        |      1 |       5 |          14 |
 | extensions    |      5 |      62 |         104 |
-| houses        |      5 |      32 |         102 |
+| houses        |      5 |      35 |         102 |
 | maps          |      1 |       9 |          28 |
-| messages      |      6 |      41 |         139 |
+| messages      |      6 |      42 |         139 |
 | notifications |      1 |       9 |          24 |
 | onboarding    |      4 |      18 |          42 |
 | privacy       |      4 |      13 |          35 |
@@ -60,7 +65,7 @@ Cet ensemble couvre **tous les boutons et interactions** des 50 écrans réels d
 | rooms         |      5 |      57 |         138 |
 | search        |      1 |       6 |          20 |
 | settings      |      2 |      31 |          71 |
-| **Total**     | **50** | **381** |   **≈ 991** |
+| **Total**     | **50** | **385** |   **≈ 991** |
 
 ---
 
@@ -113,7 +118,7 @@ Cet ensemble couvre **tous les boutons et interactions** des 50 écrans réels d
 | 19  | Créer une house   |       7 |  21 | [19-HOUSE-CREATE.md](screens/19-HOUSE-CREATE.md) |
 | 20  | Détail house      |       9 |  34 | [20-HOUSE-DETAIL.md](screens/20-HOUSE-DETAIL.md) |
 | 21  | Invitation house  |       3 |  11 | [21-HOUSE-INVITE.md](screens/21-HOUSE-INVITE.md) |
-| 22  | Liste des houses  |       6 |  18 | [22-HOUSE-LIST.md](screens/22-HOUSE-LIST.md)     |
+| 22  | Liste des houses  |       9 |  18 | [22-HOUSE-LIST.md](screens/22-HOUSE-LIST.md)     |
 | 23  | Inviter un membre |       7 |  18 | [23-HOUSE-MEMBER.md](screens/23-HOUSE-MEMBER.md) |
 
 ### maps
@@ -127,7 +132,7 @@ Cet ensemble couvre **tous les boutons et interactions** des 50 écrans réels d
 | #   | Écran                         | Boutons | Cas | Fichier                                      |
 | --- | ----------------------------- | ------: | --: | -------------------------------------------- |
 | 25  | Ajouter des membres au groupe |       5 |  17 | [25-MSG-ADDGRP.md](screens/25-MSG-ADDGRP.md) |
-| 26  | Conversation (détail)         |      12 |  38 | [26-MSG-CHAT.md](screens/26-MSG-CHAT.md)     |
+| 26  | Conversation (détail)         |      13 |  38 | [26-MSG-CHAT.md](screens/26-MSG-CHAT.md)     |
 | 27  | Chat de groupe                |       9 |  28 | [27-MSG-GCHAT.md](screens/27-MSG-GCHAT.md)   |
 | 28  | Infos du groupe               |       6 |  22 | [28-MSG-GINFO.md](screens/28-MSG-GINFO.md)   |
 | 29  | Messages (liste)              |       5 |  18 | [29-MSG-LIST.md](screens/29-MSG-LIST.md)     |

@@ -44,6 +44,7 @@ const VAGUES = [
   'v14-search-history',
   'v14-club-meta',
   'v14-profile-links',
+  'v17-invites',
 ];
 
 export const healthRouter: Router = Router();
@@ -58,7 +59,9 @@ healthRouter.get(
         payments: Boolean(process.env.STRIPE_SECRET_KEY),
         captions: Boolean(process.env.ASR_PROVIDER && process.env.ASR_API_KEY),
         twitter: Boolean(process.env.TWITTER_CLIENT_ID && process.env.TWITTER_CLIENT_SECRET),
-        contacts: Boolean(process.env.CONTACTS_HASH_SALT),
+        // Contact discovery no longer depends on the obsolete shared hashing
+        // salt; it performs an indexed E.164 match over TLS.
+        contacts: true,
       },
     });
   }),

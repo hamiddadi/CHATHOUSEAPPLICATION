@@ -1,20 +1,24 @@
 import { env, isDev } from '../../config/env';
 
 /**
- * Opaque crash-reporter wrapper. Lazy-loads `@sentry/react-native` to keep
- * Expo Go working when the dep isn't installed.
+ * Consent-gated crash-reporter wrapper. Sentry is loaded only after opt-in,
+ * never in development, and only when a production DSN is configured.
  *
- * To enable in a dev client / EAS build:
- *   1. npm install @sentry/react-native
- *   2. Add the config plugin to app.json:
- *      {"plugins": ["@sentry/react-native/expo", ...]}
- *   3. Set the SENTRY_DSN EAS secret (see README.env.md).
- * No code changes needed — this file auto-detects the package at runtime.
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type SentryLike = {
-  init: (opts: { dsn: string; enableAutoSessionTracking?: boolean; environment?: string }) => void;
+  init: (opts: {
+    dsn: string;
+    enableAutoSessionTracking: boolean;
+    environment?: string;
+    sendDefaultPii: boolean;
+    tracesSampleRate: number;
+    beforeSend: (event: unknown) => unknown | null;
+    beforeSendTransaction: (event: unknown) => unknown | null;
+  }) => void;
+  close?: (timeout?: number) => Promise<boolean>;
+  setUser?: (user: null) => void;
   captureException: (err: unknown, hint?: { extra?: Record<string, unknown> }) => void;
   captureMessage: (msg: string, level?: 'info' | 'warning' | 'error') => void;
 };
@@ -38,7 +42,7 @@ const loadSentry = (): SentryLike | null => {
 
 export const initReporter = (): void => {
   if (initialized) return;
-  initialized = true;
+  if (!consentEnabled) return;
   if (isDev) return; // never report in dev — noise
   if (!env.SENTRY_DSN) return; // no DSN, silently skip
 
@@ -47,9 +51,14 @@ export const initReporter = (): void => {
 
   sentry.init({
     dsn: env.SENTRY_DSN,
-    enableAutoSessionTracking: true,
+    enableAutoSessionTracking: false,
     environment: env.ENV,
+    sendDefaultPii: false,
+    tracesSampleRate: 0,
+    beforeSend: event => (consentEnabled ? event : null),
+    beforeSendTransaction: event => (consentEnabled ? event : null),
   });
+  initialized = true;
 };
 
 export const reportException = (err: unknown, extra?: Record<string, unknown>): void => {
@@ -79,5 +88,13 @@ export const reportMessage = (msg: string, level: 'info' | 'warning' | 'error' =
  */
 export const setReporterEnabled = (enabled: boolean): void => {
   consentEnabled = enabled;
+  if (enabled) {
+    initReporter();
+    return;
+  }
+  sentry?.setUser?.(null);
+  if (sentry?.close) void sentry.close(2_000);
+  sentry = null;
+  initialized = false;
 };
 /* eslint-enable @typescript-eslint/no-explicit-any */

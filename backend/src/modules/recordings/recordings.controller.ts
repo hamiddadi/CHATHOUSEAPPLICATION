@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import { sendOk } from '../../utils/response';
 import { AppError } from '../../middlewares/error.middleware';
+import { authedUserId } from '../../utils/authedUserId';
 import { recordingsService } from './recordings.service';
 
 const DEFAULT_LIMIT = 20;
@@ -21,7 +22,7 @@ export const recordingsController = {
     const raw = req.params['roomId'];
     const roomId = Array.isArray(raw) ? raw[0] : raw;
     if (!roomId) throw new AppError('ROOM_001');
-    const data = await recordingsService.listForRoom(roomId);
+    const data = await recordingsService.listForRoom(roomId, authedUserId(req));
     sendOk(res, data);
   },
 
@@ -29,7 +30,7 @@ export const recordingsController = {
     const raw = req.params['userId'];
     const userId = Array.isArray(raw) ? raw[0] : raw;
     if (!userId) throw new AppError('USER_001');
-    const data = await recordingsService.listForHost(userId);
+    const data = await recordingsService.listForHost(userId, authedUserId(req));
     sendOk(res, data);
   },
 };

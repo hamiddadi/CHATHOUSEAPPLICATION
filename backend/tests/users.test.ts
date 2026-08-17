@@ -9,11 +9,15 @@ process.env.REDIS_URL = process.env.REDIS_URL ?? 'redis://localhost:6379';
 /* eslint-disable @typescript-eslint/no-require-imports */
 const { createApp } = require('../src/app') as typeof import('../src/app');
 const { prisma } = require('../src/config/database') as typeof import('../src/config/database');
+const { mediaService } =
+  require('../src/modules/media/media.service') as typeof import('../src/modules/media/media.service');
 const { connectRedis, disconnectRedis } =
   require('../src/config/redis') as typeof import('../src/config/redis');
 /* eslint-enable @typescript-eslint/no-require-imports */
 
 const rand = () => Math.random().toString(36).slice(2, 10);
+const TINY_PNG_DATA_URL =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
 
 const register = async (app: Express, username?: string) => {
   const u = username ?? `u_${rand()}`;
@@ -38,6 +42,7 @@ describe('Users — profile CRUD, search, lookup', () => {
 
   afterAll(async () => {
     for (const id of createdIds) {
+      await mediaService.deleteAllForUser(id).catch(() => undefined);
       await prisma.user.delete({ where: { id } }).catch(() => undefined);
     }
     await prisma.$disconnect();
@@ -74,6 +79,12 @@ describe('Users — profile CRUD, search, lookup', () => {
   it('PATCH /api/users/me updates displayName, bio, avatarUrl', async () => {
     const user = await register(app);
     createdIds.push(user.id);
+    const upload = await request(app)
+      .post('/api/upload/avatar')
+      .set('Authorization', `Bearer ${user.token}`)
+      .send({ dataUrl: TINY_PNG_DATA_URL });
+    expect(upload.status).toBe(201);
+    const avatarUrl = upload.body.data.url as string;
 
     const res = await request(app)
       .patch('/api/users/me')
@@ -81,12 +92,12 @@ describe('Users — profile CRUD, search, lookup', () => {
       .send({
         displayName: 'Phase 7 Tester',
         bio: 'Testing Chathouse end-to-end.',
-        avatarUrl: 'https://cdn.test.local/u/avatar.jpg',
+        avatarUrl,
       });
     expect(res.status).toBe(200);
     expect(res.body.data.displayName).toBe('Phase 7 Tester');
     expect(res.body.data.bio).toBe('Testing Chathouse end-to-end.');
-    expect(res.body.data.avatarUrl).toBe('https://cdn.test.local/u/avatar.jpg');
+    expect(res.body.data.avatarUrl).toBe(avatarUrl);
 
     // Verify persistence via a fresh /me fetch
     const me = await request(app).get('/api/users/me').set('Authorization', `Bearer ${user.token}`);
@@ -175,6 +186,19 @@ describe('Users — profile CRUD, search, lookup', () => {
   it('PATCH /api/users/me/location persists coords and bumps lastSeenAt', async () => {
     const user = await register(app);
     createdIds.push(user.id);
+
+    const withoutConsent = await request(app)
+      .patch('/api/users/me/location')
+      .set('Authorization', `Bearer ${user.token}`)
+      .send({ latitude: 48.8566, longitude: 2.3522 });
+    expect(withoutConsent.status).toBe(403);
+    expect(withoutConsent.body.error.code).toBe('MAPS_001');
+
+    const consent = await request(app)
+      .patch('/api/users/me/visibility')
+      .set('Authorization', `Bearer ${user.token}`)
+      .send({ isVisible: true });
+    expect(consent.status).toBe(200);
 
     const res = await request(app)
       .patch('/api/users/me/location')

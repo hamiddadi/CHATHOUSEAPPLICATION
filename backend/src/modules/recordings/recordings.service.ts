@@ -6,11 +6,14 @@ import {
   S3Upload,
   WebhookReceiver,
 } from 'livekit-server-sdk';
-import type { EgressInfo } from 'livekit-server-sdk';
+import type { EgressInfo, WebhookEvent } from 'livekit-server-sdk';
 import type { Prisma, RecordingStatus } from '@prisma/client';
 import { prisma } from '../../config/database';
 import { env } from '../../config/env';
 import { logger } from '../../config/logger';
+import { enforceParticipantPolicyLocked } from '../rooms/livekit-revocation.outbox';
+import { roomMetadataAccessWhere } from '../rooms/rooms.access';
+import { getBlockedIdSet } from '../social/blocks';
 
 /**
  * Room Replays via LiveKit Egress → an S3-compatible bucket.
@@ -32,7 +35,7 @@ const publicUser = {
 
 const ACTIVE_STATUSES: RecordingStatus[] = ['STARTING', 'ACTIVE'];
 
-const isConfigured = (): boolean =>
+const egressConfigured = (): boolean =>
   Boolean(
     env.EGRESS_ENABLED &&
     env.LIVEKIT_URL &&
@@ -47,18 +50,21 @@ const isConfigured = (): boolean =>
     env.RECORDING_PUBLIC_BASE_URL,
   );
 
+const isConfigured = (): boolean => env.ROOM_RECORDING_ENABLED && egressConfigured();
+
 // WebhookReceiver only needs the LiveKit API key/secret (not S3), so it's
 // available whenever LiveKit itself is configured.
 const hasLivekitKeys = (): boolean => Boolean(env.LIVEKIT_API_KEY && env.LIVEKIT_API_SECRET);
 
-// EgressClient wants the HTTP(S) host; LIVEKIT_URL is the ws(s):// endpoint.
+// EgressClient is also server-to-server: prefer the internal/container
+// endpoint and fall back to the public ws(s) URL converted to http(s).
 const httpHost = (wsUrl: string): string => wsUrl.replace(/^ws/i, 'http');
 
 let egressClientRef: EgressClient | null = null;
 const egress = (): EgressClient => {
   if (!egressClientRef) {
     egressClientRef = new EgressClient(
-      httpHost(env.LIVEKIT_URL as string),
+      httpHost(env.LIVEKIT_INTERNAL_URL ?? (env.LIVEKIT_URL as string)),
       env.LIVEKIT_API_KEY as string,
       env.LIVEKIT_API_SECRET as string,
     );
@@ -75,6 +81,32 @@ const webhook = (): WebhookReceiver => {
     );
   }
   return webhookRef;
+};
+
+export class LivekitWebhookAuthenticationError extends Error {
+  constructor(cause: unknown) {
+    super('Invalid LiveKit webhook authentication', { cause });
+    this.name = 'LivekitWebhookAuthenticationError';
+  }
+}
+
+export class LivekitWebhookUnavailableError extends Error {
+  constructor(message = 'LiveKit webhook processing is unavailable') {
+    super(message);
+    this.name = 'LivekitWebhookUnavailableError';
+  }
+}
+
+export const verifyLivekitWebhook = async (
+  body: string,
+  authHeader: string | undefined,
+): Promise<WebhookEvent> => {
+  if (!hasLivekitKeys()) throw new LivekitWebhookUnavailableError();
+  try {
+    return await webhook().receive(body, authHeader);
+  } catch (cause) {
+    throw new LivekitWebhookAuthenticationError(cause);
+  }
 };
 
 const mapStatus = (status: EgressStatus): RecordingStatus => {
@@ -128,7 +160,7 @@ const applyEgressInfo = async (info: EgressInfo): Promise<void> => {
 // Webhook-less safety net: pull live egresses' current state from LiveKit so a
 // replay finalizes even if the egress webhook isn't wired up.
 const reconcileRoom = async (roomId: string): Promise<void> => {
-  if (!isConfigured()) return;
+  if (!egressConfigured()) return;
   const pending = await prisma.recording.findMany({
     where: { roomId, status: { in: ACTIVE_STATUSES } },
     select: { egressId: true },
@@ -141,6 +173,19 @@ const reconcileRoom = async (roomId: string): Promise<void> => {
       logger.warn('recording reconcile failed', { roomId, egressId: row.egressId, err });
     }
   }
+};
+
+export const dispatchVerifiedLivekitWebhook = async (event: WebhookEvent): Promise<void> => {
+  if (event.event === 'participant_joined') {
+    const roomId = event.room?.name.trim() ?? '';
+    const userId = event.participant?.identity.trim() ?? '';
+    if (!roomId || !userId) {
+      throw new LivekitWebhookUnavailableError('LiveKit participant webhook is incomplete');
+    }
+    const effect = await enforceParticipantPolicyLocked(roomId, userId);
+    if (effect.kind === 'unconfigured') throw new LivekitWebhookUnavailableError();
+  }
+  if (event.egressInfo) await applyEgressInfo(event.egressInfo);
 };
 
 interface RecordingRow {
@@ -219,7 +264,9 @@ export const recordingsService = {
    * (or a later reconcile) finalizes each row with its file URL + duration.
    */
   async stopForRoom(roomId: string): Promise<void> {
-    if (!isConfigured()) return;
+    // Existing egresses must remain stoppable after the creation kill-switch
+    // is turned off.
+    if (!egressConfigured()) return;
     const live = await prisma.recording.findMany({
       where: { roomId, status: { in: ACTIVE_STATUSES } },
       select: { egressId: true },
@@ -239,19 +286,24 @@ export const recordingsService = {
    * Throws on signature failure so the route can answer 401.
    */
   async handleWebhook(body: string, authHeader: string | undefined): Promise<void> {
-    if (!hasLivekitKeys()) return;
-    const event = await webhook().receive(body, authHeader);
-    if (event.egressInfo) await applyEgressInfo(event.egressInfo);
+    const event = await verifyLivekitWebhook(body, authHeader);
+    await dispatchVerifiedLivekitWebhook(event);
   },
 
   /** Completed, playable replays for a room (newest first). */
-  async listForRoom(roomId: string) {
+  async listForRoom(roomId: string, viewerId: string) {
+    if (!env.ROOM_RECORDING_ENABLED) return [];
     await reconcileRoom(roomId);
     const rows = await prisma.recording.findMany({
       // RECO-02: gate by room privacy like `listRecent`. Without this any
       // authenticated user could enumerate roomIds and pull the public CDN
       // `fileUrl` of private rooms' replays (IDOR).
-      where: { roomId, status: 'COMPLETED', fileUrl: { not: null }, room: { isPrivate: false } },
+      where: {
+        roomId,
+        status: 'COMPLETED',
+        fileUrl: { not: null },
+        room: { AND: [roomMetadataAccessWhere(viewerId)] },
+      },
       orderBy: { createdAt: 'desc' },
     });
     return rows.map(serialize);
@@ -259,8 +311,17 @@ export const recordingsService = {
 
   /** Recent public replays across all rooms — powers the Replays feed. */
   async listRecent(limit: number) {
+    if (!env.ROOM_RECORDING_ENABLED) return [];
     const rows = await prisma.recording.findMany({
-      where: { status: 'COMPLETED', fileUrl: { not: null }, room: { isPrivate: false } },
+      where: {
+        status: 'COMPLETED',
+        fileUrl: { not: null },
+        room: {
+          isPrivate: false,
+          roomType: 'OPEN',
+          host: { deletedAt: null },
+        },
+      },
       orderBy: { createdAt: 'desc' },
       take: limit,
       include: {
@@ -277,12 +338,20 @@ export const recordingsService = {
    * #75: a user's published public replays — completed recordings of rooms they
    * hosted. Queryable via the room relation (no host column needed).
    */
-  async listForHost(userId: string, limit = 20) {
+  async listForHost(userId: string, viewerId: string, limit = 20) {
+    if (!env.ROOM_RECORDING_ENABLED) return [];
+    const blocked = await getBlockedIdSet(viewerId);
+    if (blocked.has(userId)) return [];
     const rows = await prisma.recording.findMany({
       where: {
         status: 'COMPLETED',
         fileUrl: { not: null },
-        room: { isPrivate: false, hostId: userId },
+        room: {
+          isPrivate: false,
+          roomType: 'OPEN',
+          hostId: userId,
+          host: { deletedAt: null },
+        },
       },
       orderBy: { createdAt: 'desc' },
       take: limit,

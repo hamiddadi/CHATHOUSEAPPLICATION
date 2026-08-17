@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { prisma } from '../../../config/database';
 import { redis } from '../../../config/redis';
 import { extError } from '../../utils/ExtAppError';
@@ -20,8 +21,8 @@ import {
  * The Tip ledger is written ONLY by the verified webhook (payment_intent
  * .succeeded), never by the client. Feature-flagged via STRIPE_SECRET_KEY.
  *
- * Stripe account IDs are still mapped userId→account in Redis (legacy); the
- * webhook keeps the cached KYC flag fresh via account.updated.
+ * Stripe account IDs are durable on User.stripeConnectAccountId. Redis only
+ * caches the current KYC flags and is rebuilt from PostgreSQL after eviction.
  */
 
 interface StripeAccountMapping {
@@ -29,6 +30,27 @@ interface StripeAccountMapping {
   kycComplete: boolean;
   createdAt: string;
 }
+
+const stripeAccountMappingSchema = z.object({
+  stripeAccountId: z.string().regex(/^acct_[A-Za-z0-9]+$/),
+  kycComplete: z.boolean(),
+  createdAt: z.string(),
+});
+
+const parseAccountMapping = (raw: string): StripeAccountMapping => {
+  try {
+    return stripeAccountMappingSchema.parse(JSON.parse(raw));
+  } catch {
+    // Never trust malformed cache state for a financial destination.
+    throw extError('PAY_RECIPIENT_NOT_CONFIGURED', 'Stored payout account is invalid');
+  }
+};
+
+const isMissingStripeResource = (err: unknown): boolean =>
+  typeof err === 'object' &&
+  err !== null &&
+  'code' in err &&
+  (err as { code?: unknown }).code === 'resource_missing';
 
 /** Minimal shape of a Stripe Charge object (charge.refunded webhook, PAYM-02). */
 interface StripeChargeObject {
@@ -41,6 +63,87 @@ const accountKey = (userId: string) => `ext:stripe:account:${userId}`;
 /** Window over which identical tip retries collapse onto the same session (1 min). */
 const TIP_IDEMPOTENCY_WINDOW_MS = 60_000;
 
+const cacheAccountMapping = async (
+  userId: string,
+  mapping: StripeAccountMapping,
+): Promise<void> => {
+  await redis.set(accountKey(userId), JSON.stringify(mapping));
+};
+
+/**
+ * Resolve the durable payout account and repair either side of the old
+ * Redis-only mapping during rollout:
+ * - PostgreSQL present, Redis absent/stale → rebuild the cache.
+ * - legacy Redis present, PostgreSQL absent → persist it once.
+ * PostgreSQL wins on disagreement so a poisoned cache can never redirect
+ * money to a different destination.
+ */
+const accountMappingFor = async (userId: string): Promise<StripeAccountMapping | null> => {
+  const [user, raw] = await Promise.all([
+    prisma.user.findFirst({
+      where: { id: userId, deletedAt: null },
+      select: { stripeConnectAccountId: true },
+    }),
+    redis.get(accountKey(userId)),
+  ]);
+  if (!user) return null;
+
+  let cached: StripeAccountMapping | null = null;
+  if (raw) {
+    try {
+      cached = parseAccountMapping(raw);
+    } catch (err) {
+      // A durable id lets us safely discard and repair malformed cache state.
+      if (!user.stripeConnectAccountId) throw err;
+    }
+  }
+
+  if (user.stripeConnectAccountId) {
+    if (cached?.stripeAccountId === user.stripeConnectAccountId) return cached;
+    const repaired = {
+      stripeAccountId: user.stripeConnectAccountId,
+      kycComplete: false,
+      createdAt: new Date().toISOString(),
+    };
+    await cacheAccountMapping(userId, repaired);
+    return repaired;
+  }
+
+  if (!cached) return null;
+  try {
+    const persisted = await prisma.user.updateMany({
+      where: { id: userId, deletedAt: null, stripeConnectAccountId: null },
+      data: { stripeConnectAccountId: cached.stripeAccountId },
+    });
+    if (persisted.count !== 1) return null;
+  } catch {
+    // A connected account may belong to only one local user.
+    throw extError('PAY_RECIPIENT_NOT_CONFIGURED', 'Payout account ownership is invalid');
+  }
+  return cached;
+};
+
+const persistAccountId = async (userId: string, accountId: string): Promise<void> => {
+  try {
+    const persisted = await prisma.user.updateMany({
+      where: {
+        id: userId,
+        deletedAt: null,
+        OR: [{ stripeConnectAccountId: null }, { stripeConnectAccountId: accountId }],
+      },
+      data: { stripeConnectAccountId: accountId },
+    });
+    if (persisted.count !== 1) {
+      throw extError('PAY_RECIPIENT_NOT_CONFIGURED', 'Payout account ownership is invalid');
+    }
+  } catch (err) {
+    if (typeof err === 'object' && err !== null && 'code' in err && err.code === 'P2002') {
+      throw extError('PAY_RECIPIENT_NOT_CONFIGURED', 'Payout account ownership is invalid');
+    }
+    throw err;
+  }
+};
+
 export const paymentsService = {
   configured: stripeConfigured,
 
@@ -51,11 +154,10 @@ export const paymentsService = {
   async onboardCreator(userId: string): Promise<{ url: string; accountId: string }> {
     const { returnUrl, refreshUrl } = requireReturnUrls();
     const stripe = await requireStripe();
-    const existing = await redis.get(accountKey(userId));
+    const existing = await accountMappingFor(userId);
     let accountId: string;
     if (existing) {
-      const parsed = JSON.parse(existing) as StripeAccountMapping;
-      accountId = parsed.stripeAccountId;
+      accountId = existing.stripeAccountId;
     } else {
       // Guard against two concurrent onboard requests (double tap) both seeing
       // `existing === null` and each creating a Stripe account — one of which
@@ -63,10 +165,9 @@ export const paymentsService = {
       const lockKey = `${accountKey(userId)}:lock`;
       const gotLock = await redis.set(lockKey, '1', { NX: true, EX: 30 });
       if (!gotLock) {
-        const raced = await redis.get(accountKey(userId));
+        const raced = await accountMappingFor(userId);
         if (raced) {
-          const parsed = JSON.parse(raced) as StripeAccountMapping;
-          accountId = parsed.stripeAccountId;
+          accountId = raced.stripeAccountId;
           const link = await stripe.accountLinks.create({
             account: accountId,
             return_url: returnUrl,
@@ -87,12 +188,13 @@ export const paymentsService = {
           { idempotencyKey: `acct:${userId}` },
         );
         accountId = account.id;
+        await persistAccountId(userId, accountId);
         const mapping: StripeAccountMapping = {
           stripeAccountId: accountId,
           kycComplete: false,
           createdAt: new Date().toISOString(),
         };
-        await redis.set(accountKey(userId), JSON.stringify(mapping), { NX: true });
+        await cacheAccountMapping(userId, mapping);
       } finally {
         if (gotLock) await redis.del(lockKey);
       }
@@ -109,24 +211,27 @@ export const paymentsService = {
   async getAccountStatus(
     userId: string,
   ): Promise<{ connected: boolean; kycComplete: boolean; accountId?: string }> {
-    const raw = await redis.get(accountKey(userId));
-    if (!raw) return { connected: false, kycComplete: false };
-    const mapping = JSON.parse(raw) as StripeAccountMapping;
+    const mapping = await accountMappingFor(userId);
+    if (!mapping) return { connected: false, kycComplete: false };
     try {
       const stripe = await requireStripe();
       const acc = await stripe.accounts.retrieve(mapping.stripeAccountId);
       const kycComplete = Boolean(acc.payouts_enabled && acc.charges_enabled);
       if (kycComplete !== mapping.kycComplete) {
         mapping.kycComplete = kycComplete;
-        await redis.set(accountKey(userId), JSON.stringify(mapping));
+        await cacheAccountMapping(userId, mapping);
       }
       return { connected: true, kycComplete, accountId: mapping.stripeAccountId };
-    } catch {
-      return {
-        connected: true,
-        kycComplete: mapping.kycComplete,
-        accountId: mapping.stripeAccountId,
-      };
+    } catch (err) {
+      if (!isMissingStripeResource(err)) throw err;
+      await Promise.all([
+        redis.del(accountKey(userId)),
+        prisma.user.updateMany({
+          where: { id: userId, stripeConnectAccountId: mapping.stripeAccountId },
+          data: { stripeConnectAccountId: null },
+        }),
+      ]);
+      return { connected: false, kycComplete: false };
     }
   },
 
@@ -151,19 +256,33 @@ export const paymentsService = {
     // account mapping survives a GDPR purge, so a tip could otherwise be
     // captured + transferred and then fail the FK on recordTip (boucle de
     // retry). Reject if the user no longer exists or is soft-deleted.
-    const toUser = await prisma.user.findUnique({
-      where: { id: toUserId },
-      select: { deletedAt: true },
-    });
-    if (!toUser || toUser.deletedAt) throw extError('PAY_RECIPIENT_NOT_CONFIGURED');
-
-    const recipient = await redis.get(accountKey(toUserId));
-    if (!recipient) throw extError('PAY_RECIPIENT_NOT_CONFIGURED');
-    const mapping = JSON.parse(recipient) as StripeAccountMapping;
-    if (!mapping.kycComplete) throw extError('PAY_KYC_INCOMPLETE');
+    const mapping = await accountMappingFor(toUserId);
+    if (!mapping) throw extError('PAY_RECIPIENT_NOT_CONFIGURED');
 
     const { returnUrl, refreshUrl } = requireReturnUrls();
     const stripe = await requireStripe();
+    // Redis only caches KYC state. Re-check Stripe immediately before creating
+    // the destination so a newly restricted account fails closed.
+    let account: StripeAccountObject;
+    try {
+      account = await stripe.accounts.retrieve(mapping.stripeAccountId);
+    } catch (err) {
+      if (!isMissingStripeResource(err)) throw err;
+      await Promise.all([
+        redis.del(accountKey(toUserId)),
+        prisma.user.updateMany({
+          where: { id: toUserId, stripeConnectAccountId: mapping.stripeAccountId },
+          data: { stripeConnectAccountId: null },
+        }),
+      ]);
+      throw extError('PAY_RECIPIENT_NOT_CONFIGURED');
+    }
+    const kycComplete = Boolean(account.payouts_enabled && account.charges_enabled);
+    mapping.kycComplete = kycComplete;
+    await cacheAccountMapping(toUserId, mapping);
+    if (!kycComplete) {
+      throw extError('PAY_KYC_INCOMPLETE');
+    }
     // Idempotency: a double-submitted tip (network retry, double tap) within the
     // window collapses onto the same Checkout session rather than charging twice.
     // PAYM-07: when the client supplies a nonce, it scopes the key instead of the
@@ -280,14 +399,34 @@ export const paymentsService = {
   async syncAccount(account: StripeAccountObject): Promise<void> {
     const userId = account.metadata?.['chathouseUserId'];
     if (!userId) return;
+    const persisted = await prisma.user.updateMany({
+      where: {
+        id: userId,
+        deletedAt: null,
+        OR: [{ stripeConnectAccountId: null }, { stripeConnectAccountId: account.id }],
+      },
+      data: { stripeConnectAccountId: account.id },
+    });
+    // Ignore webhooks for purged users or a stale/orphan account whose metadata
+    // points at a user now linked to a different payout account.
+    if (persisted.count !== 1) return;
     const raw = await redis.get(accountKey(userId));
-    if (!raw) return;
-    const mapping = JSON.parse(raw) as StripeAccountMapping;
-    const kycComplete = Boolean(account.payouts_enabled && account.charges_enabled);
-    if (kycComplete !== mapping.kycComplete) {
-      mapping.kycComplete = kycComplete;
-      await redis.set(accountKey(userId), JSON.stringify(mapping));
+    let mapping: StripeAccountMapping = {
+      stripeAccountId: account.id,
+      kycComplete: false,
+      createdAt: new Date().toISOString(),
+    };
+    if (raw) {
+      try {
+        const cached = parseAccountMapping(raw);
+        if (cached.stripeAccountId === account.id) mapping = cached;
+      } catch {
+        // Rebuild malformed cache from the verified webhook object.
+      }
     }
+    const kycComplete = Boolean(account.payouts_enabled && account.charges_enabled);
+    mapping.kycComplete = kycComplete;
+    await cacheAccountMapping(userId, mapping);
   },
 
   /**

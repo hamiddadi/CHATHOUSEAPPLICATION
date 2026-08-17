@@ -16,4 +16,5 @@ declare module '@env' {
   export const ENV: string | undefined;
   export const SENTRY_DSN: string | undefined;
   export const LIVEKIT_URL: string | undefined;
+  export const LEGAL_DOCUMENT_VERSION: string | undefined;
 }

@@ -5,6 +5,7 @@
  * button advances through slides and finishes on the last one.
  */
 import React from 'react';
+import { StyleSheet } from 'react-native';
 import { fireEvent, waitFor } from '@testing-library/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { renderScreen, mockAuthenticated, resetAuth } from '../../../../test-utils/renderScreen';
@@ -20,12 +21,20 @@ describe('WelcomeSlidesScreen', () => {
   });
 
   it('mounts without throwing and shows the first slide + the Next CTA', () => {
-    const { getByText, toJSON } = renderScreen(<WelcomeSlidesScreen />, {
+    const { getByTestId, getByText, toJSON } = renderScreen(<WelcomeSlidesScreen />, {
       route: { name: 'WelcomeSlides' },
     });
     expect(toJSON()).toBeTruthy();
+    expect(getByTestId('welcome-slides-screen')).toBeTruthy();
+    const firstSlide = getByTestId('welcome-slide-welcome');
+    expect(firstSlide).toBeTruthy();
+    expect(firstSlide.props.nestedScrollEnabled).toBe(true);
+    expect(StyleSheet.flatten(firstSlide.props.contentContainerStyle)).toMatchObject({
+      flexGrow: 1,
+    });
+    expect(getByTestId('welcome-progress-1-of-4')).toBeTruthy();
     // First slide title (welcome) and the not-last CTA label.
-    expect(getByText('Welcome to Chathouse')).toBeTruthy();
+    expect(getByText('Welcome to ChatHouse')).toBeTruthy();
     expect(getByText('Next')).toBeTruthy();
     // Skip is visible while not on the last slide.
     expect(getByText('Skip')).toBeTruthy();
@@ -59,7 +68,7 @@ describe('WelcomeSlidesScreen', () => {
   });
 
   it('announces the slide progress to screen readers and updates it on Next', async () => {
-    const { getByLabelText, getByText } = renderScreen(<WelcomeSlidesScreen />, {
+    const { getByLabelText, getByTestId, getByText } = renderScreen(<WelcomeSlidesScreen />, {
       route: { name: 'WelcomeSlides' },
     });
     // The progress dots are exposed as a single "slide x of y" announcement.
@@ -67,6 +76,7 @@ describe('WelcomeSlidesScreen', () => {
     fireEvent.press(getByText('Next'));
     await waitFor(() => {
       expect(getByLabelText('Slide 2 of 4')).toBeTruthy();
+      expect(getByTestId('welcome-progress-2-of-4')).toBeTruthy();
     });
   });
 

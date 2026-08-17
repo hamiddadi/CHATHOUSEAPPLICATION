@@ -24,6 +24,11 @@ regexes = [
   '''chathouse:chathouse''',                    # dev Postgres creds
   '''ci_(access|refresh)_secret_[0-9a-f]+''',   # CI-only JWT secrets
   '''ExponentPushToken\[[^\]]+\]''',            # Expo push token fixtures
+  '''voice-attempt-123''',                       # Upload retry test idempotency fixture
+  '''tok-abcdef12345''',                         # House invite documentation fixture
+  # Firebase iOS rejects malformed API keys before smoke tests can launch. This
+  # exact fixture value has the required shape but is rejected by production preflight.
+  '''AIzareplace-with-firebase-api-key-00000''',
   # Source code that READS a secret from an env var is not a hardcoded
   # secret. The generic-api-key rule false-flags lines like
   # `secret: env.RECORDING_S3_SECRET as string` (recordings.service.ts:182).

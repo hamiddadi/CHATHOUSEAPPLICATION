@@ -1,5 +1,6 @@
 import type { Request, Response } from 'express';
 import { sendOk } from '../../utils/response';
+import { preflightResponseChunks, streamResponseChunks } from '../../utils/streamResponse';
 import { AppError } from '../../middlewares/error.middleware';
 import { authedUserId as requireUserId } from '../../utils/authedUserId';
 import { adminService } from './admin.service';
@@ -12,6 +13,7 @@ import {
   listUsersSchema,
   resolveReportSchema,
   setRoleSchema,
+  stopImpersonationSchema,
   suspendSchema,
 } from './admin.schema';
 
@@ -20,6 +22,21 @@ const param = (req: Request, key: string): string => {
   const v = Array.isArray(raw) ? raw[0] : raw;
   if (!v) throw new AppError('NOT_FOUND_001');
   return v;
+};
+
+const streamCsvDownload = async (
+  res: Response,
+  filename: string,
+  chunks: AsyncGenerator<string>,
+): Promise<void> => {
+  // The producer's first bounded database page is loaded before setting any
+  // download header, so setup/query failures can still use the error middleware.
+  const preparedChunks = await preflightResponseChunks(chunks);
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  res.setHeader('Cache-Control', 'private, no-store');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  await streamResponseChunks(res, preparedChunks);
 };
 
 export const adminController = {
@@ -131,10 +148,12 @@ export const adminController = {
   },
 
   async stopImpersonation(req: Request, res: Response) {
+    const { token } = stopImpersonationSchema.parse(req.body);
     const ctx = auditLogService.context(req);
     const result = await adminService.stopImpersonation(
       requireUserId(req),
       param(req, 'userId'),
+      token,
       ctx,
     );
     sendOk(res, result);
@@ -142,32 +161,26 @@ export const adminController = {
 
   // ───── CSV exports
   async exportUsersCsv(_req: Request, res: Response) {
-    const csv = await adminService.exportUsersCsv();
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader(
-      'Content-Disposition',
-      `attachment; filename="chathouse-users-${new Date().toISOString().slice(0, 10)}.csv"`,
+    await streamCsvDownload(
+      res,
+      `chathouse-users-${new Date().toISOString().slice(0, 10)}.csv`,
+      adminService.exportUsersCsv(),
     );
-    res.send(csv);
   },
 
   async exportAuditLogCsv(_req: Request, res: Response) {
-    const csv = await adminService.exportAuditLogCsv();
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader(
-      'Content-Disposition',
-      `attachment; filename="chathouse-audit-${new Date().toISOString().slice(0, 10)}.csv"`,
+    await streamCsvDownload(
+      res,
+      `chathouse-audit-${new Date().toISOString().slice(0, 10)}.csv`,
+      adminService.exportAuditLogCsv(),
     );
-    res.send(csv);
   },
 
   async exportReportsCsv(_req: Request, res: Response) {
-    const csv = await adminService.exportReportsCsv();
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader(
-      'Content-Disposition',
-      `attachment; filename="chathouse-reports-${new Date().toISOString().slice(0, 10)}.csv"`,
+    await streamCsvDownload(
+      res,
+      `chathouse-reports-${new Date().toISOString().slice(0, 10)}.csv`,
+      adminService.exportReportsCsv(),
     );
-    res.send(csv);
   },
 };

@@ -10,14 +10,15 @@
     - `notification:new` → invalide toutes les requetes `['notifications']` (toutes les listes all/rooms/social/clubs + le compteur non-lus) → la liste se rafraichit sans polling.
     - `notification:count` → ecrit le total non-lus faisant autorite directement dans la query badge → le badge se met a jour instantanement (creation, mark-one-read, mark-all-read).
   - L'ecran lui-meme consomme ces invalidations via React Query : une nouvelle notif fait re-render la `FlatList` et le compteur d'en-tete (`unreadCount`).
-- **Pre-conditions globales** : session authentifiee valide (token), socket connecte (`getSocket()`), reseau pour `GET /notifications`, `PATCH /notifications/:id/read`, `PATCH /notifications/read-all`, `DELETE /notifications/:id`.
+- **Pre-conditions globales** : session authentifiee valide (token), socket connecte (`getSocket()`), reseau pour `GET /notifications` (envelope compatible `data[]` + `nextCursor`/`hasMore`), `PATCH /notifications/:id/read`, `PATCH /notifications/read-all`, `DELETE /notifications/:id`.
 - **Etats de donnees pertinents** :
   - **Chargement** : `isLoading` → `<Loader fullscreen accessibilityLabel={t('notifications.title')} />`.
   - **Liste vide** : `data.length === 0` → `<EmptyState title={t('notifications.empty')} />` ("Rien a signaler.").
   - **Non lus** : `unreadCount > 0` → sous-titre `t('notifications.unread', { count })` ("{{count}} non lues") + bouton "Tout marquer comme lu" affiches ; chaque ligne non lue a un fond `bg-overlay-white-5` + une pastille `bg-primary`.
   - **Lu** : `accessibilityState={{ selected: true }}` sur la ligne, pas de pastille.
   - **Hors-ligne / latence** : `GET /notifications` echoue ou tarde ; les mutations (mark/delete) sont optimistes uniquement au sens React Query (invalidation `onSuccess`), donc en cas d'echec reseau l'etat revient apres refetch.
-  - **Pull-to-refresh** : `refreshing={isFetching}`, `onRefresh={() => void refetch()}`.
+  - **Pagination** : `onEndReached` appelle `fetchNextPage()` avec le curseur opaque `(createdAt,id)` tant que `hasMore`; les pages sont aplaties sans limite arbitraire.
+  - **Pull-to-refresh** : `refreshing={isRefetching && !isFetchingNextPage}`, `onRefresh={() => void refetch()}`.
 
 > Note : aucun partial dans `partials/` (le dossier n'existe pas). Tous les elements interactifs sont definis dans le fichier principal (en-tete, pills d'onglet, lignes `NotificationRow`, action de swipe `RightActions`).
 
@@ -33,7 +34,7 @@
 | 6   | Onglet « Clubs »                        | Barre d'onglets                    | toggle (filtre)                          | `t('notifications.tabs.clubs')` = "Clubs"                                                                                                                 | Ecran charge                                         | P1       |
 | 7   | Ligne de notification (tap → deep-link) | Corps / cellule de liste           | list-item / navigation / realtime-action | Texte du message `notif.message` (ex. "Jane Doe started following you") ; `accessibilityRole="button"`, `accessibilityState={{ selected: notif.isRead }}` | Au moins 1 notif dans `data`                         | P0       |
 | 8   | Supprimer (swipe vers la gauche)        | Cellule de liste (action de swipe) | destructive / realtime-action            | `accessibilityLabel={t('notifications.delete')}` = "Supprimer" (icone MaterialIcons `delete`)                                                             | Au moins 1 notif ; geste swipe disponible            | P1       |
-| 9   | Pull-to-refresh                         | Corps (FlatList)                   | realtime-action (refetch)                | Pas de label ; geste tirer-pour-rafraichir, `refreshing={isFetching}`                                                                                     | Au moins 1 notif (FlatList rendue, pas l'EmptyState) | P1       |
+| 9   | Pull-to-refresh                         | Corps (FlatList)                   | realtime-action (refetch)                | Pas de label ; geste tirer-pour-rafraichir, `refreshing={isRefetching && !isFetchingNextPage}`                                                            | Au moins 1 notif (FlatList rendue, pas l'EmptyState) | P1       |
 
 ## Cas de test
 
@@ -326,7 +327,7 @@
 - **Etapes** :
   1. Ouvrir Notifications.
   2. Tirer la liste vers le bas pour declencher le rafraichissement.
-- **Resultat attendu** : indicateur de rafraichissement (`refreshing={isFetching}`) ; `refetch()` relance `GET /notifications` avec le filtre courant ; la liste se met a jour (nouvelles notifs en tete, suppressions cote serveur prises en compte).
+- **Resultat attendu** : indicateur de rafraichissement (`refreshing={isRefetching && !isFetchingNextPage}`) ; `refetch()` relance `GET /notifications` avec le filtre courant ; la liste se met a jour (nouvelles notifs en tete, suppressions cote serveur prises en compte).
 - **Critere d'acceptation (OK/KO)** : OK si le spinner apparait et la liste est rechargee ; KO si le geste n'a aucun effet.
 - **Donnees de test** : ajouter une notif cote serveur entre l'ouverture et le pull pour verifier qu'elle apparait.
 - **Duree estimee** : 2 min

@@ -113,7 +113,11 @@ export const ExtSettingsScreen: React.FC = () => {
   if (loading) {
     return (
       <SafeAreaView style={styles.center}>
-        <ActivityIndicator />
+        <ActivityIndicator
+          color={colors.primary}
+          accessibilityRole="progressbar"
+          accessibilityLabel={t('common.loading', 'Loading')}
+        />
       </SafeAreaView>
     );
   }
@@ -213,7 +217,7 @@ const Row: React.FC<{ label: string; value: boolean; onChange: (v: boolean) => v
 }) => (
   <View style={styles.row}>
     <Text style={styles.rowLabel}>{label}</Text>
-    <Switch value={value} onValueChange={onChange} />
+    <Switch accessibilityLabel={label} value={value} onValueChange={onChange} />
   </View>
 );
 

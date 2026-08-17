@@ -1,59 +1,54 @@
-# ─────────────────────────────────────────────────────────────────────────────
-# ChatHouse PostgreSQL backup — compose OVERRIDE.
+# ChatHouse PostgreSQL backup override for the production stack.
 #
-# This file is meant to be COMBINED with the main backend compose so it shares
-# the default network (backend_default) and can reach the DB at host "postgres".
-# Run from the backend/ directory:
+# Always combine this file with docker-compose.prod.yml and the host .env:
 #
-#   docker compose -f docker-compose.yml -f docker/backup/docker-compose.backup.yml up -d backup
+#   docker compose --env-file .env \
+#     -f docker-compose.prod.yml \
+#     -f docker/backup/docker-compose.backup.yml up -d backup
 #
-# To trigger an ad-hoc backup immediately:
-#   docker compose -f docker-compose.yml -f docker/backup/docker-compose.backup.yml run --rm backup pg_backup.sh
+# Ad-hoc backup:
+#   docker compose --env-file .env -f docker-compose.prod.yml \
+#     -f docker/backup/docker-compose.backup.yml run --rm backup pg_backup.sh
 #
-# To restore interactively:
-#   docker compose -f docker-compose.yml -f docker/backup/docker-compose.backup.yml run --rm backup pg_restore.sh
-# ─────────────────────────────────────────────────────────────────────────────
-version: '3.8'
+# Restore drill (default restores into a temporary DB, validates it, then drops):
+# Pull RESTORE_CANDIDATE_IMAGE by digest first, then mount the Docker socket only
+# for this ad-hoc command (never on the long-running backup service):
+#   docker compose --env-file .env -f docker-compose.prod.yml \
+#     -f docker/backup/docker-compose.backup.yml run --rm \
+#     -v /var/run/docker.sock:/var/run/docker.sock backup pg_restore.sh
 
 services:
   backup:
     build:
-      # Context is the backend/ directory (relative to this override's invocation
-      # from backend/), so the Dockerfile can COPY scripts/backup/* .
       context: .
       dockerfile: docker/backup/Dockerfile
+    image: chathouse/postgres-backup:1.0.0
     container_name: chathouse-backup
     restart: unless-stopped
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     environment:
-      # ── PostgreSQL connection ──────────────────────────────────────────────
-      # Reaches the postgres service over the shared default network on its
-      # INTERNAL port 5432 (the host 5433 mapping is irrelevant inside Docker).
-      POSTGRES_HOST: ${POSTGRES_HOST:-postgres}
-      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
-      POSTGRES_DB: ${POSTGRES_DB:-chathouse}
-      POSTGRES_USER: ${POSTGRES_USER:-chathouse}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-chathouse}
-      # ── Backup behaviour ───────────────────────────────────────────────────
-      # Cron schedule for the recurring dump (default: 02:00 every day).
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
+      POSTGRES_ADMIN_DB: ${POSTGRES_ADMIN_DB:-postgres}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       BACKUP_CRON_SCHEDULE: ${BACKUP_CRON_SCHEDULE:-0 2 * * *}
-      # Local retention in days (find -mtime +N -delete).
       BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-7}
-      # Where dumps are written inside the container (mounted below).
       BACKUP_DIR: /backups
-      # Set true to run one backup at container start (useful for verification).
       BACKUP_RUN_ON_START: ${BACKUP_RUN_ON_START:-false}
-      # ── Optional S3 offsite copy ───────────────────────────────────────────
-      # Leave S3_BACKUP_BUCKET empty to keep backups local-only.
+      RESTORE_MODE: ${RESTORE_MODE:-verify}
+      RESTORE_ALLOW_REPLACE: ${RESTORE_ALLOW_REPLACE:-false}
+      RESTORE_CANDIDATE_IMAGE: ${RESTORE_CANDIDATE_IMAGE:-}
+      RESTORE_CANDIDATE_DOCKER_NETWORK: ${RESTORE_CANDIDATE_DOCKER_NETWORK:-backend_default}
       S3_BACKUP_BUCKET: ${S3_BACKUP_BUCKET:-}
       S3_BACKUP_PREFIX: ${S3_BACKUP_PREFIX:-chathouse}
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
       AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-us-east-1}
     volumes:
-      # Persist dumps on a named volume. Swap for a bind mount (./backups:/backups)
-      # if you want the dumps visible on the host filesystem.
       - backup-data:/backups
 
 volumes:

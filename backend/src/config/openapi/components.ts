@@ -37,7 +37,7 @@ export const registerComponents = (registry: OpenAPIRegistry) => {
     'UserPublic',
     z.object({
       id: z.string(),
-      username: z.string(),
+      username: z.string().nullable(),
       displayName: z.string().nullable(),
       avatarUrl: z.string().url().nullable(),
       bio: z.string().nullable(),
@@ -46,16 +46,54 @@ export const registerComponents = (registry: OpenAPIRegistry) => {
     }),
   );
 
-  const TokenPair = registry.register(
-    'TokenPair',
+  const AccountState = registry.register('AccountState', z.enum(['ACTIVE', 'PENDING_DELETION']));
+  const SessionScope = registry.register('SessionScope', z.enum(['active', 'account_recovery']));
+
+  const AuthUser = registry.register(
+    'AuthUser',
+    z
+      .object({
+        id: z.string(),
+        username: z.string(),
+        email: z.string().email().nullable().optional(),
+        phoneNumber: z.string().nullable().optional(),
+        displayName: z.string().nullable(),
+        avatarUrl: z.string().url().nullable(),
+        bio: z.string().nullable(),
+        accountState: AccountState,
+        deletedAt: z.string().datetime().nullable(),
+        permanentDeletionAt: z.string().datetime().nullable(),
+      })
+      .passthrough(),
+  );
+
+  const SessionCredentials = registry.register(
+    'SessionCredentials',
     z.object({
-      user: UserPublic.extend({ email: z.string().email() }),
       accessToken: z.string(),
       refreshToken: z.string(),
+      scope: SessionScope,
     }),
   );
 
-  return { ErrorBody, SuccessVoid, UserPublic, TokenPair };
+  const AuthSession = registry.register(
+    'AuthSession',
+    SessionCredentials.extend({ expiresAt: z.string().datetime() }),
+  );
+
+  const TokenPair = registry.register('TokenPair', SessionCredentials.extend({ user: AuthUser }));
+
+  return {
+    ErrorBody,
+    SuccessVoid,
+    UserPublic,
+    AccountState,
+    SessionScope,
+    AuthUser,
+    SessionCredentials,
+    AuthSession,
+    TokenPair,
+  };
 };
 
 export type OpenApiComponents = ReturnType<typeof registerComponents>;

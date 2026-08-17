@@ -2,8 +2,8 @@ import { apiClient } from '../../../shared/services/api/apiClient';
 import type { Envelope } from '../../../shared/types/api';
 import type { FollowerOnMap } from '../../../shared/types/domain';
 
-// Shape returned by GET /maps/followers (backend getFollowingOnMap select).
-interface RawFollowerOnMap {
+// Shape returned by GET /maps/users (all opted-in, non-blocked visible users).
+export interface RawMapUser {
   id: string;
   username: string | null;
   displayName: string | null;
@@ -15,7 +15,7 @@ interface RawFollowerOnMap {
   currentRoom: { id: string; title: string; isLive: boolean } | null;
 }
 
-const toFollowerOnMap = (r: RawFollowerOnMap): FollowerOnMap | null => {
+export const toMapUser = (r: RawMapUser): FollowerOnMap | null => {
   // The backend already filters to non-null coords, but guard so the domain
   // type stays honest (GeoPoint requires numbers).
   if (r.latitude == null || r.longitude == null) return null;
@@ -48,12 +48,11 @@ const toFollowerOnMap = (r: RawFollowerOnMap): FollowerOnMap | null => {
 
 export const mapsService = {
   /**
-   * Initial roster of the people the caller follows who are on the map
-   * (visible + online + recently located). The socket only streams coordinate
-   * deltas afterwards, so this is the only source of full follower metadata.
+   * Initial roster of all opted-in, non-blocked visible users who are online
+   * and recently located. Full socket snapshots keep it current afterwards.
    */
   async followersOnMap(): Promise<FollowerOnMap[]> {
-    const res = await apiClient.get<Envelope<RawFollowerOnMap[]>>('/maps/followers');
-    return res.data.data.map(toFollowerOnMap).filter((f): f is FollowerOnMap => f !== null);
+    const res = await apiClient.get<Envelope<RawMapUser[]>>('/maps/users');
+    return res.data.data.map(toMapUser).filter((f): f is FollowerOnMap => f !== null);
   },
 };

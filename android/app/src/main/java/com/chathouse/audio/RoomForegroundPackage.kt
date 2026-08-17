@@ -10,6 +10,7 @@ import com.facebook.react.uimanager.ViewManager
  * still bridged under the New Architecture, so this works without a TurboModule
  * spec. Added to PackageList in MainApplication.getPackages().
  */
+@Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
 class RoomForegroundPackage : ReactPackage {
   override fun createNativeModules(reactContext: ReactApplicationContext): List<NativeModule> =
     listOf(RoomForegroundModule(reactContext))

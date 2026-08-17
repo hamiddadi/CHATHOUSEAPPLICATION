@@ -1,4 +1,4 @@
-import { createHmac } from 'node:crypto';
+import { createHmac, randomUUID } from 'node:crypto';
 import { redis } from '../../../config/redis';
 import { prisma } from '../../../config/database';
 import { env } from '../../../config/env';
@@ -28,6 +28,8 @@ import { notificationsService } from '../../../modules/notifications/notificatio
 
 const DEFAULT_QUOTA = 2;
 const HISTORY_CAP = 100;
+const PENDING_INVITE_TTL_S = 30 * 24 * 3600;
+const HISTORY_TTL_S = 365 * 24 * 3600;
 
 const keyCount = (userId: string) => `ext:nominator:count:${userId}`;
 const keyHistory = (userId: string) => `ext:nominator:history:${userId}`;
@@ -69,6 +71,26 @@ const parseRecord = (s: string): InvitationRecord | null => {
   }
 };
 
+const GRANT_SCRIPT = `
+local current = tonumber(redis.call('GET', KEYS[1]) or '0')
+local next = current + tonumber(ARGV[1])
+if next < 0 then next = 0 end
+redis.call('SET', KEYS[1], tostring(next))
+return next
+`;
+
+const CLAIM_INVITE_SCRIPT = `
+if redis.call('EXISTS', KEYS[2]) == 1 then return -1 end
+local quota = tonumber(redis.call('GET', KEYS[1]) or '0')
+if quota <= 0 then return -2 end
+local remaining = redis.call('DECR', KEYS[1])
+redis.call('SET', KEYS[2], ARGV[1], 'EX', tonumber(ARGV[3]))
+redis.call('LPUSH', KEYS[3], ARGV[2])
+redis.call('LTRIM', KEYS[3], 0, tonumber(ARGV[4]) - 1)
+redis.call('EXPIRE', KEYS[3], tonumber(ARGV[5]))
+return remaining
+`;
+
 export const nominatorService = {
   /** Initialise the counter once (atomic SET NX) so concurrent first reads
    * can't both seed it, then return the current value. */
@@ -86,14 +108,13 @@ export const nominatorService = {
 
   async grant(userId: string, n: number): Promise<number> {
     await this.ensureQuota(userId);
-    // Atomic increment avoids a read-modify-write race with concurrent
-    // grant()/invite() calls. Clamp to >= 0 afterwards if we overshot down.
-    const next = await redis.incrBy(keyCount(userId), n);
-    if (next < 0) {
-      await redis.set(keyCount(userId), '0');
-      return 0;
-    }
-    return next;
+    // Clamp and increment in one Lua operation. A separate INCR then SET(0)
+    // could overwrite a concurrent invitation decrement.
+    const next = await redis.eval(GRANT_SCRIPT, {
+      keys: [keyCount(userId)],
+      arguments: [String(n)],
+    });
+    return Number(next);
   },
 
   async history(userId: string, limit = 50): Promise<InvitationRecord[]> {
@@ -112,24 +133,8 @@ export const nominatorService = {
     }
     await this.ensureQuota(inviterId);
 
-    // De-dup — if the phone is already in any inviter's `invited` map, refuse
-    const existing = await redis.get(keyInvited(cleanedPhone));
-    if (existing) {
-      throw extError('CLUB_REQ_DUPLICATE', 'Phone already invited');
-    }
-
-    // Atomically consume one invitation. A non-atomic read-modify-write let
-    // two concurrent /invite calls both read the same remaining value and
-    // each write remaining-1, over-spending the quota. DECR is atomic; if it
-    // drops below zero we compensate (INCR) and reject.
-    const newCount = await redis.decr(keyCount(inviterId));
-    if (newCount < 0) {
-      await redis.incr(keyCount(inviterId));
-      throw extError('PAY_INVALID', 'No invitations remaining');
-    }
-
     const record: InvitationRecord = {
-      id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+      id: randomUUID(),
       invitedPhone: maskPhone(cleanedPhone), // masked — no raw PII at rest
       invitedPhoneHmac: phoneHmac(cleanedPhone),
       invitedName,
@@ -137,13 +142,28 @@ export const nominatorService = {
       createdAt: new Date().toISOString(),
     };
 
-    await Promise.all([
-      redis.lPush(keyHistory(inviterId), JSON.stringify(record)),
-      redis.lTrim(keyHistory(inviterId), 0, HISTORY_CAP - 1),
-      redis.set(keyInvited(cleanedPhone), inviterId),
-    ]);
+    // Claim the phone, consume quota and append history atomically. This closes
+    // both the duplicate-phone race across inviters and partial-write states.
+    const claim = Number(
+      await redis.eval(CLAIM_INVITE_SCRIPT, {
+        keys: [keyCount(inviterId), keyInvited(cleanedPhone), keyHistory(inviterId)],
+        arguments: [
+          inviterId,
+          JSON.stringify(record),
+          String(PENDING_INVITE_TTL_S),
+          String(HISTORY_CAP),
+          String(HISTORY_TTL_S),
+        ],
+      }),
+    );
+    if (claim === -1) {
+      throw extError('CLUB_REQ_DUPLICATE', 'Phone already invited');
+    }
+    if (claim === -2) {
+      throw extError('PAY_INVALID', 'No invitations remaining');
+    }
 
-    return { remaining: newCount, record };
+    return { remaining: claim, record };
   },
 
   /**
@@ -156,7 +176,8 @@ export const nominatorService = {
     phoneNumber: string,
   ): Promise<{ inviterId: string } | null> {
     const cleaned = normalizePhone(phoneNumber);
-    const inviterId = await redis.get(keyInvited(cleaned));
+    // One signup may consume a pending phone invitation only once.
+    const inviterId = await redis.getDel(keyInvited(cleaned));
     if (!inviterId) return null;
 
     // Patch the inviter's most recent matching record (match on the HMAC,
@@ -190,6 +211,7 @@ export const nominatorService = {
         data: { kind: 'nominator_accepted', inviteeId: newUserId },
         targetId: newUserId,
         targetType: 'user',
+        dedupeKey: `nominator-accepted:${inviterId}:${newUserId}`,
       });
     } catch {
       /* best-effort */

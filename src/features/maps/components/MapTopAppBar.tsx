@@ -13,7 +13,7 @@ export const MapTopAppBar: React.FC = () => (
   <View className="flex-row items-center px-xxl py-lg">
     <View className="flex-row items-center gap-sm">
       <MaterialIcons name="graphic-eq" size={LOGO_ICON_SIZE} color={BRAND_NAVY} />
-      <Text style={styles.titleText}>Chathouse</Text>
+      <Text style={styles.titleText}>ChatHouse</Text>
     </View>
   </View>
 );

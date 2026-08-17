@@ -1,5 +1,6 @@
 import request from 'supertest';
 import type { Express } from 'express';
+import { encodeGroupCursor } from '../src/modules/groups/groups.cursor';
 
 process.env.DATABASE_URL =
   process.env.DATABASE_URL ??
@@ -19,18 +20,33 @@ const register = async (app: Express) => {
   const u = `g_${rand()}`;
   const res = await request(app)
     .post('/api/auth/register')
-    .send({ username: u, email: `${u}@test.local`, password: 'test-password-123' });
-  return { id: res.body.data.user.id as string, token: res.body.data.accessToken as string };
+    .send({
+      username: u,
+      email: `${u}@test.local`,
+      password: 'test-password-123',
+    });
+  return {
+    id: res.body.data.user.id as string,
+    token: res.body.data.accessToken as string,
+  };
 };
 
 const block = (app: Express, token: string, targetId: string) =>
   request(app).post(`/api/users/${targetId}/block`).set('Authorization', `Bearer ${token}`);
 
-const createGroup = (app: Express, token: string, memberIds: string[], title?: string) =>
+const follow = (app: Express, token: string, targetId: string) =>
+  request(app).post(`/api/follow/${targetId}`).set('Authorization', `Bearer ${token}`);
+
+const createGroupRaw = (app: Express, token: string, memberIds: string[], title?: string) =>
   request(app)
     .post('/api/groups')
     .set('Authorization', `Bearer ${token}`)
     .send({ memberIds, ...(title !== undefined ? { title } : {}) });
+
+const createGroup = async (app: Express, token: string, memberIds: string[], title?: string) => {
+  await Promise.all(memberIds.map(targetId => follow(app, token, targetId)));
+  return createGroupRaw(app, token, memberIds, title);
+};
 
 describe('Groups — block gate, ownership transfer, rename-to-null', () => {
   let app: Express;
@@ -99,7 +115,7 @@ describe('Groups — block gate, ownership transfer, rename-to-null', () => {
     expect(groups.body.data).toHaveLength(0);
   });
 
-  it('create: unrelated users can still open a group (201)', async () => {
+  it('create: accepted follows can open a group (201)', async () => {
     const alice = await register(app);
     const bob = await register(app);
     const carol = await register(app);
@@ -109,6 +125,106 @@ describe('Groups — block gate, ownership transfer, rename-to-null', () => {
     expect(res.status).toBe(201);
     expect(res.body.data.members).toHaveLength(3);
     expect(res.body.data.title).toBe('Trip planning');
+  });
+
+  it('lists every equal-timestamp group through a cursor, even if the boundary is deleted', async () => {
+    const alice = await register(app);
+    const bob = await register(app);
+    const carol = await register(app);
+    createdIds.push(alice.id, bob.id, carol.id);
+    const prefix = `group_page_${rand()}`;
+    const groupIds = ['a', 'b', 'c', 'd', 'e'].map(suffix => `${prefix}_${suffix}`);
+    const timestamp = new Date('2026-08-13T12:00:00.456Z');
+
+    await prisma.$transaction(async tx => {
+      await tx.conversation.createMany({
+        data: groupIds.map(id => ({
+          id,
+          ownerId: alice.id,
+          title: id,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        })),
+      });
+      await tx.conversationMember.createMany({
+        data: groupIds.flatMap(conversationId =>
+          [alice.id, bob.id, carol.id].map(userId => ({ conversationId, userId })),
+        ),
+      });
+    });
+
+    const legacy = await request(app)
+      .get('/api/groups')
+      .query({ limit: 2 })
+      .set('Authorization', `Bearer ${alice.token}`);
+    expect(legacy.status).toBe(200);
+    expect(Array.isArray(legacy.body.data)).toBe(true);
+    expect(legacy.body.data).toHaveLength(2);
+
+    const seen: string[] = [];
+    let cursor: string | undefined;
+    let pageCount = 0;
+    do {
+      const page = await request(app)
+        .get('/api/groups')
+        .query({ limit: 2, paginated: 'true', ...(cursor ? { cursor } : {}) })
+        .set('Authorization', `Bearer ${alice.token}`);
+
+      expect(page.status).toBe(200);
+      expect(Array.isArray(page.body.data.data)).toBe(true);
+      seen.push(...page.body.data.data.map((group: { id: string }) => group.id));
+      cursor = page.body.data.nextCursor ?? undefined;
+      pageCount += 1;
+
+      if (pageCount === 1) {
+        expect(cursor).toMatch(/^v1\./);
+        const boundaryId = seen[seen.length - 1];
+        if (!boundaryId) throw new Error('Expected a first-page boundary group');
+        await prisma.conversation.delete({ where: { id: boundaryId } });
+      }
+      expect(pageCount).toBeLessThan(10);
+    } while (cursor);
+
+    expect(new Set(seen)).toEqual(new Set(groupIds));
+    expect(seen).toHaveLength(groupIds.length);
+  });
+
+  it('rejects invalid group-list pagination queries', async () => {
+    const alice = await register(app);
+    createdIds.push(alice.id);
+
+    for (const query of [
+      { paginated: 'true', cursor: 'not-a-cursor' },
+      { cursor: encodeGroupCursor(new Date('2026-08-13T12:00:00.000Z'), 'group-boundary') },
+      { paginated: 'true', limit: 0 },
+      { paginated: 'true', limit: 101 },
+    ]) {
+      const response = await request(app)
+        .get('/api/groups')
+        .query(query)
+        .set('Authorization', `Bearer ${alice.token}`);
+      expect(response.status).toBe(400);
+      expect(response.body.error.code).toBe('VALIDATION_001');
+    }
+  });
+
+  it('create: a PENDING private-account request is not enough (GROUP_007)', async () => {
+    const alice = await register(app);
+    const bob = await register(app);
+    const carol = await register(app);
+    createdIds.push(alice.id, bob.id, carol.id);
+    await prisma.user.update({
+      where: { id: bob.id },
+      data: { isPrivateAccount: true },
+    });
+
+    const pending = await follow(app, alice.token, bob.id);
+    expect(pending.body.data.requested).toBe(true);
+    expect((await follow(app, alice.token, carol.id)).status).toBe(200);
+
+    const res = await createGroupRaw(app, alice.token, [bob.id, carol.id]);
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe('GROUP_007');
   });
 
   // ── Fix 1: block gate on send ────────────────────────────────────────────
@@ -158,6 +274,7 @@ describe('Groups — block gate, ownership transfer, rename-to-null', () => {
     const group = await createGroup(app, alice.token, [bob.id, carol.id]);
     const gid = group.body.data.id as string;
 
+    expect((await follow(app, alice.token, dave.id)).status).toBe(200);
     // dave has blocked bob (an existing member). Adding dave must be refused.
     await block(app, dave.token, bob.id);
 
@@ -186,6 +303,7 @@ describe('Groups — block gate, ownership transfer, rename-to-null', () => {
     const group = await createGroup(app, alice.token, [bob.id, carol.id]);
     const gid = group.body.data.id as string;
 
+    await Promise.all([follow(app, alice.token, dave.id), follow(app, alice.token, eve.id)]);
     // D blocks E. They are BOTH new members in the same batch — the old check
     // only compared each new member against existing ones, so this pair passed
     // and both were inserted.
@@ -217,6 +335,7 @@ describe('Groups — block gate, ownership transfer, rename-to-null', () => {
     const group = await createGroup(app, alice.token, [bob.id, carol.id]);
     const gid = group.body.data.id as string;
 
+    expect((await follow(app, alice.token, dave.id)).status).toBe(200);
     const res = await request(app)
       .post(`/api/groups/${gid}/members`)
       .set('Authorization', `Bearer ${alice.token}`)
@@ -297,5 +416,48 @@ describe('Groups — block gate, ownership transfer, rename-to-null', () => {
       .send({ title: 'Renamed' });
     expect(renamed.status).toBe(200);
     expect(renamed.body.data.title).toBe('Renamed');
+  });
+
+  it('keeps every equal-timestamp group message across a composite-cursor boundary', async () => {
+    const alice = await register(app);
+    const bob = await register(app);
+    const carol = await register(app);
+    createdIds.push(alice.id, bob.id, carol.id);
+    const group = await createGroup(app, alice.token, [bob.id, carol.id]);
+    const groupId = group.body.data.id as string;
+    const timestamp = new Date('2026-08-10T12:00:00.456Z');
+    const prefix = `group_tie_${rand()}`;
+    const ids = ['a', 'b', 'c', 'd'].map(suffix => `${prefix}_${suffix}`);
+    await prisma.groupMessage.createMany({
+      data: ids.map((id, index) => ({
+        id,
+        conversationId: groupId,
+        senderId: alice.id,
+        content: `tied group ${index}`,
+        createdAt: timestamp,
+      })),
+    });
+
+    const seen: string[] = [];
+    let before: string | undefined;
+    let pageCount = 0;
+
+    do {
+      const page = await request(app)
+        .get(`/api/groups/${groupId}/messages`)
+        .query({ limit: 2, paginated: 'true', ...(before ? { before } : {}) })
+        .set('Authorization', `Bearer ${alice.token}`);
+
+      expect(page.status).toBe(200);
+      if (pageCount === 0) expect(page.body.data.nextCursor).toMatch(/^v1\./);
+      seen.push(...page.body.data.data.map((message: { id: string }) => message.id));
+      before = page.body.data.nextCursor ?? undefined;
+      pageCount += 1;
+      expect(pageCount).toBeLessThan(10);
+    } while (before);
+
+    const tiedSeen = seen.filter(id => ids.includes(id));
+    expect(new Set(tiedSeen)).toEqual(new Set(ids));
+    expect(tiedSeen).toHaveLength(ids.length);
   });
 });

@@ -13,6 +13,7 @@ export const profileKeys = {
   detail: (id: string) => [...profileKeys.all, 'detail', id] as const,
   followers: (id: string) => [...profileKeys.all, 'followers', id] as const,
   following: (id: string) => [...profileKeys.all, 'following', id] as const,
+  followRequests: () => [...profileKeys.all, 'follow-requests'] as const,
   search: (q: string) => [...profileKeys.all, 'search', q] as const,
   viewers: () => [...profileKeys.all, 'viewers'] as const,
 };
@@ -82,8 +83,43 @@ export const useUnfollow = () => {
   });
 };
 
-// The follow-list endpoints cap each page at 50 (follow.controller) and drive
-// the next page off the last row's createdAt cursor. `useInfiniteQuery` walks
+export const useFollowRequests = () =>
+  useInfiniteQuery<FollowPage, Error, FollowPage[], readonly string[], string | undefined>({
+    queryKey: profileKeys.followRequests(),
+    queryFn: ({ pageParam }) => profileService.followRequests(pageParam),
+    initialPageParam: undefined,
+    getNextPageParam: lastPage =>
+      lastPage.hasMore ? (lastPage.nextCursor ?? undefined) : undefined,
+    select: result => result.pages,
+  });
+
+const invalidateFollowRequestSurfaces = (qc: ReturnType<typeof useQueryClient>) => {
+  // Accept/reject changes the inbox, profile counters/follow state and removes
+  // the corresponding FOLLOW_REQUEST notification in the same backend tx.
+  void qc.invalidateQueries({ queryKey: profileKeys.all });
+  void qc.invalidateQueries({ queryKey: ['notifications'] });
+};
+
+export const useAcceptFollowRequest = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (userId: string) => profileService.acceptFollowRequest(userId),
+    // Reconcile even when the client receives a late/ambiguous response after
+    // the server committed the decision.
+    onSettled: () => invalidateFollowRequestSurfaces(qc),
+  });
+};
+
+export const useRejectFollowRequest = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (userId: string) => profileService.rejectFollowRequest(userId),
+    onSettled: () => invalidateFollowRequestSurfaces(qc),
+  });
+};
+
+// The follow-list endpoints cap each page at 50 (follow.controller) and return
+// an opaque total-order cursor. `useInfiniteQuery` walks
 // those pages so the list isn't silently truncated at 50; screens flatten
 // `data.pages` and call `fetchNextPage` on scroll. `initialPageParam` is
 // `undefined` (first page → no cursor); `getNextPageParam` stops when the
@@ -93,7 +129,8 @@ export const useFollowers = (userId: string) =>
     queryKey: profileKeys.followers(userId),
     queryFn: ({ pageParam }) => profileService.followers(userId, pageParam),
     initialPageParam: undefined,
-    getNextPageParam: lastPage => lastPage.nextCursor ?? undefined,
+    getNextPageParam: lastPage =>
+      lastPage.hasMore ? (lastPage.nextCursor ?? undefined) : undefined,
     enabled: userId.length > 0,
     select: result => result.pages,
   });
@@ -103,7 +140,8 @@ export const useFollowing = (userId: string) =>
     queryKey: profileKeys.following(userId),
     queryFn: ({ pageParam }) => profileService.following(userId, pageParam),
     initialPageParam: undefined,
-    getNextPageParam: lastPage => lastPage.nextCursor ?? undefined,
+    getNextPageParam: lastPage =>
+      lastPage.hasMore ? (lastPage.nextCursor ?? undefined) : undefined,
     enabled: userId.length > 0,
     select: result => result.pages,
   });

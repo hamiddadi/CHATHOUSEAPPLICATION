@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { getSocket } from '../../../shared/services/realtime/socketClient';
 import { useAuthStore } from '../../auth/store/authStore';
+import { profileKeys } from '../../profile/hooks/useProfile';
 import { notificationKeys } from './useNotifications';
 
 /**
@@ -34,8 +35,11 @@ export const useNotificationSocket = (): void => {
 
       // A fresh notification arrived — refetch every cached notification list
       // variant (the `.all` prefix also covers the unread count query).
-      const onNew = (): void => {
+      const onNew = (payload?: { type?: string }): void => {
         void qc.invalidateQueries({ queryKey: notificationKeys.all });
+        if (payload?.type === 'FOLLOW_REQUEST') {
+          void qc.invalidateQueries({ queryKey: profileKeys.followRequests() });
+        }
       };
 
       // Authoritative unread total — write it straight into the badge query so

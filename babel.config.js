@@ -1,5 +1,12 @@
 module.exports = function (api) {
-  api.cache(true);
+  // Cache the compiled config, but key the cache on ENVFILE so a release bundle
+  // built with `ENVFILE=.env.production` never reuses the cached dev (.env) config.
+  api.cache.using(
+    () => `${process.env.NODE_ENV || 'development'}:${process.env.ENVFILE || 'default'}`,
+  );
+  // File react-native-dotenv inlines for `@env`. Default `.env` (dev, unchanged);
+  // a release build sets ENVFILE=.env.production to inline the public prod hosts.
+  const envPath = process.env.NODE_ENV === 'test' ? '.env.test' : process.env.ENVFILE || '.env';
   return {
     presets: [
       ['module:@react-native/babel-preset', { jsxImportSource: 'nativewind' }],
@@ -37,7 +44,7 @@ module.exports = function (api) {
         'module:react-native-dotenv',
         {
           moduleName: '@env',
-          path: '.env',
+          path: envPath,
           allowUndefined: true,
           safe: false,
         },

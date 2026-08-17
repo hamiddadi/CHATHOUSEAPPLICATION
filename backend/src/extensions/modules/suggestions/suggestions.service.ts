@@ -29,7 +29,7 @@ export const suggestionsService = {
     const [following, blocks] = await Promise.all([
       prisma.follow.findMany({
         where: { followerId: userId },
-        select: { followingId: true },
+        select: { followingId: true, status: true },
       }),
       prisma.block.findMany({
         where: { OR: [{ blockerId: userId }, { blockedId: userId }] },
@@ -37,14 +37,19 @@ export const suggestionsService = {
       }),
     ]);
 
-    const followingIds = following.map(f => f.followingId);
+    const followingIds = following.filter(f => f.status === 'ACCEPTED').map(f => f.followingId);
+    const existingRelationshipIds = following.map(f => f.followingId);
     const blockedIds = new Set<string>([
       ...blocks.map(b => b.blockerId),
       ...blocks.map(b => b.blockedId),
     ]);
     blockedIds.delete(userId);
 
-    const excludeIds = new Set<string>([userId, ...followingIds, ...Array.from(blockedIds)]);
+    const excludeIds = new Set<string>([
+      userId,
+      ...existingRelationshipIds,
+      ...Array.from(blockedIds),
+    ]);
     const excludeIdsArr = Array.from(excludeIds);
 
     // Candidate pool: interest overlap first, then friends-of-friends, then trending.
@@ -66,7 +71,12 @@ export const suggestionsService = {
           where: {
             id: { notIn: excludeIdsArr },
             deletedAt: null,
-            followers: { some: { followerId: { in: followingIds } } },
+            followers: {
+              some: {
+                followerId: { in: followingIds },
+                status: 'ACCEPTED',
+              },
+            },
           },
           select: PUBLIC_USER,
           orderBy: { followerCount: 'desc' },

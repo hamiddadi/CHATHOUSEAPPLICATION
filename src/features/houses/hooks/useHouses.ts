@@ -7,37 +7,77 @@ import {
   type UpdateHouseInput,
 } from '../services/houseService';
 import type { House, HouseSummary } from '../../../shared/types/domain';
+import { searchService } from '../../search/services/searchService';
+import { createIdempotencyKey } from '../../../shared/utils/idempotency';
+import { retryTransientMutation } from '../../../shared/services/api/retryPolicy';
 
 export const houseKeys = {
   all: ['houses'] as const,
   list: (filter: 'mine' | 'discover') => [...houseKeys.all, 'list', filter] as const,
+  search: (query: string) => [...houseKeys.all, 'search', query] as const,
   detail: (id: string) => [...houseKeys.all, 'detail', id] as const,
+  invitation: (id: string) => [...houseKeys.all, 'invitation', id] as const,
   rooms: (id: string, filter: 'live' | 'upcoming' | 'past') =>
     [...houseKeys.all, 'rooms', id, filter] as const,
   inviteLink: (id: string) => [...houseKeys.all, 'inviteLink', id] as const,
 };
 
-export const useHouses = (filter: 'mine' | 'discover' = 'mine') =>
+export const useHouses = (filter: 'mine' | 'discover' = 'mine', enabled = true) =>
   useQuery<HouseSummary[]>({
     queryKey: houseKeys.list(filter),
     queryFn: () => houseService.list(filter),
+    enabled,
   });
 
-export const useHouse = (houseId: string) =>
+/**
+ * Search the discoverable club catalogue. The backend already excludes PRIVATE
+ * clubs; the defensive client-side filter prevents an accidentally broadened
+ * API response or stale cache entry from exposing one in Discover.
+ *
+ * Debouncing belongs to the caller so the query key always represents the
+ * exact request that was sent. `enabled` also keeps this request dormant while
+ * the My Houses tab is active or the query is blank.
+ */
+export const useHouseSearch = (query: string, enabled = true) =>
+  useQuery<HouseSummary[]>({
+    queryKey: houseKeys.search(query),
+    queryFn: async () => {
+      const clubs = await searchService.clubs(query);
+      return clubs.filter(club => club.privacy !== 'private');
+    },
+    enabled: enabled && query.trim().length > 0,
+    staleTime: 10_000,
+  });
+
+export const useHouse = (houseId: string, inviteToken?: string) =>
   useQuery<House>({
-    queryKey: houseKeys.detail(houseId),
-    queryFn: () => houseService.get(houseId),
+    // Never place the bearer token in the query key/devtools cache.
+    queryKey: inviteToken ? houseKeys.invitation(houseId) : houseKeys.detail(houseId),
+    queryFn: () => houseService.get(houseId, inviteToken),
     enabled: houseId.length > 0,
   });
 
 export const useCreateHouse = () => {
   const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (input: CreateHouseInput) => houseService.create(input),
+  const mutation = useMutation({
+    mutationFn: ({ input, idempotencyKey }: { input: CreateHouseInput; idempotencyKey: string }) =>
+      houseService.create(input, idempotencyKey),
+    retry: retryTransientMutation,
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: houseKeys.all });
     },
   });
+  const withKey = (input: CreateHouseInput) => ({
+    input,
+    idempotencyKey: createIdempotencyKey(),
+  });
+  return {
+    ...mutation,
+    mutate: (input: CreateHouseInput, options?: Parameters<typeof mutation.mutate>[1]) =>
+      mutation.mutate(withKey(input), options),
+    mutateAsync: (input: CreateHouseInput, options?: Parameters<typeof mutation.mutateAsync>[1]) =>
+      mutation.mutateAsync(withKey(input), options),
+  };
 };
 
 export const useUpdateHouse = () => {

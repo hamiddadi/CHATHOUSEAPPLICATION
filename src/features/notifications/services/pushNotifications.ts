@@ -1,5 +1,5 @@
 import notifee, { AndroidImportance } from '@notifee/react-native';
-import messaging from '@react-native-firebase/messaging';
+import { getMessaging, onMessage } from '@react-native-firebase/messaging';
 
 /**
  * Foreground notification display (de-Expo: replaces expo-notifications'
@@ -9,6 +9,7 @@ import messaging from '@react-native-firebase/messaging';
  */
 
 export const ANDROID_CHANNEL_ID = 'default';
+const firebaseMessaging = getMessaging();
 
 // Android 8+ requires a channel before a notification can show. Created once
 // and memoised; notifee.createChannel is idempotent on the same id.
@@ -29,14 +30,18 @@ const ensureChannel = (): Promise<string> => {
  */
 export const setupForegroundPush = (): (() => void) => {
   void ensureChannel();
-  return messaging().onMessage(async remoteMessage => {
+  return onMessage(firebaseMessaging, async remoteMessage => {
     const channelId = await ensureChannel();
     const { notification, data } = remoteMessage;
     await notifee.displayNotification({
       title: notification?.title,
       body: notification?.body,
       data,
-      android: { channelId, pressAction: { id: 'default' } },
+      android: {
+        channelId,
+        smallIcon: 'ic_stat_audio',
+        pressAction: { id: 'default' },
+      },
     });
   });
 };

@@ -18,7 +18,8 @@ import { useChatSocket } from '../../hooks/useChatSocket';
 import { useGroups } from '../../hooks/useGroups';
 import { useGroupSocket } from '../../hooks/useGroupSocket';
 import type { GroupConversation } from '../../services/groupService';
-import { OnlineUsersList } from '../../components/OnlineUsersList';
+import { OnlineUsersList, type OnlineUser } from '../../components/OnlineUsersList';
+import { usePresenceAvailable } from '../../../extensions/hooks/usePresenceAvailable';
 
 type Nav = NativeStackNavigationProp<MessageStackParamList, 'MessagesList'>;
 
@@ -76,10 +77,10 @@ const ConvoRow: React.FC<ConvoRowProps> = memo(({ convo, myId, onPress }) => {
       <Avatar uri={other.avatarUrl ?? undefined} name={other.displayName} size="lg" />
       <View className="flex-1">
         <View className="flex-row items-center justify-between">
-          <Text className="text-md font-body-bold text-ink" numberOfLines={1}>
+          <Text className="flex-1 mr-sm text-md font-body-bold text-ink" numberOfLines={1}>
             {other.displayName}
           </Text>
-          <Text className="text-xxs font-body text-ink-muted">{timeLabel}</Text>
+          <Text className="shrink-0 text-xxs font-body text-ink-muted">{timeLabel}</Text>
         </View>
         <View className="flex-row items-center justify-between mt-xxs">
           <Text
@@ -141,10 +142,10 @@ const GroupRow: React.FC<GroupRowProps> = memo(({ group, myId, onPress }) => {
       </View>
       <View className="flex-1">
         <View className="flex-row items-center justify-between">
-          <Text className="text-md font-body-bold text-ink" numberOfLines={1}>
+          <Text className="flex-1 mr-sm text-md font-body-bold text-ink" numberOfLines={1}>
             {title}
           </Text>
-          <Text className="text-xxs font-body text-ink-muted">{timeLabel}</Text>
+          <Text className="shrink-0 text-xxs font-body text-ink-muted">{timeLabel}</Text>
         </View>
         <View className="flex-row items-center justify-between mt-xxs">
           <Text
@@ -181,8 +182,47 @@ export const MessagesScreen: React.FC = () => {
   useChatSocket();
   useGroupSocket();
   const myId = useAuthStore(s => s.user?.id ?? null);
-  const { data: conversations, isLoading, isError, refetch, isRefetching } = useConversations();
-  const { data: groups, refetch: refetchGroups, isRefetching: isRefetchingGroups } = useGroups();
+  const {
+    data: conversations,
+    isLoading,
+    isError,
+    refetch,
+    isRefetching,
+    hasNextPage,
+    isFetchingNextPage,
+    fetchNextPage,
+  } = useConversations();
+  const {
+    data: groups,
+    refetch: refetchGroups,
+    isRefetching: isRefetchingGroups,
+    hasNextPage: hasNextGroupPage,
+    isFetchingNextPage: isFetchingNextGroupPage,
+    fetchNextPage: fetchNextGroupPage,
+  } = useGroups();
+  // "Online now" strip: people I follow who are currently online / recently-seen
+  // and free to chat (GET /api/ext/presence/available). Copy the backend id
+  // verbatim into a semantically named `peerId`; never derive a conversation id.
+  const { data: availablePeers } = usePresenceAvailable();
+  const onlineUsers = useMemo<OnlineUser[]>(() => {
+    const seenPeerIds = new Set<string>();
+    const users: OnlineUser[] = [];
+    for (const peer of availablePeers ?? []) {
+      const displayName = peer.displayName?.trim() || peer.username?.trim();
+      // Runtime validation protects navigation from malformed/duplicate API
+      // rows while preserving every valid id byte-for-byte.
+      if (!peer.id || peer.id.trim() !== peer.id || !displayName || seenPeerIds.has(peer.id)) {
+        continue;
+      }
+      seenPeerIds.add(peer.id);
+      users.push({
+        peerId: peer.id,
+        displayName,
+        avatarUrl: peer.avatarUrl,
+      });
+    }
+    return users;
+  }, [availablePeers]);
 
   // Pull-to-refresh (and the error retry) must resync BOTH sources rendered on
   // this screen: the 1:1 conversations and the group threads in the header.
@@ -191,8 +231,20 @@ export const MessagesScreen: React.FC = () => {
     void refetchGroups();
   }, [refetch, refetchGroups]);
 
-  const handleOpen = useCallback(
-    (conversationId: string) => navigation.navigate('ChatDetail', { conversationId }),
+  const handleEndReached = useCallback(() => {
+    if (hasNextPage && !isFetchingNextPage) void fetchNextPage();
+    if (hasNextGroupPage && !isFetchingNextGroupPage) void fetchNextGroupPage();
+  }, [
+    fetchNextGroupPage,
+    fetchNextPage,
+    hasNextGroupPage,
+    hasNextPage,
+    isFetchingNextGroupPage,
+    isFetchingNextPage,
+  ]);
+
+  const handleOpenDirectMessage = useCallback(
+    (peerId: string) => navigation.navigate('ChatDetail', { conversationId: peerId }),
     [navigation],
   );
   const handleOpenGroup = useCallback(
@@ -207,9 +259,9 @@ export const MessagesScreen: React.FC = () => {
 
   const renderItem = useCallback(
     ({ item }: { item: Conversation }) => (
-      <ConvoRow convo={item} myId={myId} onPress={handleOpen} />
+      <ConvoRow convo={item} myId={myId} onPress={handleOpenDirectMessage} />
     ),
-    [handleOpen, myId],
+    [handleOpenDirectMessage, myId],
   );
   const keyExtractor = useCallback((item: Conversation) => item.id, []);
   const renderSeparator = useCallback(
@@ -221,7 +273,7 @@ export const MessagesScreen: React.FC = () => {
   // own backend tables, so they're rendered above the 1:1 conversation list).
   const ListHeader = (
     <View>
-      <OnlineUsersList />
+      <OnlineUsersList users={onlineUsers} onOpenChat={handleOpenDirectMessage} />
       {groups && groups.length > 0 ? (
         <View className="pt-sm">
           <Text className="px-xxl pb-xs text-xs font-body-bold uppercase tracking-widest text-ink-muted">
@@ -267,6 +319,11 @@ export const MessagesScreen: React.FC = () => {
           keyExtractor={keyExtractor}
           ItemSeparatorComponent={renderSeparator}
           ListHeaderComponent={ListHeader}
+          ListFooterComponent={
+            isFetchingNextPage || isFetchingNextGroupPage ? (
+              <Loader size="small" accessibilityLabel={t('common.loading')} />
+            ) : null
+          }
           ListEmptyComponent={
             (groups?.length ?? 0) === 0 ? (
               <EmptyState title={t('messages.empty')} description={t('messages.startHint')} />
@@ -274,6 +331,8 @@ export const MessagesScreen: React.FC = () => {
           }
           refreshing={isRefetching || isRefetchingGroups}
           onRefresh={handleRefresh}
+          onEndReached={handleEndReached}
+          onEndReachedThreshold={0.4}
           contentContainerStyle={[
             styles.list,
             {

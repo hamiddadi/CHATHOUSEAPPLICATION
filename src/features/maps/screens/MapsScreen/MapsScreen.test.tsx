@@ -10,9 +10,12 @@
  * modules are globally mocked in jest-setup.
  */
 import React from 'react';
-import { PermissionsAndroid } from 'react-native';
+import { PermissionsAndroid, Platform } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import Geolocation from '@react-native-community/geolocation';
 import { fireEvent, waitFor } from '@testing-library/react-native';
 import { renderScreen, mockAuthenticated, resetAuth } from '../../../../test-utils/renderScreen';
+import { createConsentRecord } from '../../../privacy/consentRecord';
 import { MapsScreen } from './MapsScreen';
 
 // react-native-dotenv inlines `.env` into `@env` at babel-transform time, so the
@@ -26,8 +29,20 @@ jest.mock('../../hooks/useFollowersOnMap', () => ({
 }));
 
 describe('MapsScreen', () => {
+  const originalOs = Platform.OS;
+
+  beforeAll(() => {
+    Object.defineProperty(Platform, 'OS', { value: 'android', configurable: true });
+  });
+  afterAll(() => {
+    Object.defineProperty(Platform, 'OS', { value: originalOs, configurable: true });
+  });
+
   beforeEach(() => {
     mockAuthenticated();
+    (AsyncStorage.getItem as jest.Mock).mockResolvedValue(
+      JSON.stringify(createConsentRecord('location', 'granted')),
+    );
     // Force the granted permission path so the map (not the consent flow) renders.
     jest.spyOn(PermissionsAndroid, 'check').mockResolvedValue(true);
     jest.spyOn(PermissionsAndroid, 'request').mockResolvedValue(PermissionsAndroid.RESULTS.GRANTED);
@@ -64,6 +79,41 @@ describe('MapsScreen', () => {
     });
     const recenter = await waitFor(() => getByLabelText('Recenter map on my location'));
     expect(() => fireEvent.press(recenter)).not.toThrow();
+  });
+
+  it('accepts approximate location when Android grants COARSE but denies FINE', async () => {
+    (PermissionsAndroid.check as jest.Mock).mockResolvedValue(false);
+    const requestMultiple = jest.spyOn(PermissionsAndroid, 'requestMultiple').mockResolvedValue({
+      [PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION]: PermissionsAndroid.RESULTS.GRANTED,
+      [PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION]: PermissionsAndroid.RESULTS.DENIED,
+    } as Awaited<ReturnType<typeof PermissionsAndroid.requestMultiple>>);
+
+    const { getByLabelText } = renderScreen(<MapsScreen />, {
+      route: { name: 'Maps', params: {} },
+    });
+
+    await waitFor(() => expect(getByLabelText('Find a friend')).toBeTruthy());
+    expect(requestMultiple).toHaveBeenCalledWith([
+      PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION,
+      PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+    ]);
+  });
+
+  it('uses the native geolocation authorization flow on iOS', async () => {
+    const originalOs = Platform.OS;
+    Object.defineProperty(Platform, 'OS', { value: 'ios', configurable: true });
+    const requestAuthorization = Geolocation.requestAuthorization as jest.Mock;
+    requestAuthorization.mockImplementationOnce((success?: () => void) => success?.());
+
+    try {
+      const { getByLabelText } = renderScreen(<MapsScreen />, {
+        route: { name: 'Maps', params: {} },
+      });
+      await waitFor(() => expect(getByLabelText('Find a friend')).toBeTruthy());
+      expect(requestAuthorization).toHaveBeenCalled();
+    } finally {
+      Object.defineProperty(Platform, 'OS', { value: originalOs, configurable: true });
+    }
   });
 
   it('See/Unsee (ghost mode) toggle is pressable without throwing', async () => {

@@ -63,7 +63,7 @@ const DefaultFallback: React.FC<DefaultFallbackProps> = ({ error, onReset }) => 
     >
       <Text className="text-xl font-headline text-ink text-center">{t('errorBoundary.title')}</Text>
       <Text className="text-md font-body text-ink-muted text-center" numberOfLines={4}>
-        {error.message || t('errorBoundary.fallbackMessage')}
+        {__DEV__ && error.message ? error.message : t('errorBoundary.fallbackMessage')}
       </Text>
       <Pressable
         onPress={onReset}

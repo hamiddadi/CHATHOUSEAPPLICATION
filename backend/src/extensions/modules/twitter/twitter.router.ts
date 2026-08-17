@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { requireAuth } from '../../../middlewares/auth.middleware';
 import { asyncHandler } from '../../../utils/asyncHandler';
+import { authedUserId } from '../../../utils/authedUserId';
 import { twitterService } from './twitter.service';
 
 export const twitterRouter: Router = Router();
@@ -25,8 +26,8 @@ twitterRouter.get(
 
 twitterRouter.post(
   '/begin',
-  asyncHandler(async (_req, res) => {
-    const out = await twitterService.beginAuth();
+  asyncHandler(async (req, res) => {
+    const out = await twitterService.beginAuth(authedUserId(req));
     res.json(out);
   }),
 );
@@ -35,7 +36,7 @@ twitterRouter.post(
   '/complete',
   asyncHandler(async (req, res) => {
     const { state, code } = completeSchema.parse(req.body);
-    const profile = await twitterService.completeAuth(state, code);
+    const profile = await twitterService.completeAuth(authedUserId(req), state, code);
     res.json(profile);
   }),
 );

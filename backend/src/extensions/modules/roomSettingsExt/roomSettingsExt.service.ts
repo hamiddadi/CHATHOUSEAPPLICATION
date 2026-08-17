@@ -1,6 +1,13 @@
 import { prisma } from '../../../config/database';
+import { roomsService } from '../../../modules/rooms/rooms.service';
+import { withLockedRoomState } from '../../../modules/rooms/room-state-lock';
 import { extError } from '../../utils/ExtAppError';
-import { readJson, writeJson } from '../../utils/redisJson';
+import { writeJson } from '../../utils/redisJson';
+import {
+  canRaiseHandUnderRoomSettings,
+  readHandRaiseRestriction,
+  type HandRaiseRestriction,
+} from './roomSettingsExt.policy';
 
 /**
  * Per-room extended settings (Module 5.5 / ROOM-INT-009 — restrict hand
@@ -20,43 +27,42 @@ import { readJson, writeJson } from '../../utils/redisJson';
 const TTL_S = 24 * 3600;
 const key = (roomId: string) => `ext:roomset:${roomId}`;
 
-export type HandRaiseRestriction = 'everyone' | 'followers' | 'none';
+export type { HandRaiseRestriction } from './roomSettingsExt.policy';
 
 export interface ExtRoomSettings {
   handRaiseRestriction: HandRaiseRestriction;
   coHostIds: string[];
 }
 
-const DEFAULTS: ExtRoomSettings = {
-  handRaiseRestriction: 'everyone',
-  coHostIds: [],
-};
-
-const requireHostOrMod = async (roomId: string, userId: string): Promise<void> => {
-  const room = await prisma.room.findUnique({
-    where: { id: roomId },
-    select: { hostId: true },
-  });
-  if (!room) throw extError('CLUB_REQ_NOT_FOUND', 'Room not found');
-  if (room.hostId === userId) return;
-  const part = await prisma.participant.findUnique({
-    where: { userId_roomId: { userId, roomId } },
-    select: { role: true },
-  });
-  if (part?.role !== 'MODERATOR') throw extError('PAY_INVALID', 'Not allowed');
-};
-
 export const roomSettingsExtService = {
   async get(roomId: string): Promise<ExtRoomSettings> {
-    const parsed = await readJson<Partial<ExtRoomSettings>>(key(roomId));
-    if (!parsed) return DEFAULTS;
+    const [handRaiseRestriction, moderators] = await Promise.all([
+      readHandRaiseRestriction(roomId),
+      prisma.participant.findMany({
+        where: { roomId, leftAt: null, role: 'MODERATOR', user: { deletedAt: null } },
+        select: { userId: true },
+      }),
+    ]);
     return {
-      handRaiseRestriction:
-        parsed.handRaiseRestriction === 'followers' || parsed.handRaiseRestriction === 'none'
-          ? parsed.handRaiseRestriction
-          : 'everyone',
-      coHostIds: Array.isArray(parsed.coHostIds) ? parsed.coHostIds : [],
+      handRaiseRestriction,
+      // Participant.role is authoritative. Returning a Redis-maintained copy
+      // drifted after kicks, leaves and role changes.
+      coHostIds: moderators.map(m => m.userId),
     };
+  },
+
+  async getForParticipant(roomId: string, callerId: string): Promise<ExtRoomSettings> {
+    const room = await prisma.room.findFirst({
+      where: {
+        id: roomId,
+        endedAt: null,
+        isLive: true,
+        participants: { some: { userId: callerId, leftAt: null } },
+      },
+      select: { id: true },
+    });
+    if (!room) throw extError('CLUB_REQ_NOT_FOUND', 'Room not found');
+    return this.get(roomId);
   },
 
   async setHandRaise(
@@ -64,34 +70,47 @@ export const roomSettingsExtService = {
     callerId: string,
     restriction: HandRaiseRestriction,
   ): Promise<ExtRoomSettings> {
-    await requireHostOrMod(roomId, callerId);
-    const current = await this.get(roomId);
-    const next: ExtRoomSettings = { ...current, handRaiseRestriction: restriction };
-    await writeJson(key(roomId), next, TTL_S);
-    return next;
+    await withLockedRoomState(roomId, async (tx, room) => {
+      if (!room || room.endedAt || !room.isLive) {
+        throw extError('CLUB_REQ_NOT_FOUND', 'Room not found');
+      }
+      if (room.hostId !== callerId) {
+        const participant = await tx.participant.findUnique({
+          where: { userId_roomId: { userId: callerId, roomId } },
+          select: { role: true, leftAt: true },
+        });
+        if (!participant || participant.leftAt || participant.role !== 'MODERATOR') {
+          throw extError('PAY_INVALID', 'Not allowed');
+        }
+      }
+      // Only the preference belongs in Redis; co-hosts are derived from the
+      // authoritative Participant rows on read.
+      await writeJson(key(roomId), { handRaiseRestriction: restriction }, TTL_S);
+    });
+    return this.get(roomId);
   },
 
   async addCoHost(roomId: string, callerId: string, coHostId: string): Promise<ExtRoomSettings> {
-    await requireHostOrMod(roomId, callerId);
-    const current = await this.get(roomId);
-    if (current.coHostIds.includes(coHostId)) return current;
-    const next: ExtRoomSettings = {
-      ...current,
-      coHostIds: [...current.coHostIds, coHostId],
-    };
-    await writeJson(key(roomId), next, TTL_S);
-    return next;
+    // Core setRole enforces a live room, active target and host-only moderator
+    // promotion, and emits the canonical realtime role event.
+    await roomsService.setRole(roomId, callerId, {
+      userId: coHostId,
+      role: 'MODERATOR',
+    });
+    return this.get(roomId);
   },
 
   async removeCoHost(roomId: string, callerId: string, coHostId: string): Promise<ExtRoomSettings> {
-    await requireHostOrMod(roomId, callerId);
-    const current = await this.get(roomId);
-    const next: ExtRoomSettings = {
-      ...current,
-      coHostIds: current.coHostIds.filter(id => id !== coHostId),
-    };
-    await writeJson(key(roomId), next, TTL_S);
-    return next;
+    const room = await prisma.room.findFirst({
+      where: { id: roomId, hostId: callerId, endedAt: null, isLive: true },
+      select: { id: true },
+    });
+    if (!room) throw extError('PAY_INVALID', 'Only the host can remove a co-host');
+    await roomsService.setRole(roomId, callerId, {
+      userId: coHostId,
+      role: 'LISTENER',
+    });
+    return this.get(roomId);
   },
 
   /**
@@ -99,14 +118,6 @@ export const roomSettingsExtService = {
    * listener may raise their hand under the current restriction.
    */
   async canRaiseHand(roomId: string, viewerId: string, hostId: string): Promise<boolean> {
-    const settings = await this.get(roomId);
-    if (settings.handRaiseRestriction === 'none') return false;
-    if (settings.handRaiseRestriction === 'everyone') return true;
-    // 'followers' — viewer must follow the host
-    const follow = await prisma.follow.findUnique({
-      where: { followerId_followingId: { followerId: viewerId, followingId: hostId } },
-      select: { id: true },
-    });
-    return Boolean(follow);
+    return canRaiseHandUnderRoomSettings(roomId, viewerId, hostId);
   },
 };

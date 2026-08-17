@@ -5,12 +5,8 @@ import { extError } from '../../utils/ExtAppError';
 /**
  * Shared Stripe accessor for the payments + premium modules and the webhook.
  *
- * `stripe` is an OPTIONAL dynamic import — it is NOT a package.json dependency
- * and is never required at typecheck time. When STRIPE_SECRET_KEY is unset (or
- * the SDK isn't installed) every caller gets PAY_NOT_CONFIGURED and the feature
- * no-ops, exactly like the LiveKit/recording gating. The hand-written
- * `StripeLike` type covers only the SDK surface we call, so callers still get
- * real method signatures without the dependency.
+ * Stripe is a production dependency. The dynamic import keeps startup cheap;
+ * when STRIPE_SECRET_KEY is unset callers get PAY_NOT_CONFIGURED.
  */
 
 export interface StripeAccountObject {
@@ -30,6 +26,7 @@ export interface StripePaymentIntentObject {
 
 export interface StripeSubscriptionObject {
   id: string;
+  created: number;
   status: string;
   customer: string;
   current_period_end?: number;
@@ -49,6 +46,7 @@ export interface StripeCheckoutSessionObject {
 
 export interface StripeEvent {
   id: string;
+  created: number;
   type: string;
   data: { object: Record<string, unknown> };
 }
@@ -57,6 +55,7 @@ export interface StripeLike {
   accounts: {
     create(params: unknown, options?: { idempotencyKey?: string }): Promise<{ id: string }>;
     retrieve(id: string): Promise<StripeAccountObject>;
+    del(id: string): Promise<{ id: string; deleted: boolean }>;
   };
   accountLinks: { create(params: unknown): Promise<{ url: string }> };
   paymentIntents: {
@@ -74,7 +73,7 @@ export interface StripeLike {
     };
   };
   customers: {
-    create(params: unknown): Promise<{ id: string }>;
+    create(params: unknown, options?: { idempotencyKey?: string }): Promise<{ id: string }>;
     // PAYM-05: delete a customer on GDPR hard-delete so a purged user stops
     // being billed and no PII lingers at Stripe.
     del(id: string): Promise<{ id: string; deleted: boolean }>;
@@ -83,6 +82,10 @@ export interface StripeLike {
     retrieve(id: string): Promise<StripeSubscriptionObject>;
     // PAYM-05: cancel the active subscription before the customer is deleted.
     cancel(id: string): Promise<StripeSubscriptionObject>;
+    update(
+      id: string,
+      params: { cancel_at_period_end: boolean },
+    ): Promise<StripeSubscriptionObject>;
   };
   billingPortal: { sessions: { create(params: unknown): Promise<{ url: string }> } };
   webhooks: {
@@ -94,21 +97,21 @@ export interface StripeLike {
   };
 }
 
-export const stripeConfigured = (): boolean => Boolean(process.env.STRIPE_SECRET_KEY);
+export const stripeConfigured = (): boolean => Boolean(env.STRIPE_SECRET_KEY);
 
 const load = async (): Promise<StripeLike | null> => {
-  const secretKey = process.env.STRIPE_SECRET_KEY;
+  const secretKey = env.STRIPE_SECRET_KEY;
   if (!secretKey) return null;
   try {
-    // Dynamic import keeps the dependency optional. To enable Stripe, run
-    // `npm i stripe` in backend/ and set STRIPE_SECRET_KEY.
+    // Dynamic import avoids loading the SDK in a process where payments are
+    // intentionally unconfigured.
     const mod = (await import(/* webpackIgnore: true */ 'stripe' as string)) as unknown as {
       default: new (key: string, opts?: unknown) => StripeLike;
     };
     const Stripe = mod.default;
-    return new Stripe(secretKey, { apiVersion: '2024-06-20' });
+    return new Stripe(secretKey, { maxNetworkRetries: 2 });
   } catch (err) {
-    logger.warn('ext.payments: stripe SDK not installed', { err });
+    logger.error('ext.payments: failed to load the installed Stripe SDK', { err });
     return null;
   }
 };
@@ -116,10 +119,7 @@ const load = async (): Promise<StripeLike | null> => {
 export const requireStripe = async (): Promise<StripeLike> => {
   const s = await load();
   if (!s) {
-    throw extError(
-      'PAY_NOT_CONFIGURED',
-      'Stripe is not configured — install `stripe` and set STRIPE_SECRET_KEY',
-    );
+    throw extError('PAY_NOT_CONFIGURED', 'Stripe is not configured — set STRIPE_SECRET_KEY');
   }
   return s;
 };

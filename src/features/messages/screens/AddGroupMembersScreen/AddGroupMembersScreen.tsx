@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -36,11 +36,9 @@ type Route = RouteProp<MessageStackParamList, 'AddGroupMembers'>;
  * in the group. The old global user search let you pick anyone, which the
  * backend would then reject.
  *
- * NOTE: the *server* gate here is a Block check, NOT a follow-gate. Groups now
- * enforce the Block table symmetrically (groups.service `assertNoBlockBetween`
- * in create/addMembers/send), so a blocked user can't reach their blocker via a
- * group — GROUP_006 on the add. Scoping the picker to who you follow is a UX
- * convenience, not the security boundary.
+ * The server independently enforces both an ACCEPTED follow from the adder to
+ * every candidate and a symmetric Block check across the full membership.
+ * This picker mirrors that policy but is not the security boundary.
  */
 export const AddGroupMembersScreen: React.FC = () => {
   const navigation = useNavigation<Nav>();
@@ -50,11 +48,23 @@ export const AddGroupMembersScreen: React.FC = () => {
   const conversationId = route.params.conversationId;
   const myId = useAuthStore(s => s.user?.id) ?? '';
 
-  const { data: group } = useGroup(conversationId);
+  const {
+    data: group,
+    isLoading: isGroupLoading,
+    isError: isGroupError,
+    refetch: refetchGroup,
+  } = useGroup(conversationId);
   // Who I follow, paged server-side (limit 50/page); the infinite query pulls
   // the next page on scroll so followers past the 50th are still addable.
   const followingQuery = useFollowing(myId);
-  const { isLoading, hasNextPage, isFetchingNextPage, fetchNextPage } = followingQuery;
+  const {
+    isLoading: isFollowingLoading,
+    isError: isFollowingError,
+    hasNextPage,
+    isFetchingNextPage,
+    fetchNextPage,
+    refetch: refetchFollowing,
+  } = followingQuery;
   const following = useMemo(() => flattenFollowPages(followingQuery.data), [followingQuery.data]);
   const addMembers = useAddGroupMembers();
   // Existing members can't be re-added — drop them from the candidate list.
@@ -65,6 +75,7 @@ export const AddGroupMembersScreen: React.FC = () => {
 
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<Map<string, User>>(new Map());
+  const addInFlightRef = useRef(false);
 
   // People I follow who aren't already in the group, narrowed by the filter.
   const candidates = useMemo(
@@ -94,16 +105,24 @@ export const AddGroupMembersScreen: React.FC = () => {
     if (hasNextPage && !isFetchingNextPage) void fetchNextPage();
   }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
-  const handleAdd = useCallback(() => {
+  const handleRetry = useCallback(() => {
+    if (isGroupError) void refetchGroup();
+    if (isFollowingError) void refetchFollowing();
+  }, [isFollowingError, isGroupError, refetchFollowing, refetchGroup]);
+
+  const handleAdd = useCallback(async () => {
+    if (addInFlightRef.current) return;
     const userIds = [...selected.keys()];
     if (userIds.length === 0) return;
-    addMembers.mutate(
-      { conversationId, userIds },
-      {
-        onSuccess: () => navigation.goBack(),
-        onError: () => Alert.alert(t('messages.addError', "Couldn't add members. Try again.")),
-      },
-    );
+    addInFlightRef.current = true;
+    try {
+      await addMembers.mutateAsync({ conversationId, userIds });
+      navigation.goBack();
+    } catch {
+      Alert.alert(t('messages.addError', "Couldn't add members. Try again."));
+    } finally {
+      addInFlightRef.current = false;
+    }
   }, [addMembers, conversationId, navigation, selected, t]);
 
   const handleClose = useCallback(() => navigation.goBack(), [navigation]);
@@ -194,8 +213,15 @@ export const AddGroupMembersScreen: React.FC = () => {
 
       <SelectedPeopleChips people={selectedPeople} onRemove={toggle} />
 
-      {isLoading ? (
+      {isGroupLoading || isFollowingLoading ? (
         <Loader fullscreen accessibilityLabel={t('common.loading', 'Loading')} />
+      ) : isGroupError || isFollowingError ? (
+        <EmptyState
+          title={t('messages.couldNotLoad', "Couldn't load messages")}
+          description={t('messages.loadErrorHint', 'Check your connection and try again.')}
+          actionLabel={t('common.retry', 'Retry')}
+          onAction={handleRetry}
+        />
       ) : (
         <FlatList
           data={results}

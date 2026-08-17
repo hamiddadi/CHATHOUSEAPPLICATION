@@ -1,15 +1,19 @@
 import { apiClient } from '../../../shared/services/api/apiClient';
 import type { Envelope } from '../../../shared/types/api';
 import type { MessageKind, UserSummary } from '../../../shared/types/domain';
+import type { ContentReportReason, ContentReportResult } from '../../../shared/types/moderation';
 
 /**
  * Group DM (Backchannel groups) service. Separate from the 1:1 messageService
  * because groups have their own backend tables (Conversation / GroupMessage).
  * Backend contract — backend/src/modules/groups:
- *   GET   /groups                 → GroupConversation[]
+ *   GET   /groups?limit&cursor&paginated=true
+ *                                      → { data: GroupConversation[], nextCursor, hasMore }
+ *                                      (legacy fallback: GroupConversation[])
  *   POST  /groups                 → GroupConversation   { title?, memberIds[] }
  *   GET   /groups/:id             → GroupConversation
- *   GET   /groups/:id/messages?limit&before → GroupMessage[]
+ *   GET   /groups/:id/messages?limit&before&paginated=true
+ *                                      → { data: GroupMessage[], nextCursor, hasMore }
  *   POST  /groups/:id/messages    → GroupMessage        { content }
  *   PATCH /groups/:id/read        → { read: true }
  */
@@ -52,6 +56,12 @@ interface RawGroupConversation {
   updatedAt: string;
 }
 
+interface RawPage<T> {
+  data: T[];
+  nextCursor: string | null;
+  hasMore?: boolean;
+}
+
 export interface GroupMessage {
   id: string;
   conversationId: string;
@@ -81,6 +91,17 @@ export interface GroupConversation {
   lastMessage: GroupLastMessage | null;
   unreadCount: number;
   updatedAt: string;
+}
+
+export interface GroupMessagePage {
+  items: GroupMessage[];
+  nextCursor: string | null;
+}
+
+export interface GroupConversationPage {
+  items: GroupConversation[];
+  nextCursor: string | null;
+  hasMore: boolean;
 }
 
 const toSummary = (u: RawUser): UserSummary => ({
@@ -126,9 +147,39 @@ const toConversation = (c: RawGroupConversation): GroupConversation => ({
 });
 
 export const groupService = {
-  async list(): Promise<GroupConversation[]> {
-    const res = await apiClient.get<Envelope<RawGroupConversation[]>>('/groups');
-    return res.data.data.map(toConversation);
+  /**
+   * One activity-ordered group page. During a rolling deployment an older
+   * backend may ignore `paginated=true` and return the historical bare array;
+   * treat that response as a complete page instead of crashing the client.
+   */
+  async list(opts: { cursor?: string; limit?: number } = {}): Promise<GroupConversationPage> {
+    const params: Record<string, string | number | boolean> = { paginated: true };
+    if (opts.cursor) params.cursor = opts.cursor;
+    if (opts.limit) params.limit = opts.limit;
+    const res = await apiClient.get<
+      Envelope<RawPage<RawGroupConversation> | RawGroupConversation[]>
+    >('/groups', { params });
+    const payload = res.data.data;
+
+    if (Array.isArray(payload)) {
+      return {
+        items: payload.map(toConversation),
+        nextCursor: null,
+        hasMore: false,
+      };
+    }
+
+    const nextCursor =
+      typeof payload.nextCursor === 'string' && payload.nextCursor.length > 0
+        ? payload.nextCursor
+        : null;
+    return {
+      items: payload.data.map(toConversation),
+      nextCursor,
+      // Older paginated deployments may omit hasMore; the cursor remains the
+      // authoritative continuation signal in that case.
+      hasMore: payload.hasMore ?? nextCursor !== null,
+    };
   },
 
   async detail(id: string): Promise<GroupConversation> {
@@ -137,29 +188,34 @@ export const groupService = {
   },
 
   /**
-   * One page of the group thread, newest page first. `before` is an ISO
-   * createdAt cursor — the backend returns messages strictly older than it
-   * (see groups.schema listGroupMessagesSchema), each page sorted ascending.
+   * One page of the group thread, newest page first. `before` is the opaque
+   * `nextCursor` from the previous envelope; each returned page is sorted
+   * ascending for display.
    */
   async messages(
     id: string,
     opts: { before?: string; limit?: number } = {},
-  ): Promise<GroupMessage[]> {
-    const params: Record<string, string | number> = {};
+  ): Promise<GroupMessagePage> {
+    const params: Record<string, string | number | boolean> = { paginated: true };
     if (opts.before) params.before = opts.before;
     if (opts.limit) params.limit = opts.limit;
-    const res = await apiClient.get<Envelope<RawGroupMessage[]>>(`/groups/${id}/messages`, {
+    const res = await apiClient.get<Envelope<RawPage<RawGroupMessage>>>(`/groups/${id}/messages`, {
       params,
     });
-    return res.data.data.map(toMessage);
+    return {
+      items: res.data.data.data.map(toMessage),
+      nextCursor: res.data.data.nextCursor,
+    };
   },
 
-  async send(id: string, content: string): Promise<GroupMessage> {
+  async send(id: string, content: string, idempotencyKey: string): Promise<GroupMessage> {
     const trimmed = content.trim();
     if (trimmed.length === 0) throw new Error('Message cannot be empty');
-    const res = await apiClient.post<Envelope<RawGroupMessage>>(`/groups/${id}/messages`, {
-      content: trimmed,
-    });
+    const res = await apiClient.post<Envelope<RawGroupMessage>>(
+      `/groups/${id}/messages`,
+      { content: trimmed },
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    );
     return toMessage(res.data.data);
   },
 
@@ -167,19 +223,33 @@ export const groupService = {
    * Send a voice note to a group. The clip must already be uploaded (see
    * voiceService); we post the stored URL + clip length to /groups/:id/voice.
    */
-  async sendVoice(id: string, audioUrl: string, durationMs: number): Promise<GroupMessage> {
-    const res = await apiClient.post<Envelope<RawGroupMessage>>(`/groups/${id}/voice`, {
-      audioUrl,
-      durationMs,
-    });
+  async sendVoice(
+    id: string,
+    audioUrl: string,
+    durationMs: number,
+    idempotencyKey: string,
+  ): Promise<GroupMessage> {
+    const res = await apiClient.post<Envelope<RawGroupMessage>>(
+      `/groups/${id}/voice`,
+      { audioUrl, durationMs },
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    );
     return toMessage(res.data.data);
   },
 
-  async create(memberIds: string[], title?: string): Promise<GroupConversation> {
-    const res = await apiClient.post<Envelope<RawGroupConversation>>('/groups', {
-      memberIds,
-      ...(title && title.trim() ? { title: title.trim() } : {}),
-    });
+  async create(
+    memberIds: string[],
+    title: string | undefined,
+    idempotencyKey: string,
+  ): Promise<GroupConversation> {
+    const res = await apiClient.post<Envelope<RawGroupConversation>>(
+      '/groups',
+      {
+        memberIds,
+        ...(title && title.trim() ? { title: title.trim() } : {}),
+      },
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    );
     return toConversation(res.data.data);
   },
 
@@ -195,10 +265,16 @@ export const groupService = {
     return toConversation(res.data.data);
   },
 
-  async addMembers(id: string, userIds: string[]): Promise<GroupConversation> {
-    const res = await apiClient.post<Envelope<RawGroupConversation>>(`/groups/${id}/members`, {
-      userIds,
-    });
+  async addMembers(
+    id: string,
+    userIds: string[],
+    idempotencyKey: string,
+  ): Promise<GroupConversation> {
+    const res = await apiClient.post<Envelope<RawGroupConversation>>(
+      `/groups/${id}/members`,
+      { userIds },
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    );
     return toConversation(res.data.data);
   },
 
@@ -212,5 +288,17 @@ export const groupService = {
   async leave(id: string): Promise<{ left: true }> {
     await apiClient.post(`/groups/${id}/leave`);
     return { left: true };
+  },
+
+  async reportMessage(
+    conversationId: string,
+    messageId: string,
+    reason: ContentReportReason,
+  ): Promise<ContentReportResult> {
+    const res = await apiClient.post<Envelope<ContentReportResult>>(
+      `/groups/${conversationId}/messages/${messageId}/report`,
+      { reason },
+    );
+    return res.data.data;
   },
 };

@@ -10,6 +10,10 @@ process.env.DATABASE_URL =
   process.env.DATABASE_URL ??
   'postgresql://chathouse:chathouse@localhost:5433/chathouse?schema=public';
 process.env.REDIS_URL = process.env.REDIS_URL ?? 'redis://localhost:6379';
+// This isolated service-level suite explicitly exercises the future recording
+// implementation. The public release and normal integration suites keep this
+// kill-switch false.
+process.env.ROOM_RECORDING_ENABLED = 'true';
 process.env.EGRESS_ENABLED = 'true';
 process.env.LIVEKIT_URL = 'wss://livekit.test';
 process.env.LIVEKIT_API_KEY = 'lk_key';
@@ -131,7 +135,11 @@ describe('recordingsService.listForRoom', () => {
       data: { roomId, egressId: `eg_pending_${rand()}`, status: 'STARTING' },
     });
 
-    const replays = await recordingsService.listForRoom(roomId);
+    const room = await prisma.room.findUniqueOrThrow({
+      where: { id: roomId },
+      select: { hostId: true },
+    });
+    const replays = await recordingsService.listForRoom(roomId, room.hostId);
     expect(replays).toHaveLength(1);
     expect(replays[0]?.fileUrl).toBe('https://cdn.test/recordings/x.ogg');
     expect(replays[0]?.status).toBe('COMPLETED');

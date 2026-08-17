@@ -1,62 +1,107 @@
-# Chathouse
+# ChatHouse
 
-Audio social network (Clubhouse-like) built with Expo + React Native + TypeScript.
+ChatHouse is a bare React Native audio-social application with native Android
+and iOS projects plus an Express/Prisma backend.
 
 ## Stack
 
-- Expo SDK 55 (React Native 0.83)
-- TypeScript strict
-- React Navigation v7 (Native Stack + Bottom Tabs)
-- Zustand (client state) + TanStack Query (server state)
-- react-hook-form + Zod (forms + validation)
-- expo-av / LiveKit (audio rooms, planned)
-- expo-secure-store + AsyncStorage (persistence)
-- StyleSheet with a typed design system in `src/shared/constants/theme.ts`
+- React Native 0.83.6, React 19.2 and strict TypeScript
+- Android (Kotlin, SDK 36, Hermes, new architecture)
+- iOS (Swift, CocoaPods, Hermes, new architecture)
+- React Navigation, Zustand, TanStack Query, React Hook Form and Zod
+- LiveKit audio, Firebase Cloud Messaging, Notifee and Sentry
+- Express 5, Socket.IO, Prisma/PostgreSQL and Redis
 
-## Quick start
+## Prerequisites
+
+- Node.js `>=22.20.0 <23` and npm
+- Android: JDK 17 and Android SDK 36
+- iOS: macOS, Xcode and Bundler/CocoaPods
+- Docker Desktop for the backend and integration tests
+
+## Install
 
 ```bash
-# Frontend
-npm install
-npx expo install --check   # align native module versions with the Expo SDK
-npm run start
-
-# Backend (requires Docker)
-cd backend
-docker compose up -d postgres redis
-cp .env.example .env       # if applicable, configure env vars
-npm install
-npm run db:migrate
-npm run dev
+npm ci
+cd backend && npm ci
 ```
 
-Open with Expo Go or an emulator (Android Studio / Xcode Simulator).
+Copy `.env.example` to `.env`, and `backend/.env.example` to
+`backend/.env`. Do not use localhost in the mobile `.env` when running on a
+physical device; use the development machine's LAN address.
 
-## Scripts
+Firebase native configuration is intentionally not committed:
 
-| Command             | What it does             |
-| ------------------- | ------------------------ |
-| `npm run start`     | Start the Metro bundler  |
-| `npm run android`   | Build & run on Android   |
-| `npm run ios`       | Build & run on iOS       |
-| `npm run lint`      | ESLint check             |
-| `npm run format`    | Prettier write           |
-| `npm run typecheck` | TypeScript no-emit check |
-| `npm test`          | Run Jest tests           |
+```bash
+cp android/app/google-services.json.example android/app/google-services.json
+cp ios/ChatHouse/GoogleService-Info.plist.example ios/ChatHouse/GoogleService-Info.plist
+```
+
+Replace both placeholders with files downloaded from the Firebase console.
+
+## Run
+
+```bash
+# Terminal 1
+npm run backend:up
+
+# Terminal 2
+cd backend
+npm run prisma:deploy
+npm run dev
+
+# Terminal 3
+npm start
+
+# Terminal 4 — choose one platform
+npm run android
+npm run ios
+```
+
+On macOS, run `npm run ios:pods` after installing or changing native
+dependencies.
+
+## Quality and tests
+
+```bash
+npm run quality
+npm test
+
+cd backend
+npm run lint
+npm run typecheck
+npm run test:local
+```
+
+`test:local` starts disposable PostgreSQL/Redis test services on ports 5434 and
+6380, applies migrations to `chathouse_test`, and then runs Jest. A safety guard
+refuses any database whose name does not contain `test`.
+
+## Native release
+
+- Android release signing: [`docs/RELEASE-SIGNING.md`](docs/RELEASE-SIGNING.md)
+- Native setup: [`docs/setup.md`](docs/setup.md)
+- Store builds: [`docs/store/build-and-submit.md`](docs/store/build-and-submit.md)
+- Go-live checklist: [`docs/GO-LIVE.md`](docs/GO-LIVE.md)
+- Legal release dossier: [`docs/legal/README.md`](docs/legal/README.md)
+
+The CI verifies lint (including CSS/NativeWind and operational shell scripts),
+formatting, TypeScript, Jest, Compose rendering, backend migrations/tests,
+backup/restore contracts, Android assemble/lint, and an iOS Simulator build.
 
 ## Architecture
 
-Feature-based hybrid. See `src/` — each feature owns its `components/`, `screens/`, `hooks/`, `services/`, `store/`, `types/`.
+The app is organized by feature. Each domain owns its screens, components,
+hooks, services, state and types; reusable infrastructure lives under `shared`
+and application composition under `core`.
 
-```
+```text
 src/
-├── app/            # App root, navigation, providers
-├── features/       # auth, rooms, houses, messages, maps, settings, profile, search, notifications, onboarding
-├── shared/         # shared components, hooks, services, utils, constants (theme)
-├── config/         # env + feature flags
+├── core/       navigation, providers, i18n and observability
+├── features/   auth, rooms, houses, messages, maps, profile, settings, …
+├── shared/     components, API/realtime clients, hooks, types and utilities
+├── config/     validated build-time environment
 └── assets/
 ```
 
-## Design system
-
-Material 3 dark palette extracted from the reference mocks (`src/ui/`). All tokens in `src/shared/constants/theme.ts` — never hand-pick colors.
+See [`docs/architecture.md`](docs/architecture.md) for the detailed boundaries.

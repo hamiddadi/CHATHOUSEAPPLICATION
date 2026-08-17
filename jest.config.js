@@ -25,4 +25,12 @@ module.exports = {
   testPathIgnorePatterns: ['<rootDir>/backend/', '<rootDir>/node_modules/'],
   testMatch: ['**/*.test.ts', '**/*.test.tsx'],
   collectCoverageFrom: ['src/**/*.{ts,tsx}', '!src/**/*.d.ts', '!src/**/index.ts'],
+  coverageThreshold: {
+    global: {
+      statements: 60,
+      branches: 45,
+      functions: 50,
+      lines: 60,
+    },
+  },
 };

@@ -1,4 +1,4 @@
-import React, { memo, useCallback, useState } from 'react';
+import React, { memo, useCallback, useRef, useState } from 'react';
 import {
   Alert,
   Image,
@@ -100,7 +100,7 @@ const PrivacyRow: React.FC<PrivacyRowProps> = memo(({ option, selected, onPress 
         <Text
           className={
             selected
-              ? 'text-xs font-body text-primary-on-container opacity-80'
+              ? 'text-xs font-body text-primary-on-container'
               : 'text-xs font-body text-ink-muted'
           }
         >
@@ -125,6 +125,9 @@ export const CreateHouseScreen: React.FC = () => {
   const [iconBase64, setIconBase64] = useState<string | null>(null);
   const [iconMime, setIconMime] = useState<string | undefined>(undefined);
   const [uploading, setUploading] = useState(false);
+  // Close the same-tick window before React paints isPending/uploading. One
+  // guarded action owns exactly one upload and one idempotency key.
+  const submittingRef = useRef(false);
 
   const createHouse = useCreateHouse();
 
@@ -148,6 +151,8 @@ export const CreateHouseScreen: React.FC = () => {
   }, []);
 
   const handleCreate = useCallback(async () => {
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     try {
       // A freshly-picked icon is a local file:// URI — upload it first and send
       // the REMOTE https URL. Sending file:// persisted an unusable path that
@@ -171,6 +176,7 @@ export const CreateHouseScreen: React.FC = () => {
         errorMessage(e, t('houses.create.errorBody', "Couldn't create the house.")),
       );
     } finally {
+      submittingRef.current = false;
       setUploading(false);
     }
   }, [createHouse, description, rules, iconBase64, iconMime, name, navigation, privacy, t]);

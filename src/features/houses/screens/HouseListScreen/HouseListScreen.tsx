@@ -1,4 +1,4 @@
-import React, { memo, useCallback, useState } from 'react';
+import React, { memo, useCallback, useMemo, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import MaterialIcons from '@react-native-vector-icons/material-icons';
 import { useNavigation } from '@react-navigation/native';
@@ -9,17 +9,37 @@ import { useTranslation } from 'react-i18next';
 import { Avatar } from '../../../../shared/components/Avatar';
 import { Loader } from '../../../../shared/components/Loader';
 import { EmptyState } from '../../../../shared/components/EmptyState';
+import { Input } from '../../../../shared/components/Input';
 import { useAnimatedPress } from '../../../../shared/hooks/useAnimatedPress';
+import { useDebouncedValue } from '../../../../shared/hooks/useDebouncedValue';
 import { colors, layout, spacing } from '../../../../shared/constants/theme';
 import type { RoomStackParamList } from '../../../../core/navigation/types';
 import type { HouseSummary } from '../../../../shared/types/domain';
-import { useHouses } from '../../hooks/useHouses';
+import { useHouses, useHouseSearch } from '../../hooks/useHouses';
 
 type Nav = NativeStackNavigationProp<RoomStackParamList, 'HouseList'>;
 type Tab = 'mine' | 'discover';
 
 const FAB_BOTTOM_OFFSET = layout.tabBarHeight + layout.tabBarBottomOffset + spacing.xl;
 const HOUSE_ICON_SIZE = 56;
+const SEARCH_DEBOUNCE_MS = 250;
+
+const normalizeSearchText = (value: string): string =>
+  value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+
+/** Match all query words against a member's house name or category. */
+export const filterMyHouses = (houses: readonly HouseSummary[], query: string): HouseSummary[] => {
+  const tokens = normalizeSearchText(query).trim().split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) return [...houses];
+
+  return houses.filter(house => {
+    const searchable = normalizeSearchText(`${house.name} ${house.category}`);
+    return tokens.every(token => searchable.includes(token));
+  });
+};
 
 interface HouseRowProps {
   house: HouseSummary;
@@ -131,8 +151,48 @@ export const HouseListScreen: React.FC = () => {
   const insets = useSafeAreaInsets();
   const { t } = useTranslation();
   const [tab, setTab] = useState<Tab>('mine');
+  const [query, setQuery] = useState('');
   const fab = useAnimatedPress({ scaleTo: 0.9 });
-  const { data: houses, isLoading, isError, isFetching, refetch } = useHouses(tab);
+  // Keep the viewer's memberships available while Discover is active so a
+  // global search result cannot re-surface a House they have already joined.
+  const mineHouses = useHouses('mine');
+  const discoverHouses = useHouses('discover', tab === 'discover');
+  const activeList = tab === 'mine' ? mineHouses : discoverHouses;
+  const trimmedQuery = query.trim();
+  const debouncedQuery = useDebouncedValue(trimmedQuery, SEARCH_DEBOUNCE_MS);
+  const discoverSearch = useHouseSearch(debouncedQuery, tab === 'discover');
+  const isDebouncingDiscover =
+    tab === 'discover' && trimmedQuery.length > 0 && trimmedQuery !== debouncedQuery;
+  const isDiscoverSearch =
+    tab === 'discover' &&
+    trimmedQuery.length > 0 &&
+    trimmedQuery === debouncedQuery &&
+    debouncedQuery.length > 0;
+  const mineHouseIds = useMemo(
+    () => new Set((mineHouses.data ?? []).map(house => house.id)),
+    [mineHouses.data],
+  );
+
+  const visibleHouses = useMemo(() => {
+    if (isDiscoverSearch) {
+      return (discoverSearch.data ?? []).filter(house => !mineHouseIds.has(house.id));
+    }
+    if (tab === 'mine') return filterMyHouses(mineHouses.data ?? [], trimmedQuery);
+    return discoverHouses.data ?? [];
+  }, [
+    discoverHouses.data,
+    discoverSearch.data,
+    isDiscoverSearch,
+    mineHouseIds,
+    mineHouses.data,
+    tab,
+    trimmedQuery,
+  ]);
+
+  const contentIsLoading =
+    isDebouncingDiscover || (isDiscoverSearch ? discoverSearch.isLoading : activeList.isLoading);
+  const contentIsError = isDiscoverSearch ? discoverSearch.isError : activeList.isError;
+  const contentIsFetching = isDiscoverSearch ? discoverSearch.isFetching : activeList.isFetching;
 
   const handleBack = useCallback(() => navigation.goBack(), [navigation]);
   const handleOpenHouse = useCallback(
@@ -140,6 +200,14 @@ export const HouseListScreen: React.FC = () => {
     [navigation],
   );
   const handleCreate = useCallback(() => navigation.navigate('CreateHouse'), [navigation]);
+  const handleClearSearch = useCallback(() => setQuery(''), []);
+  const handleRetry = useCallback(() => {
+    if (isDiscoverSearch) {
+      void discoverSearch.refetch();
+      return;
+    }
+    void activeList.refetch();
+  }, [activeList, discoverSearch, isDiscoverSearch]);
 
   const renderItem = useCallback(
     ({ item }: { item: HouseSummary }) => <HouseRow house={item} onPress={handleOpenHouse} />,
@@ -161,9 +229,7 @@ export const HouseListScreen: React.FC = () => {
           <MaterialIcons name="arrow-back" size={24} color={colors.text} />
         </Pressable>
         <Text className="text-lg font-headline text-ink">{t('houses.title', 'Houses')}</Text>
-        {/* Right-side spacer keeps the title centered. House search is not yet
-            implemented — a dead search affordance was removed rather than
-            shipping a button that does nothing. */}
+        {/* Right-side spacer keeps the title centered. */}
         <View className="w-6" />
       </View>
 
@@ -171,37 +237,87 @@ export const HouseListScreen: React.FC = () => {
         <TabToggle value={tab} onChange={setTab} />
       </View>
 
-      {isLoading ? (
-        <Loader fullscreen accessibilityLabel={t('houses.loading', 'Loading houses')} />
-      ) : isError ? (
+      <View className="px-xxl mb-lg">
+        <Input
+          value={query}
+          onChangeText={setQuery}
+          placeholder={t('houses.searchPlaceholder', 'Search houses')}
+          accessibilityLabel={t('houses.searchA11y', 'Search houses')}
+          autoCorrect={false}
+          returnKeyType="search"
+          leftAdornment={<MaterialIcons name="search" size={18} color={colors.textMuted} />}
+          rightAdornment={
+            query.length > 0 ? (
+              <Pressable
+                onPress={handleClearSearch}
+                accessibilityRole="button"
+                accessibilityLabel={t('houses.clearSearchA11y', 'Clear house search')}
+                hitSlop={10}
+              >
+                <MaterialIcons name="close" size={18} color={colors.textMuted} />
+              </Pressable>
+            ) : undefined
+          }
+        />
+      </View>
+
+      {contentIsLoading ? (
+        <Loader
+          fullscreen
+          accessibilityLabel={
+            trimmedQuery.length > 0
+              ? t('houses.searching', 'Searching houses')
+              : t('houses.loading', 'Loading houses')
+          }
+        />
+      ) : contentIsError ? (
         <EmptyState
-          title={t('houses.errorTitle', "Couldn't load houses")}
-          description={t('houses.errorBody', 'Check your connection.')}
+          title={
+            isDiscoverSearch
+              ? t('houses.searchErrorTitle', "Couldn't search houses")
+              : t('houses.errorTitle', "Couldn't load houses")
+          }
+          description={
+            isDiscoverSearch
+              ? t('houses.searchErrorBody', 'Check your connection and try again.')
+              : t('houses.errorBody', 'Check your connection.')
+          }
           actionLabel={t('common.retry', 'Retry')}
-          onAction={() => void refetch()}
+          onAction={handleRetry}
         />
       ) : (
         <FlatList
-          data={houses ?? []}
+          data={visibleHouses}
           renderItem={renderItem}
           keyExtractor={keyExtractor}
           ItemSeparatorComponent={renderSeparator}
-          refreshing={isFetching}
-          onRefresh={() => void refetch()}
+          refreshing={contentIsFetching}
+          onRefresh={handleRetry}
+          keyboardShouldPersistTaps="handled"
           ListEmptyComponent={
             <EmptyState
               title={
-                tab === 'mine'
-                  ? t('houses.emptyMineTitle', 'No houses yet')
-                  : t('houses.emptyDiscoverTitle', 'Nothing to discover')
+                trimmedQuery.length > 0
+                  ? t('houses.searchNoResultsTitle', 'No houses found')
+                  : tab === 'mine'
+                    ? t('houses.emptyMineTitle', 'No houses yet')
+                    : t('houses.emptyDiscoverTitle', 'Nothing to discover')
               }
               description={
-                tab === 'mine'
-                  ? t('houses.emptyMineBody', 'Join a house or create your own community.')
-                  : t('houses.emptyDiscoverBody', 'Be the first — create a house.')
+                trimmedQuery.length > 0
+                  ? t('houses.searchNoResultsBody', 'Nothing matches “{{query}}”.', {
+                      query: trimmedQuery,
+                    })
+                  : tab === 'mine'
+                    ? t('houses.emptyMineBody', 'Join a house or create your own community.')
+                    : t('houses.emptyDiscoverBody', 'Be the first — create a house.')
               }
-              actionLabel={t('houses.emptyCreateCta', 'Create a house')}
-              onAction={handleCreate}
+              actionLabel={
+                trimmedQuery.length > 0
+                  ? t('houses.clearSearch', 'Clear search')
+                  : t('houses.emptyCreateCta', 'Create a house')
+              }
+              onAction={trimmedQuery.length > 0 ? handleClearSearch : handleCreate}
             />
           }
           contentContainerStyle={[

@@ -47,10 +47,16 @@ const makeItem = (overrides: Partial<ActivityItem> = {}): ActivityItem => ({
   ...overrides,
 });
 
+const page = (items: ActivityItem[], nextCursor: string | null = null) => ({
+  items,
+  nextCursor,
+  hasMore: nextCursor !== null,
+});
+
 describe('ExtActivityFeedScreen', () => {
   beforeEach(() => {
     mockAuthenticated();
-    mockList.mockResolvedValue([makeItem()]);
+    mockList.mockResolvedValue(page([makeItem()]));
   });
   afterEach(() => {
     resetAuth();
@@ -85,7 +91,7 @@ describe('ExtActivityFeedScreen', () => {
   });
 
   it('shows the empty state when the feed is empty', async () => {
-    mockList.mockResolvedValue([]);
+    mockList.mockResolvedValue(page([]));
     const { getByText } = renderScreen(<ExtActivityFeedScreen />, {});
     await waitFor(() => expect(getByText('No activity yet.')).toBeTruthy(), WAIT);
   });
@@ -96,14 +102,12 @@ describe('ExtActivityFeedScreen', () => {
     // First load failed → error copy, NOT the "no activity" empty state.
     await waitFor(() => expect(getByText("Couldn't load your activity.")).toBeTruthy(), WAIT);
     // Retry re-fetches; now the list resolves with a row.
-    mockList.mockResolvedValueOnce([makeItem()]);
+    mockList.mockResolvedValueOnce(page([makeItem()]));
     fireEvent.press(getByLabelText('Retry'));
     await waitFor(() => expect(getByText('Jane Doe')).toBeTruthy(), WAIT);
   });
 
-  it('onEndReached loads the next page using the last row createdAt as cursor', async () => {
-    // A full first page (50) means there may be more → cursor derived from the
-    // oldest row's createdAt.
+  it('onEndReached loads the next page using the server-provided opaque cursor', async () => {
     const firstPage = Array.from({ length: 50 }, (_, i) =>
       makeItem({
         id: `a-${i}`,
@@ -111,20 +115,19 @@ describe('ExtActivityFeedScreen', () => {
         createdAt: new Date(2024, 0, 1, 0, 0, 50 - i).toISOString(),
       }),
     );
-    const oldestCursor = firstPage[firstPage.length - 1]!.createdAt;
-    mockList.mockResolvedValueOnce(firstPage);
+    const opaqueCursor = 'v1.WyIyMDI0LTAxLTAxVDAwOjAwOjAxLjAwMFoiLCJhLTQ5Il0';
+    mockList.mockResolvedValueOnce(page(firstPage, opaqueCursor));
     const { getByText, UNSAFE_getByType } = renderScreen(<ExtActivityFeedScreen />, {});
     await waitFor(() => expect(getByText('User 0')).toBeTruthy(), WAIT);
 
-    mockList.mockResolvedValueOnce([makeItem({ id: 'page2', title: 'Second Page User' })]);
+    mockList.mockResolvedValueOnce(page([makeItem({ id: 'page2', title: 'Second Page User' })]));
     // Drive the FlatList's onEndReached directly.
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const { FlatList } = require('react-native');
     const list = UNSAFE_getByType(FlatList);
     list.props.onEndReached();
 
-    // Pagination fires with the derived keyset cursor (oldest row's createdAt).
-    await waitFor(() => expect(mockList).toHaveBeenCalledWith('all', oldestCursor), WAIT);
+    await waitFor(() => expect(mockList).toHaveBeenCalledWith('all', opaqueCursor), WAIT);
     // The next page is appended to the feed data (FlatList windowing may not
     // render the 51st row in jsdom, so assert against the data prop directly).
     await waitFor(() => {
@@ -134,7 +137,7 @@ describe('ExtActivityFeedScreen', () => {
   });
 
   it('"Mark all read" rolls back the read state when the API call fails', async () => {
-    mockList.mockResolvedValue([makeItem({ id: 'act-1', isRead: false })]);
+    mockList.mockResolvedValue(page([makeItem({ id: 'act-1', isRead: false })]));
     mockMarkAllRead.mockRejectedValueOnce(new Error('boom'));
     const { getByText, getByLabelText, getByTestId, queryByTestId } = renderScreen(
       <ExtActivityFeedScreen />,
@@ -153,7 +156,7 @@ describe('ExtActivityFeedScreen', () => {
   });
 
   it('"Mark all read" clears the unread dot on success', async () => {
-    mockList.mockResolvedValue([makeItem({ id: 'act-1', isRead: false })]);
+    mockList.mockResolvedValue(page([makeItem({ id: 'act-1', isRead: false })]));
     mockMarkAllRead.mockResolvedValueOnce(undefined);
     const { getByText, getByLabelText, getByTestId, queryByTestId } = renderScreen(
       <ExtActivityFeedScreen />,

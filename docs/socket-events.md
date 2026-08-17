@@ -45,6 +45,33 @@ Source of truth : `backend/src/socket/realtime.ts` (legacy) and
 Sockets must present a JWT in the `auth.token` field at connect time.
 See `backend/src/socket/socket.middleware.ts`.
 
+## Inbound flood protection
+
+Every authenticated socket is protected by token buckets before feature
+handlers run. Budgets are enforced both per connection and per user on the
+current backend node. They are deliberately generous for `rtc:*` signalling
+and `caption:publish`; presence, location, typing, probes and durable mutations
+have separate lower budgets. Frames larger than 128 KiB are rejected by
+Socket.IO before packet decoding and handler middleware.
+
+When a packet is refused, the server emits:
+
+```json
+{
+  "code": "SOCKET_RATE_LIMITED",
+  "event": "chat:send",
+  "category": "mutation",
+  "retryAfterMs": 200,
+  "disconnecting": false
+}
+```
+
+on `socket:rate_limited`. Boolean acknowledgement contracts receive `false`;
+`rtc:*` receives `{ "ok": false, "error": "RATE_LIMITED",
+"retryAfterMs": ... }`. Notifications are coalesced to at most one per second
+per socket. A connection is forcibly closed only after 120 already-refused
+packets in the same 10-second abuse window.
+
 ## Extension events
 
 The Clubhouse-parity extensions reuse the existing events — they do **not**

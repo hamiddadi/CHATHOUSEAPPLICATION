@@ -1,32 +1,64 @@
 import { Router } from 'express';
 import { asyncHandler } from '../../utils/asyncHandler';
-import { requireAuth } from '../../middlewares/auth.middleware';
+import {
+  requireAccountRecoveryAuth,
+  requireAnySession,
+  requireAuth,
+} from '../../middlewares/auth.middleware';
 import { socialController } from '../social/social.controller';
 import { followController } from '../follow/follow.controller';
+import { requireCurrentLegalAcceptance } from '../auth/legal-acceptance';
+import { dataExportLimiter } from '../../middlewares/rateLimit.middleware';
 import { usersController } from './users.controller';
 
 export const usersRouter: Router = Router();
 
-// All user endpoints require a valid access token.
+// Recovery sessions are deny-by-default. Only the authoritative account view
+// and explicit restoration endpoint are mounted before the active-session
+// guard; every other user action requires a regular bearer.
+usersRouter.get('/me', requireAnySession, asyncHandler(usersController.getMe));
+usersRouter.post(
+  '/me/cancel-deletion',
+  requireAccountRecoveryAuth,
+  asyncHandler(usersController.cancelDeletion),
+);
+
+// All remaining user endpoints require an active access token.
 usersRouter.use(requireAuth);
 
-usersRouter.get('/me', asyncHandler(usersController.getMe));
-usersRouter.patch('/me', asyncHandler(usersController.updateMe));
-usersRouter.patch('/me/username', asyncHandler(usersController.setUsername));
+usersRouter.patch('/me', requireCurrentLegalAcceptance, asyncHandler(usersController.updateMe));
+usersRouter.patch(
+  '/me/username',
+  requireCurrentLegalAcceptance,
+  asyncHandler(usersController.setUsername),
+);
 usersRouter.patch('/me/visibility', asyncHandler(usersController.setVisibility));
+usersRouter.get('/me/contact-discovery', asyncHandler(usersController.getContactDiscovery));
+usersRouter.patch(
+  '/me/contact-discovery',
+  requireCurrentLegalAcceptance,
+  asyncHandler(usersController.setContactDiscovery),
+);
 usersRouter.patch('/me/location', asyncHandler(usersController.setLocation));
 // Presence heartbeat HTTP fallback (socket `presence_update` is preferred).
 usersRouter.post('/me/heartbeat', asyncHandler(usersController.heartbeat));
-usersRouter.patch('/me/interests', asyncHandler(usersController.setInterests));
-usersRouter.patch('/me/onboarding', asyncHandler(usersController.completeOnboarding));
+usersRouter.patch(
+  '/me/interests',
+  requireCurrentLegalAcceptance,
+  asyncHandler(usersController.setInterests),
+);
+usersRouter.patch(
+  '/me/onboarding',
+  requireCurrentLegalAcceptance,
+  asyncHandler(usersController.completeOnboarding),
+);
 usersRouter.get('/me/blocked', asyncHandler(socialController.listBlocked));
 usersRouter.get('/me/notification-preferences', asyncHandler(usersController.getNotifPrefs));
 usersRouter.patch('/me/notification-preferences', asyncHandler(usersController.updateNotifPrefs));
 usersRouter.post('/me/request-deletion', asyncHandler(usersController.requestDeletion));
-usersRouter.post('/me/cancel-deletion', asyncHandler(usersController.cancelDeletion));
 // GDPR Article 20 — data portability. Returns a JSON archive of every
 // piece of user-owned content the platform holds.
-usersRouter.get('/me/export', asyncHandler(usersController.exportData));
+usersRouter.get('/me/export', dataExportLimiter, asyncHandler(usersController.exportData));
 // #76: who viewed my profile (premium-gated in the service).
 usersRouter.get('/me/profile-views', asyncHandler(usersController.profileViews));
 usersRouter.get('/online-locations', asyncHandler(usersController.onlineLocations));

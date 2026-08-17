@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { prisma } from '../../config/database';
 import { redis } from '../../config/redis';
 import { logger } from '../../config/logger';
@@ -7,145 +8,289 @@ import { getBlockedIdSet } from '../../modules/social/blocks';
 /**
  * "Follow started a room" fan-out (Module 12.1 / NOTIF-001).
  *
- * The existing rooms.service emits `hallway:room_created` on the socket
- * tier but does NOT push a personal notification to every follower of the
- * host. Modifying it would violate the no-touch rule, so this extension
- * watches recently-created rooms via a periodic scan and fans out a
- * ROOM_STARTED notification to each follower of the host.
- *
- * De-duplication: a Redis key per room captures already-notified rooms
- * (`ext:fanout:notified:<roomId>`) with a 24h TTL — so the worker is
- * idempotent across restarts. The claim is RELEASED if the fan-out body
- * throws, so a transient failure (DB blip) doesn't permanently suppress the
- * notification — the next scan/create-trigger re-attempts.
+ * Recipient progress is tracked independently. A successful recipient never
+ * has to be recreated on a retry, while a failed/busy recipient keeps the
+ * overall call retryable. The short processing claim prevents concurrent
+ * workers from creating the same row; the SQL lookup repairs the crash window
+ * between Notification insertion and the durable Redis completion marker.
  */
 
 const SCAN_INTERVAL_MS = 30 * 1000;
-const LOOKBACK_MS = 90 * 1000; // scan rooms created in the last 90s
-const DEDUP_KEY = (roomId: string) => `ext:fanout:notified:${roomId}`;
+const LOOKBACK_MS = 90 * 1000;
+const RECIPIENT_DONE_KEY = (roomId: string) => `ext:fanout:v2:notified:${roomId}`;
+const RECIPIENT_CLAIM_KEY = (roomId: string, userId: string) =>
+  `ext:fanout:v2:claim:${roomId}:${userId}`;
 const DEDUP_TTL_S = 24 * 3600;
-const FANOUT_CONCURRENCY = 20; // notifications dispatched in parallel per chunk
-const CLUB_MEMBER_CAP = 5000; // upper bound on club members fanned out per room
+const CLAIM_TTL_S = 5 * 60;
+const PAGE_SIZE = 250;
+const FANOUT_CONCURRENCY = 20;
+
+const RELEASE_CLAIM_SCRIPT = `
+  if redis.call('GET', KEYS[1]) == ARGV[1] then
+    return redis.call('DEL', KEYS[1])
+  end
+  return 0
+`;
 
 let timer: NodeJS.Timeout | null = null;
 
-export const fanoutOne = async (roomId: string): Promise<number> => {
-  // Idempotency guard — atomic SET NX. Released on error (see catch) so a
-  // failure between claim and dispatch can be retried by a later pass.
-  const claimed = await redis.set(DEDUP_KEY(roomId), '1', {
-    NX: true,
-    EX: DEDUP_TTL_S,
-  });
-  if (claimed !== 'OK') return 0;
+interface FanoutRoom {
+  id: string;
+  hostId: string;
+  clubId: string | null;
+  title: string;
+  roomType: string;
+  host: {
+    displayName: string | null;
+    username: string | null;
+  };
+}
+
+interface FollowerPageRow {
+  id: string;
+  followerId: string;
+  createdAt: Date;
+}
+
+interface ClubMemberPageRow {
+  userId: string;
+}
+
+type RecipientSource = 'ext.fanout.follow' | 'ext.fanout.club';
+type RecipientResult = 'created' | 'already-created' | 'busy';
+
+const markRecipientDone = async (roomId: string, userId: string): Promise<void> => {
+  await redis
+    .multi()
+    .sAdd(RECIPIENT_DONE_KEY(roomId), userId)
+    .expire(RECIPIENT_DONE_KEY(roomId), DEDUP_TTL_S)
+    .exec();
+};
+
+const releaseRecipientClaim = async (
+  roomId: string,
+  userId: string,
+  token: string,
+): Promise<void> => {
+  try {
+    await redis.eval(RELEASE_CLAIM_SCRIPT, {
+      keys: [RECIPIENT_CLAIM_KEY(roomId, userId)],
+      arguments: [token],
+    });
+  } catch (err) {
+    // The claim expires by itself. Do not replace the original delivery error
+    // with a cleanup failure, and never blindly DEL another worker's claim.
+    logger.warn('ext.fanout: recipient claim release failed', { err, roomId, userId });
+  }
+};
+
+const notifyRecipient = async (
+  room: FanoutRoom,
+  userId: string,
+  source: RecipientSource,
+  title: string,
+  body: string,
+): Promise<RecipientResult> => {
+  const doneKey = RECIPIENT_DONE_KEY(room.id);
+  if (await redis.sIsMember(doneKey, userId)) return 'already-created';
+
+  const claimKey = RECIPIENT_CLAIM_KEY(room.id, userId);
+  const claimToken = randomUUID();
+  const claimed = await redis.set(claimKey, claimToken, { NX: true, EX: CLAIM_TTL_S });
+  if (claimed !== 'OK') {
+    // The owner may have completed between our first membership read and the
+    // failed claim. Otherwise report "busy" so callers retry after its TTL.
+    return (await redis.sIsMember(doneKey, userId)) ? 'already-created' : 'busy';
+  }
 
   try {
-    const room = await prisma.room.findUnique({
-      where: { id: roomId },
-      include: {
-        host: { select: { id: true, displayName: true, username: true } },
+    // If the process died after the SQL insert but before SADD, a retry repairs
+    // only the Redis marker. actor/target make this specific to the live-room
+    // fan-out and do not collide with the earlier RSVP reminder row.
+    const existing = await prisma.notification.findFirst({
+      where: {
+        userId,
+        actorId: room.hostId,
+        type: 'ROOM_STARTED',
+        targetId: room.id,
+        targetType: 'room',
       },
+      select: { id: true },
     });
-    if (!room || !room.isLive || room.endedAt) return 0;
-    // Don't fan out private rooms.
-    if (room.isPrivate || room.roomType === 'CLOSED') return 0;
-
-    // Pull followers of the host + (if clubbed) the club members + the host's
-    // block set concurrently — none depend on each other. Both lists are capped
-    // to avoid runaway scans on viral hosts/clubs.
-    const [followers, clubMembers, blocked] = await Promise.all([
-      prisma.follow.findMany({
-        where: { followingId: room.hostId },
-        select: { followerId: true },
-        take: 5000,
-      }),
-      room.clubId
-        ? prisma.clubMember.findMany({
-            where: { clubId: room.clubId },
-            select: { userId: true },
-            take: CLUB_MEMBER_CAP,
-          })
-        : Promise.resolve<{ userId: string }[]>([]),
-      // Symmetric block graph of the host — these users must never receive the
-      // host's room-started fan-out (in either direction of the block).
-      getBlockedIdSet(room.hostId),
-    ]);
-
-    const title = room.host.displayName ?? room.host.username ?? 'Someone you follow';
-    const body = `started a room: "${room.title}"`;
-
-    // Track every recipient we've already queued so a user who both follows the
-    // host AND belongs to the room's club is only notified once. Seed it with the
-    // host so they never get a "you started a room" ping about their own room,
-    // and with the host's block set so blocked users are excluded from dispatch.
-    const notified = new Set<string>([room.hostId, ...blocked]);
-
-    // Build the ordered recipient list: followers first, then any club members
-    // (NOTIF: notify CLUB members on a direct live room). De-dupe via `notified`.
-    const recipients: string[] = [];
-    for (const f of followers) {
-      if (!notified.has(f.followerId)) {
-        notified.add(f.followerId);
-        recipients.push(f.followerId);
-      }
+    if (existing) {
+      await markRecipientDone(room.id, userId);
+      return 'already-created';
     }
 
-    // Club members (already fetched above) also learn the room went live — even
-    // when they don't follow the host. Reuse the same ROOM_STARTED type/data
-    // shape; only the dispatch source tag differs. De-duped via `notified`.
-    for (const m of clubMembers) {
-      if (!notified.has(m.userId)) {
-        notified.add(m.userId);
-        recipients.push(m.userId);
-      }
-    }
-
-    const followerIds = new Set(followers.map(f => f.followerId));
-    const sourceFor = (userId: string): string =>
-      followerIds.has(userId) ? 'ext.fanout.follow' : 'ext.fanout.club';
-
-    // Bounded-concurrency fan-out. We keep notificationsService.create per
-    // recipient (it owns the WS emit, push dispatch and unread-badge bump that a
-    // bare prisma.createMany would skip), but process FANOUT_CONCURRENCY at a
-    // time instead of strictly serial — cutting wall-clock round-trips ~Nx for
-    // viral hosts without a new dependency.
-    // TODO(audit): a true durable fan-out should enqueue per-recipient jobs (e.g.
-    // BullMQ) rather than scan-and-batch in-process.
-    let count = 0;
-    for (let i = 0; i < recipients.length; i += FANOUT_CONCURRENCY) {
-      const chunk = recipients.slice(i, i + FANOUT_CONCURRENCY);
-      const results = await Promise.allSettled(
-        chunk.map(userId =>
-          notificationsService.create({
-            userId,
-            actorId: room.hostId,
-            type: 'ROOM_STARTED',
-            title,
-            body,
-            data: { roomId: room.id, source: sourceFor(userId) },
-            targetId: room.id,
-            targetType: 'room',
-          }),
-        ),
-      );
-      results.forEach((r, idx) => {
-        if (r.status === 'fulfilled') {
-          count += 1;
-        } else {
-          logger.warn('ext.fanout: notify failed', {
-            err: r.reason,
-            userId: chunk[idx],
-            roomId,
-          });
-        }
-      });
-    }
-    return count;
-  } catch (err) {
-    // Release the idempotency claim so a transient failure (DB/Redis blip)
-    // doesn't permanently suppress this room's fan-out for 24h.
-    await redis.del(DEDUP_KEY(roomId)).catch(() => {});
-    throw err;
+    await notificationsService.create({
+      userId,
+      actorId: room.hostId,
+      type: 'ROOM_STARTED',
+      title,
+      body,
+      data: { roomId: room.id, source },
+      targetId: room.id,
+      targetType: 'room',
+      dedupeKey: `room-started:${room.id}:${userId}`,
+    });
+    await markRecipientDone(room.id, userId);
+    return 'created';
+  } finally {
+    await releaseRecipientClaim(room.id, userId, claimToken);
   }
+};
+
+interface DispatchState {
+  created: number;
+  incomplete: Set<string>;
+}
+
+const dispatchPage = async (
+  room: FanoutRoom,
+  recipientIds: string[],
+  source: RecipientSource,
+  title: string,
+  body: string,
+  excluded: ReadonlySet<string>,
+  state: DispatchState,
+): Promise<void> => {
+  const eligibleIds = recipientIds.filter(userId => !excluded.has(userId));
+  for (let offset = 0; offset < eligibleIds.length; offset += FANOUT_CONCURRENCY) {
+    const chunk = eligibleIds.slice(offset, offset + FANOUT_CONCURRENCY);
+    const results = await Promise.allSettled(
+      chunk.map(userId => notifyRecipient(room, userId, source, title, body)),
+    );
+
+    results.forEach((result, index) => {
+      const userId = chunk[index];
+      if (!userId) return;
+      if (result.status === 'rejected') {
+        state.incomplete.add(userId);
+        logger.warn('ext.fanout: notify failed', { err: result.reason, userId, roomId: room.id });
+        return;
+      }
+      if (result.value === 'busy') {
+        state.incomplete.add(userId);
+        return;
+      }
+
+      // A club page can repair a failed follower attempt for a member who is in
+      // both audiences. Only recipients still incomplete after every source
+      // make the fan-out call fail and request another retry.
+      state.incomplete.delete(userId);
+      if (result.value === 'created') state.created += 1;
+    });
+  }
+};
+
+const fanoutFollowers = async (
+  room: FanoutRoom,
+  title: string,
+  body: string,
+  excluded: ReadonlySet<string>,
+  state: DispatchState,
+): Promise<void> => {
+  let cursor: { createdAt: Date; id: string } | null = null;
+  while (true) {
+    const page: FollowerPageRow[] = await prisma.follow.findMany({
+      where: {
+        followingId: room.hostId,
+        status: 'ACCEPTED',
+        follower: { deletedAt: null },
+        ...(cursor
+          ? {
+              OR: [
+                { createdAt: { gt: cursor.createdAt } },
+                { createdAt: cursor.createdAt, id: { gt: cursor.id } },
+              ],
+            }
+          : {}),
+      },
+      select: { id: true, followerId: true, createdAt: true },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      take: PAGE_SIZE,
+    });
+    await dispatchPage(
+      room,
+      page.map(follow => follow.followerId),
+      'ext.fanout.follow',
+      title,
+      body,
+      excluded,
+      state,
+    );
+    if (page.length < PAGE_SIZE) return;
+    const last: FollowerPageRow | undefined = page[page.length - 1];
+    if (!last) return;
+    cursor = { createdAt: last.createdAt, id: last.id };
+  }
+};
+
+const fanoutClubMembers = async (
+  room: FanoutRoom,
+  title: string,
+  body: string,
+  excluded: ReadonlySet<string>,
+  state: DispatchState,
+): Promise<void> => {
+  if (!room.clubId || room.roomType !== 'OPEN') return;
+
+  let cursorUserId: string | null = null;
+  while (true) {
+    const page: ClubMemberPageRow[] = await prisma.clubMember.findMany({
+      where: {
+        clubId: room.clubId,
+        user: { deletedAt: null },
+        ...(cursorUserId ? { userId: { gt: cursorUserId } } : {}),
+      },
+      select: { userId: true },
+      orderBy: { userId: 'asc' },
+      take: PAGE_SIZE,
+    });
+    await dispatchPage(
+      room,
+      page.map(member => member.userId),
+      'ext.fanout.club',
+      title,
+      body,
+      excluded,
+      state,
+    );
+    if (page.length < PAGE_SIZE) return;
+    cursorUserId = page[page.length - 1]?.userId ?? null;
+    if (!cursorUserId) return;
+  }
+};
+
+export const fanoutOne = async (roomId: string): Promise<number> => {
+  const room = await prisma.room.findFirst({
+    where: { id: roomId, host: { deletedAt: null } },
+    include: {
+      host: { select: { id: true, displayName: true, username: true } },
+    },
+  });
+  if (!room || !room.isLive || room.endedAt) return 0;
+  if (room.isPrivate || room.roomType === 'CLOSED') return 0;
+
+  const blocked = await getBlockedIdSet(room.hostId);
+  const excluded = new Set<string>([room.hostId, ...blocked]);
+  const title = room.host.displayName ?? room.host.username ?? 'Someone you follow';
+  const body = `started a room: "${room.title}"`;
+  const state: DispatchState = { created: 0, incomplete: new Set<string>() };
+
+  // Followers retain source priority when someone belongs to both audiences.
+  // Each page is released before the next one is loaded, bounding DB results,
+  // in-memory recipient arrays and notification concurrency independently of
+  // audience size.
+  await fanoutFollowers(room, title, body, excluded, state);
+  await fanoutClubMembers(room, title, body, excluded, state);
+
+  if (state.incomplete.size > 0) {
+    throw new Error(
+      `ROOM_STARTED fan-out incomplete for ${state.incomplete.size} recipient(s) in room ${roomId}`,
+    );
+  }
+  return state.created;
 };
 
 const scanRecent = async (): Promise<void> => {
@@ -156,25 +301,22 @@ const scanRecent = async (): Promise<void> => {
       isLive: true,
       endedAt: null,
       isPrivate: false,
-      // roomType CLOSED rooms are never fanned out (fanoutOne re-checks too);
-      // exclude them here so we don't waste an idempotency claim on them.
       roomType: { not: 'CLOSED' },
-      // Exclude scheduled-but-not-yet-live (those are handled by the
-      // existing 5-min reminder + our 15-min sister worker).
+      host: { deletedAt: null },
       scheduledFor: null,
     },
     select: { id: true },
     take: 200,
   });
 
-  for (const r of rooms) {
+  for (const room of rooms) {
     try {
-      const n = await fanoutOne(r.id);
-      if (n > 0) {
-        logger.info('ext.fanout: room fanned out', { roomId: r.id, count: n });
+      const count = await fanoutOne(room.id);
+      if (count > 0) {
+        logger.info('ext.fanout: room fanned out', { roomId: room.id, count });
       }
     } catch (err) {
-      logger.error('ext.fanout: fanoutOne crashed', { err, roomId: r.id });
+      logger.error('ext.fanout: fanoutOne crashed', { err, roomId: room.id });
     }
   }
 };
@@ -185,7 +327,7 @@ export const startFollowFanoutWorker = (): void => {
     void scanRecent().catch(err => logger.warn('ext.fanout: scan failed', { err }));
   }, SCAN_INTERVAL_MS);
   timer.unref();
-  logger.info('ext.fanout: follow→room fan-out worker started');
+  logger.info('ext.fanout: follow-to-room fan-out worker started');
 };
 
 export const shutdownFollowFanout = (): void => {
@@ -195,5 +337,9 @@ export const shutdownFollowFanout = (): void => {
   }
 };
 
-// Exposed for tests
-export const _internals = { fanoutOne, scanRecent };
+export const _internals = {
+  fanoutOne,
+  scanRecent,
+  PAGE_SIZE,
+  FANOUT_CONCURRENCY,
+};

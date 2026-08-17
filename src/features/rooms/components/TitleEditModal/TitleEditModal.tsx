@@ -11,8 +11,9 @@ import {
   View,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button } from '../../../../shared/components/Button';
-import { colors, spacing } from '../../../../shared/constants/theme';
+import { colors, layout, spacing } from '../../../../shared/constants/theme';
 import { errorMessage } from '../../../../shared/utils/errorMessage';
 import { useUpdateRoomTitle } from '../../hooks/useRooms';
 // Shared title bounds — CreateRoomScreen and this modal must agree so an edited
@@ -29,6 +30,7 @@ interface TitleEditModalProps {
 export const TitleEditModal: React.FC<TitleEditModalProps> = memo(
   ({ visible, roomId, initialTitle, onClose }) => {
     const { t } = useTranslation();
+    const insets = useSafeAreaInsets();
     const [draft, setDraft] = useState(initialTitle);
     const updateTitle = useUpdateRoomTitle();
 
@@ -61,12 +63,14 @@ export const TitleEditModal: React.FC<TitleEditModalProps> = memo(
 
     return (
       <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-        <Pressable
-          style={styles.backdrop}
-          onPress={onClose}
-          accessibilityLabel={t('titleEdit.closeA11y', 'Close')}
-        >
-          <Pressable style={styles.sheet} onPress={() => undefined}>
+        <Pressable style={styles.backdrop} onPress={onClose} accessible={false}>
+          <Pressable
+            style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, spacing.xxl) }]}
+            onPress={() => undefined}
+            accessible={false}
+            focusable={false}
+            accessibilityViewIsModal
+          >
             <KeyboardAvoidingView
               behavior={Platform.OS === 'ios' ? 'padding' : undefined}
               style={styles.keyboardContent}
@@ -121,10 +125,13 @@ TitleEditModal.displayName = 'TitleEditModal';
 const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    backgroundColor: colors.modalBackdrop,
     justifyContent: 'flex-end',
+    alignItems: 'center',
   },
   sheet: {
+    width: '100%',
+    maxWidth: layout.maxContentWidth,
     backgroundColor: colors.surfaceHigh,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
@@ -139,21 +146,22 @@ const styles = StyleSheet.create({
   },
   title: { color: colors.text, fontSize: 18, fontWeight: '700' },
   input: {
-    backgroundColor: 'rgba(255,255,255,0.05)',
+    backgroundColor: colors.glass,
     color: colors.text,
     borderRadius: 12,
     padding: spacing.md,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.15)',
+    borderColor: colors.outline,
     fontSize: 16,
   },
   counter: { color: colors.textMuted, fontSize: 11, textAlign: 'right' },
   actions: { flexDirection: 'row', gap: spacing.sm, alignItems: 'center' },
   cancelBtn: {
+    minHeight: 44,
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.md,
     borderRadius: 999,
-    backgroundColor: 'rgba(255,255,255,0.05)',
+    backgroundColor: colors.glass,
   },
   cancelLabel: { color: colors.textMuted, fontSize: 14, fontWeight: '600' },
   saveBtnWrap: { flex: 1 },

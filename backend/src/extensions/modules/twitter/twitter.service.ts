@@ -42,6 +42,11 @@ interface TwitterImportResult {
   avatarUrl: string | null;
 }
 
+interface PkceSession {
+  userId: string;
+  codeVerifier: string;
+}
+
 export const twitterService = {
   configured: isConfigured,
 
@@ -49,14 +54,15 @@ export const twitterService = {
    * Step 1: mint state + PKCE verifier, persist the verifier in Redis keyed
    * by state (one-time, TTL'd), and return the authorize URL + state.
    */
-  async beginAuth(): Promise<{ url: string; state: string }> {
+  async beginAuth(userId: string): Promise<{ url: string; state: string }> {
     if (!isConfigured()) {
       throw extError('TWITTER_NOT_CONFIGURED');
     }
     const state = b64url(crypto.randomBytes(16));
     const codeVerifier = b64url(crypto.randomBytes(32));
     const codeChallenge = b64url(crypto.createHash('sha256').update(codeVerifier).digest());
-    await redis.setEx(pkceKey(state), PKCE_TTL_S, codeVerifier);
+    const session: PkceSession = { userId, codeVerifier };
+    await redis.setEx(pkceKey(state), PKCE_TTL_S, JSON.stringify(session));
     return { url: this.authorizeUrl(state, codeChallenge), state };
   },
 
@@ -64,14 +70,30 @@ export const twitterService = {
    * Step 3: look the verifier up by state (deleting it so a code can't be
    * replayed), then exchange the code for the user's profile.
    */
-  async completeAuth(state: string, code: string): Promise<TwitterImportResult> {
+  async completeAuth(userId: string, state: string, code: string): Promise<TwitterImportResult> {
     const key = pkceKey(state);
-    const codeVerifier = await redis.get(key);
-    await redis.del(key);
-    if (!codeVerifier) {
+    // GETDEL makes state one-time even when two completion requests race.
+    const rawSession = await redis.getDel(key);
+    if (!rawSession) {
       throw extError('TWITTER_STATE_INVALID');
     }
-    return this.exchange(code, codeVerifier);
+    let session: PkceSession;
+    try {
+      session = JSON.parse(rawSession) as PkceSession;
+    } catch {
+      throw extError('TWITTER_STATE_INVALID');
+    }
+    // Bind the browser callback to the account that initiated it. Without
+    // this check, one authenticated account could redeem another account's
+    // intercepted state/code pair.
+    if (
+      session.userId !== userId ||
+      typeof session.codeVerifier !== 'string' ||
+      session.codeVerifier.length < 32
+    ) {
+      throw extError('TWITTER_STATE_INVALID');
+    }
+    return this.exchange(code, session.codeVerifier);
   },
 
   authorizeUrl(state: string, codeChallenge: string): string {

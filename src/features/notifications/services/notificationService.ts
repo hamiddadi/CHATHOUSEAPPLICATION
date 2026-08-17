@@ -5,7 +5,10 @@ import type { AppNotification, NotificationKind } from '../../../shared/types/do
 type BackendType =
   | 'ROOM_INVITE'
   | 'NEW_FOLLOWER'
+  | 'FOLLOW_REQUEST'
   | 'ROOM_STARTED'
+  | 'ROOM_CANCELED'
+  | 'ROOM_ENDED_BY_ADMIN'
   | 'SPEAKER_REQUEST'
   | 'MENTION'
   | 'CLUB_INVITE'
@@ -20,6 +23,9 @@ interface RawNotification {
   id: string;
   userId: string;
   type: BackendType;
+  actorId?: string | null;
+  targetId?: string | null;
+  targetType?: string | null;
   title: string;
   body: string;
   data?: Record<string, unknown> | null;
@@ -27,10 +33,21 @@ interface RawNotification {
   createdAt: string;
 }
 
+export interface NotificationPage {
+  items: AppNotification[];
+  nextCursor: string | null;
+  hasMore: boolean;
+}
+
+const PAGE_SIZE = 50;
+
 const typeToKind: Record<BackendType, NotificationKind> = {
   NEW_FOLLOWER: 'follow',
+  FOLLOW_REQUEST: 'follow_request',
   ROOM_INVITE: 'room_invite',
   ROOM_STARTED: 'room_starting',
+  ROOM_CANCELED: 'room_canceled',
+  ROOM_ENDED_BY_ADMIN: 'room_ended_by_admin',
   SPEAKER_REQUEST: 'mention',
   MENTION: 'mention',
   // Frontend domain calls a club a "house".
@@ -52,13 +69,25 @@ const toAppNotification = (raw: RawNotification): AppNotification => {
   // deep-link fires; display info is carried by `message` (= body).
   const d = data as Record<string, unknown>;
   const actorId =
+    asString(raw.actorId) ??
     asString(d.followerId) ??
     asString(d.inviterId) ??
     asString(d.hostId) ??
     asString(d.waverId) ??
     asString(d.senderId) ??
     asString(d.actorId) ??
+    (raw.targetType === 'user' ? asString(raw.targetId) : undefined) ??
     '';
+  const roomId =
+    asString(d.roomId) ?? (raw.targetType === 'room' ? asString(raw.targetId) : undefined) ?? null;
+  const houseId =
+    asString(d.clubId) ??
+    asString(d.houseId) ??
+    (raw.targetType === 'club' || raw.targetType === 'house'
+      ? (asString(raw.targetId) ?? null)
+      : null);
+  const conversationType =
+    d.conversation === 'group' ? 'group' : d.conversation === 'dm' ? 'dm' : null;
   return {
     id: raw.id,
     kind: typeToKind[raw.type],
@@ -69,19 +98,59 @@ const toAppNotification = (raw: RawNotification): AppNotification => {
       avatarUrl: null,
     },
     message: raw.body,
-    roomId: asString((data as Record<string, unknown>).roomId) ?? null,
-    houseId: asString((data as Record<string, unknown>).clubId) ?? null,
+    roomId,
+    houseId,
+    conversationId: asString(d.conversationId) ?? null,
+    conversationType,
     createdAt: raw.createdAt,
     isRead: raw.isRead,
   };
 };
 
 export const notificationService = {
-  async list(filter: NotificationFilter = 'all'): Promise<AppNotification[]> {
-    const res = await apiClient.get<Envelope<RawNotification[]>>('/notifications', {
-      params: filter === 'all' ? undefined : { filter },
+  async list(filter: NotificationFilter = 'all', cursor?: string): Promise<NotificationPage> {
+    const res = await apiClient.get<unknown>('/notifications', {
+      params: {
+        ...(filter !== 'all' ? { filter } : {}),
+        ...(cursor ? { cursor } : {}),
+      },
     });
-    return res.data.data.map(toAppNotification);
+
+    // Current API: { success, data: RawNotification[], nextCursor, hasMore }.
+    // Also accept the previous array-only envelope and the briefly-used nested
+    // page shape so mobile/backend rolling deployments remain interoperable.
+    const responseBody = res.data;
+    const root =
+      responseBody && typeof responseBody === 'object' && !Array.isArray(responseBody)
+        ? (responseBody as Record<string, unknown>)
+        : null;
+    const payload = root ? root.data : responseBody;
+    const nested =
+      payload && typeof payload === 'object' && !Array.isArray(payload)
+        ? (payload as Record<string, unknown>)
+        : null;
+    const rows = (
+      Array.isArray(payload)
+        ? payload
+        : Array.isArray(nested?.data)
+          ? nested.data
+          : Array.isArray(nested?.items)
+            ? nested.items
+            : []
+    ) as RawNotification[];
+
+    const rawHasMore = root?.hasMore ?? nested?.hasMore;
+    const hasMore = typeof rawHasMore === 'boolean' ? rawHasMore : rows.length >= PAGE_SIZE;
+    const rawNextCursor = root?.nextCursor ?? nested?.nextCursor;
+    const legacyCursor = hasMore ? (rows[rows.length - 1]?.createdAt ?? null) : null;
+    const nextCursor =
+      typeof rawNextCursor === 'string'
+        ? rawNextCursor
+        : rawNextCursor === null
+          ? null
+          : legacyCursor;
+
+    return { items: rows.map(toAppNotification), nextCursor, hasMore };
   },
 
   async unreadCount(): Promise<number> {

@@ -57,46 +57,49 @@ describe('isUserInRoom', () => {
 
 describe('UserMapMarker', () => {
   it('speaking user → green mic glyph + ", live" label', () => {
-    const { getByText, getAllByLabelText } = render(
+    const { getByText, getByLabelText, queryAllByLabelText } = render(
       <UserMapMarker user={makeUser({ liveRoomId: 'r1', isSpeaking: true })} />,
     );
-    expect(getByText('mic')).toBeTruthy();
-    expect(getAllByLabelText('Alex Rivers, live').length).toBeGreaterThan(0);
+    expect(getByText('mic', { includeHiddenElements: true }).props.color).toBe('#0C112E');
+    expect(getByLabelText('Alex Rivers, live').props.accessibilityRole).toBe('image');
+    expect(queryAllByLabelText('Alex Rivers, live')).toHaveLength(1);
   });
 
   it('muted user → mic-off glyph', () => {
     const { getByText } = render(
       <UserMapMarker user={makeUser({ liveRoomId: 'r1', isMuted: true })} />,
     );
-    expect(getByText('mic-off')).toBeTruthy();
+    expect(getByText('mic-off', { includeHiddenElements: true })).toBeTruthy();
   });
 
   it('listener user → hearing glyph', () => {
     const { getByText } = render(
       <UserMapMarker user={makeUser({ liveRoomId: 'r1', isListener: true })} />,
     );
-    expect(getByText('hearing')).toBeTruthy();
+    expect(getByText('hearing', { includeHiddenElements: true })).toBeTruthy();
   });
 
   it('online user (no room) → no mic glyph, label has no ", live"', () => {
     const { queryByText, getByText } = render(<UserMapMarker user={makeUser()} />);
-    expect(queryByText('mic')).toBeNull();
-    expect(queryByText('mic-off')).toBeNull();
-    expect(queryByText('hearing')).toBeNull();
+    expect(queryByText('mic', { includeHiddenElements: true })).toBeNull();
+    expect(queryByText('mic-off', { includeHiddenElements: true })).toBeNull();
+    expect(queryByText('hearing', { includeHiddenElements: true })).toBeNull();
     // Username chip still renders for identification.
-    expect(getByText('alex')).toBeTruthy();
+    expect(getByText('alex', { includeHiddenElements: true })).toBeTruthy();
   });
 
   it('falls back to initials when the profile photo is absent', () => {
     const { getByText } = render(<UserMapMarker user={makeUser({ avatarUrl: null })} />);
-    expect(getByText('AR')).toBeTruthy();
+    expect(getByText('AR', { includeHiddenElements: true })).toBeTruthy();
   });
 
   it('invokes onPress with the user when the marker is tapped', () => {
     const onPress = jest.fn();
     const user = makeUser({ liveRoomId: 'r1', isSpeaking: true });
-    const { getAllByLabelText } = render(<UserMapMarker user={user} onPress={onPress} />);
-    fireEvent.press(getAllByLabelText('Alex Rivers, live')[0]);
+    const { getByLabelText } = render(<UserMapMarker user={user} onPress={onPress} />);
+    const marker = getByLabelText('Alex Rivers, live');
+    expect(marker.props.accessibilityRole).toBe('button');
+    fireEvent.press(marker);
     expect(onPress).toHaveBeenCalledWith(user);
   });
 });

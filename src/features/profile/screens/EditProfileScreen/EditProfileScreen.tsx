@@ -17,6 +17,7 @@ import { useTranslation } from 'react-i18next';
 import { impactLight, notifySuccess } from '../../../../shared/utils/haptics';
 import { Avatar } from '../../../../shared/components/Avatar';
 import { Button } from '../../../../shared/components/Button';
+import { EmptyState } from '../../../../shared/components/EmptyState';
 import { Input } from '../../../../shared/components/Input';
 import { Loader } from '../../../../shared/components/Loader';
 import { colors, spacing } from '../../../../shared/constants/theme';
@@ -44,7 +45,7 @@ export const EditProfileScreen: React.FC = () => {
   const { t } = useTranslation();
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
-  const { data: me, isLoading, refetch } = useMe();
+  const { data: me, isLoading, isError, refetch } = useMe();
   const updateProfile = useUpdateProfile();
 
   const [displayName, setDisplayName] = useState('');
@@ -229,8 +230,31 @@ export const EditProfileScreen: React.FC = () => {
   const busy = uploading || updateProfile.isPending;
   const canSave = displayName.trim().length >= 2 && usernameOk && !busy;
 
-  if (isLoading || !me) {
+  if (isLoading) {
     return <Loader fullscreen accessibilityLabel={t('profile.edit.loading', 'Loading profile')} />;
+  }
+
+  if (isError || !me) {
+    return (
+      <View className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
+        <View className="flex-row items-center px-xxl py-lg">
+          <Pressable
+            onPress={handleClose}
+            accessibilityRole="button"
+            accessibilityLabel={t('profile.edit.cancelA11y', 'Cancel')}
+            hitSlop={10}
+          >
+            <MaterialIcons name="close" size={24} color={colors.text} />
+          </Pressable>
+        </View>
+        <EmptyState
+          title={t('profile.edit.loadError', "Couldn't load your profile")}
+          description={t('common.checkConnection', 'Check your connection and try again.')}
+          actionLabel={t('common.retry', 'Retry')}
+          onAction={() => void refetch()}
+        />
+      </View>
+    );
   }
 
   return (
@@ -286,6 +310,7 @@ export const EditProfileScreen: React.FC = () => {
               onPress={handlePickImage}
               accessibilityRole="button"
               accessibilityLabel={t('profile.edit.changePhotoA11y', 'Change profile photo')}
+              hitSlop={4}
               className="absolute -bottom-xxs -right-xxs w-10 h-10 rounded-pill bg-primary items-center justify-center border-2 border-background"
             >
               <MaterialIcons name="photo-camera" size={18} color={colors.onPrimary} />

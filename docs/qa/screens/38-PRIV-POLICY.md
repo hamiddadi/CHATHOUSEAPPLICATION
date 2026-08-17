@@ -5,29 +5,36 @@
 - **Route** : `PrivacyPolicy` (sans parametre, `undefined`). L'ecran est enregistre **deux fois** :
   - dans l'`AuthNavigator` (`AuthStackParamList`), atteint en **pre-auth** depuis `PhoneScreen` via `navigation.navigate('PrivacyPolicy')` (lien « Politique de confidentialite » du bas de l'ecran telephone) ;
   - dans le `SettingsNavigator` (`SettingsStackParamList`), atteint en **post-auth** depuis `SettingsScreen` via `goPrivacyPolicy` (`navigation.navigate('PrivacyPolicy')`).
-- **Composant** : `PrivacyPolicyScreen.tsx`. Document legal **statique, en lecture seule**, embarque dans l'app (volontairement pas une URL distante : fonctionne hors-ligne et la version vue par l'utilisateur correspond a celle revue au build).
+- **Composant** : `PrivacyPolicyScreen.tsx`. Résumé juridique **statique, en
+  lecture seule**, embarqué pour rester disponible hors ligne, avec un lien vers
+  la version canonique publiée.
 - **Roles requis** : aucun role privilegie. Accessible a un visiteur non authentifie (`guest`, via l'AuthStack) comme a un utilisateur authentifie (`standard`, `admin`, via le SettingsStack). C'est une page RGPD ouverte a tous.
 - **Comportements temps-reel** : **AUCUN**. L'ecran ne fait aucun appel reseau, ne lit aucun store, n'ouvre aucune WebSocket/LiveKit, n'emet/recoit aucun push. Il n'affiche que des chaines i18n statiques (`t('privacy.policy.*')`) dans la mise en page partagee `LegalDoc`.
-- **Pre-conditions globales** : aucune. Le contenu est identique en ligne, hors-ligne, en 4G ou en avion — aucune donnee distante n'est requise. La langue affichee (FR/EN) depend de la locale i18n active.
+- **Pre-conditions globales** : aucune pour lire le résumé. Le réseau est requis
+  seulement pour ouvrir la politique canonique. La langue affichée (FR/EN)
+  dépend de la locale i18n active.
 - **Etats de donnees pertinents** : sans objet (pas de liste, pas de « non lus », pas d'etat vide, pas d'etat de chargement, pas d'etat d'erreur reseau). Le seul « etat » est la position de defilement et la langue active.
 
 ### Note importante sur l'interactivite
 
-Cet ecran ne contient **litteralement aucun bouton, toggle, champ de saisie, lien actionnable, FAB ni cellule pressable**. Inspection du code (`PrivacyPolicyScreen.tsx` + composants `LegalDoc` / `LegalSection` / `LegalParagraph` / `LegalEmail`) :
+Cet ecran reste en lecture seule, mais comporte trois actions explicites :
 
-- tout est rendu via `<Text>` et `<View>` non pressables dans un `<ScrollView>` ;
-- l'adresse e-mail `privacy@chathouse.app` (composant `LegalEmail`) est un **simple `<Text>` colore** (couleur primaire) — **PAS** un lien : aucun `onPress`, aucun `accessibilityRole="link"`, aucun `Linking.openURL`. Elle n'ouvre donc pas le client mail ;
-- les deux navigateurs declarent `headerShown: false` → **aucun bouton retour natif rendu dans un header**. Le retour se fait exclusivement par le **geste de retour natif** (swipe iOS / bouton materiel Android) du native-stack.
-
-Conformement a la consigne « ecran legal en lecture seule », on traite donc au minimum : l'**affordance de retour** (geste / bouton materiel), la **zone de defilement** (ScrollView) et le **texte e-mail** (selectionnable mais non actionnable). Le test confirme cette absence d'interactivite (`PrivacyPolicyScreen.test.tsx` n'asserte que la presence de textes, aucun `fireEvent.press`).
+- `LegalDoc` affiche un bouton Retour visible (`Pressable`, icone `arrow-back`,
+  `testID="privacy-policy-screen-back"`) qui appelle `navigation.goBack()` ;
+- `LegalEmail` rend `privacy@chathouse.app` comme lien accessible et ouvre
+  `mailto:privacy@chathouse.app` via `Linking.openURL` ;
+- le lien « Lire la politique complète » ouvre la version canonique publiée
+  sur l'origine de l'API ;
+- le document reste defilable et n'effectue aucun appel reseau applicatif.
 
 ## Matrice bouton
 
-| #   | Bouton                                             | Emplacement                                                   | Type                                       | Locator reel                                                                                                                           | Pre-condition                                          | Priorite |
-| --- | -------------------------------------------------- | ------------------------------------------------------------- | ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ | -------- |
-| 1   | Retour (geste swipe iOS / bouton materiel Android) | Geste systeme / hors-UI (header masque, `headerShown:false`)  | navigation                                 | Aucun locator dans l'app (affordance OS native du native-stack) ; cible = ecran appelant (`Phone` ou `Settings`)                       | Etre arrive sur l'ecran via navigation (pile non vide) | P1       |
-| 2   | Defilement du document (ScrollView)                | Corps (conteneur scrollable plein ecran)                      | list-item (zone scrollable, non-pressable) | `ScrollView` racine de `LegalDoc` (pas de testID ; identifiable par `accessibilityRole="header"` du titre `t('privacy.policy.title')`) | Contenu plus haut que le viewport                      | P2       |
-| 3   | Adresse e-mail de contact (texte, NON actionnable) | Corps, section 7 « Contact » (`t('privacy.policy.s7.title')`) | link (apparence lien mais inerte)          | Texte litteral `privacy@chathouse.app` (composant `LegalEmail`, sans `onPress`)                                                        | Avoir defile jusqu'a la section 7                      | P2       |
+| #   | Bouton                              | Emplacement                                                   | Type                                       | Locator reel                                                                                                      | Pre-condition                                          | Priorite |
+| --- | ----------------------------------- | ------------------------------------------------------------- | ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ | -------- |
+| 1   | Retour                              | Haut du document                                              | navigation                                 | `testID="privacy-policy-screen-back"`, role `button`, label localise `common.back`                                | Etre arrive sur l'ecran via navigation (pile non vide) | P1       |
+| 2   | Defilement du document (ScrollView) | Corps (conteneur scrollable plein ecran)                      | list-item (zone scrollable, non-pressable) | `testID="privacy-policy-screen"` ; titre avec `accessibilityRole="header"`                                        | Contenu plus haut que le viewport                      | P2       |
+| 3   | Adresse e-mail de contact           | Corps, section 7 « Contact » (`t('privacy.policy.s7.title')`) | link                                       | Texte `privacy@chathouse.app`, composant `LegalEmail`, role `link`, `onPress` vers `mailto:privacy@chathouse.app` | Avoir defile jusqu'a la section 7                      | P2       |
+| 4   | Politique complète publiée          | Introduction                                                  | link                                       | `privacy.policy.fullLink`, composant `LegalLink`, URL canonique se terminant par `/privacy`                       | Réseau disponible                                      | P1       |
 
 ## Cas de test
 
@@ -40,7 +47,7 @@ Conformement a la consigne « ecran legal en lecture seule », on traite donc au
   1. Lancer l'app, depuis Landing aller sur `Phone`.
   2. Taper le lien « Politique de confidentialite » en bas de `PhoneScreen` → l'ecran `PrivacyPolicy` s'ouvre.
   3. Verifier que le titre `Politique de confidentialite` (FR) est affiche en haut.
-  4. Declencher le retour : swipe depuis le bord gauche (iOS) ou bouton materiel Retour (Android).
+  4. Taper le bouton Retour visible (`privacy-policy-screen-back`).
 - **Resultat attendu** : l'ecran `PrivacyPolicy` se ferme avec l'animation `slide_from_right` inverse et l'app revient exactement sur `PhoneScreen`, dans l'etat ou il etait laisse (numero saisi conserve). Aucun crash, aucun double-pop.
 - **Critere d'acceptation (OK/KO)** : OK si l'utilisateur revient sur `Phone` (et non sur Landing ou un ecran blanc) ; KO sinon.
 - **Donnees de test** : compte guest ; numero pre-saisi `+33612345678`.
@@ -84,7 +91,7 @@ Conformement a la consigne « ecran legal en lecture seule », on traite donc au
 - **Pre-conditions** : compte guest ou standard ; reseau indifferent ; etre sur `PrivacyPolicy`.
 - **Etapes** :
   1. Ouvrir `PrivacyPolicy`.
-  2. Verifier l'affichage du titre `Politique de confidentialite` et de la ligne « Derniere mise a jour : 25 avril 2026 ».
+  2. Verifier l'affichage du titre `Politique de confidentialite` et de la ligne « Derniere mise a jour : 29 juillet 2026 ».
   3. Faire defiler de haut en bas (swipe vertical) jusqu'au bas du document.
   4. Verifier la presence successive des 7 titres de section : « 1. Quelles donnees nous collectons » … « 7. Contact ».
   5. Verifier que la section 7 affiche le texte de contact et l'adresse `privacy@chathouse.app`.

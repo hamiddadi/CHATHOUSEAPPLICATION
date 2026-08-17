@@ -13,10 +13,11 @@ import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
+import androidx.annotation.RequiresApi
 import com.chathouse.app.R
 
 /**
- * Foreground service that keeps the process alive while a Chathouse audio room
+ * Foreground service that keeps the process alive while a ChatHouse audio room
  * (LiveKit) is active in the background, so Android does not kill live audio.
  *
  * Declared in AndroidManifest.xml with
@@ -75,24 +76,20 @@ class RoomForegroundService : Service() {
    * permission makes startForeground throw a SecurityException on Android 14+,
    * which would crash listeners (who never grant the mic).
    */
+  @RequiresApi(Build.VERSION_CODES.Q)
   private fun resolveServiceType(): Int {
     var type = ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
     val micGranted =
       ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
         PackageManager.PERMISSION_GRANTED
-    if (micGranted) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && micGranted) {
       type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
     }
     return type
   }
 
   private fun stopForegroundCompat() {
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-      stopForeground(STOP_FOREGROUND_REMOVE)
-    } else {
-      @Suppress("DEPRECATION")
-      stopForeground(true)
-    }
+    stopForeground(STOP_FOREGROUND_REMOVE)
   }
 
   private fun createChannel() {

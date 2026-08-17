@@ -1,4 +1,5 @@
 import { apiClient } from '../../../shared/services/api/apiClient';
+import { assertExternalDigitalPurchasesAllowed } from '../utils/digitalPurchases';
 
 export interface PaymentStatus {
   configured: boolean;
@@ -57,6 +58,7 @@ export const paymentsApi = {
    * minor units; `currency` defaults server-side when omitted.
    */
   async tip(toUserId: string, amountCents: number, currency?: string): Promise<TipResult> {
+    assertExternalDigitalPurchasesAllowed();
     const { data } = await apiClient.post<TipResult>('/ext/payments/tip', {
       toUserId,
       amountCents,

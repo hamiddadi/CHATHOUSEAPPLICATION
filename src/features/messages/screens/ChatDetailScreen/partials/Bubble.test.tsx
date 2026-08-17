@@ -4,7 +4,7 @@
  * then a single grey "done" check is shown so we never over-promise a read.
  */
 import React from 'react';
-import { render } from '@testing-library/react-native';
+import { fireEvent, render } from '@testing-library/react-native';
 import type { Message } from '../../../../../shared/types/domain';
 import Bubble from './Bubble';
 
@@ -46,5 +46,24 @@ describe('Bubble read receipt', () => {
     const { queryByText } = render(<Bubble message={msg} otherAvatar={null} showAvatar />);
     expect(queryByText('done')).toBeTruthy();
     expect(queryByText('done-all')).toBeNull();
+  });
+
+  it('exposes long-press moderation as a screen-reader action', () => {
+    const onLongPress = jest.fn();
+    const { getByRole } = render(
+      <Bubble message={mine()} otherAvatar={null} showAvatar onLongPress={onLongPress} />,
+    );
+
+    const bubble = getByRole('button');
+    expect(bubble.props.accessibilityActions).toEqual([
+      expect.objectContaining({ name: 'delete' }),
+    ]);
+    fireEvent(bubble, 'accessibilityAction', { nativeEvent: { actionName: 'delete' } });
+    expect(onLongPress).toHaveBeenCalledWith(expect.objectContaining({ id: 'm1' }));
+  });
+
+  it('does not announce an action when no handler exists', () => {
+    const { queryByRole } = render(<Bubble message={mine()} otherAvatar={null} showAvatar />);
+    expect(queryByRole('button')).toBeNull();
   });
 });

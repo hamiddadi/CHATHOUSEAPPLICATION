@@ -10,6 +10,7 @@ import {
   usePremiumStatus,
   useStartPremiumCheckout,
 } from '../hooks/usePremium';
+import { areExternalDigitalPurchasesAllowed } from '../utils/digitalPurchases';
 
 /**
  * Settings entry for ChatHouse Premium. Subscribe (Stripe Checkout) when free,
@@ -18,7 +19,8 @@ import {
  */
 export const ExtPremiumRow: React.FC = () => {
   const { t } = useTranslation();
-  const { data: status } = usePremiumStatus();
+  const externalPurchasesAllowed = areExternalDigitalPurchasesAllowed();
+  const { data: status } = usePremiumStatus(externalPurchasesAllowed);
   const checkout = useStartPremiumCheckout();
   const portal = useOpenBillingPortal();
 
@@ -47,8 +49,9 @@ export const ExtPremiumRow: React.FC = () => {
     });
   }, [portal, open, t]);
 
-  // Hidden unless premium is configured on the backend.
-  if (!status?.configured) return null;
+  // Stripe-hosted digital purchases are not exposed in mobile store builds.
+  // Existing entitlements remain server-side; this row is a purchase/manage link.
+  if (!externalPurchasesAllowed || !status?.configured) return null;
 
   const premium = status.premium;
   const busy = checkout.isPending || portal.isPending;

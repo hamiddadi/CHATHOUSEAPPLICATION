@@ -3,15 +3,20 @@ import type { Request, Response } from 'express';
 import { sendOk } from '../../utils/response';
 import { AppError } from '../../middlewares/error.middleware';
 import { authedUserId as requireUserId } from '../../utils/authedUserId';
+import { decodeTimeIdCursor } from '../../utils/timeIdCursor';
 import { followService } from './follow.service';
 
 // Shared list pagination guard. Replaces the hand-rolled Number()/string
 // parsing that let `limit=abc` reach Prisma as NaN and an invalid `cursor`
-// reach `new Date(cursor)` as Invalid Date. `cursor` is an ISO timestamp
-// (the followed-row createdAt) the service feeds to `createdAt: { lt }`.
+// reach Prisma. New cursors are opaque `(createdAt,id)` values; strict legacy
+// ISO timestamp cursors remain accepted during rolling client upgrades.
 const listQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(50).default(50),
-  cursor: z.string().datetime().optional(),
+  cursor: z
+    .string()
+    .max(1024)
+    .refine(value => decodeTimeIdCursor(value) !== null, { message: 'Invalid follow cursor' })
+    .optional(),
 });
 
 const targetId = (req: Request): string => {

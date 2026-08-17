@@ -1,7 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
 import { apiClient } from '../../../shared/services/api/apiClient';
-import { getSocket } from '../../../shared/services/realtime/socketClient';
 
 const KEY = 'chathouse.ghostMode.v1';
 
@@ -15,10 +14,9 @@ interface GhostModeState {
 }
 
 /**
- * Ghost Mode is persisted locally via AsyncStorage so the user's preference
- * survives app restarts even before the network sync succeeds. (Non-sensitive
- * boolean flag — moved off expo-secure-store in the de-Expo migration.)
- * When the backend is wired, `setGhost` should also POST /me/presence/ghost.
+ * The server is the source of truth because only a successful visibility
+ * update can guarantee that stored coordinates were cleared. AsyncStorage
+ * mirrors the confirmed server state for startup/offline rendering.
  */
 export const useGhostModeStore = create<GhostModeState>((set, get) => ({
   isGhost: false,
@@ -35,28 +33,17 @@ export const useGhostModeStore = create<GhostModeState>((set, get) => ({
   },
 
   setGhost: async next => {
-    // Persist optimistically — the local value is the source of truth
-    // when the user opens the app offline. Backend sync is best-effort.
-    await AsyncStorage.setItem(KEY, next ? '1' : '0');
+    // Do not show "hidden" until the durable server update succeeds. The
+    // backend clears coordinates and emits maps:user-offline from this path.
+    await apiClient.patch('/users/me/visibility', { isVisible: !next });
     set({ isGhost: next });
 
-    // CRITICAL: tell the realtime server NOW so our last broadcast position is
-    // removed from every other viewer's map. The backend only emits
-    // `maps:user-offline` when it receives `maps:toggle-visibility` — it does
-    // NOT infer Ghost Mode from the REST PATCH. Without this emit, the last
-    // GPS position stays visible to followers until the socket disconnects.
+    // Persistence failure must not roll back a privacy change already accepted
+    // by the server. Hydration will be corrected by the next confirmed toggle.
     try {
-      const socket = await getSocket();
-      socket?.emit('maps:toggle-visibility', { isVisible: !next });
+      await AsyncStorage.setItem(KEY, next ? '1' : '0');
     } catch {
-      /* best-effort — REST PATCH below is the durable source of truth */
-    }
-
-    try {
-      await apiClient.patch('/users/me/visibility', { isVisible: !next });
-    } catch {
-      // Silent: local state already reflects the user's choice; the sync will
-      // be retried on the next toggle.
+      /* server-confirmed state remains authoritative */
     }
   },
 

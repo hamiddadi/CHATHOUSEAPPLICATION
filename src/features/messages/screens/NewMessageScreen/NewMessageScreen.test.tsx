@@ -1,21 +1,24 @@
 /**
  * Render test for NewMessageScreen (the people picker that opens a 1:1 thread or
- * creates a group). The picker is scoped to who you follow (the DM follow-gate),
- * so we seed the `useFollowing` cache rather than mocking a global search.
+ * creates a group). The picker is scoped to who you follow and consumes the
+ * server-computed DM eligibility flag, so we seed the `useFollowing` cache
+ * rather than mocking a global search.
  * Mounts, asserts the no-following empty state, exercises close (→ goBack),
  * filters the list, and selects one / two followed people to assert the CTA
  * `replace`s into ChatDetail or switches to the group-create label.
  */
 import React from 'react';
-import { fireEvent, waitFor } from '@testing-library/react-native';
+import { act, fireEvent, waitFor } from '@testing-library/react-native';
 import { profileKeys } from '../../../profile/hooks/useProfile';
 import type { User } from '../../../../shared/types/domain';
 import { renderScreen, mockAuthenticated, resetAuth } from '../../../../test-utils/renderScreen';
+import { profileService } from '../../../profile/services/profileService';
+import { groupService, type GroupConversation } from '../../services/groupService';
 import { NewMessageScreen } from './NewMessageScreen';
 
 const ME = 'user-test-1';
 
-const followUser = (id: string, username: string): User =>
+const followUser = (id: string, username: string, canDirectMessage = true): User =>
   ({
     id,
     username,
@@ -31,6 +34,7 @@ const followUser = (id: string, username: string): User =>
     followersCount: 0,
     followingCount: 0,
     isFollowedByMe: true,
+    canDirectMessage,
     invitedBy: null,
     currentRoomId: null,
   }) as User;
@@ -38,7 +42,7 @@ const followUser = (id: string, username: string): User =>
 // useFollowing is now a useInfiniteQuery → the cache holds
 // { pages: FollowPage[], pageParams }, not a flat User[].
 const page = (following: User[]) => ({
-  pages: [{ items: following, nextCursor: null }],
+  pages: [{ items: following, nextCursor: null, hasMore: false }],
   pageParams: [undefined],
 });
 
@@ -64,6 +68,23 @@ describe('NewMessageScreen', () => {
     expect(getByText('No one to message yet')).toBeTruthy();
   });
 
+  it('shows a retryable error instead of the no-following state when loading fails', async () => {
+    const followingSpy = jest
+      .spyOn(profileService, 'following')
+      .mockRejectedValue(new Error('offline'));
+    const { findByText, getAllByText, getByText, queryByText } = renderScreen(
+      <NewMessageScreen />,
+      { route: { name: 'NewMessage' } },
+    );
+
+    expect(await findByText("Couldn't load messages")).toBeTruthy();
+    expect(queryByText('No one to message yet')).toBeNull();
+    expect(getAllByText('New message').length).toBeGreaterThan(0);
+
+    fireEvent.press(getByText('Retry'));
+    await waitFor(() => expect(followingSpy).toHaveBeenCalledTimes(2));
+  });
+
   it('close button calls navigation.goBack', () => {
     const { navigation, getByLabelText } = renderNew([]);
     fireEvent.press(getByLabelText('Close'));
@@ -81,6 +102,34 @@ describe('NewMessageScreen', () => {
     expect(navigation.replace).toHaveBeenCalledWith('ChatDetail', { conversationId: 'peer-42' });
   });
 
+  it('prevents a known-ineligible direct message before opening the thread', () => {
+    const { navigation, getAllByText, getByLabelText, getByText } = renderNew([
+      followUser('peer-42', 'alice', false),
+    ]);
+
+    // The row communicates the server-side result without exposing whether it
+    // came from a follow, block, or recipient privacy setting.
+    expect(getByText('Direct message unavailable')).toBeTruthy();
+    fireEvent.press(getByLabelText('alice'));
+
+    expect(
+      getByText('This person cannot receive a direct message from you right now.'),
+    ).toBeTruthy();
+    // The CTA is disabled and its defensive handler cannot enter ChatDetail.
+    fireEvent.press(getAllByText('Direct message unavailable').at(-1)!);
+    expect(navigation.replace).not.toHaveBeenCalled();
+  });
+
+  it('still permits group creation when a selected person cannot receive a 1:1 DM', () => {
+    const { getByText, getByLabelText } = renderNew([
+      followUser('peer-42', 'alice', false),
+      followUser('peer-43', 'bob', true),
+    ]);
+    fireEvent.press(getByLabelText('alice'));
+    fireEvent.press(getByLabelText('bob'));
+    expect(getByText(/create group/i)).toBeTruthy();
+  });
+
   it('selecting two people shows a group CTA (create group label)', () => {
     const { getByText, getByLabelText } = renderNew([
       followUser('peer-42', 'alice'),
@@ -89,6 +138,32 @@ describe('NewMessageScreen', () => {
     fireEvent.press(getByLabelText('alice'));
     fireEvent.press(getByLabelText('bob'));
     expect(getByText(/create group/i)).toBeTruthy();
+  });
+
+  it('turns a same-tick double press into one group creation', async () => {
+    let resolveCreate!: (group: GroupConversation) => void;
+    const createSpy = jest
+      .spyOn(groupService, 'create')
+      .mockReturnValue(new Promise(resolve => (resolveCreate = resolve)));
+    const { getByText, getByLabelText, navigation } = renderNew([
+      followUser('peer-42', 'alice'),
+      followUser('peer-43', 'bob'),
+    ]);
+    fireEvent.press(getByLabelText('alice'));
+    fireEvent.press(getByLabelText('bob'));
+    const createButton = getByText(/create group/i);
+
+    act(() => {
+      fireEvent.press(createButton);
+      fireEvent.press(createButton);
+    });
+    await waitFor(() => expect(createSpy).toHaveBeenCalledTimes(1));
+    await act(async () => resolveCreate({ id: 'group-once' } as unknown as GroupConversation));
+    await waitFor(() =>
+      expect(navigation.replace).toHaveBeenCalledWith('GroupChat', {
+        conversationId: 'group-once',
+      }),
+    );
   });
 
   it('filters the following list by the query', () => {
@@ -125,9 +200,11 @@ describe('NewMessageScreen', () => {
 
   it('loads the next page of followees when the list end is reached', async () => {
     const { profileService } = require('../../../profile/services/profileService');
-    const spy = jest
-      .spyOn(profileService, 'following')
-      .mockResolvedValue({ items: [followUser('peer-99', 'zoe')], nextCursor: null });
+    const spy = jest.spyOn(profileService, 'following').mockResolvedValue({
+      items: [followUser('peer-99', 'zoe')],
+      nextCursor: null,
+      hasMore: false,
+    });
 
     const { UNSAFE_getByType } = renderScreen(<NewMessageScreen />, {
       route: { name: 'NewMessage' },
@@ -135,7 +212,13 @@ describe('NewMessageScreen', () => {
         {
           key: [...profileKeys.following(ME)],
           data: {
-            pages: [{ items: [followUser('peer-42', 'alice')], nextCursor: 'cursor-1' }],
+            pages: [
+              {
+                items: [followUser('peer-42', 'alice')],
+                nextCursor: 'cursor-1',
+                hasMore: true,
+              },
+            ],
             pageParams: [undefined],
           },
         },

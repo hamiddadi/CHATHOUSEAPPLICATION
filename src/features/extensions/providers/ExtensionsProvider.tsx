@@ -34,7 +34,7 @@ interface ExtensionsProviderProps {
   children: ReactNode;
   /** Whether the user is currently authenticated; gates push-token registration. */
   authenticated?: boolean;
-  /** Override the initial theme (defaults to 'auto'). */
+  /** Legacy compatibility input; the current application palette is dark. */
   initialThemeMode?: ExtThemeMode;
   /** Disable the presence heartbeat (e.g. during tests). */
   presenceEnabled?: boolean;
@@ -60,7 +60,7 @@ const Inner: React.FC<{
 export const ExtensionsProvider: React.FC<ExtensionsProviderProps> = ({
   children,
   authenticated = false,
-  initialThemeMode = 'auto',
+  initialThemeMode = 'dark',
   presenceEnabled = true,
 }) => (
   <ExtThemeProvider initialMode={initialThemeMode}>

@@ -1,5 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, FlatList, Linking, Pressable, Share, StyleSheet, Text, View } from 'react-native';
+import {
+  Alert,
+  FlatList,
+  Linking,
+  Pressable,
+  Share,
+  StyleSheet,
+  Text,
+  View,
+  useWindowDimensions,
+} from 'react-native';
 import MaterialIcons from '@react-native-vector-icons/material-icons';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -25,6 +35,7 @@ import {
 import type { RoomListener } from '../../services/roomService';
 import { MIC_PERMISSION_DENIED_ERROR } from '../../services/roomAudioService';
 import { useRoomSocket } from '../../hooks/useRoomSocket';
+import { useRoomMembership } from '../../hooks/useRoomMembership';
 import {
   SPEAKING_SCORE_THRESHOLD,
   SPEAKING_SELF_KEY,
@@ -50,6 +61,7 @@ import {
 } from '../../../extensions';
 import { getSocket } from '../../../../shared/services/realtime/socketClient';
 import { formatScheduled } from '../../../../shared/utils/formatScheduled';
+import { errorMessage } from '../../../../shared/utils/errorMessage';
 import StageGrid from './partials/StageGrid';
 import HandRaiseQueue from './partials/HandRaiseQueue';
 import FollowedByListeners from './partials/FollowedByListeners';
@@ -81,6 +93,8 @@ export const RoomScreen: React.FC = () => {
   const navigation = useNavigation<Nav>();
   const route = useRoute<Route>();
   const insets = useSafeAreaInsets();
+  const { width, fontScale } = useWindowDimensions();
+  const compactHeader = width < 380 || fontScale > 1.3;
   const { t } = useTranslation();
   // SINGLE source of truth for the viewer's mute state (see currentRoomStore):
   // roomAudioService re-applies it after a LiveKit token renew/rejoin, so a
@@ -88,12 +102,25 @@ export const RoomScreen: React.FC = () => {
   // showed "muted". The screen only READS it; writes go through the store.
   const isMuted = useCurrentRoomStore(s => s.isMuted);
   const [isHandRaised, setIsHandRaised] = useState(false);
+  const [isMuteBusy, setIsMuteBusy] = useState(false);
+  const muteInFlightRef = useRef(false);
   // The viewer is the actor of the room end (pressed "End Room"): ignore the
   // `room:ended` broadcast echo, which would otherwise pop the screen a second
   // time and show the "Room ended" alert to the very host who closed it.
   const selfEndedRef = useRef(false);
+  // REST and realtime can confirm the close in either order. This guard makes
+  // the local teardown idempotent so the screen is never popped twice.
+  const selfEndExitHandledRef = useRef(false);
 
-  const { data: room, isLoading, isError } = useRoom(route.params.roomId);
+  const membership = useRoomMembership(route.params.roomId);
+  // Do not race a public detail GET against the authoritative POST /join
+  // response. The join hook seeds this query first; any subsequent refetch
+  // therefore observes an already-active Participant row.
+  const {
+    data: room,
+    isLoading,
+    isError,
+  } = useRoom(route.params.roomId, membership.status === 'joined');
   const leaveRoom = useLeaveRoom();
   const raiseHand = useRaiseHand();
   const lowerHand = useLowerHand();
@@ -103,8 +130,11 @@ export const RoomScreen: React.FC = () => {
   const viewerId = useAuthStore(s => s.user?.id ?? null);
   // Stable room id for effects that only need the identifier (not the whole
   // `room` object, which gets a fresh reference on every React Query refetch).
-  const roomId = room?.id ?? null;
-  const { data: handRaises = [] } = useHandRaises(room?.id ?? null);
+  const roomId =
+    membership.status === 'joined' && room?.id === route.params.roomId ? room.id : null;
+  // Hand raises require an active Participant row. Passing the gated roomId
+  // prevents the former pre-join 403 race on feed, deep-link and resume entry.
+  const { data: handRaises = [], dataUpdatedAt: handRaisesUpdatedAt } = useHandRaises(roomId);
   const [actionTarget, setActionTarget] = useState<RoomParticipant | null>(null);
   // Listener taps surface a profile sheet (follow / wave / ping); host taps
   // surface the moderation sheet (kick / promote / etc). These two states
@@ -131,6 +161,14 @@ export const RoomScreen: React.FC = () => {
     viewerRole && (viewerRole === 'host' || viewerRole === 'moderator' || viewerRole === 'speaker'),
   );
 
+  const finishSelfEnd = useCallback((): void => {
+    if (selfEndExitHandledRef.current) return;
+    selfEndExitHandledRef.current = true;
+    useCurrentRoomStore.getState().clear();
+    void roomAudioSession.stop();
+    navigation.goBack();
+  }, [navigation]);
+
   // Back out cleanly if the server GATES our join (private / CLOSED invite-only
   // / RoomBan / ended room) instead of leaving the user stranded on the screen
   // with no Participant row and therefore no audio (livekit-token → ROOM_005).
@@ -148,7 +186,7 @@ export const RoomScreen: React.FC = () => {
   // mute-changed, kicked, ended). Without this, the screen is static and
   // never reflects what other participants do. The second arg backs out on a
   // gated/denied join (see handleJoinDenied).
-  useRoomSocket(room?.id ?? null, handleJoinDenied);
+  const socketAdmissionConfirmed = useRoomSocket(roomId, handleJoinDenied);
 
   // #86: a host nominated me to speak — prompt to accept/refuse (respond posts
   // back; on accept the backend promotes me to SPEAKER).
@@ -178,7 +216,7 @@ export const RoomScreen: React.FC = () => {
   // navigate away. Refreshed on every room change; cleared only on explicit
   // leave / kick / room-end — a plain back minimises to the mini-bar.
   useEffect(() => {
-    if (!room) return;
+    if (!room || membership.status !== 'joined') return;
     const store = useCurrentRoomStore.getState();
     // ENTRY into a room the store didn't hold yet: hydrate the mute flag from
     // the viewer's own participant row so the badge matches the server state.
@@ -198,25 +236,28 @@ export const RoomScreen: React.FC = () => {
     // Record this room in the viewer's "recently played" zset (resume parity).
     // Fire-and-forget: the touch is best-effort and must never block the join.
     void recentlyPlayedApi.touch(room.id).catch(() => undefined);
-  }, [room, viewerId]);
+  }, [membership.status, room, viewerId]);
 
-  // Hydrate the hand-raise badge from the server queue on (re)mount: the
-  // local `useState(false)` was never seeded, so returning via the mini-bar
-  // showed "Raise hand" even while the viewer was queued. One-shot on the
-  // first non-empty queue payload so later optimistic toggles aren't clobbered
-  // by a stale refetch.
-  const handHydratedRef = useRef(false);
+  // Keep the optimistic button reconciled with every authoritative queue
+  // response. In particular, a moderator dismissal emits room:hand_lowered;
+  // the resulting empty queue must flip "Lower hand" back to "Raise hand".
   useEffect(() => {
-    if (handHydratedRef.current || !viewerId || handRaises.length === 0) return;
-    handHydratedRef.current = true;
-    if (handRaises.some(h => h.id === viewerId)) setIsHandRaised(true);
-  }, [handRaises, viewerId]);
+    if (!viewerId || !roomId || handRaisesUpdatedAt === 0) return;
+    setIsHandRaised(handRaises.some(h => h.id === viewerId));
+  }, [handRaises, handRaisesUpdatedAt, roomId, viewerId]);
+
+  useEffect(() => {
+    if (!roomId) setIsHandRaised(false);
+  }, [roomId]);
 
   // Capture mic + start producing once we're in the room. The LiveKit
   // engine auto-activates if `@livekit/react-native` is installed; in Expo
   // Go it returns `status: 'unsupported'` and the rest of the screen
   // (chat, hand-raise, reactions) keeps working.
-  const audio = useRoomAudio({ roomId: room?.id ?? null, enabled: Boolean(room) });
+  const audio = useRoomAudio({
+    roomId,
+    enabled: Boolean(roomId) && socketAdmissionConfirmed,
+  });
 
   // Live captions (Clubhouse-style). `useExtCaptions` subscribes to the
   // `room:caption` stream + the live on/off flag; the publisher runs the
@@ -293,10 +334,13 @@ export const RoomScreen: React.FC = () => {
       // we're viewing. Pop the screen and tell the user it's over.
       const endedHandler = (payload: { roomId?: string; endedByName?: string | null }): void => {
         if (payload.roomId && payload.roomId !== roomId) return;
-        // We ARE the actor (host pressed "End Room"): handleEndRoom already
-        // pops the screen in onSettled — swallowing the broadcast echo avoids
-        // a double goBack and a nonsensical "Room ended" alert to the host.
-        if (selfEndedRef.current) return;
+        // The host who initiated the close should still leave immediately when
+        // realtime confirms it, but should not see the third-person alert. The
+        // idempotent helper also handles a later REST success safely.
+        if (selfEndedRef.current) {
+          finishSelfEnd();
+          return;
+        }
         useCurrentRoomStore.getState().clear();
         void roomAudioSession.stop();
         navigation.goBack();
@@ -346,27 +390,36 @@ export const RoomScreen: React.FC = () => {
       cancelled = true;
       cleanup?.();
     };
-  }, [navigation, roomId, viewerId, t]);
+  }, [finishSelfEnd, navigation, roomId, viewerId, t]);
 
   const handleToggleMute = useCallback(async () => {
-    if (!room) return;
+    if (!room || muteInFlightRef.current) return;
+    muteInFlightRef.current = true;
+    setIsMuteBusy(true);
     const store = useCurrentRoomStore.getState();
     const next = !store.isMuted;
     // Optimistic flip — written to the SHARED store (not local state) so the
     // badge follows the press immediately AND survives detail refetches /
     // LiveKit token renews (roomAudioService re-applies getState().isMuted).
-    // Backend is the source of truth: if it rejects, we roll back. The
-    // LiveKit mute is fire-and-forget and not awaited because it's local —
-    // its failure shouldn't drag down the API success.
+    // Backend remains the source of truth, but LiveKit publication must also
+    // succeed before we advertise the new state. Awaiting it lets iOS
+    // permission failures reach roomAudioSession and its mic-denied banner.
     store.setMuted(next);
-    void audio.setMuted(next);
     try {
+      await audio.setMuted(next);
       await setMute.mutateAsync({ roomId: room.id, isMuted: next });
     } catch {
       // Backend refused — undo both the badge AND LiveKit to keep them
       // consistent.
       useCurrentRoomStore.getState().setMuted(!next);
-      void audio.setMuted(!next);
+      try {
+        await audio.setMuted(!next);
+      } catch {
+        // roomAudioSession already surfaced this failure in its reactive state.
+      }
+    } finally {
+      muteInFlightRef.current = false;
+      setIsMuteBusy(false);
     }
   }, [audio, room, setMute]);
   const handleToggleHand = useCallback(() => {
@@ -393,7 +446,7 @@ export const RoomScreen: React.FC = () => {
   }, [leaveRoom, navigation, room]);
 
   const handleEndRoom = useCallback(() => {
-    if (!room) return;
+    if (!room || endRoom.isPending) return;
     Alert.alert(
       t('room.alert.confirmEndTitle', 'End Room'),
       t('room.alert.confirmEndBody', '"{{title}}" will be closed for all participants. Continue?', {
@@ -405,22 +458,36 @@ export const RoomScreen: React.FC = () => {
           text: t('room.closeRoom', 'End Room'),
           style: 'destructive',
           onPress: () => {
+            if (endRoom.isPending || selfEndedRef.current) return;
             // Mark ourselves as the actor BEFORE the mutation: the server's
-            // `room:ended` broadcast can land before onSettled, and the
-            // screen-level listener must ignore it (see endedHandler).
+            // `room:ended` broadcast can land before the REST response, and the
+            // screen-level listener must suppress the third-person alert.
             selfEndedRef.current = true;
             endRoom.mutate(room.id, {
-              onSettled: () => {
-                useCurrentRoomStore.getState().clear();
-                void roomAudioSession.stop();
-                navigation.goBack();
+              onSuccess: finishSelfEnd,
+              onError: err => {
+                // A realtime confirmation is authoritative even if the HTTP
+                // response was lost. Otherwise retain the room and let the host
+                // retry instead of presenting a false success.
+                if (selfEndExitHandledRef.current) return;
+                selfEndedRef.current = false;
+                Alert.alert(
+                  t('room.alert.endFailedTitle', "Couldn't end the room"),
+                  errorMessage(
+                    err,
+                    t(
+                      'room.alert.endFailedBody',
+                      'The room is still active. Check your connection and try again.',
+                    ),
+                  ),
+                );
               },
             });
           },
         },
       ],
     );
-  }, [endRoom, navigation, room, t]);
+  }, [endRoom, finishSelfEnd, room, t]);
 
   const handleReportRoom = useCallback(() => {
     if (!room) return;
@@ -510,16 +577,17 @@ export const RoomScreen: React.FC = () => {
 
   const handleShare = useCallback(async () => {
     if (!room) return;
+    const url = `${ROOM_SHARE_BASE_URL}/${room.id}`;
     try {
       await Share.share({
         title: room.title,
-        message: `Rejoins-moi sur Chathouse : "${room.title}" — ${ROOM_SHARE_BASE_URL}/${room.id}`,
-        url: `${ROOM_SHARE_BASE_URL}/${room.id}`,
+        message: t('room.shareMessage', { title: room.title, url }),
+        url,
       });
     } catch {
       /* user cancelled — no-op */
     }
-  }, [room]);
+  }, [room, t]);
 
   // Real hand-raise queue from the API. We render avatars for every queued
   // user; tapping one promotes them to SPEAKER (host/mod only).
@@ -606,7 +674,30 @@ export const RoomScreen: React.FC = () => {
     void Linking.openSettings();
   }, []);
 
-  if (isLoading) return <Loader fullscreen accessibilityLabel={t('common.loading')} />;
+  if (isLoading || membership.status === 'joining') {
+    return <Loader fullscreen accessibilityLabel={t('room.joining', 'Joining room')} />;
+  }
+  if (membership.status === 'error') {
+    const connectivityFailure =
+      membership.error?.kind === 'network' || membership.error?.kind === 'timeout';
+    return (
+      <EmptyState
+        title={
+          connectivityFailure
+            ? t('room.joinConnectionTitle', 'Unable to connect')
+            : t('room.alert.joinDeniedTitle', 'Unable to join')
+        }
+        description={
+          connectivityFailure
+            ? t('room.joinConnectionBody', 'Check your connection and try again.')
+            : (membership.error?.message ??
+              t('room.alert.joinDeniedBody', "You don't have access to this room."))
+        }
+        actionLabel={connectivityFailure ? t('common.retry', 'Retry') : undefined}
+        onAction={connectivityFailure ? membership.retry : undefined}
+      />
+    );
+  }
   if (isError || !room) {
     return <EmptyState title={t('room.unavailable')} description={t('room.mayHaveEnded')} />;
   }
@@ -616,9 +707,11 @@ export const RoomScreen: React.FC = () => {
       <View style={[styles.topBar, { paddingTop: insets.top + spacing.sm }]}>
         <View className="flex-row items-center gap-sm">
           <MaterialIcons name="graphic-eq" size={HEADER_ICON_SIZE} color={colors.primary} />
-          <Text className="text-lg font-display text-primary tracking-tighter">
-            {t('common.appName', 'Chathouse')}
-          </Text>
+          {!compactHeader ? (
+            <Text className="text-lg font-display text-primary tracking-tighter">
+              {t('common.appName', 'ChatHouse')}
+            </Text>
+          ) : null}
         </View>
         <View className="flex-row items-center gap-xs">
           <Pressable
@@ -626,7 +719,7 @@ export const RoomScreen: React.FC = () => {
             accessibilityRole="button"
             accessibilityLabel={t('room.shareA11y', 'Share room link')}
             hitSlop={8}
-            className="w-9 h-9 items-center justify-center rounded-pill bg-overlay-white-5"
+            className="w-11 h-11 items-center justify-center rounded-pill bg-overlay-white-5"
           >
             <MaterialIcons name="ios-share" size={18} color={colors.text} />
           </Pressable>
@@ -635,7 +728,7 @@ export const RoomScreen: React.FC = () => {
             accessibilityRole="button"
             accessibilityLabel={t('room.openChatA11y', 'Open chat')}
             hitSlop={8}
-            className="w-9 h-9 items-center justify-center rounded-pill bg-overlay-white-5"
+            className="w-11 h-11 items-center justify-center rounded-pill bg-overlay-white-5"
           >
             <MaterialIcons name="chat" size={18} color={colors.text} />
           </Pressable>
@@ -645,7 +738,7 @@ export const RoomScreen: React.FC = () => {
               accessibilityRole="button"
               accessibilityLabel={t('room.controlsA11y', 'Room controls')}
               hitSlop={8}
-              className="w-9 h-9 items-center justify-center rounded-pill bg-overlay-white-5"
+              className="w-11 h-11 items-center justify-center rounded-pill bg-overlay-white-5"
             >
               <MaterialIcons name="tune" size={18} color={colors.text} />
             </Pressable>
@@ -656,7 +749,7 @@ export const RoomScreen: React.FC = () => {
               accessibilityRole="button"
               accessibilityLabel={t('room.reportA11y', 'Report room')}
               hitSlop={8}
-              className="w-9 h-9 items-center justify-center rounded-pill bg-overlay-white-5"
+              className="w-11 h-11 items-center justify-center rounded-pill bg-overlay-white-5"
             >
               <MaterialIcons name="flag" size={18} color={colors.textMuted} />
             </Pressable>
@@ -664,14 +757,22 @@ export const RoomScreen: React.FC = () => {
           {viewerIsHost && (
             <Pressable
               onPress={handleEndRoom}
+              disabled={endRoom.isPending}
               accessibilityRole="button"
               accessibilityLabel={t('room.closeRoom', 'End Room')}
+              accessibilityState={{ disabled: endRoom.isPending, busy: endRoom.isPending }}
               hitSlop={8}
-              className="bg-danger/15 border border-danger/30 px-lg py-xs rounded-pill"
+              className={`min-w-[44px] min-h-[44px] items-center justify-center bg-danger/15 border border-danger/30 px-md py-xs rounded-pill ${
+                endRoom.isPending ? 'opacity-50' : ''
+              }`}
             >
-              <Text className="text-sm font-body-bold text-danger">
-                {t('room.closeRoom', 'End Room')}
-              </Text>
+              {compactHeader ? (
+                <MaterialIcons name="stop-circle" size={20} color={colors.danger} />
+              ) : (
+                <Text className="text-sm font-body-bold text-danger">
+                  {t('room.closeRoom', 'End Room')}
+                </Text>
+              )}
             </Pressable>
           )}
         </View>
@@ -730,8 +831,13 @@ export const RoomScreen: React.FC = () => {
                             '⚠️ Audio requires an EAS dev-client (@livekit/react-native is unavailable in Expo Go).',
                           )
                         : audio.status === 'error'
-                          ? `❌ ${audio.error ?? t('room.audioError', 'Audio error')}`
-                          : t('room.audioBanner')}
+                          ? `❌ ${t(
+                              'room.audioErrorBody',
+                              'Live audio is unavailable. Check your connection and try again.',
+                            )}`
+                          : audio.status === 'reconnecting'
+                            ? t('room.audioReconnecting', '🔄 Reconnecting audio…')
+                            : t('room.audioBanner')}
                 </Text>
                 {micDenied ? (
                   <Pressable
@@ -743,6 +849,18 @@ export const RoomScreen: React.FC = () => {
                   >
                     <Text className="text-xs font-body-bold text-warning">
                       {t('room.openSettings', 'Open settings')}
+                    </Text>
+                  </Pressable>
+                ) : audio.status === 'error' ? (
+                  <Pressable
+                    onPress={() => void audio.retry()}
+                    accessibilityRole="button"
+                    accessibilityLabel={t('room.retryAudio', 'Retry audio')}
+                    hitSlop={8}
+                    className="self-center mt-sm bg-danger/20 rounded-pill px-lg py-sm min-h-[36px] items-center justify-center"
+                  >
+                    <Text className="text-xs font-body-bold text-danger">
+                      {t('room.retryAudio', 'Retry audio')}
                     </Text>
                   </Pressable>
                 ) : null}
@@ -876,7 +994,12 @@ export const RoomScreen: React.FC = () => {
 
       {/* Floating live-captions overlay — renders the rolling transcript
           near the bottom of the room when captions are on. */}
-      {captions.enabled ? <ExtCaptionsOverlay lines={captions.lines} /> : null}
+      {captions.enabled ? (
+        <ExtCaptionsOverlay
+          lines={captions.lines}
+          bottomOffset={insets.bottom + ACTION_BAR_BOTTOM_OFFSET + 112}
+        />
+      ) : null}
 
       {/* Floating reactions bar — sits just above the action pill so the
           float-up emojis fly in front of the controls. pointerEvents
@@ -897,6 +1020,7 @@ export const RoomScreen: React.FC = () => {
         <RoomActionBar
           viewerCanSpeak={viewerCanSpeak}
           isMuted={isMuted}
+          isMuteBusy={isMuteBusy}
           isHandRaised={isHandRaised}
           onToggleMute={handleToggleMute}
           onToggleHand={handleToggleHand}

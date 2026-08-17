@@ -3,6 +3,8 @@ import type { Request } from 'express';
 import { prisma } from '../../config/database';
 import { logger } from '../../config/logger';
 
+type AuditLogClient = Pick<Prisma.TransactionClient, 'auditLog'>;
+
 interface RecordInput {
   actorId: string;
   action: AuditAction;
@@ -21,15 +23,14 @@ const truncate = (s: string | null | undefined, max: number): string | null => {
 };
 
 /**
- * Append-only audit trail for every privileged action. Persistence failure
- * is logged but never thrown — losing the audit row is preferable to
- * blocking an in-flight admin action that has already mutated state. (For
- * stricter regulatory regimes, switch to throw + transactional write.)
+ * Append-only audit trail for privileged actions. Persistence is fail-closed;
+ * mutation callers pass their transaction client so state and its audit row
+ * commit or roll back together.
  */
 export const auditLogService = {
-  async record(input: RecordInput): Promise<void> {
+  async record(input: RecordInput, client: AuditLogClient = prisma): Promise<void> {
     try {
-      await prisma.auditLog.create({
+      await client.auditLog.create({
         data: {
           actorId: input.actorId,
           action: input.action,
@@ -48,6 +49,7 @@ export const auditLogService = {
         actorId: input.actorId,
         err: err instanceof Error ? err.message : err,
       });
+      throw err;
     }
   },
 

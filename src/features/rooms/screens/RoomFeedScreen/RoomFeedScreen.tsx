@@ -24,7 +24,6 @@ import type { RoomSummary, UserSummary } from '../../../../shared/types/domain';
 import { useRooms, roomKeys } from '../../hooks/useRooms';
 import { roomService } from '../../services/roomService';
 import { useHallwaySocket } from '../../hooks/useHallwaySocket';
-import { useUnreadNotificationCount } from '../../../notifications/hooks/useNotifications';
 import { formatScheduled } from '../../../../shared/utils/formatScheduled';
 import {
   ExtAvailablePeopleStrip,
@@ -236,7 +235,7 @@ const RoomCard: React.FC<RoomCardProps> = memo(({ room, onJoin }) => {
               onPressOut={onPressOut}
               accessibilityRole="button"
               accessibilityLabel={`Join room: ${room.title}`}
-              className="bg-primary rounded-pill px-xxl py-sm items-center justify-center ml-md"
+              className="min-h-[44px] bg-primary rounded-pill px-xxl py-sm items-center justify-center ml-md"
             >
               <Text className="text-sm font-display text-primary-on-container">
                 {t('feed.join', 'Join')}
@@ -253,10 +252,7 @@ RoomCard.displayName = 'RoomCard';
 interface HeaderProps {
   onSearch: () => void;
   onEvents: () => void;
-  onReplays: () => void;
   onActivity: () => void;
-  onNotifications: () => void;
-  unreadCount: number;
 }
 
 const HeaderIcon: React.FC<{
@@ -351,43 +347,30 @@ const UpcomingRow: React.FC<UpcomingRowProps> = memo(({ rooms, onOpen }) => {
 });
 UpcomingRow.displayName = 'UpcomingRow';
 
-const Header: React.FC<HeaderProps> = memo(
-  ({ onSearch, onEvents, onReplays, onActivity, onNotifications, unreadCount }) => {
-    const { t } = useTranslation();
-    return (
-      <View className="flex-row items-center justify-between px-xxl py-lg">
-        <View className="flex-row items-center gap-sm">
-          <MaterialIcons name="graphic-eq" size={HEADER_ICON_SIZE} color={colors.primary} />
-          <Text className="text-xxl font-display text-primary tracking-tighter">
-            {t('common.appName', 'Chathouse')}
-          </Text>
-        </View>
-        <View className="flex-row items-center gap-sm">
-          <HeaderIcon name="search" label={t('feed.exploreA11y', 'Explore')} onPress={onSearch} />
-          <HeaderIcon name="event" label={t('feed.eventsA11y', 'Events')} onPress={onEvents} />
-          <HeaderIcon
-            name="play-circle-outline"
-            label={t('replays.title', 'Replays')}
-            onPress={onReplays}
-          />
-          {/* Activity bell — opens the extension ActivityFeed (waves, invites,
-              follow-backs) distinct from the system Notifications list. */}
-          <HeaderIcon
-            name="notifications-none"
-            label={t('feed.activityA11y', 'Activity')}
-            onPress={onActivity}
-          />
-          <HeaderIcon
-            name="notifications"
-            label={t('feed.notificationsA11y', 'Notifications')}
-            onPress={onNotifications}
-            badge={unreadCount}
-          />
-        </View>
+const Header: React.FC<HeaderProps> = memo(({ onSearch, onEvents, onActivity }) => {
+  const { t } = useTranslation();
+  return (
+    <View className="flex-row items-center justify-between px-xxl py-lg">
+      <View className="flex-row items-center gap-sm">
+        <MaterialIcons name="graphic-eq" size={HEADER_ICON_SIZE} color={colors.primary} />
+        <Text className="text-xxl font-display text-primary tracking-tighter">
+          {t('common.appName', 'ChatHouse')}
+        </Text>
       </View>
-    );
-  },
-);
+      <View className="flex-row items-center gap-sm">
+        <HeaderIcon name="search" label={t('feed.exploreA11y', 'Explore')} onPress={onSearch} />
+        <HeaderIcon name="event" label={t('feed.eventsA11y', 'Events')} onPress={onEvents} />
+        {/* Activity bell — opens the extension ActivityFeed (waves, invites,
+              follow-backs). */}
+        <HeaderIcon
+          name="notifications-none"
+          label={t('feed.activityA11y', 'Activity')}
+          onPress={onActivity}
+        />
+      </View>
+    </View>
+  );
+});
 Header.displayName = 'Header';
 
 export const RoomFeedScreen: React.FC = () => {
@@ -433,7 +416,6 @@ export const RoomFeedScreen: React.FC = () => {
   // Subscribe to live hallway broadcasts — new/ended rooms invalidate
   // the scored feed so ranking stays fresh without manual refreshes.
   useHallwaySocket();
-  const { data: unreadCount = 0 } = useUnreadNotificationCount();
 
   const handleJoin = useCallback(
     (roomId: string) => navigation.navigate('Room', { roomId }),
@@ -442,9 +424,7 @@ export const RoomFeedScreen: React.FC = () => {
   const handleStartRoom = useCallback(() => navigation.navigate('CreateRoom'), [navigation]);
   const handleSearch = useCallback(() => navigation.navigate('Explore'), [navigation]);
   const handleEvents = useCallback(() => navigation.navigate('Events'), [navigation]);
-  const handleReplays = useCallback(() => navigation.navigate('Replays'), [navigation]);
   const handleActivity = useCallback(() => navigation.navigate('ActivityFeed'), [navigation]);
-  const handleNotifications = useCallback(() => navigation.navigate('Notifications'), [navigation]);
 
   // Extension: wave to a user from the available-people strip
   const { wave } = useExtWave();
@@ -474,14 +454,7 @@ export const RoomFeedScreen: React.FC = () => {
 
   return (
     <View className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
-      <Header
-        onSearch={handleSearch}
-        onEvents={handleEvents}
-        onReplays={handleReplays}
-        onActivity={handleActivity}
-        onNotifications={handleNotifications}
-        unreadCount={unreadCount}
-      />
+      <Header onSearch={handleSearch} onEvents={handleEvents} onActivity={handleActivity} />
 
       {isLoading ? (
         <RoomFeedSkeleton />
@@ -505,7 +478,7 @@ export const RoomFeedScreen: React.FC = () => {
           ListFooterComponent={
             isFetchingNextPage ? (
               <View className="py-xl items-center">
-                <ActivityIndicator />
+                <ActivityIndicator color={colors.primary} />
               </View>
             ) : null
           }

@@ -153,7 +153,7 @@ const styles = StyleSheet.create({
     minHeight: 88,
     borderRadius: radii.md,
     borderWidth: 1,
-    borderColor: colors.overlayWhite15,
+    borderColor: colors.outline,
     backgroundColor: colors.overlayWhite5,
     color: colors.text,
     paddingHorizontal: spacing.md,

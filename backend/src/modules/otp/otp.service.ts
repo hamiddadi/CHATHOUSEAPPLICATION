@@ -7,6 +7,12 @@ import { logger } from '../../config/logger';
 import { sendSms } from '../../config/smsSender';
 import { AppError } from '../../middlewares/error.middleware';
 import { issueTokenPair } from '../../utils/issueTokenPair';
+import { resolveAccountSessionScope } from '../auth/account-lifecycle';
+import {
+  legalAcceptanceStatus,
+  resolveLegalAcceptance,
+  type ResolvedLegalAcceptance,
+} from '../auth/legal-acceptance';
 import type { SendOtpInput, VerifyOtpInput } from './otp.schema';
 
 const SALT_ROUNDS = 10; // 10 is fine for a 6-digit space; 12 takes ~300ms
@@ -22,6 +28,22 @@ const checkAndBumpRateLimit = async (phoneNumber: string): Promise<boolean> => {
   const count = await redis.incr(rateKey(phoneNumber));
   if (count === 1) await redis.expire(rateKey(phoneNumber), 3600);
   return count <= env.OTP_RATE_LIMIT_PER_HOUR;
+};
+
+const refundRateLimit = async (phoneNumber: string): Promise<void> => {
+  // Atomic refund: a provider/DB failure must not consume one of the user's
+  // hourly delivery attempts, and an expired key must not be recreated as a
+  // negative counter.
+  await redis.eval(
+    `
+      local current = tonumber(redis.call('GET', KEYS[1]) or '0')
+      if current <= 1 then
+        return redis.call('DEL', KEYS[1])
+      end
+      return redis.call('DECR', KEYS[1])
+    `,
+    { keys: [rateKey(phoneNumber)], arguments: [] },
+  );
 };
 
 /**
@@ -45,27 +67,47 @@ const isTestPhone = (phoneNumber: string): boolean => {
  * Find-or-create the user for a verified phone number and mint a token pair.
  * Shared by the normal OTP-verify success path and the dev test-number bypass.
  */
-const establishSession = async (phoneNumber: string) => {
+const establishSession = async (
+  phoneNumber: string,
+  ageConfirmed: boolean,
+  legalAcceptance: ResolvedLegalAcceptance,
+) => {
   // OTP-01: find-or-create via upsert so two requests racing on a brand-new
   // phone number can't both INSERT and collide on the @unique phoneNumber
   // (which would surface as a 500). New users get a placeholder username they
   // must replace on SetupProfile; frontend routes them there via `isNewUser`.
   const existing = await prisma.user.findUnique({
     where: { phoneNumber },
-    select: { id: true },
   });
   const isNewUser = existing === null;
-  const user = await prisma.user.upsert({
-    where: { phoneNumber },
-    create: { phoneNumber },
-    update: {},
-  });
 
-  const tokens = await issueTokenPair(user.id);
+  // Proving possession of the phone number does not authorize account-state or
+  // profile writes. A pending-deletion account gets a recovery-only session;
+  // it is restored only by the explicit cancel-deletion endpoint.
+  const scope = existing ? resolveAccountSessionScope(existing) : 'active';
+
+  const user =
+    existing && scope === 'account_recovery'
+      ? existing
+      : await prisma.user.upsert({
+          where: { phoneNumber },
+          create: {
+            phoneNumber,
+            ...(ageConfirmed ? { ageConfirmedAt: new Date() } : {}),
+            ...legalAcceptance,
+          },
+          update: {
+            ...(ageConfirmed && !existing?.ageConfirmedAt ? { ageConfirmedAt: new Date() } : {}),
+            ...legalAcceptance,
+          },
+        });
+
+  const tokens = await issueTokenPair(user.id, { scope });
   return {
     session: {
       accessToken: tokens.accessToken,
       refreshToken: tokens.refreshToken,
+      scope: tokens.scope,
       expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
     },
     user: {
@@ -78,6 +120,19 @@ const establishSession = async (phoneNumber: string) => {
       interests: user.interests,
       hasCompletedOnboarding: user.hasCompletedOnboarding,
       createdAt: user.createdAt.toISOString(),
+      termsAcceptedVersion: user.termsAcceptedVersion,
+      termsAcceptedAt: user.termsAcceptedAt?.toISOString() ?? null,
+      privacyNoticeAcknowledgedVersion: user.privacyNoticeAcknowledgedVersion,
+      privacyNoticeAcknowledgedAt: user.privacyNoticeAcknowledgedAt?.toISOString() ?? null,
+      legalAcceptanceLocale: user.legalAcceptanceLocale,
+      accountState: user.deletedAt ? ('PENDING_DELETION' as const) : ('ACTIVE' as const),
+      deletedAt: user.deletedAt?.toISOString() ?? null,
+      permanentDeletionAt: user.deletedAt
+        ? new Date(
+            user.deletedAt.getTime() + env.ACCOUNT_DELETION_GRACE_DAYS * 24 * 60 * 60 * 1000,
+          ).toISOString()
+        : null,
+      ...legalAcceptanceStatus(user),
     },
     isNewUser,
   };
@@ -85,6 +140,12 @@ const establishSession = async (phoneNumber: string) => {
 
 export const otpService = {
   async send(input: SendOtpInput): Promise<{ sent: true; expiresIn: number }> {
+    if (env.NODE_ENV !== 'test' && input.ageConfirmed !== true) {
+      throw new AppError('AGE_001');
+    }
+    // Validate before spending an SMS. Verification validates the same payload
+    // again before consuming the OTP and persists it only on successful login.
+    resolveLegalAcceptance(input);
     // Dev/QA test number: no real SMS, no DB code, no rate limit — the tester
     // just enters OTP_TEST_CODE on the next screen (verified in `verify`).
     if (isTestPhone(input.phoneNumber)) {
@@ -101,28 +162,29 @@ export const otpService = {
     const codeHash = await hash(code, SALT_ROUNDS);
     const expiresAt = new Date(Date.now() + env.OTP_TTL_MINUTES * 60 * 1000);
 
-    // OTP-03: send the SMS BEFORE touching the DB. If delivery fails we throw
-    // here, leaving previously-issued codes intact — the user isn't locked out
-    // by a phantom unsent code. Only on confirmed delivery do we atomically
-    // invalidate old codes and commit the new one (one transaction so a
-    // partial state — old codes voided but new code missing — can't happen).
-    await sendSms(
-      { to: input.phoneNumber, body: `Your Chathouse code: ${code}` },
-      // Dev hint: the raw code is also logged so you can test without SMS.
-      env.NODE_ENV === 'production' ? undefined : { code },
-    );
-
-    await prisma.$transaction([
-      // Invalidate any previous unused codes for this phone — only the latest
-      // emitted code is valid.
-      prisma.otpCode.updateMany({
-        where: { phoneNumber: input.phoneNumber, isUsed: false },
-        data: { isUsed: true },
-      }),
-      prisma.otpCode.create({
+    // Persist before contacting Twilio so a provider-accepted SMS never carries
+    // a code that a later database failure prevented us from storing.
+    // Verification always selects the newest record (including used records),
+    // so an older code can never become valid again after a resend.
+    let record: { id: string } | undefined;
+    try {
+      record = await prisma.otpCode.create({
         data: { phoneNumber: input.phoneNumber, codeHash, expiresAt },
-      }),
-    ]);
+        select: { id: true },
+      });
+      await sendSms(
+        { to: input.phoneNumber, body: `Your ChatHouse code: ${code}` },
+        // Dev hint: the raw code is also logged so you can test without SMS.
+        env.NODE_ENV === 'production' ? undefined : { code },
+      );
+    } catch (err) {
+      const cleanup = record
+        ? prisma.otpCode.delete({ where: { id: record.id } })
+        : Promise.resolve(undefined);
+      await Promise.allSettled([cleanup, refundRateLimit(input.phoneNumber)]);
+      throw err;
+    }
+
     if (env.NODE_ENV !== 'production') {
       logger.info(`[otp] issued ${code} for ${input.phoneNumber} (ttl ${env.OTP_TTL_MINUTES}m)`);
     }
@@ -131,23 +193,26 @@ export const otpService = {
   },
 
   async verify(input: VerifyOtpInput) {
+    if (env.NODE_ENV !== 'test' && input.ageConfirmed !== true) {
+      throw new AppError('AGE_001');
+    }
+    const legalAcceptance = resolveLegalAcceptance(input);
     // Dev/QA test number: accept the fixed OTP_TEST_CODE and log straight in,
     // bypassing the real code lookup. `isTestPhone` is hard-gated to non-prod.
     if (isTestPhone(input.phoneNumber) && input.code === env.OTP_TEST_CODE) {
       logger.info(`[otp] test-number bypass login for ${input.phoneNumber}`);
-      return establishSession(input.phoneNumber);
+      return establishSession(input.phoneNumber, input.ageConfirmed === true, legalAcceptance);
     }
 
     const record = await prisma.otpCode.findFirst({
       where: {
         phoneNumber: input.phoneNumber,
-        isUsed: false,
         expiresAt: { gt: new Date() },
       },
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     });
 
-    if (!record) {
+    if (!record || record.isUsed) {
       throw new AppError('AUTH_002', 'OTP code expired or not found');
     }
 
@@ -183,6 +248,6 @@ export const otpService = {
       throw new AppError('AUTH_002', 'OTP code expired or not found');
     }
 
-    return establishSession(input.phoneNumber);
+    return establishSession(input.phoneNumber, input.ageConfirmed === true, legalAcceptance);
   },
 };

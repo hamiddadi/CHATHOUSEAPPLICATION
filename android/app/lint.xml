@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<lint>
+  <!-- React Native's stock EditText drawable intentionally mirrors private
+       AppCompat resources to preserve the platform text-field appearance. -->
+  <issue id="PrivateResource">
+    <ignore path="src/main/res/drawable/rn_edit_text_material.xml" />
+  </issue>
+
+  <!-- These resources are read dynamically by React Native's dev support. -->
+  <issue id="UnusedResources">
+    <ignore regexp="react_native_dev_server_(port|ip)" />
+  </issue>
+
+  <!-- Legacy icons are opaque squares because Android applies its launcher
+       mask; adaptive foreground/background assets are supplied separately. -->
+  <issue id="IconLauncherShape">
+    <ignore regexp="ic_launcher" />
+  </issue>
+</lint>

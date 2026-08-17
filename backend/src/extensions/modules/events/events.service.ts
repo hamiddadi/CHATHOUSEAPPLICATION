@@ -19,7 +19,18 @@ export const extEventsService = {
   async cancel(userId: string, roomId: string, reason?: string): Promise<{ notified: number }> {
     const room = await prisma.room.findUnique({
       where: { id: roomId },
-      include: { rsvps: { select: { userId: true } } },
+      include: {
+        rsvps: {
+          where: {
+            user: {
+              deletedAt: null,
+              blocksCreated: { none: { blockedId: userId } },
+              blocksReceived: { none: { blockerId: userId } },
+            },
+          },
+          select: { userId: true },
+        },
+      },
     });
     if (!room) throw new AppError('ROOM_001');
     if (room.hostId !== userId) throw new AppError('AUTH_008'); // forbidden
@@ -35,22 +46,36 @@ export const extEventsService = {
     // 1. Soft close: set endedAt AND canceledAt so a canceled event is
     //    distinct from a normally ended room (feed/history can tell them apart).
     const now = new Date();
-    await prisma.room.update({
-      where: { id: roomId },
+    const transitioned = await prisma.room.updateMany({
+      where: {
+        id: roomId,
+        hostId: userId,
+        endedAt: null,
+        isLive: false,
+        scheduledFor: room.scheduledFor,
+      },
       data: { endedAt: now, canceledAt: now, isLive: false },
     });
+    if (transitioned.count === 0) {
+      const latest = await prisma.room.findUnique({
+        where: { id: roomId },
+        select: { hostId: true, endedAt: true, canceledAt: true, isLive: true },
+      });
+      // A retried/concurrent cancellation is idempotent and must not fan out
+      // duplicate notifications.
+      if (latest?.hostId === userId && latest.canceledAt) return { notified: 0 };
+      if (!latest) throw new AppError('ROOM_001');
+      if (latest.hostId !== userId) throw new AppError('AUTH_008');
+      if (latest.isLive) throw new AppError('ROOM_002', 'Room is already live');
+      if (latest.endedAt) throw new AppError('ROOM_002', 'Already ended');
+      throw new AppError('ROOM_013');
+    }
 
     // 2. Cancel both reminder queues. The 15-min one is best-effort.
     try {
       await cancelEventReminder(roomId);
     } catch (err) {
       logger.warn('ext.events.cancel: cancelEventReminder failed', { err, roomId });
-    }
-    try {
-      const { cancelReminder15 } = await import('../../queues/reminder15');
-      await cancelReminder15(roomId);
-    } catch (err) {
-      logger.warn('ext.events.cancel: cancelReminder15 failed', { err, roomId });
     }
 
     // 3. Fan-out cancellation notification to RSVPs + host (the host gets one
@@ -73,6 +98,7 @@ export const extEventsService = {
           data: { eventCancel: true, roomId, reason: reason ?? null },
           targetId: roomId,
           targetType: 'room',
+          dedupeKey: `room-canceled:${roomId}:${recipientId}`,
         });
         notified += 1;
       } catch (err) {
@@ -101,13 +127,40 @@ export const extEventsService = {
     if (input.scheduledFor.getTime() <= Date.now())
       throw new AppError('ROOM_002', 'New time must be in the future');
 
-    await prisma.room.update({
-      where: { id: roomId },
+    const transitioned = await prisma.room.updateMany({
+      where: {
+        id: roomId,
+        hostId: userId,
+        endedAt: null,
+        isLive: false,
+        scheduledFor: room.scheduledFor,
+      },
       data: {
         scheduledFor: input.scheduledFor,
         ...(input.title !== undefined ? { title: input.title } : {}),
       },
     });
+    if (transitioned.count === 0) {
+      const latest = await prisma.room.findUnique({
+        where: { id: roomId },
+        select: {
+          hostId: true,
+          endedAt: true,
+          isLive: true,
+          scheduledFor: true,
+          title: true,
+        },
+      });
+      if (!latest) throw new AppError('ROOM_001');
+      if (latest.hostId !== userId) throw new AppError('AUTH_008');
+      if (latest.isLive) throw new AppError('ROOM_002', 'Room is already live');
+      if (latest.endedAt) throw new AppError('ROOM_002', 'Already ended');
+      const sameTime = latest.scheduledFor?.getTime() === input.scheduledFor.getTime();
+      const sameTitle = input.title === undefined || latest.title === input.title;
+      // Same desired state means this is a safe retry. Re-arm reminders below
+      // so a process crash between the DB transition and queue update heals.
+      if (!sameTime || !sameTitle) throw new AppError('ROOM_013');
+    }
 
     // Re-arm both reminder queues for the new time (cancel old → schedule new).
     try {
@@ -115,13 +168,6 @@ export const extEventsService = {
       await scheduleEventReminder(roomId, input.scheduledFor);
     } catch (err) {
       logger.warn('ext.events.reschedule: reminder re-arm failed', { err, roomId });
-    }
-    try {
-      const { cancelReminder15, scheduleReminder15 } = await import('../../queues/reminder15');
-      await cancelReminder15(roomId);
-      await scheduleReminder15(roomId, input.scheduledFor);
-    } catch (err) {
-      logger.warn('ext.events.reschedule: reminder15 re-arm failed', { err, roomId });
     }
 
     return { rescheduled: true as const, scheduledFor: input.scheduledFor.toISOString() };

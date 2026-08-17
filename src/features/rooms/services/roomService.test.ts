@@ -44,6 +44,7 @@ const rawRoom = (over: Record<string, unknown> = {}) => ({
 });
 
 const baseCreate: CreateRoomInput = { title: 'My room', visibility: 'public' };
+const roomCreateKey = 'rn-room-create-contract-123';
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -55,41 +56,53 @@ beforeEach(() => {
 
 describe('roomService.create — the 3 room types map to backend gating fields', () => {
   it('PUBLIC → POST /rooms with isPrivate:false, roomType:OPEN', async () => {
-    await roomService.create({ ...baseCreate, visibility: 'public' });
+    await roomService.create({ ...baseCreate, visibility: 'public' }, roomCreateKey);
     expect(api.post).toHaveBeenCalledWith(
       '/rooms',
       expect.objectContaining({ isPrivate: false, roomType: 'OPEN' }),
+      expect.objectContaining({
+        headers: { 'Idempotency-Key': roomCreateKey },
+      }),
     );
   });
 
   it('SOCIAL → POST /rooms with isPrivate:false, roomType:SOCIAL (keeps follow-gate path)', async () => {
-    await roomService.create({ ...baseCreate, visibility: 'social' });
+    await roomService.create({ ...baseCreate, visibility: 'social' }, roomCreateKey);
     expect(api.post).toHaveBeenCalledWith(
       '/rooms',
       expect.objectContaining({ isPrivate: false, roomType: 'SOCIAL' }),
+      expect.objectContaining({
+        headers: { 'Idempotency-Key': roomCreateKey },
+      }),
     );
   });
 
   it('CLOSED/private → POST /rooms with isPrivate:true, roomType:CLOSED', async () => {
-    await roomService.create({ ...baseCreate, visibility: 'closed' });
+    await roomService.create({ ...baseCreate, visibility: 'closed' }, roomCreateKey);
     expect(api.post).toHaveBeenCalledWith(
       '/rooms',
       expect.objectContaining({ isPrivate: true, roomType: 'CLOSED' }),
+      expect.objectContaining({
+        headers: { 'Idempotency-Key': roomCreateKey },
+      }),
     );
   });
 
   it('trims the title and defaults chatEnabled=true, recordingEnabled=false', async () => {
-    await roomService.create({ ...baseCreate, title: '  Spaced  ' });
+    await roomService.create({ ...baseCreate, title: '  Spaced  ' }, roomCreateKey);
     expect(api.post).toHaveBeenCalledWith(
       '/rooms',
       expect.objectContaining({ title: 'Spaced', chatEnabled: true, recordingEnabled: false }),
+      expect.objectContaining({
+        headers: { 'Idempotency-Key': roomCreateKey },
+      }),
     );
   });
 
   it('rejects an empty/whitespace title before calling the API', async () => {
-    await expect(roomService.create({ ...baseCreate, title: '   ' })).rejects.toThrow(
-      'Title is required',
-    );
+    await expect(
+      roomService.create({ ...baseCreate, title: '   ' }, roomCreateKey),
+    ).rejects.toThrow('Title is required');
     expect(api.post).not.toHaveBeenCalled();
   });
 });
@@ -179,5 +192,44 @@ describe('roomService.ping — REGRESSION: must hit canonical /rooms/:id/ping/:u
     const url = api.post.mock.calls[0][0] as string;
     expect(url).not.toMatch(/^\/users\//);
     expect(url).toMatch(/^\/rooms\/[^/]+\/ping\/[^/]+$/);
+  });
+});
+
+describe('roomService — retry-safe room chat mutations', () => {
+  it('sends a room message with the logical attempt idempotency key', async () => {
+    api.post.mockResolvedValueOnce({
+      data: {
+        data: {
+          id: 'message-1',
+          content: 'hello',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          user: {
+            id: 'user-1',
+            username: 'alice',
+            displayName: 'Alice',
+            avatarUrl: null,
+          },
+          replyTo: null,
+        },
+      },
+    });
+
+    await roomService.sendMessage('room-1', 'hello', 'rn-room-message-attempt-123');
+
+    expect(api.post).toHaveBeenCalledWith(
+      '/rooms/room-1/messages',
+      { content: 'hello' },
+      { headers: { 'Idempotency-Key': 'rn-room-message-attempt-123' } },
+    );
+  });
+
+  it('sends a room reaction with the logical attempt idempotency key', async () => {
+    await roomService.sendReaction('room-1', '👍', 'rn-room-reaction-attempt-456');
+
+    expect(api.post).toHaveBeenCalledWith(
+      '/rooms/room-1/reactions',
+      { emoji: '👍' },
+      { headers: { 'Idempotency-Key': 'rn-room-reaction-attempt-456' } },
+    );
   });
 });

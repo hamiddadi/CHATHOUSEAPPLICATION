@@ -1,45 +1,54 @@
 import React, { memo } from 'react';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import MaterialIcons from '@react-native-vector-icons/material-icons';
+import { useTranslation } from 'react-i18next';
 import { GradientView } from '../../../../../shared/components/GradientView';
-import { colors, spacing } from '../../../../../shared/constants/theme';
+import { colors, spacing, withAlpha } from '../../../../../shared/constants/theme';
 import { DEFAULTS } from '../../../../../shared/constants/images';
 import type { Message } from '../../../../../shared/types/domain';
+import { formatTime } from '../../../../../shared/utils/intl';
 import { ExtLinkifiedText } from '../../../../extensions/components/ExtLinkifiedText';
 import VoiceMessageBubble from '../../../components/VoiceMessageBubble';
 
 const AVATAR_BUBBLE_SIZE = 32;
 const BUBBLE_CORNER = 20;
 
-const GLASS_BG = 'rgba(255,255,255,0.05)';
-const SENT_GRADIENT = ['rgba(176,198,255,0.2)', 'rgba(85,141,255,0.3)'] as const;
-
-const formatTime = (iso: string): string => {
-  const d = new Date(iso);
-  const h = d.getHours();
-  const m = d.getMinutes();
-  const suffix = h >= 12 ? 'PM' : 'AM';
-  const hh = ((h + 11) % 12) + 1;
-  return `${hh}:${m.toString().padStart(2, '0')} ${suffix}`;
-};
+const SENT_GRADIENT = [
+  withAlpha(colors.primary, 0.2),
+  withAlpha(colors.primaryContainer, 0.3),
+] as const;
 
 interface BubbleProps {
   message: Message;
   otherAvatar: string | null;
   showAvatar: boolean;
-  /** Long-press handler — only wired on your own messages (sender-only delete). */
+  /** Long press opens delete for your messages and report for received ones. */
   onLongPress?: (message: Message) => void;
 }
 
 const Bubble: React.FC<BubbleProps> = memo(({ message, otherAvatar, showAvatar, onLongPress }) => {
+  const { t } = useTranslation();
+  const actionName = message.isMine ? 'delete' : 'report';
+  const actionLabel = message.isMine
+    ? t('moderation.deleteMessage', 'Delete message')
+    : t('moderation.reportMessage', 'Report message');
+  const accessibilityActions = onLongPress ? [{ name: actionName, label: actionLabel }] : undefined;
+  const handleAccessibilityAction = onLongPress ? () => onLongPress(message) : undefined;
+
   if (message.isMine) {
     return (
       <View style={styles.sentRow}>
         <Pressable
           onLongPress={onLongPress ? () => onLongPress(message) : undefined}
           delayLongPress={350}
-          accessibilityRole="button"
-          accessibilityHint="Maintenir pour supprimer le message"
+          accessibilityRole={onLongPress ? 'button' : undefined}
+          accessibilityHint={
+            onLongPress
+              ? t('moderation.longPressToDelete', 'Long press to delete this message')
+              : undefined
+          }
+          accessibilityActions={accessibilityActions}
+          onAccessibilityAction={handleAccessibilityAction}
         >
           <GradientView
             colors={SENT_GRADIENT}
@@ -75,7 +84,19 @@ const Bubble: React.FC<BubbleProps> = memo(({ message, otherAvatar, showAvatar, 
     );
   }
   return (
-    <View style={styles.receivedRow}>
+    <Pressable
+      style={styles.receivedRow}
+      onLongPress={onLongPress ? () => onLongPress(message) : undefined}
+      delayLongPress={350}
+      accessibilityRole={onLongPress ? 'button' : undefined}
+      accessibilityHint={
+        onLongPress
+          ? t('moderation.longPressToReport', 'Long press to report this message')
+          : undefined
+      }
+      accessibilityActions={accessibilityActions}
+      onAccessibilityAction={handleAccessibilityAction}
+    >
       {showAvatar ? (
         <Image
           source={{ uri: otherAvatar ?? DEFAULTS.avatar }}
@@ -103,7 +124,7 @@ const Bubble: React.FC<BubbleProps> = memo(({ message, otherAvatar, showAvatar, 
           {formatTime(message.sentAt)}
         </Text>
       </View>
-    </View>
+    </Pressable>
   );
 });
 Bubble.displayName = 'Bubble';
@@ -129,7 +150,7 @@ const styles = StyleSheet.create({
     flexShrink: 1,
   },
   receivedBubble: {
-    backgroundColor: GLASS_BG,
+    backgroundColor: colors.glass,
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.md,
     borderRadius: BUBBLE_CORNER,

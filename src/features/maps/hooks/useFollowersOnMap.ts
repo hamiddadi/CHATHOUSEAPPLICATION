@@ -1,15 +1,12 @@
 import { useEffect, useState } from 'react';
 import { env } from '../../../config/env';
-import { MOCK_FOLLOWERS_ON_MAP } from '../../../shared/mocks/followersOnMap.mock';
 import { getSocket } from '../../../shared/services/realtime/socketClient';
-import { mapsService } from '../services/mapsService';
+import { mapsService, toMapUser, type RawMapUser } from '../services/mapsService';
 import type { FollowerOnMap } from '../../../shared/types/domain';
 
-/** Backend `maps:user-moved` payload — partial: only the moving user's coords. */
-interface MapsUserMoved {
+/** Backend `maps:user-moved` payload — full public snapshot for one visible user. */
+interface MapsUserMoved extends Omit<RawMapUser, 'id'> {
   userId: string;
-  latitude: number;
-  longitude: number;
 }
 
 /** Backend `maps:user-offline` payload. */
@@ -33,62 +30,62 @@ interface MapUserUpdate {
 }
 
 /**
- * Subscribes to followers presence via WebSocket.
- * Falls back to `MOCK_FOLLOWERS_ON_MAP` when `env.REALTIME_ENABLED === false`
- * so the feature is demo-able without a server.
+ * Subscribes to the presence of every opted-in, visible, non-blocked user.
+ * When realtime is disabled, the hook fails honest with an empty roster; demo
+ * fixtures belong in tests/Storybook and must never appear as real people.
  *
  * Event contract is dictated by the backend (backend/src/socket/handlers/maps.handler.ts):
  * - The socket auto-joins the `maps:presence` channel — there is NO subscribe message.
- * - The server emits `maps:user-moved` ({ userId, latitude, longitude }) and
- *   `maps:user-offline` ({ userId }). It never pushes a full follower roster.
+ * - The server emits a full `maps:user-moved` public snapshot and
+ *   `maps:user-offline` ({ userId }). It does not push the whole roster.
  *
- * Roster strategy: the socket only carries coordinate deltas (no username/
- * avatar/presence), so the initial roster comes from the REST snapshot
- * GET /maps/followers (mapsService.followersOnMap). The socket then relocates
- * already-known followers on `maps:user-moved` and removes them on
- * `maps:user-offline`. In demo mode (REALTIME disabled) we seed from the mock.
+ * Roster strategy: GET /maps/users seeds all currently eligible users. A full
+ * socket snapshot can then add a newly-visible pin or update an existing one;
+ * `maps:user-offline` removes it.
  */
 export const useFollowersOnMap = (): FollowerOnMap[] => {
-  // Realtime: start empty and fill from the REST snapshot below. Demo mode
-  // (no realtime): seed from the mock roster so the feature is browsable.
-  const [followers, setFollowers] = useState<FollowerOnMap[]>(() =>
-    env.REALTIME_ENABLED ? [] : [...MOCK_FOLLOWERS_ON_MAP],
-  );
+  const [followers, setFollowers] = useState<FollowerOnMap[]>([]);
 
   useEffect(() => {
-    if (!env.REALTIME_ENABLED) return;
     let cancelled = false;
 
-    // 1) Seed the roster with full follower metadata from the REST snapshot.
+    // 1) Seed the roster with full public metadata from the REST snapshot.
     void mapsService
       .followersOnMap()
       .then(roster => {
         if (!cancelled) setFollowers(roster);
       })
       .catch(() => {
-        // Snapshot failed — keep an empty roster; socket deltas can't
-        // materialise pins on their own, so there's nothing to relocate yet.
+        // Snapshot failed — keep an empty roster. When realtime is enabled,
+        // subsequent full socket snapshots can still materialise pins.
       });
+
+    if (!env.REALTIME_ENABLED) {
+      return () => {
+        cancelled = true;
+      };
+    }
 
     const onMoved = (m: MapsUserMoved) => {
       if (cancelled) return;
-      // Only relocate followers we already have full metadata for — the socket
-      // payload lacks username/avatar/presence so we can't safely materialise a
-      // new pin from it.
-      setFollowers(prev =>
-        prev.map(f =>
-          f.id === m.userId
+      const incoming = toMapUser({ id: m.userId, ...m });
+      if (!incoming) return;
+      setFollowers(prev => {
+        const existingIndex = prev.findIndex(f => f.id === m.userId);
+        if (existingIndex < 0) return [...prev, incoming];
+        return prev.map((f, index) =>
+          index === existingIndex
             ? {
+                // Preserve mic state learned from map:user_update while applying
+                // the authoritative profile/location snapshot.
                 ...f,
-                // A follower emitting moves is by definition active right now —
-                // refresh freshness so the card doesn't show a stale "Nm ago".
+                ...incoming,
                 presence: 'online',
                 lastSeenMinutesAgo: 0,
-                location: { ...f.location, latitude: m.latitude, longitude: m.longitude },
               }
             : f,
-        ),
-      );
+        );
+      });
     };
 
     const onOffline = (p: MapsUserOffline) => {
@@ -137,6 +134,7 @@ export const useFollowersOnMap = (): FollowerOnMap[] => {
       socket.on('maps:user-moved', onMoved);
       socket.on('maps:user-offline', onOffline);
       socket.on('map:user_update', onUserUpdate);
+      socket.emit('maps:subscribe');
     })();
 
     return () => {
@@ -147,6 +145,7 @@ export const useFollowersOnMap = (): FollowerOnMap[] => {
         s?.off('maps:user-moved', onMoved);
         s?.off('maps:user-offline', onOffline);
         s?.off('map:user_update', onUserUpdate);
+        s?.emit('maps:unsubscribe');
       });
     };
   }, []);

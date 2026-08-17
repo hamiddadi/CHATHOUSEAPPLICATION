@@ -5,9 +5,10 @@
 # and LiveKit are reachable over https:// and wss:// (required by iOS ATS and
 # Android cleartext policy, and by the production env-guard in src/config/env.ts).
 #
-# DNS: point api.chathouse.app and livekit.chathouse.app A/AAAA records at this
-# host, and open TCP 80+443 (Caddy) and the LiveKit UDP media range on the
-# firewall. Set EMAIL for ACME expiry notices via the host .env.
+# DNS: point api.chathouse.app, livekit.chathouse.app and app.chathouse.com
+# A/AAAA records at this host, and open TCP 80+443 (Caddy) and the LiveKit UDP
+# media range on the firewall. Set EMAIL for ACME expiry notices via the host
+# .env.
 #
 # Brought up by the `caddy` service in docker-compose.prod.yml. Caddy reaches
 # the other containers by their compose service name on the internal network,
@@ -20,6 +21,20 @@
 # Public REST + Socket.IO API. reverse_proxy transparently upgrades WebSocket
 # (socket.io) connections, so wss://api.chathouse.app works with no extra config.
 api.chathouse.app {
+	encode zstd gzip
+	# Keep provider admission enforcement reachable even when the API process is
+	# unhealthy. LiveKit authenticates this raw-body route with its signed JWT.
+	handle /webhooks/livekit {
+		reverse_proxy livekit-revocation-worker:4010
+	}
+	handle {
+		reverse_proxy api:4000
+	}
+}
+
+# Universal/App Links host. The API serves both well-known association
+# documents from the reviewed production signing identifiers.
+app.chathouse.com {
 	encode zstd gzip
 	reverse_proxy api:4000
 }

@@ -1,6 +1,13 @@
-import messaging from '@react-native-firebase/messaging';
+import {
+  AuthorizationStatus,
+  deleteToken,
+  getMessaging,
+  getToken,
+  requestPermission,
+} from '@react-native-firebase/messaging';
 import { PermissionsAndroid, Platform } from 'react-native';
 import { apiClient } from '../../../shared/services/api/apiClient';
+import { isAppError } from '../../../shared/services/api/errorHandler';
 
 /**
  * Device push registration via Firebase Cloud Messaging (de-Expo: replaces
@@ -13,6 +20,33 @@ import { apiClient } from '../../../shared/services/api/apiClient';
  */
 
 let cachedToken: string | null = null;
+const firebaseMessaging = getMessaging();
+const backendPlatform = (): 'ios' | 'android' => (Platform.OS === 'ios' ? 'ios' : 'android');
+
+/**
+ * Claim a concrete FCM token for the authenticated account. A 409 PUSH_001
+ * means the token is still bound to a previous account on this installation.
+ * Invalidate it locally (so the previous backend row can no longer receive)
+ * and claim the new FCM token once; network errors never rotate tokens.
+ */
+const registerToken = async (token: string, allowRotation = true): Promise<boolean> => {
+  try {
+    await apiClient.post('/push/register', { token, platform: backendPlatform() });
+    cachedToken = token;
+    return true;
+  } catch (err) {
+    if (!allowRotation || !isAppError(err) || err.code !== 'PUSH_001') return false;
+    try {
+      await deleteToken(firebaseMessaging);
+      cachedToken = null;
+      const replacement = await getToken(firebaseMessaging);
+      if (!replacement || replacement === token) return false;
+      return registerToken(replacement, false);
+    } catch {
+      return false;
+    }
+  }
+};
 
 /**
  * Outcome of the permission/token flow, surfaced so UI (e.g. the onboarding
@@ -21,7 +55,7 @@ let cachedToken: string | null = null;
  * - 'denied'   user refused, the OS may re-prompt later
  * - 'blocked'  user refused permanently ("never ask again" / iOS denial) —
  *              only the system settings screen can re-enable it
- * - 'error'    native module/token unavailable (emulator, tests, web)
+ * - 'error'    native module/token unavailable or backend registration failed
  */
 export type PushPermissionStatus = 'granted' | 'denied' | 'blocked' | 'error';
 
@@ -44,14 +78,14 @@ export const requestNotificationPermissionStatus = async (): Promise<PushPermiss
     }
     return 'granted';
   }
-  const authStatus = await messaging().requestPermission();
+  const authStatus = await requestPermission(firebaseMessaging);
   if (
-    authStatus === messaging.AuthorizationStatus.AUTHORIZED ||
-    authStatus === messaging.AuthorizationStatus.PROVISIONAL
+    authStatus === AuthorizationStatus.AUTHORIZED ||
+    authStatus === AuthorizationStatus.PROVISIONAL
   ) {
     return 'granted';
   }
-  return authStatus === messaging.AuthorizationStatus.DENIED ? 'blocked' : 'denied';
+  return authStatus === AuthorizationStatus.DENIED ? 'blocked' : 'denied';
 };
 
 /**
@@ -73,7 +107,7 @@ export const pushService = {
     try {
       const status = await requestNotificationPermissionStatus();
       if (status !== 'granted') return { token: null, status };
-      const token = await messaging().getToken();
+      const token = await getToken(firebaseMessaging);
       cachedToken = token || null;
       return { token: cachedToken, status: cachedToken ? 'granted' : 'error' };
     } catch (err) {
@@ -96,26 +130,38 @@ export const pushService = {
   },
 
   /**
-   * Register the device's FCM token with the backend. Idempotent (backend
-   * upserts on `token`). Always re-POSTs — even when cached — so calling it on
-   * every login re-associates the device with the current account. Invoke after
-   * each successful authentication, not only on first boot. Returns the
-   * permission status so UI callers can surface a refusal; registration
-   * failures themselves stay best-effort and never throw.
+   * Register the device's FCM token with the backend. Re-registering it for
+   * the same account is idempotent; a token still bound to another account is
+   * invalidated and rotated before one retry. Invoke after each successful
+   * authentication. Failures remain best-effort and never block login.
    */
   async registerWithBackend(): Promise<PushPermissionStatus> {
     const { token, status } = await this.getOrRequestToken();
     if (!token) return status;
-    await apiClient
-      .post('/push/register', { token, platform: Platform.OS === 'ios' ? 'ios' : 'android' })
-      .catch(() => undefined);
-    return status;
+    const registered = await registerToken(token);
+    return registered ? 'granted' : 'error';
+  },
+
+  async registerTokenWithBackend(token: string): Promise<boolean> {
+    return registerToken(token);
   },
 
   async unregisterCurrentDevice(): Promise<void> {
-    if (!cachedToken) return;
-    const token = cachedToken;
+    let token = cachedToken;
+    if (!token) {
+      try {
+        token = await getToken(firebaseMessaging);
+      } catch {
+        token = null;
+      }
+    }
     cachedToken = null;
-    await apiClient.post('/push/unregister', { token }).catch(() => undefined);
+    if (token) {
+      await apiClient.post('/push/unregister', { token }).catch(() => undefined);
+    }
+    // Even if the API call failed because the access token expired, deleting
+    // the local FCM token makes the stale backend mapping undeliverable. FCM
+    // will mint a fresh token for the next signed-in account.
+    await deleteToken(firebaseMessaging).catch(() => undefined);
   },
 };

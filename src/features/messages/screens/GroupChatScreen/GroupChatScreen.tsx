@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   Keyboard,
   KeyboardAvoidingView,
@@ -17,16 +18,20 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { Loader } from '../../../../shared/components/Loader';
 import { EmptyState } from '../../../../shared/components/EmptyState';
+import { ContentReportSheet } from '../../../../shared/components/ContentReportSheet';
 import { colors, spacing } from '../../../../shared/constants/theme';
 import { useApiErrorToast } from '../../../../shared/hooks/useApiErrorToast';
 import type { MessageStackParamList } from '../../../../core/navigation/types';
 import { useAuthStore } from '../../../auth/store/authStore';
+import type { ContentReportReason } from '../../../../shared/types/moderation';
+import { formatTime } from '../../../../shared/utils/intl';
 import {
   useGroup,
   useGroupMessages,
   useMarkGroupRead,
   useSendGroupMessage,
   useSendGroupVoice,
+  useReportGroupMessage,
 } from '../../hooks/useGroups';
 import { useGroupSocket } from '../../hooks/useGroupSocket';
 import { useVoiceMessage } from '../../hooks/useVoiceMessage';
@@ -41,15 +46,11 @@ type Route = RouteProp<MessageStackParamList, 'GroupChat'>;
 const MAX_MESSAGE_LEN = 2000;
 const COUNTER_THRESHOLD = 1900;
 
-// Locale-aware wall-clock, mirroring the 1:1 Bubble's meta line.
-const formatTime = (iso: string, language: string): string =>
-  new Intl.DateTimeFormat(language, { hour: 'numeric', minute: '2-digit' }).format(new Date(iso));
-
 export const GroupChatScreen: React.FC = () => {
   const navigation = useNavigation<Nav>();
   const route = useRoute<Route>();
   const insets = useSafeAreaInsets();
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const conversationId = route.params.conversationId;
   const myId = useAuthStore(s => s.user?.id ?? null);
 
@@ -72,7 +73,9 @@ export const GroupChatScreen: React.FC = () => {
   const send = useSendGroupMessage();
   const sendVoice = useSendGroupVoice();
   const markRead = useMarkGroupRead();
+  const reportMessage = useReportGroupMessage();
   const toastError = useApiErrorToast();
+  const [reportMessageId, setReportMessageId] = useState<string | null>(null);
 
   // Track the keyboard so the recording bar drops its bottom inset when the
   // keyboard is up (mirrors ChatDetailScreen).
@@ -105,6 +108,7 @@ export const GroupChatScreen: React.FC = () => {
 
   const [draft, setDraft] = useState('');
   const listRef = useRef<FlatList<GroupMessage>>(null);
+  const sendInFlightRef = useRef(false);
 
   // Mark the thread read when there's something unread — on open and whenever
   // new messages land. Guarded so we don't fire a redundant PATCH every render.
@@ -137,21 +141,22 @@ export const GroupChatScreen: React.FC = () => {
   // so new messages pin to the bottom without an onContentSizeChange→scrollToEnd hack.
   const data = useMemo(() => [...(messages ?? [])].reverse(), [messages]);
 
-  const handleSend = useCallback(() => {
+  const handleSend = useCallback(async () => {
+    if (sendInFlightRef.current) return;
     const text = draft.trim();
     if (text.length === 0) return;
+    sendInFlightRef.current = true;
     setDraft('');
-    send.mutate(
-      { conversationId, text },
-      {
-        // On failure, restore the text so the user doesn't silently lose their
-        // message, and surface the error.
-        onError: err => {
-          setDraft(text);
-          toastError(err);
-        },
-      },
-    );
+    try {
+      await send.mutateAsync({ conversationId, text });
+    } catch (err) {
+      // Preserve anything typed while the failed request was in flight; only
+      // restore the sent text when the composer is still empty.
+      setDraft(current => (current.trim().length === 0 ? text : current));
+      toastError(err);
+    } finally {
+      sendInFlightRef.current = false;
+    }
   }, [conversationId, draft, send, toastError]);
 
   const handleBack = useCallback(() => navigation.goBack(), [navigation]);
@@ -160,11 +165,62 @@ export const GroupChatScreen: React.FC = () => {
     [conversationId, navigation],
   );
 
+  const handleReportReason = useCallback(
+    (reason: ContentReportReason) => {
+      if (!reportMessageId || reportMessage.isPending) return;
+      reportMessage.mutate(
+        { conversationId, messageId: reportMessageId, reason },
+        {
+          onSuccess: result => {
+            setReportMessageId(null);
+            Alert.alert(
+              t('moderation.reportSentTitle', 'Report sent'),
+              result.alreadyReported
+                ? t('moderation.reportAlreadySent', 'You already reported this message.')
+                : t('moderation.reportSentBody', 'The moderation team will review this message.'),
+            );
+          },
+          onError: toastError,
+        },
+      );
+    },
+    [conversationId, reportMessage, reportMessageId, t, toastError],
+  );
+
   const renderItem = useCallback(
     ({ item }: { item: GroupMessage }) => {
       const isMine = item.senderId === myId;
       return (
-        <View className={isMine ? 'items-end px-xxl py-xxs' : 'items-start px-xxl py-xxs'}>
+        <Pressable
+          testID={`group-message-${item.id}`}
+          className={isMine ? 'items-end px-xxl py-xxs' : 'items-start px-xxl py-xxs'}
+          onLongPress={!isMine ? () => setReportMessageId(item.id) : undefined}
+          delayLongPress={350}
+          accessible={!isMine}
+          accessibilityRole={!isMine ? 'button' : undefined}
+          accessibilityActions={
+            !isMine
+              ? [
+                  {
+                    name: 'report',
+                    label: t('moderation.reportMessageA11y', 'Report this message'),
+                  },
+                ]
+              : undefined
+          }
+          onAccessibilityAction={
+            !isMine
+              ? event => {
+                  if (event.nativeEvent.actionName === 'report') setReportMessageId(item.id);
+                }
+              : undefined
+          }
+          accessibilityHint={
+            !isMine
+              ? t('moderation.longPressToReport', 'Long press to report this message')
+              : undefined
+          }
+        >
           {!isMine && (
             <Text className="text-xxs font-body-medium text-ink-muted ml-sm mb-xxs">
               {nameById.get(item.senderId) ?? item.sender?.displayName ?? '—'}
@@ -182,6 +238,7 @@ export const GroupChatScreen: React.FC = () => {
                 audioUrl={item.audioUrl}
                 durationMs={item.durationMs}
                 isMine={isMine}
+                foregroundColor={isMine ? colors.onPrimary : undefined}
               />
             ) : (
               <Text className={isMine ? 'text-sm text-primary-on-container' : 'text-sm text-ink'}>
@@ -197,12 +254,12 @@ export const GroupChatScreen: React.FC = () => {
                 : 'text-[10px] text-ink-muted ml-xs mt-xxs'
             }
           >
-            {formatTime(item.createdAt, i18n.language)}
+            {formatTime(item.createdAt)}
           </Text>
-        </View>
+        </Pressable>
       );
     },
-    [myId, nameById, i18n.language],
+    [myId, nameById, t],
   );
 
   // Inverted list: "end" = the visual TOP = the oldest loaded message. Reaching
@@ -302,10 +359,11 @@ export const GroupChatScreen: React.FC = () => {
               value={draft}
               onChangeText={setDraft}
               placeholder={t('messages.messagePlaceholder', 'Message')}
+              accessibilityLabel={t('messages.messagePlaceholder', 'Message')}
               placeholderTextColor={colors.textMuted}
               maxLength={MAX_MESSAGE_LEN}
               multiline
-              className="max-h-28 bg-overlay-white-5 rounded-2xl px-md py-sm text-ink"
+              className="min-h-[44px] max-h-28 bg-overlay-white-5 rounded-2xl border border-outline px-md py-sm text-ink"
             />
             {draft.length >= COUNTER_THRESHOLD ? (
               <Text className="text-[10px] text-ink-muted self-end mt-xxs mr-sm">
@@ -336,6 +394,12 @@ export const GroupChatScreen: React.FC = () => {
           )}
         </View>
       )}
+      <ContentReportSheet
+        visible={reportMessageId !== null}
+        submitting={reportMessage.isPending}
+        onClose={() => setReportMessageId(null)}
+        onSelect={handleReportReason}
+      />
     </KeyboardAvoidingView>
   );
 };

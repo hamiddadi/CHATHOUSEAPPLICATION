@@ -92,7 +92,6 @@ export const SuggestedFollowsRoute: React.FC = () => {
           onFollow={async user => {
             await follow.mutateAsync(user.id);
           }}
-          onTapUser={() => {}}
         />
       </View>
       <View style={[styles.footer, { paddingBottom: insets.bottom + spacing.lg }]}>

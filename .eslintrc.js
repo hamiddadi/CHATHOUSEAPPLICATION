@@ -1,5 +1,7 @@
 /**
- * ESLint configuration — central source of truth for all lint rules.
+ * ESLint configuration — source of truth for the React Native application.
+ * The independently installed backend owns backend/.eslintrc.cjs so its lint
+ * never depends on this package's node_modules.
  * Per project policy, NO inline eslint-disable comments in src/.
  * File-specific exceptions live in the `overrides` section below.
  */

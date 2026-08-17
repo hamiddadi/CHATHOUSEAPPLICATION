@@ -1,7 +1,16 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Linking, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Linking,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { profileLinksApi, type ProfileLink } from '../api/profileLinksApi';
 import { apiErrorMessage } from '../utils/extUi';
+import { areExternalDigitalPurchasesAllowed } from '../utils/digitalPurchases';
 import { colors } from '../../../shared/constants/theme';
 
 interface Props {
@@ -10,8 +19,9 @@ interface Props {
   editable?: boolean;
 }
 
-/** Clubhouse-style cap on custom profile links (server enforces the same). */
-const MAX_PROFILE_LINKS = 5;
+/** Server-side free/premium caps. Store builds expose only the free allowance. */
+const FREE_MAX_PROFILE_LINKS = 2;
+const PREMIUM_MAX_PROFILE_LINKS = 5;
 
 /**
  * Display + (optional) inline editor for a user's custom profile links
@@ -22,18 +32,29 @@ const MAX_PROFILE_LINKS = 5;
  * small × on each chip to remove. Server enforces the 5-link cap.
  */
 export const ExtProfileLinks: React.FC<Props> = ({ userId, editable = false }) => {
+  const maxEditableLinks = areExternalDigitalPurchasesAllowed()
+    ? PREMIUM_MAX_PROFILE_LINKS
+    : FREE_MAX_PROFILE_LINKS;
   const [links, setLinks] = useState<ProfileLink[]>([]);
   const [label, setLabel] = useState('');
   const [url, setUrl] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [removingId, setRemovingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const reload = useCallback(async (): Promise<void> => {
+    setLoading(true);
+    setLoadError(false);
+    setError(null);
     try {
       const items = await profileLinksApi.list(userId);
       setLinks(items);
     } catch {
-      /* keep stale */
+      setLoadError(true);
+    } finally {
+      setLoading(false);
     }
   }, [userId]);
 
@@ -61,13 +82,47 @@ export const ExtProfileLinks: React.FC<Props> = ({ userId, editable = false }) =
   };
 
   const onRemove = async (id: string): Promise<void> => {
+    setError(null);
+    setRemovingId(id);
     try {
       const items = await profileLinksApi.remove(id);
       setLinks(items);
-    } catch {
-      /* keep visible */
+    } catch (err) {
+      setError(apiErrorMessage(err, 'Failed to remove link'));
+    } finally {
+      setRemovingId(null);
     }
   };
+
+  if (loading) {
+    return (
+      <View style={styles.status}>
+        <ActivityIndicator
+          color={colors.primary}
+          accessibilityRole="progressbar"
+          accessibilityLabel="Loading profile links"
+        />
+      </View>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <View style={styles.status}>
+        <Text style={styles.error} accessibilityRole="alert">
+          Failed to load profile links.
+        </Text>
+        <Pressable
+          style={styles.retry}
+          onPress={() => void reload()}
+          accessibilityRole="button"
+          accessibilityLabel="Retry loading profile links"
+        >
+          <Text style={styles.retryText}>Retry</Text>
+        </Pressable>
+      </View>
+    );
+  }
 
   if (links.length === 0 && !editable) return null;
 
@@ -89,8 +144,11 @@ export const ExtProfileLinks: React.FC<Props> = ({ userId, editable = false }) =
               <Pressable
                 style={styles.remove}
                 onPress={() => void onRemove(l.id)}
+                disabled={removingId === l.id}
                 accessibilityRole="button"
                 accessibilityLabel={`Remove link ${l.label}`}
+                accessibilityState={{ disabled: removingId === l.id, busy: removingId === l.id }}
+                hitSlop={6}
               >
                 <Text style={styles.removeText}>×</Text>
               </Pressable>
@@ -99,7 +157,13 @@ export const ExtProfileLinks: React.FC<Props> = ({ userId, editable = false }) =
         ))}
       </View>
 
-      {editable && links.length < MAX_PROFILE_LINKS ? (
+      {error ? (
+        <Text style={styles.error} accessibilityRole="alert">
+          {error}
+        </Text>
+      ) : null}
+
+      {editable && links.length < maxEditableLinks ? (
         <View style={styles.form}>
           <TextInput
             placeholder="Label (e.g. Newsletter)"
@@ -109,6 +173,7 @@ export const ExtProfileLinks: React.FC<Props> = ({ userId, editable = false }) =
             style={styles.input}
             maxLength={40}
             autoCapitalize="words"
+            accessibilityLabel="Profile link label"
           />
           <TextInput
             placeholder="https://…"
@@ -119,15 +184,17 @@ export const ExtProfileLinks: React.FC<Props> = ({ userId, editable = false }) =
             autoCapitalize="none"
             autoCorrect={false}
             keyboardType="url"
+            accessibilityLabel="Profile link URL"
           />
-          {error ? <Text style={styles.error}>{error}</Text> : null}
           <Pressable
-            style={[styles.add, busy && styles.addBusy]}
+            style={styles.add}
             onPress={() => void onAdd()}
             disabled={busy}
             accessibilityRole="button"
             accessibilityLabel="Add profile link"
+            accessibilityState={{ disabled: busy, busy }}
           >
+            {busy ? <ActivityIndicator size="small" color={colors.onPrimary} /> : null}
             <Text style={styles.addText}>{busy ? 'Adding…' : '+ Add link'}</Text>
           </Pressable>
         </View>
@@ -138,6 +205,15 @@ export const ExtProfileLinks: React.FC<Props> = ({ userId, editable = false }) =
 
 const styles = StyleSheet.create({
   container: { gap: 10 },
+  status: { minHeight: 44, alignItems: 'center', justifyContent: 'center', gap: 10 },
+  retry: {
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingHorizontal: 18,
+    borderRadius: 10,
+    backgroundColor: colors.primary,
+  },
+  retryText: { color: colors.onPrimary, fontSize: 13, fontWeight: '600' },
   row: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: {
     flexDirection: 'row',
@@ -146,16 +222,16 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     paddingLeft: 12,
     paddingRight: 4,
-    paddingVertical: 4,
+    minHeight: 44,
     gap: 4,
   },
-  chipTap: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  chipTap: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 6 },
   icon: { fontSize: 13, color: colors.text },
   label: { fontSize: 13, color: colors.text, fontWeight: '500' },
   remove: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.surfaceHigh,
@@ -164,20 +240,27 @@ const styles = StyleSheet.create({
   form: { gap: 8 },
   input: {
     backgroundColor: colors.overlayWhite5,
+    borderWidth: 1,
+    borderColor: colors.outline,
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 10,
+    minHeight: 44,
     fontSize: 13,
     color: colors.text,
   },
-  error: { color: colors.danger, fontSize: 12 },
+  error: { color: colors.danger, fontSize: 12, textAlign: 'center' },
   add: {
     alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
     paddingHorizontal: 16,
     paddingVertical: 10,
     backgroundColor: colors.primary,
     borderRadius: 10,
+    minHeight: 44,
   },
-  addBusy: { opacity: 0.5 },
   addText: { color: colors.onPrimary, fontWeight: '600', fontSize: 13 },
 });

@@ -127,6 +127,7 @@ export const ExtPlaygroundScreen: React.FC = () => {
             value={pickedRoomId}
             onChangeText={setPickedRoomId}
             autoCapitalize="none"
+            accessibilityLabel={t('extensions.playground.roomId', 'Room ID')}
           />
           <ExtCalendarExportButton roomId={pickedRoomId} />
         </Section>
@@ -210,6 +211,10 @@ export const ExtPlaygroundScreen: React.FC = () => {
               'tech, music, startups, …',
             )}
             autoCapitalize="none"
+            accessibilityLabel={t(
+              'extensions.playground.interestsInputA11y',
+              'Interests, separated by commas',
+            )}
           />
           <Text style={[styles.muted, !interestValidation.ok && styles.bad]}>
             {interestValidation.ok

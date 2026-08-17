@@ -1,5 +1,13 @@
 import React, { memo, useCallback, useState } from 'react';
-import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  FlatList,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import MaterialIcons from '@react-native-vector-icons/material-icons';
 import { Swipeable } from 'react-native-gesture-handler';
 import { useNavigation } from '@react-navigation/native';
@@ -8,7 +16,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { Loader } from '../../../../shared/components/Loader';
 import { EmptyState } from '../../../../shared/components/EmptyState';
-import { colors, spacing } from '../../../../shared/constants/theme';
+import { colors, palette, spacing } from '../../../../shared/constants/theme';
 import { formatDateTime } from '../../../../shared/utils/intl';
 import type { RoomStackParamList } from '../../../../core/navigation/types';
 import type { AppNotification, NotificationKind } from '../../../../shared/types/domain';
@@ -17,6 +25,7 @@ import {
   useMarkNotificationRead,
   useNotifications,
   useRemoveNotification,
+  useUnreadNotificationCount,
 } from '../../hooks/useNotifications';
 import type { NotificationFilter } from '../../services/notificationService';
 
@@ -27,9 +36,12 @@ const TABS: readonly NotificationFilter[] = ['all', 'rooms', 'social', 'clubs'];
 const ICON_FOR_KIND: Record<NotificationKind, React.ComponentProps<typeof MaterialIcons>['name']> =
   {
     follow: 'person-add',
+    follow_request: 'person-add-alt',
     room_invite: 'mic',
     house_invite: 'home',
     room_starting: 'schedule',
+    room_canceled: 'event-busy',
+    room_ended_by_admin: 'gavel',
     mention: 'alternate-email',
     wave: 'waving-hand',
     hand_accepted: 'pan-tool',
@@ -50,8 +62,8 @@ const RightActions: React.FC<{ label: string; onPress: () => void }> = ({ label,
     accessibilityLabel={label}
     style={styles.swipeAction}
   >
-    <MaterialIcons name="delete" size={22} color="white" />
-    <Text className="text-xs text-white mt-xxs">{label}</Text>
+    <MaterialIcons name="delete" size={22} color={palette.onError} />
+    <Text className="text-xs text-on-danger mt-xxs">{label}</Text>
   </Pressable>
 );
 
@@ -61,6 +73,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     width: 96,
     backgroundColor: colors.danger,
+  },
+  tabs: {
+    gap: spacing.sm,
+    paddingHorizontal: spacing.xxl,
+    paddingBottom: spacing.md,
+  },
+  tabScroller: {
+    flexGrow: 0,
+    flexShrink: 0,
   },
 });
 
@@ -77,14 +98,18 @@ const NotificationRow: React.FC<RowProps> = memo(({ notif, onPress, onDelete }) 
       <Pressable
         onPress={() => onPress(notif)}
         accessibilityRole="button"
-        accessibilityState={{ selected: notif.isRead }}
+        accessibilityLabel={t(
+          notif.isRead ? 'notifications.itemReadA11y' : 'notifications.itemUnreadA11y',
+          notif.isRead ? 'Read notification: {{message}}' : 'Unread notification: {{message}}',
+          { message: notif.message },
+        )}
         className={
           notif.isRead
             ? 'flex-row items-start gap-md py-lg px-xxl'
             : 'flex-row items-start gap-md py-lg px-xxl bg-overlay-white-5'
         }
       >
-        <View className="w-10 h-10 rounded-pill bg-surface-container items-center justify-center">
+        <View className="w-10 h-10 rounded-pill bg-surface-alt items-center justify-center">
           <MaterialIcons name={iconName} size={18} color={colors.primary} />
         </View>
         <View className="flex-1 gap-xxs">
@@ -108,11 +133,12 @@ const TabPill: React.FC<{
   <Pressable
     onPress={onPress}
     accessibilityRole="button"
+    accessibilityLabel={label}
     accessibilityState={{ selected: active }}
     className={
       active
-        ? 'px-lg py-sm rounded-pill bg-primary'
-        : 'px-lg py-sm rounded-pill bg-overlay-white-5 border border-overlay-white-10'
+        ? 'px-lg py-sm min-h-[44px] items-center justify-center rounded-pill bg-primary'
+        : 'px-lg py-sm min-h-[44px] items-center justify-center rounded-pill bg-overlay-white-5 border border-overlay-white-10'
     }
   >
     <Text
@@ -133,12 +159,24 @@ export const NotificationsScreen: React.FC = () => {
   const { t } = useTranslation();
 
   const [filter, setFilter] = useState<NotificationFilter>('all');
-  const { data, isLoading, isError, isFetching, refetch } = useNotifications(filter);
+  const {
+    data,
+    isLoading,
+    isError,
+    isRefetching,
+    isFetchingNextPage,
+    hasNextPage,
+    fetchNextPage,
+    refetch,
+  } = useNotifications(filter);
   const markOne = useMarkNotificationRead();
   const markAll = useMarkAllNotificationsRead();
   const remove = useRemoveNotification();
+  const unreadQuery = useUnreadNotificationCount();
 
-  const unreadCount = (data ?? []).filter(n => !n.isRead).length;
+  // Loaded pages may cover only the newest 50 rows. Prefer the exact backend
+  // count; the current page remains a resilient fallback while it is loading.
+  const unreadCount = unreadQuery.data ?? (data ?? []).filter(n => !n.isRead).length;
 
   const goBack = useCallback(() => navigation.goBack(), [navigation]);
 
@@ -146,7 +184,9 @@ export const NotificationsScreen: React.FC = () => {
     (notif: AppNotification) => {
       if (!notif.isRead) markOne.mutate(notif.id);
       // Deep-link per kind — tap takes the user to the right place.
-      if (notif.kind === 'follow' && notif.actor.id) {
+      if (notif.kind === 'follow_request') {
+        navigation.navigate('FollowRequests');
+      } else if (notif.kind === 'follow' && notif.actor.id) {
         navigation.navigate('Profile', { userId: notif.actor.id });
       } else if (notif.kind === 'house_invite' && notif.houseId) {
         // Route to the dedicated invitation screen (Accept/Decline) rather than
@@ -156,12 +196,21 @@ export const NotificationsScreen: React.FC = () => {
         // DM deep-link: messages live outside the RoomStack (MessagesTab), so
         // hop through the root 'Main' navigator to the thread (conversationId
         // === peer userId). Same cross-tab pattern as MapsScreen/RoomScreen.
+        const isGroup = notif.conversationType === 'group' && notif.conversationId;
         (navigation as unknown as { navigate: (name: string, params: object) => void }).navigate(
           'Main',
-          {
-            screen: 'MessagesTab',
-            params: { screen: 'ChatDetail', params: { conversationId: notif.actor.id } },
-          },
+          isGroup
+            ? {
+                screen: 'MessagesTab',
+                params: {
+                  screen: 'GroupChat',
+                  params: { conversationId: notif.conversationId },
+                },
+              }
+            : {
+                screen: 'MessagesTab',
+                params: { screen: 'ChatDetail', params: { conversationId: notif.actor.id } },
+              },
         );
       } else if (notif.roomId) {
         // Any room-scoped notification (room_starting / room_invite /
@@ -178,7 +227,24 @@ export const NotificationsScreen: React.FC = () => {
   );
 
   const handleMarkAll = useCallback(() => markAll.mutate(), [markAll]);
+  const openFollowRequests = useCallback(() => navigation.navigate('FollowRequests'), [navigation]);
   const handleDelete = useCallback((id: string) => remove.mutate(id), [remove]);
+  const handleEndReached = useCallback(() => {
+    if (hasNextPage && !isFetchingNextPage) void fetchNextPage();
+  }, [fetchNextPage, hasNextPage, isFetchingNextPage]);
+
+  const renderFooter = useCallback(
+    () =>
+      isFetchingNextPage ? (
+        <View className="py-lg items-center">
+          <ActivityIndicator
+            color={colors.primary}
+            accessibilityLabel={t('common.loadingMore', 'Loading more')}
+          />
+        </View>
+      ) : null,
+    [isFetchingNextPage, t],
+  );
 
   return (
     <View className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
@@ -214,7 +280,12 @@ export const NotificationsScreen: React.FC = () => {
         )}
       </View>
 
-      <View className="flex-row gap-sm px-xxl pb-md">
+      <ScrollView
+        horizontal
+        style={styles.tabScroller}
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.tabs}
+      >
         {TABS.map(tab => (
           <TabPill
             key={tab}
@@ -223,7 +294,21 @@ export const NotificationsScreen: React.FC = () => {
             onPress={() => setFilter(tab)}
           />
         ))}
-      </View>
+      </ScrollView>
+
+      <Pressable
+        onPress={openFollowRequests}
+        accessibilityRole="button"
+        accessibilityLabel={t('notifications.followRequests.openA11y')}
+        accessibilityHint={t('notifications.followRequests.openHint')}
+        className="mx-xxl mb-md px-lg py-md rounded-md bg-overlay-white-5 flex-row items-center gap-md"
+      >
+        <MaterialIcons name="person-add-alt" size={20} color={colors.primary} />
+        <Text className="text-sm font-body-bold text-ink flex-1">
+          {t('notifications.followRequests.open')}
+        </Text>
+        <MaterialIcons name="chevron-right" size={20} color={colors.textMuted} />
+      </Pressable>
 
       {isLoading ? (
         <Loader fullscreen accessibilityLabel={t('notifications.title')} />
@@ -245,8 +330,11 @@ export const NotificationsScreen: React.FC = () => {
           )}
           ItemSeparatorComponent={() => <View className="h-px bg-overlay-white-5" />}
           contentContainerStyle={{ paddingBottom: insets.bottom + spacing.huge }}
-          refreshing={isFetching}
+          refreshing={isRefetching && !isFetchingNextPage}
           onRefresh={() => void refetch()}
+          onEndReached={handleEndReached}
+          onEndReachedThreshold={0.4}
+          ListFooterComponent={renderFooter}
           showsVerticalScrollIndicator={false}
         />
       )}

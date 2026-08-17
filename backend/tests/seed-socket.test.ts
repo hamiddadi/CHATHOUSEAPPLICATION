@@ -20,24 +20,74 @@ import { prisma } from '../src/config/database';
 import { signAccessToken } from '../src/utils/jwt';
 
 let httpServer: http.Server;
+let socketServer: Awaited<ReturnType<typeof createSocketServer>>;
 let port: number;
 let adminToken: string;
 let testUser1Token: string;
+let adminId: string;
+let testUser1Id: string;
 let sampleRoomId: string;
+let hostClient: ClientSocket;
+
+const FIXTURE_ROOM_TITLE = 'Seed Socket deterministic fixture room';
 
 const createClient = (token: string): ClientSocket =>
   ioClient(`http://localhost:${port}`, {
     transports: ['websocket'],
     auth: { token },
     forceNew: true,
+    reconnection: false,
   });
 
 const waitFor = (socket: ClientSocket, event: string, timeout = 5000): Promise<any> =>
   new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`Timeout waiting for ${event}`)), timeout);
-    socket.once(event, (data: any) => {
+    const onEvent = (data: any) => {
       clearTimeout(timer);
       resolve(data);
+    };
+    const timer = setTimeout(() => {
+      socket.off(event, onEvent);
+      reject(new Error(`Timeout waiting for ${event}`));
+    }, timeout);
+    socket.once(event, onEvent);
+  });
+
+const connectClient = (socket: ClientSocket, timeout = 5000): Promise<void> => {
+  if (socket.connected) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      clearTimeout(timer);
+      socket.off('connect', onConnect);
+      socket.off('connect_error', onError);
+    };
+    const onConnect = () => {
+      cleanup();
+      resolve();
+    };
+    const onError = (error: Error) => {
+      cleanup();
+      reject(error);
+    };
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error('Socket connection timeout'));
+    }, timeout);
+    socket.once('connect', onConnect);
+    socket.once('connect_error', onError);
+  });
+};
+
+const emitWithAck = (
+  socket: ClientSocket,
+  event: string,
+  payload: { roomId: string; [key: string]: unknown },
+  timeout = 5000,
+): Promise<boolean> =>
+  new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`Timeout waiting for ${event} ack`)), timeout);
+    socket.emit(event, payload, (ok: boolean) => {
+      clearTimeout(timer);
+      resolve(ok);
     });
   });
 
@@ -51,15 +101,33 @@ beforeAll(async () => {
   const user1 = await prisma.user.findUnique({ where: { email: 'test1@chathouse.dev' } });
   if (!admin || !user1) throw new Error('Run seed first');
 
-  adminToken = signAccessToken(admin.id);
-  testUser1Token = signAccessToken(user1.id);
+  adminId = admin.id;
+  testUser1Id = user1.id;
+  adminToken = signAccessToken(admin.id, admin.tokenVersion);
+  testUser1Token = signAccessToken(user1.id, user1.tokenVersion);
 
-  const liveRoom = await prisma.room.findFirst({ where: { isLive: true } });
-  if (liveRoom) sampleRoomId = liveRoom.id;
+  await prisma.room.deleteMany({
+    where: { hostId: admin.id, title: FIXTURE_ROOM_TITLE },
+  });
+  const fixtureRoom = await prisma.room.create({
+    data: {
+      title: FIXTURE_ROOM_TITLE,
+      hostId: admin.id,
+      isLive: true,
+      isPrivate: false,
+      roomType: 'OPEN',
+      participantCount: 1,
+      totalAttendees: 1,
+      participants: {
+        create: { userId: admin.id, role: 'HOST' },
+      },
+    },
+  });
+  sampleRoomId = fixtureRoom.id;
 
   const app = createApp();
   httpServer = http.createServer(app);
-  await createSocketServer(httpServer);
+  socketServer = await createSocketServer(httpServer);
 
   await new Promise<void>(resolve => {
     httpServer.listen(0, () => {
@@ -68,10 +136,22 @@ beforeAll(async () => {
       resolve();
     });
   });
+  if (port <= 0) throw new Error('Socket test server did not bind a TCP port');
+
+  // Keep the host attached for the whole suite. Disconnecting the last host is
+  // supposed to end a room, which would make later tests order-dependent.
+  hostClient = createClient(adminToken);
+  await connectClient(hostClient);
+  const hostJoinAck = await emitWithAck(hostClient, 'room:join', { roomId: sampleRoomId });
+  if (!hostJoinAck) throw new Error('Fixture host could not join the deterministic room');
 }, 30_000);
 
 afterAll(async () => {
-  await new Promise<void>(resolve => httpServer.close(() => resolve()));
+  hostClient?.disconnect();
+  if (socketServer) await socketServer.close();
+  await prisma.room.deleteMany({
+    where: { hostId: adminId, title: FIXTURE_ROOM_TITLE },
+  });
   await disconnectRedis();
   await prisma.$disconnect();
 }, 15_000);
@@ -126,114 +206,79 @@ describe('Socket.IO — Connection', () => {
 // ROOM EVENTS
 // ═══════════════════════════════════════════════════════════════════════════
 describe('Socket.IO — Room Events', () => {
-  it('✅ should emit room:join and receive ack', done => {
-    if (!sampleRoomId) {
-      done();
-      return;
-    }
-
-    const client = createClient(adminToken);
-    client.on('connect', () => {
-      client.emit('room:join', { roomId: sampleRoomId }, (ok: boolean) => {
-        expect(typeof ok).toBe('boolean');
-        client.disconnect();
-        done();
-      });
-    });
-    client.on('connect_error', err => {
+  it('✅ should emit room:join and receive ack', async () => {
+    const client = createClient(testUser1Token);
+    try {
+      await connectClient(client);
+      await expect(emitWithAck(client, 'room:join', { roomId: sampleRoomId })).resolves.toBe(true);
+      await expect(emitWithAck(client, 'room:leave', { roomId: sampleRoomId })).resolves.toBe(true);
+    } finally {
       client.disconnect();
-      done(err);
-    });
+    }
   });
 
   it('✅ should broadcast room:user-joined to other clients', async () => {
-    if (!sampleRoomId) return;
-
-    const observer = createClient(adminToken);
     const joiner = createClient(testUser1Token);
-
-    await new Promise<void>(resolve => observer.on('connect', resolve));
-
-    // Observer joins the room first
-    await new Promise<void>(resolve => {
-      observer.emit('room:join', { roomId: sampleRoomId }, () => resolve());
-    });
-
-    // Listen for user-joined
-    const joinPromise = waitFor(observer, 'room:user-joined', 5000);
-
-    // Joiner connects and joins
-    await new Promise<void>(resolve => joiner.on('connect', resolve));
-    joiner.emit('room:join', { roomId: sampleRoomId });
-
     try {
+      const joinPromise = waitFor(hostClient, 'room:user-joined', 5000);
+      await connectClient(joiner);
+      await expect(emitWithAck(joiner, 'room:join', { roomId: sampleRoomId })).resolves.toBe(true);
       const data = await joinPromise;
-      expect(data).toHaveProperty('userId');
+      expect(data).toHaveProperty('userId', testUser1Id);
       expect(data).toHaveProperty('roomId', sampleRoomId);
-    } catch {
-      // Timeout is acceptable if broadcast is self-only
+      await expect(emitWithAck(joiner, 'room:leave', { roomId: sampleRoomId })).resolves.toBe(true);
+    } finally {
+      joiner.disconnect();
     }
-
-    observer.disconnect();
-    joiner.disconnect();
   });
 
   it('✅ should emit room:leave and notify peers', async () => {
-    if (!sampleRoomId) return;
-
-    const client = createClient(adminToken);
-    await new Promise<void>(resolve => client.on('connect', resolve));
-
-    // Join first
-    await new Promise<void>(resolve => {
-      client.emit('room:join', { roomId: sampleRoomId }, () => resolve());
-    });
-
-    // Leave
-    const ack = await new Promise<boolean>(resolve => {
-      client.emit('room:leave', { roomId: sampleRoomId }, (ok: boolean) => resolve(ok));
-    });
-
-    expect(typeof ack).toBe('boolean');
-    client.disconnect();
+    const client = createClient(testUser1Token);
+    try {
+      await connectClient(client);
+      await expect(emitWithAck(client, 'room:join', { roomId: sampleRoomId })).resolves.toBe(true);
+      await expect(emitWithAck(client, 'room:leave', { roomId: sampleRoomId })).resolves.toBe(true);
+    } finally {
+      client.disconnect();
+    }
   });
 
   it('✅ should emit room:mute and receive ack', async () => {
-    if (!sampleRoomId) return;
-
-    const client = createClient(adminToken);
-    await new Promise<void>(resolve => client.on('connect', resolve));
-
-    await new Promise<void>(resolve => {
-      client.emit('room:join', { roomId: sampleRoomId }, () => resolve());
-    });
-
-    const ack = await new Promise<boolean>(resolve => {
-      client.emit('room:mute', { roomId: sampleRoomId, isMuted: true }, (ok: boolean) =>
-        resolve(ok),
-      );
-    });
-
-    expect(typeof ack).toBe('boolean');
-    client.disconnect();
+    const client = createClient(testUser1Token);
+    try {
+      await connectClient(client);
+      await expect(emitWithAck(client, 'room:join', { roomId: sampleRoomId })).resolves.toBe(true);
+      await expect(
+        emitWithAck(client, 'room:mute', { roomId: sampleRoomId, isMuted: true }),
+      ).resolves.toBe(true);
+      await expect(emitWithAck(client, 'room:leave', { roomId: sampleRoomId })).resolves.toBe(true);
+    } finally {
+      client.disconnect();
+    }
   });
 
   it('✅ should emit room:request-speak', async () => {
-    if (!sampleRoomId) return;
-
     const client = createClient(testUser1Token);
-    await new Promise<void>(resolve => client.on('connect', resolve));
-
-    await new Promise<void>(resolve => {
-      client.emit('room:join', { roomId: sampleRoomId }, () => resolve());
-    });
-
-    // request-speak has no ack in our handler
-    client.emit('room:request-speak', { roomId: sampleRoomId });
-
-    // Give a moment for the event to propagate
-    await new Promise(resolve => setTimeout(resolve, 200));
-    client.disconnect();
+    try {
+      await connectClient(client);
+      await expect(emitWithAck(client, 'room:join', { roomId: sampleRoomId })).resolves.toBe(true);
+      await prisma.roomHandRaise.deleteMany({
+        where: { roomId: sampleRoomId, userId: testUser1Id },
+      });
+      await expect(
+        emitWithAck(client, 'room:request-speak', { roomId: sampleRoomId }),
+      ).resolves.toBe(true);
+      await expect(
+        prisma.roomHandRaise.findUnique({
+          where: {
+            roomId_userId: { roomId: sampleRoomId, userId: testUser1Id },
+          },
+        }),
+      ).resolves.toEqual(expect.objectContaining({ roomId: sampleRoomId, userId: testUser1Id }));
+      await expect(emitWithAck(client, 'room:leave', { roomId: sampleRoomId })).resolves.toBe(true);
+    } finally {
+      client.disconnect();
+    }
   });
 });
 
@@ -242,53 +287,35 @@ describe('Socket.IO — Room Events', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 describe('Socket.IO — Concurrent Clients', () => {
   it('✅ should handle 10 simultaneous clients in one room', async () => {
-    if (!sampleRoomId) return;
-
-    // Create test tokens — reuse admin for simplicity (real world: separate users)
-    const users = await prisma.user.findMany({ take: 10 });
+    const users = await prisma.user.findMany({
+      where: { id: { not: adminId }, deletedAt: null },
+      orderBy: { email: 'asc' },
+      take: 10,
+    });
+    expect(users).toHaveLength(10);
     const clients: ClientSocket[] = [];
 
     for (const user of users) {
-      const token = signAccessToken(user.id);
+      const token = signAccessToken(user.id, user.tokenVersion);
       const client = createClient(token);
       clients.push(client);
     }
 
-    // Wait for all to connect
-    await Promise.all(
-      clients.map(
-        c =>
-          new Promise<void>((resolve, reject) => {
-            c.on('connect', resolve);
-            c.on('connect_error', reject);
-            setTimeout(() => reject(new Error('Connection timeout')), 5000);
-          }),
-      ),
-    );
+    try {
+      await Promise.all(clients.map(client => connectClient(client)));
+      expect(clients.every(client => client.connected)).toBe(true);
 
-    expect(clients.every(c => c.connected)).toBe(true);
+      const joinAcks = await Promise.all(
+        clients.map(client => emitWithAck(client, 'room:join', { roomId: sampleRoomId })),
+      );
+      expect(joinAcks).toEqual(Array(10).fill(true));
 
-    // All join the same room
-    await Promise.all(
-      clients.map(
-        c =>
-          new Promise<void>(resolve => {
-            c.emit('room:join', { roomId: sampleRoomId }, () => resolve());
-          }),
-      ),
-    );
-
-    // All leave
-    await Promise.all(
-      clients.map(
-        c =>
-          new Promise<void>(resolve => {
-            c.emit('room:leave', { roomId: sampleRoomId }, () => resolve());
-          }),
-      ),
-    );
-
-    // Disconnect all
-    clients.forEach(c => c.disconnect());
+      const leaveAcks = await Promise.all(
+        clients.map(client => emitWithAck(client, 'room:leave', { roomId: sampleRoomId })),
+      );
+      expect(leaveAcks).toEqual(Array(10).fill(true));
+    } finally {
+      clients.forEach(client => client.disconnect());
+    }
   }, 30_000);
 });

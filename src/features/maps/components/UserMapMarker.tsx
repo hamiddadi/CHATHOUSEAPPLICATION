@@ -38,8 +38,9 @@ const GREEN = '#22C55E'; // speaking / online
 const RED = '#EF4444'; // muted
 const BLUE = '#3B82F6'; // listener
 const WHITE = '#FFFFFF';
+const DARK_INK = '#0C112E';
 const USERNAME_BG = 'rgba(0,0,0,0.55)';
-const AVATAR_PLACEHOLDER_BG = '#6366F1';
+const AVATAR_PLACEHOLDER_BG = '#4F46E5';
 
 export type MarkerVisualState = 'speaking' | 'muted' | 'listener' | 'online';
 
@@ -78,6 +79,12 @@ const BADGE_ICON: Record<Exclude<MarkerVisualState, 'online'>, MaterialIconsIcon
   speaking: 'mic',
   muted: 'mic-off',
   listener: 'hearing',
+};
+
+const BADGE_ICON_COLOR: Record<Exclude<MarkerVisualState, 'online'>, string> = {
+  speaking: DARK_INK,
+  muted: WHITE,
+  listener: WHITE,
 };
 
 const getInitials = (name?: string): string => {
@@ -163,15 +170,17 @@ export const UserMapMarker: React.FC<UserMapMarkerProps> = memo(({ user, onPress
       anchor={{ x: 0.5, y: 0.5 }}
       onPress={onPress ? () => onPress(user) : undefined}
       tracksViewChanges={tracksViewChanges}
+      accessible
+      accessibilityRole={onPress ? 'button' : 'image'}
       accessibilityLabel={a11yLabel}
     >
       {/* collapsable={false} is required on Android for custom marker content. */}
       <View
         collapsable={false}
         style={styles.container}
-        accessible
-        accessibilityRole="button"
-        accessibilityLabel={a11yLabel}
+        accessible={false}
+        accessibilityElementsHidden
+        importantForAccessibility="no-hide-descendants"
       >
         <Animated.View style={[styles.avatarGroup, pulseStyle]}>
           <View style={[styles.avatarWrapper, { borderColor }]}>
@@ -195,7 +204,11 @@ export const UserMapMarker: React.FC<UserMapMarkerProps> = memo(({ user, onPress
             {state === 'online' ? (
               <View style={styles.onlineDot} />
             ) : (
-              <MaterialIcons name={BADGE_ICON[state]} size={BADGE_ICON_SIZE} color={WHITE} />
+              <MaterialIcons
+                name={BADGE_ICON[state]}
+                size={BADGE_ICON_SIZE}
+                color={BADGE_ICON_COLOR[state]}
+              />
             )}
           </View>
         </Animated.View>
@@ -263,7 +276,7 @@ const styles = StyleSheet.create({
     width: ONLINE_DOT_SIZE,
     height: ONLINE_DOT_SIZE,
     borderRadius: ONLINE_DOT_SIZE / 2,
-    backgroundColor: WHITE,
+    backgroundColor: DARK_INK,
   },
   usernameBadge: {
     marginTop: 4,

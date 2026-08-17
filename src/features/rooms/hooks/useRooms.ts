@@ -9,8 +9,11 @@ import {
 import { env } from '../../../config/env';
 import { roomService, FEED_PAGE_SIZE, type CreateRoomInput } from '../services/roomService';
 import type { Room, RoomSummary } from '../../../shared/types/domain';
+import type { ContentReportReason } from '../../../shared/types/moderation';
 import { useCurrentRoomStore } from '../store/currentRoomStore';
 import { roomAudioSession } from '../services/roomAudioSession';
+import { createIdempotencyKey } from '../../../shared/utils/idempotency';
+import { retryTransientMutation } from '../../../shared/services/api/retryPolicy';
 
 export const roomKeys = {
   all: ['rooms'] as const,
@@ -49,11 +52,11 @@ export const useRooms = (filter: RoomsFilter = {}) =>
     placeholderData: keepPreviousData,
   });
 
-export const useRoom = (roomId: string) =>
+export const useRoom = (roomId: string, enabled = true) =>
   useQuery<Room>({
     queryKey: roomKeys.detail(roomId),
     queryFn: () => roomService.get(roomId),
-    enabled: roomId.length > 0,
+    enabled: enabled && roomId.length > 0,
   });
 
 // Public scheduled rooms a given user is hosting — drives the profile's
@@ -68,12 +71,22 @@ export const useUserUpcomingEvents = (userId: string) =>
 
 export const useCreateRoom = () => {
   const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (input: CreateRoomInput) => roomService.create(input),
+  const mutation = useMutation({
+    mutationFn: ({ input, idempotencyKey }: { input: CreateRoomInput; idempotencyKey: string }) =>
+      roomService.create(input, idempotencyKey),
+    retry: retryTransientMutation,
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: roomKeys.list() });
     },
   });
+  const withKey = (input: CreateRoomInput) => ({ input, idempotencyKey: createIdempotencyKey() });
+  return {
+    ...mutation,
+    mutate: (input: CreateRoomInput, options?: Parameters<typeof mutation.mutate>[1]) =>
+      mutation.mutate(withKey(input), options),
+    mutateAsync: (input: CreateRoomInput, options?: Parameters<typeof mutation.mutateAsync>[1]) =>
+      mutation.mutateAsync(withKey(input), options),
+  };
 };
 
 export const useJoinRoom = () =>
@@ -82,11 +95,29 @@ export const useJoinRoom = () =>
 export const useLeaveRoom = () =>
   useMutation({ mutationFn: (roomId: string) => roomService.leave(roomId) });
 
-export const useRaiseHand = () =>
-  useMutation({ mutationFn: (roomId: string) => roomService.raiseHand(roomId) });
+export const useRaiseHand = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (roomId: string) => roomService.raiseHand(roomId),
+    onSuccess: (_data, roomId) => {
+      // Do not rely exclusively on Socket.IO: a REST success while realtime is
+      // reconnecting must still reconcile the local queue/button.
+      void qc.invalidateQueries({ queryKey: roomKeys.handRaises(roomId) });
+      void qc.invalidateQueries({ queryKey: roomKeys.detail(roomId) });
+    },
+  });
+};
 
-export const useLowerHand = () =>
-  useMutation({ mutationFn: (roomId: string) => roomService.lowerHand(roomId) });
+export const useLowerHand = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (roomId: string) => roomService.lowerHand(roomId),
+    onSuccess: (_data, roomId) => {
+      void qc.invalidateQueries({ queryKey: roomKeys.handRaises(roomId) });
+      void qc.invalidateQueries({ queryKey: roomKeys.detail(roomId) });
+    },
+  });
+};
 
 export const useSetMute = () => {
   const qc = useQueryClient();
@@ -191,29 +222,78 @@ export const useRoomMessages = (roomId: string | null) =>
 
 export const useSendRoomMessage = () => {
   const qc = useQueryClient();
-  return useMutation({
+  const mutation = useMutation({
     mutationFn: ({
       roomId,
       content,
       replyToId,
+      idempotencyKey,
     }: {
       roomId: string;
       content: string;
       replyToId?: string;
-    }) => roomService.sendMessage(roomId, content, replyToId),
+      idempotencyKey: string;
+    }) => roomService.sendMessage(roomId, content, idempotencyKey, replyToId),
+    retry: retryTransientMutation,
     onSuccess: (_data, vars) => {
       void qc.invalidateQueries({
         queryKey: [...roomKeys.all, 'messages', vars.roomId] as const,
       });
     },
   });
+  type Variables = { roomId: string; content: string; replyToId?: string };
+  const withKey = (variables: Variables) => ({
+    ...variables,
+    idempotencyKey: createIdempotencyKey(),
+  });
+  return {
+    ...mutation,
+    mutate: (variables: Variables, options?: Parameters<typeof mutation.mutate>[1]) =>
+      mutation.mutate(withKey(variables), options),
+    mutateAsync: (variables: Variables, options?: Parameters<typeof mutation.mutateAsync>[1]) =>
+      mutation.mutateAsync(withKey(variables), options),
+  };
 };
 
-export const useSendReaction = () =>
+export const useReportRoomMessage = () =>
   useMutation({
-    mutationFn: ({ roomId, emoji }: { roomId: string; emoji: string }) =>
-      roomService.sendReaction(roomId, emoji),
+    mutationFn: ({
+      roomId,
+      messageId,
+      reason,
+    }: {
+      roomId: string;
+      messageId: string;
+      reason: ContentReportReason;
+    }) => roomService.reportMessage(roomId, messageId, reason),
   });
+
+export const useSendReaction = () => {
+  const mutation = useMutation({
+    mutationFn: ({
+      roomId,
+      emoji,
+      idempotencyKey,
+    }: {
+      roomId: string;
+      emoji: string;
+      idempotencyKey: string;
+    }) => roomService.sendReaction(roomId, emoji, idempotencyKey),
+    retry: retryTransientMutation,
+  });
+  type Variables = { roomId: string; emoji: string };
+  const withKey = (variables: Variables) => ({
+    ...variables,
+    idempotencyKey: createIdempotencyKey(),
+  });
+  return {
+    ...mutation,
+    mutate: (variables: Variables, options?: Parameters<typeof mutation.mutate>[1]) =>
+      mutation.mutate(withKey(variables), options),
+    mutateAsync: (variables: Variables, options?: Parameters<typeof mutation.mutateAsync>[1]) =>
+      mutation.mutateAsync(withKey(variables), options),
+  };
+};
 
 export const useUpdateRoomTitle = () => {
   const qc = useQueryClient();

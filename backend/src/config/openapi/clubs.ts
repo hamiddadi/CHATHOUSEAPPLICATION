@@ -7,6 +7,10 @@ export const registerClubsPaths = (
   registry: OpenAPIRegistry,
   { ErrorBody, SuccessVoid }: OpenApiComponents,
 ): void => {
+  const idempotencyHeaders = z.object({
+    'Idempotency-Key': z.string().min(8).max(128).optional(),
+  });
+
   registry.registerPath({
     method: 'get',
     path: '/api/clubs',
@@ -33,7 +37,10 @@ export const registerClubsPaths = (
     path: '/api/clubs',
     tags: ['Clubs'],
     security: [{ bearerAuth: [] }],
-    request: { body: { content: { 'application/json': { schema: createClubSchema } } } },
+    request: {
+      headers: idempotencyHeaders,
+      body: { content: { 'application/json': { schema: createClubSchema } } },
+    },
     responses: {
       201: {
         description: 'Club created.',

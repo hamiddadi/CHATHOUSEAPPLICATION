@@ -8,7 +8,8 @@ import { clsx, type ClassValue } from 'clsx';
  * <View className={cn('p-md rounded-md', isActive && 'bg-primary', className)} />
  * ```
  *
- * NativeWind v4 resolves conflicting utilities by source order (last wins),
- * so `cn` does not need to merge à la `tailwind-merge`.
+ * `cn` only joins conditional classes. Avoid supplying conflicting utilities:
+ * NativeWind follows generated stylesheet order, not class-string order, so a
+ * later class is not guaranteed to override an earlier one.
  */
 export const cn = (...inputs: ClassValue[]): string => clsx(inputs);

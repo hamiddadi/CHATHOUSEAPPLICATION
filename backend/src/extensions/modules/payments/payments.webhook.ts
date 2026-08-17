@@ -57,6 +57,7 @@ const dispatch = async (event: StripeEvent): Promise<void> => {
       case 'checkout.session.completed':
         await premiumService.syncFromCheckout(
           event.data.object as unknown as StripeCheckoutSessionObject,
+          { id: event.id, created: event.created },
         );
         break;
       case 'customer.subscription.created':
@@ -64,6 +65,7 @@ const dispatch = async (event: StripeEvent): Promise<void> => {
       case 'customer.subscription.deleted':
         await premiumService.syncSubscription(
           event.data.object as unknown as StripeSubscriptionObject,
+          { id: event.id, created: event.created },
         );
         break;
       default:

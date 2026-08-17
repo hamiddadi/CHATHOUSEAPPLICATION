@@ -15,12 +15,14 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { Loader } from '../../../../shared/components/Loader';
 import { EmptyState } from '../../../../shared/components/EmptyState';
+import { ContentReportSheet } from '../../../../shared/components/ContentReportSheet';
 import { useApiErrorToast } from '../../../../shared/hooks/useApiErrorToast';
 import { toAppError } from '../../../../shared/services/api/errorHandler';
+import { formatWeekdayDate } from '../../../../shared/utils/intl';
 import { colors, spacing } from '../../../../shared/constants/theme';
 import type { MessageStackParamList } from '../../../../core/navigation/types';
 import type { Message, UserSummary } from '../../../../shared/types/domain';
-import { CURRENT_USER } from '../../../../shared/mocks/users.mock';
+import type { ContentReportReason } from '../../../../shared/types/moderation';
 import { useAuthStore } from '../../../auth/store/authStore';
 import {
   useConversation,
@@ -29,10 +31,17 @@ import {
   useSendVoiceMessage,
   useMarkConversationRead,
   useDeleteMessage,
+  useReportMessage,
 } from '../../hooks/useMessages';
 import { useChatSocket } from '../../hooks/useChatSocket';
 import { useTypingIndicator } from '../../hooks/useTypingIndicator';
 import { useVoiceMessage } from '../../hooks/useVoiceMessage';
+import { usePeerPresence } from '../../../extensions/hooks/usePeerPresence';
+import { useCreateRoom } from '../../../rooms/hooks/useRooms';
+import { ROOM_TITLE_MAX } from '../../../rooms/constants';
+import { useBlock, useReport } from '../../../social/hooks/useSocial';
+import type { ReportReason } from '../../../social/services/socialService';
+import { ProfileReportSheet } from '../../../social/components/ProfileReportSheet';
 import VoiceRecordingBar from '../../components/VoiceRecordingBar';
 import Bubble from './partials/Bubble';
 import DateSeparator from './partials/DateSeparator';
@@ -52,25 +61,14 @@ const sameDay = (a: string, b: string): boolean => {
   );
 };
 
-// Date label is locale-aware: i18n translates "Today"/"Yesterday", and
-// Intl.DateTimeFormat gets the active app language so formatting matches
-// the rest of the UI (not the device locale, which can differ).
-const formatDateLabel = (
-  iso: string,
-  language: string,
-  todayLabel: string,
-  yesterdayLabel: string,
-): string => {
+// Date label is locale-aware: i18n translates "Today"/"Yesterday", while the
+// shared formatter handles older dates consistently even without full ICU.
+const formatDateLabel = (iso: string, todayLabel: string, yesterdayLabel: string): string => {
   const today = new Date();
-  const d = new Date(iso);
   if (sameDay(iso, today.toISOString())) return todayLabel;
   const yesterday = new Date(today.getTime() - 86400000);
   if (sameDay(iso, yesterday.toISOString())) return yesterdayLabel;
-  return new Intl.DateTimeFormat(language, {
-    weekday: 'long',
-    month: 'short',
-    day: 'numeric',
-  }).format(d);
+  return formatWeekdayDate(iso);
 };
 
 interface ChatListItem {
@@ -104,11 +102,10 @@ export const ChatDetailScreen: React.FC = () => {
   const [draft, setDraft] = useState('');
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const reportApiError = useApiErrorToast();
-  const { t, i18n } = useTranslation();
-  // Identify "me" from the authenticated session, not a mock. Fall back to
-  // the CURRENT_USER mock id only when there is no live session (tests /
-  // unauthenticated render) so the participant resolution stays stable.
-  const myId = useAuthStore(s => s.user?.id) ?? CURRENT_USER.id;
+  const { t } = useTranslation();
+  // Identify "me" exclusively from the authenticated session. A missing user
+  // during auth hydration must never substitute a fictitious production id.
+  const myId = useAuthStore(s => s.user?.id ?? '');
 
   // Subscribe to realtime chat events for as long as THIS screen is mounted,
   // so the thread stays live regardless of the entry point (deep link, Room,
@@ -137,6 +134,7 @@ export const ChatDetailScreen: React.FC = () => {
   // The conversation id IS the peer's user id (see messageService), so it
   // doubles as the `receiverId` for the typing relay.
   const peerId = route.params.conversationId;
+  const { data: peerPresence } = usePeerPresence(peerId);
   const { data: conversation } = useConversation(peerId);
   const {
     data: messages,
@@ -151,7 +149,21 @@ export const ChatDetailScreen: React.FC = () => {
   const sendVoice = useSendVoiceMessage();
   const markRead = useMarkConversationRead();
   const deleteMessage = useDeleteMessage();
+  const reportMessage = useReportMessage();
+  const createRoom = useCreateRoom();
+  const blockUser = useBlock();
+  const reportUser = useReport();
+  const [reportMessageId, setReportMessageId] = useState<string | null>(null);
+  const [reportUserVisible, setReportUserVisible] = useState(false);
+  const sendInFlightRef = useRef(false);
   const { isPeerTyping, notifyTyping } = useTypingIndicator(peerId);
+  // Keep an immediate lock in addition to the mutation state: two taps can
+  // arrive before React has rendered `isPending=true`.
+  const callInFlightRef = useRef(false);
+
+  const other: UserSummary | undefined =
+    conversation?.participants.find(p => p.id !== myId) ?? conversation?.participants[0];
+  const otherAvatar = other?.avatarUrl ?? null;
 
   // Voice notes: record → upload → send, then pin the thread to the bottom.
   const voiceSend = useCallback(
@@ -195,64 +207,132 @@ export const ChatDetailScreen: React.FC = () => {
 
   const handleBack = useCallback(() => navigation.goBack(), [navigation]);
   const handleSend = useCallback(async () => {
-    if (!draft.trim() || sendMessage.isPending) return;
+    if (!draft.trim() || sendInFlightRef.current || sendMessage.isPending) return;
+    const submittedDraft = draft;
+    sendInFlightRef.current = true;
     try {
       await sendMessage.mutateAsync({
         conversationId: route.params.conversationId,
-        text: draft,
+        text: submittedDraft,
       });
-      setDraft('');
+      // Preserve text entered while the previous message was in flight.
+      setDraft(current => (current === submittedDraft ? '' : current));
       scrollToBottom();
     } catch (err) {
-      // The only 403 on a DM send is the follow-gate (CHAT_004 — a block, or the
-      // recipient's dmPrivacy not satisfied; default 'mutual'). Spell the rule
-      // out instead of a raw toast, and keep the draft so nothing typed is lost.
-      // The peer's dmPrivacy isn't exposed client-side (it's a `me`-only field),
-      // so this gate can only be surfaced reactively here, not pre-disabled.
+      // Privacy/follows can change after the compose eligibility snapshot.
+      // Keep this authoritative send-time fallback and preserve the draft.
       const e = toAppError(err);
       if (e.kind === 'forbidden') {
         Alert.alert(
           t('chat.cannotMessageTitle', 'Message impossible'),
           t(
             'chat.cannotMessageBody',
-            'Vous devez vous suivre mutuellement pour échanger des messages.',
+            'Cette personne ne peut pas recevoir de message privé de votre part pour le moment.',
           ),
         );
         return;
       }
       reportApiError(err);
+    } finally {
+      sendInFlightRef.current = false;
     }
   }, [draft, reportApiError, route.params.conversationId, scrollToBottom, sendMessage, t]);
 
-  // Features below are not yet implemented end-to-end (no attachment upload
-  // pipeline). Rather than no-op handlers — which make the buttons feel
-  // broken — we surface a single "Coming soon" alert so the user gets
-  // immediate feedback. Replace each handler when the underlying feature ships.
-  // (Voice messages now ship for real — see handleMic/handleVoiceSend above.)
-  const showComingSoon = useCallback(
-    (label: string) => {
-      Alert.alert(label, t('chat.comingSoon', 'Cette fonctionnalité arrive bientôt.'));
+  const handleCall = useCallback(async () => {
+    if (callInFlightRef.current || createRoom.isPending) return;
+
+    callInFlightRef.current = true;
+    const peerName = other?.displayName?.trim() || other?.username?.trim();
+    const localizedTitle = peerName
+      ? t('chat.privateCallTitle', { name: peerName })
+      : t('chat.privateCallFallbackTitle');
+    // Profile names can be longer than room titles. Apply the same client-side
+    // bound as CreateRoomScreen before sending the localized title.
+    const title = localizedTitle.slice(0, ROOM_TITLE_MAX).trimEnd();
+
+    try {
+      const created = await createRoom.mutateAsync({
+        title,
+        visibility: 'closed',
+        topics: [],
+        coHostIds: [peerId],
+        chatEnabled: false,
+        recordingEnabled: false,
+        maxSpeakers: 2,
+      });
+
+      // ChatDetail belongs to MessagesStack. Route through the root and the
+      // Rooms tab so the newly-created LiveKit room opens in its owning stack.
+      (navigation as unknown as { navigate: (screen: string, params: object) => void }).navigate(
+        'Main',
+        {
+          screen: 'RoomsTab',
+          params: { screen: 'Room', params: { roomId: created.id } },
+        },
+      );
+    } catch (err) {
+      reportApiError(err);
+    } finally {
+      callInFlightRef.current = false;
+    }
+  }, [createRoom, navigation, other?.displayName, other?.username, peerId, reportApiError, t]);
+  const submitUserReport = useCallback(
+    (reason: ReportReason) => {
+      if (reportUser.isPending) return;
+      reportUser.mutate(
+        { userId: peerId, input: { reason } },
+        {
+          onSuccess: () => {
+            setReportUserVisible(false);
+            Alert.alert(t('profile.reportThanks'));
+          },
+          onError: reportApiError,
+        },
+      );
     },
-    [t],
+    [peerId, reportApiError, reportUser, t],
   );
 
-  const handleCall = useCallback(
-    () => showComingSoon(t('chat.callLabel', 'Appel vocal')),
-    [showComingSoon, t],
-  );
-  const handleMore = useCallback(
-    () => showComingSoon(t('chat.moreLabel', 'Options de la conversation')),
-    [showComingSoon, t],
-  );
-  const handleAttach = useCallback(
-    () => showComingSoon(t('chat.attachLabel', 'Pièce jointe')),
-    [showComingSoon, t],
-  );
+  const handleReportUser = useCallback(() => setReportUserVisible(true), []);
 
-  const other: UserSummary | undefined =
-    conversation?.participants.find(p => p.id !== myId) ?? conversation?.participants[0];
-  const otherAvatar = other?.avatarUrl ?? null;
+  const handleBlockUser = useCallback(() => {
+    const peerHandle = other?.username?.trim() || other?.displayName?.trim() || peerId;
+    Alert.alert(
+      t('profile.blockConfirmTitle', { handle: peerHandle }),
+      t('profile.blockConfirmBody'),
+      [
+        { text: t('common.cancel'), style: 'cancel' },
+        {
+          text: t('profile.blockConfirm'),
+          style: 'destructive',
+          onPress: () => {
+            if (blockUser.isPending) return;
+            blockUser.mutate(peerId, {
+              onSuccess: () => navigation.goBack(),
+              onError: reportApiError,
+            });
+          },
+        },
+      ],
+      { cancelable: true },
+    );
+  }, [blockUser, navigation, other?.displayName, other?.username, peerId, reportApiError, t]);
 
+  const handleMore = useCallback(() => {
+    const peerHandle = other?.username?.trim()
+      ? `@${other.username.trim()}`
+      : other?.displayName?.trim();
+    Alert.alert(
+      t('chat.moreLabel', 'Options de la conversation'),
+      peerHandle,
+      [
+        { text: t('profile.report'), onPress: handleReportUser },
+        { text: t('profile.block'), style: 'destructive', onPress: handleBlockUser },
+        { text: t('common.cancel'), style: 'cancel' },
+      ],
+      { cancelable: true },
+    );
+  }, [handleBlockUser, handleReportUser, other?.displayName, other?.username, t]);
   // Chronological items, then reversed for the `inverted` FlatList: index 0 is
   // the newest (rendered at the visual bottom), which keeps the thread pinned
   // to the latest message with no onContentSizeChange→scrollToEnd hack.
@@ -260,13 +340,15 @@ export const ChatDetailScreen: React.FC = () => {
 
   const todayLabel = t('chat.dateToday');
   const yesterdayLabel = t('chat.dateYesterday');
-  const language = i18n.language;
 
-  // Long-press your own message → confirm → DELETE /chat/messages/:id and prune
-  // it from the thread cache. Sender-only on the backend, so we guard on isMine.
-  const handleDeleteMessage = useCallback(
+  // Long press keeps sender-only deletion for your messages and exposes the
+  // required per-item report action for content received from the peer.
+  const handleMessageLongPress = useCallback(
     (message: Message) => {
-      if (!message.isMine) return;
+      if (!message.isMine) {
+        setReportMessageId(message.id);
+        return;
+      }
       Alert.alert(
         t('chat.deleteTitle', 'Supprimer le message'),
         t('chat.deleteBody', 'Ce message sera supprimé définitivement.'),
@@ -287,12 +369,32 @@ export const ChatDetailScreen: React.FC = () => {
     [deleteMessage, peerId, reportApiError, t],
   );
 
+  const handleReportReason = useCallback(
+    (reason: ContentReportReason) => {
+      if (!reportMessageId || reportMessage.isPending) return;
+      reportMessage.mutate(
+        { messageId: reportMessageId, reason },
+        {
+          onSuccess: result => {
+            setReportMessageId(null);
+            Alert.alert(
+              t('moderation.reportSentTitle', 'Report sent'),
+              result.alreadyReported
+                ? t('moderation.reportAlreadySent', 'You already reported this message.')
+                : t('moderation.reportSentBody', 'The moderation team will review this message.'),
+            );
+          },
+          onError: reportApiError,
+        },
+      );
+    },
+    [reportApiError, reportMessage, reportMessageId, t],
+  );
+
   const renderItem = useCallback(
     ({ item }: { item: ChatListItem }) => {
       if (item.kind === 'date' && item.date) {
-        return (
-          <DateSeparator label={formatDateLabel(item.date, language, todayLabel, yesterdayLabel)} />
-        );
+        return <DateSeparator label={formatDateLabel(item.date, todayLabel, yesterdayLabel)} />;
       }
       if (item.message) {
         return (
@@ -300,13 +402,13 @@ export const ChatDetailScreen: React.FC = () => {
             message={item.message}
             otherAvatar={otherAvatar}
             showAvatar={item.showAvatar ?? true}
-            onLongPress={handleDeleteMessage}
+            onLongPress={handleMessageLongPress}
           />
         );
       }
       return null;
     },
-    [language, otherAvatar, todayLabel, yesterdayLabel, handleDeleteMessage],
+    [otherAvatar, todayLabel, yesterdayLabel, handleMessageLongPress],
   );
 
   const keyExtractor = useCallback((item: ChatListItem) => item.id, []);
@@ -325,14 +427,10 @@ export const ChatDetailScreen: React.FC = () => {
     </View>
   ) : null;
 
-  // Presence is not yet wired into the DM thread. The conversation payload
-  // carries no per-peer online flag, so we must not assert a green "online"
-  // dot unconditionally — that was a misleading indicator. Until a real
-  // presence source is plumbed through, treat the peer as offline (dot
-  // hidden).
-  // TODO(audit): wire to a real presence source (e.g. extensions presence
-  // API / socket presence events) instead of defaulting to offline.
-  const isOnline = false;
+  // The server reveals presence only to an allowed relationship. Hidden,
+  // blocked and non-reciprocal private peers all resolve to a neutral offline
+  // payload, so the UI never leaks relationship-sensitive activity.
+  const isOnline = peerPresence?.visible === true && peerPresence.isOnline;
   const canSend = draft.trim().length > 0 && !sendMessage.isPending;
 
   return (
@@ -350,6 +448,7 @@ export const ChatDetailScreen: React.FC = () => {
         username={other?.username}
         onBack={handleBack}
         onCall={handleCall}
+        callPending={createRoom.isPending}
         onMore={handleMore}
       />
 
@@ -406,11 +505,23 @@ export const ChatDetailScreen: React.FC = () => {
           canSend={canSend}
           bottomInset={insets.bottom}
           keyboardVisible={keyboardVisible}
-          onAttach={handleAttach}
           onMic={handleMic}
           onInputFocus={scrollToBottom}
         />
       )}
+      <ContentReportSheet
+        visible={reportMessageId !== null}
+        submitting={reportMessage.isPending}
+        onClose={() => setReportMessageId(null)}
+        onSelect={handleReportReason}
+      />
+      <ProfileReportSheet
+        visible={reportUserVisible}
+        targetLabel={other?.username?.trim() || other?.displayName?.trim() || peerId}
+        submitting={reportUser.isPending}
+        onClose={() => setReportUserVisible(false)}
+        onSelect={submitUserReport}
+      />
     </KeyboardAvoidingView>
   );
 };

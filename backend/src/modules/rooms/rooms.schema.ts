@@ -1,20 +1,27 @@
 import { z } from 'zod';
+import { publicContentString } from '../../utils/publicContentModeration';
+import { strictBooleanQuery } from '../../utils/strictBooleanQuery';
 
 export const createRoomSchema = z
   .object({
-    title: z.string().min(3).max(120),
-    description: z.string().max(500).optional(),
-    topic: z.string().max(60).optional(),
+    title: publicContentString(z.string().min(3).max(120)),
+    description: publicContentString(z.string().max(500)).optional(),
+    topic: publicContentString(z.string().max(60)).optional(),
     // Topic tags (aligned with User.interests). Max 5 keeps the scoring
     // well-balanced and the payload small.
-    topics: z.array(z.string().min(1).max(32)).max(5).default([]),
-    // User ids promoted to SPEAKER on room creation. Host + co-hosts
-    // collectively cap at 6 speakers before the audience queue kicks in.
+    topics: z
+      .array(publicContentString(z.string().min(1).max(32)))
+      .max(5)
+      .default([]),
+    // User ids offered a durable SPEAKER grant on room creation. Invited
+    // co-hosts remain inactive until they explicitly join the room.
     coHostIds: z.array(z.string().min(1)).max(5).default([]),
     isPrivate: z.boolean().default(false),
     roomType: z.enum(['OPEN', 'SOCIAL', 'CLOSED']).default('OPEN'),
     chatEnabled: z.boolean().default(true),
-    // TODO(phase-N): Dead flag. No server-side media recording pipeline exists yet.
+    // Reserved for a future consent-gated LiveKit Egress -> private S3 Replay
+    // pipeline. The service rejects true while ROOM_RECORDING_ENABLED is false;
+    // the public mobile UI does not expose this field during the release freeze.
     recordingEnabled: z.boolean().default(false),
     maxSpeakers: z.number().int().min(1).max(50).default(10),
     clubId: z.string().min(1).optional(),
@@ -32,12 +39,12 @@ export const createRoomSchema = z
   });
 
 export const sendRoomMessageSchema = z.object({
-  content: z.string().trim().min(1).max(500),
+  content: publicContentString(z.string().trim().min(1).max(500)),
   replyToId: z.string().min(1).optional(),
 });
 
 export const updateRoomTitleSchema = z.object({
-  title: z.string().trim().min(3).max(120),
+  title: publicContentString(z.string().trim().min(3).max(120)),
 });
 
 export const toggleRoomChatSchema = z.object({
@@ -76,11 +83,11 @@ export const sendReactionSchema = z.object({
 });
 
 export const listRoomsSchema = z.object({
-  live: z.coerce.boolean().optional(),
+  live: strictBooleanQuery.optional(),
   filter: z.enum(['live', 'upcoming', 'mine', 'past']).optional(),
   clubId: z.string().min(1).optional(),
   // When true, restrict the hallway feed to club-attached rooms only.
-  clubs: z.coerce.boolean().optional(),
+  clubs: strictBooleanQuery.optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
 });
 

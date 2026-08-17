@@ -16,10 +16,11 @@
  * useRoomSocket never opens a socket — the screen renders deterministically.
  */
 import React from 'react';
-import { Alert } from 'react-native';
-import { act, fireEvent } from '@testing-library/react-native';
+import { Alert, Share } from 'react-native';
+import { act, fireEvent, waitFor } from '@testing-library/react-native';
 import { roomKeys } from '../../hooks/useRooms';
 import { roomService } from '../../services/roomService';
+import { roomAudioSession } from '../../services/roomAudioSession';
 import { useCurrentRoomStore } from '../../store/currentRoomStore';
 import type { Room, RoomParticipant } from '../../../../shared/types/domain';
 import {
@@ -29,6 +30,43 @@ import {
   fakeAuthUser,
 } from '../../../../test-utils/renderScreen';
 import { RoomScreen } from './RoomScreen';
+
+const mockAudioRetry = jest.fn().mockResolvedValue(undefined);
+const mockAudioSetMuted = jest.fn().mockResolvedValue(undefined);
+interface MockAudioState {
+  status: 'idle' | 'error';
+  reconnecting: boolean;
+  error: string | null;
+  scores: ReadonlyMap<string, number>;
+  retry: typeof mockAudioRetry;
+  setMuted: typeof mockAudioSetMuted;
+  setPeerVolume: jest.Mock;
+}
+const mockUseRoomAudio = jest.fn<MockAudioState, []>(() => ({
+  status: 'idle',
+  reconnecting: false,
+  error: null,
+  scores: new Map(),
+  retry: mockAudioRetry,
+  setMuted: mockAudioSetMuted,
+  setPeerVolume: jest.fn(),
+}));
+
+jest.mock('../../hooks/useRoomAudio', () => ({
+  SPEAKING_SCORE_THRESHOLD: 0.5,
+  SPEAKING_SELF_KEY: '__self__',
+  useRoomAudio: () => mockUseRoomAudio(),
+}));
+
+// Membership ordering is covered by useRoomMembership.test.tsx. These render
+// tests exercise the populated in-room controls after that prerequisite.
+jest.mock('../../hooks/useRoomMembership', () => ({
+  useRoomMembership: () => ({
+    status: 'joined',
+    error: null,
+    retry: jest.fn(),
+  }),
+}));
 
 const ROOM_ID = 'room-test-1';
 const VIEWER_ID = fakeAuthUser().id; // 'user-test-1'
@@ -72,9 +110,28 @@ const mountRoom = (room: Room) =>
     seedQueryData: [{ key: [...roomKeys.detail(ROOM_ID)], data: room }],
   });
 
+const deferred = <T,>() => {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>(res => {
+    resolve = res;
+  });
+  return { promise, resolve };
+};
+
 describe('RoomScreen', () => {
   beforeEach(() => {
+    mockAudioSetMuted.mockReset().mockResolvedValue(undefined);
+    mockAudioRetry.mockClear();
     mockAuthenticated();
+    mockUseRoomAudio.mockReturnValue({
+      status: 'idle',
+      reconnecting: false,
+      error: null,
+      scores: new Map(),
+      retry: mockAudioRetry,
+      setMuted: mockAudioSetMuted,
+      setPeerVolume: jest.fn(),
+    });
     // Clear BEFORE each mount too: a prior test's still-mounted screen (RTL
     // unmounts in its own afterEach, which may run after ours) can otherwise
     // leave the shared store holding this room id, skipping mute hydration.
@@ -101,15 +158,44 @@ describe('RoomScreen', () => {
     });
 
     it('shares the room link via the share button without crashing', () => {
+      const shareSpy = jest
+        .spyOn(Share, 'share')
+        .mockResolvedValue({ action: 'sharedAction' } as never);
       const { getByLabelText } = mountRoom(fakeRoom());
-      // Share.share is async; the press fires it fire-and-forget. We assert the
-      // press itself does not throw (button has a real handler).
-      expect(() => fireEvent.press(getByLabelText('Share room link'))).not.toThrow();
+      fireEvent.press(getByLabelText('Share room link'));
+      expect(shareSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          message:
+            'Join me on ChatHouse in “Deep dive on testing” — https://app.chathouse.com/room/room-test-1',
+          url: 'https://app.chathouse.com/room/room-test-1',
+        }),
+      );
     });
 
     it('opens the chat sidebar without crashing', () => {
       const { getByLabelText } = mountRoom(fakeRoom());
       expect(() => fireEvent.press(getByLabelText('Open chat'))).not.toThrow();
+    });
+
+    it('localizes an audio failure and lets the user retry without exposing SDK details', () => {
+      mockUseRoomAudio.mockReturnValue({
+        status: 'error',
+        reconnecting: false,
+        error: 'could not establish signal connection',
+        scores: new Map(),
+        retry: mockAudioRetry,
+        setMuted: mockAudioSetMuted,
+        setPeerVolume: jest.fn(),
+      });
+      const { getByLabelText, getByText, queryByText } = mountRoom(fakeRoom());
+
+      expect(
+        getByText('❌ Live audio is unavailable. Check your connection and try again.'),
+      ).toBeTruthy();
+      expect(queryByText('could not establish signal connection')).toBeNull();
+
+      fireEvent.press(getByLabelText('Retry audio'));
+      expect(mockAudioRetry).toHaveBeenCalledTimes(1);
     });
 
     it('navigates to InviteToRoom from the action-bar invite button', () => {
@@ -119,17 +205,17 @@ describe('RoomScreen', () => {
       expect(navigation.navigate).toHaveBeenCalledWith('InviteToRoom', { roomId: ROOM_ID });
     });
 
-    it('leaves the room via the action-bar leave button (clears the mini-bar store)', () => {
-      const { getByLabelText } = mountRoom(fakeRoom());
+    it('leaves the room via the action-bar leave button and waits for completion', async () => {
+      const leaveSpy = jest.spyOn(roomService, 'leave').mockResolvedValue({ left: true });
+      const { navigation, getByLabelText } = mountRoom(fakeRoom());
       // Mount mirrored the room into the global "current room" store (mini-bar).
       expect(useCurrentRoomStore.getState().room).not.toBeNull();
-      // handleLeave clears the mini-bar synchronously, THEN awaits the leave
-      // mutation (which hits the absent API and is caught) before goBack. The
-      // synchronous clear is the deterministic, assert-able effect here; goBack
-      // fires only after the network promise settles, which jest's fake API
-      // never resolves quickly enough to await reliably.
       fireEvent.press(getByLabelText('Leave quietly'));
       expect(useCurrentRoomStore.getState().room).toBeNull();
+      await waitFor(() => {
+        expect(leaveSpy).toHaveBeenCalledWith(ROOM_ID);
+        expect(navigation.goBack).toHaveBeenCalledTimes(1);
+      });
     });
 
     it('toggles raise-hand without crashing (no mic for a listener)', () => {
@@ -138,6 +224,27 @@ describe('RoomScreen', () => {
       expect(queryByLabelText('Mute microphone')).toBeNull();
       // Raise hand has a real handler; pressing it flips local state.
       expect(() => fireEvent.press(getByLabelText('Raise hand'))).not.toThrow();
+    });
+
+    it('returns to Raise hand when the authoritative queue is cleared externally', async () => {
+      const { getByLabelText, queryClient } = mountRoom(fakeRoom());
+      act(() => {
+        queryClient.setQueryData(roomKeys.handRaises(ROOM_ID), [
+          {
+            id: VIEWER_ID,
+            username: 'tester',
+            displayName: 'Test User',
+            avatarUrl: null,
+            raisedAt: '2026-07-29T10:00:00.000Z',
+          },
+        ]);
+      });
+      await waitFor(() => expect(getByLabelText('Lower hand')).toBeTruthy());
+
+      act(() => {
+        queryClient.setQueryData(roomKeys.handRaises(ROOM_ID), []);
+      });
+      await waitFor(() => expect(getByLabelText('Raise hand')).toBeTruthy());
     });
   });
 
@@ -152,6 +259,54 @@ describe('RoomScreen', () => {
       const { getByLabelText } = mountRoom(hostRoom());
       fireEvent.press(getByLabelText('End Room'));
       expect(Alert.alert).toHaveBeenCalled();
+    });
+
+    it('keeps the room active and lets the host retry when ending fails', async () => {
+      const endSpy = jest.spyOn(roomService, 'end').mockRejectedValue(new Error('Network lost'));
+      const stopSpy = jest.spyOn(roomAudioSession, 'stop').mockResolvedValue(undefined);
+      const { navigation, getByLabelText } = mountRoom(hostRoom());
+
+      fireEvent.press(getByLabelText('End Room'));
+      const confirmCall = (Alert.alert as jest.Mock).mock.calls[0];
+      const buttons = confirmCall[2] as Array<{
+        style?: string;
+        onPress?: () => void;
+      }>;
+      act(() => buttons.find(button => button.style === 'destructive')?.onPress?.());
+
+      await waitFor(() => {
+        expect(endSpy).toHaveBeenCalledWith(ROOM_ID);
+        expect(Alert.alert).toHaveBeenCalledTimes(2);
+      });
+      expect((Alert.alert as jest.Mock).mock.calls[1][0]).toBe("Couldn't end the room");
+      expect(navigation.goBack).not.toHaveBeenCalled();
+      expect(stopSpy).not.toHaveBeenCalled();
+      expect(useCurrentRoomStore.getState().room?.id).toBe(ROOM_ID);
+      expect(getByLabelText('End Room').props.accessibilityState).toEqual({
+        disabled: false,
+        busy: false,
+      });
+    });
+
+    it('clears local audio and leaves exactly once after ending succeeds', async () => {
+      const endSpy = jest.spyOn(roomService, 'end').mockResolvedValue({ ended: true });
+      const stopSpy = jest.spyOn(roomAudioSession, 'stop').mockResolvedValue(undefined);
+      const { navigation, getByLabelText } = mountRoom(hostRoom());
+
+      fireEvent.press(getByLabelText('End Room'));
+      const confirmCall = (Alert.alert as jest.Mock).mock.calls[0];
+      const buttons = confirmCall[2] as Array<{
+        style?: string;
+        onPress?: () => void;
+      }>;
+      act(() => buttons.find(button => button.style === 'destructive')?.onPress?.());
+
+      await waitFor(() => {
+        expect(endSpy).toHaveBeenCalledWith(ROOM_ID);
+        expect(navigation.goBack).toHaveBeenCalledTimes(1);
+        expect(stopSpy).toHaveBeenCalledTimes(1);
+      });
+      expect(useCurrentRoomStore.getState().room).toBeNull();
     });
 
     it('opens room controls (tune) without crashing', () => {
@@ -195,6 +350,33 @@ describe('RoomScreen', () => {
       expect(getByLabelText('Unmute microphone')).toBeTruthy();
     });
 
+    it('serializes rapid microphone taps until LiveKit and the backend settle', async () => {
+      const liveKitUpdate = deferred<void>();
+      mockAudioSetMuted.mockReturnValueOnce(liveKitUpdate.promise);
+      const setMuteSpy = jest.spyOn(roomService, 'setMute').mockResolvedValue(undefined as never);
+      jest.spyOn(roomService, 'get').mockImplementation(() => new Promise(() => undefined));
+      const { getByLabelText } = mountRoom(hostRoom());
+      const muteButton = getByLabelText('Mute microphone');
+
+      fireEvent.press(muteButton);
+      fireEvent.press(muteButton);
+
+      expect(mockAudioSetMuted).toHaveBeenCalledTimes(1);
+      expect(getByLabelText('Unmute microphone').props.accessibilityState).toMatchObject({
+        disabled: true,
+        busy: true,
+      });
+
+      liveKitUpdate.resolve();
+      await waitFor(() => {
+        expect(setMuteSpy).toHaveBeenCalledTimes(1);
+        expect(getByLabelText('Unmute microphone').props.accessibilityState).toMatchObject({
+          disabled: false,
+          busy: false,
+        });
+      });
+    });
+
     // Hydration: entering a room whose own participant row is already muted
     // (server state) seeds the store so the badge matches on first paint.
     it('hydrates isMuted from the viewer participant row on room entry', () => {
@@ -212,6 +394,33 @@ describe('RoomScreen', () => {
       const { getByLabelText } = mountRoom(mutedHostRoom);
       expect(useCurrentRoomStore.getState().isMuted).toBe(true);
       expect(getByLabelText('Unmute microphone')).toBeTruthy();
+    });
+
+    it('rolls back the badge and backend update when LiveKit cannot publish', async () => {
+      const setMuteSpy = jest.spyOn(roomService, 'setMute').mockResolvedValue(undefined as never);
+      const publicationError = new Error('mic permission denied');
+      mockAudioSetMuted.mockRejectedValueOnce(publicationError).mockResolvedValueOnce(undefined);
+      const mutedHostRoom = fakeRoom({
+        hostId: VIEWER_ID,
+        speakers: [
+          {
+            ...hostParticipant(VIEWER_ID),
+            username: 'tester',
+            displayName: 'Test User',
+            audio: 'muted',
+          },
+        ],
+      });
+      const { getByLabelText } = mountRoom(mutedHostRoom);
+
+      fireEvent.press(getByLabelText('Unmute microphone'));
+
+      await waitFor(() => {
+        expect(useCurrentRoomStore.getState().isMuted).toBe(true);
+        expect(mockAudioSetMuted).toHaveBeenNthCalledWith(1, false);
+        expect(mockAudioSetMuted).toHaveBeenNthCalledWith(2, true);
+      });
+      expect(setMuteSpy).not.toHaveBeenCalled();
     });
   });
 });

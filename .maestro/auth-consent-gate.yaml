@@ -1,0 +1,168 @@
+appId: com.chathouse.app
+name: Validate phone and mandatory consent gate without network
+tags:
+  - smoke
+  - release-gate
+  - offline
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+
+- extendedWaitUntil:
+    visible:
+      id: 'welcome-skip|auth-get-started'
+    timeout: 30000
+- runFlow:
+    when:
+      visible:
+        id: 'welcome-skip'
+    commands:
+      - tapOn:
+          id: 'welcome-skip'
+          retryTapIfNoChange: true
+
+- extendedWaitUntil:
+    visible:
+      id: 'auth-get-started'
+    timeout: 15000
+- tapOn:
+    id: 'auth-get-started'
+- extendedWaitUntil:
+    visible:
+      id: 'auth-phone-input'
+    timeout: 10000
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - hideKeyboard
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - assertVisible:
+          id: 'auth-age-confirmation'
+          checked: false
+      - assertVisible:
+          id: 'auth-terms-acceptance'
+          checked: false
+      - assertVisible:
+          id: 'auth-privacy-acknowledgement'
+          checked: false
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - assertVisible:
+          id: 'auth-age-confirmation'
+          text: 'checkbox, unchecked'
+      - assertVisible:
+          id: 'auth-terms-acceptance'
+          text: 'checkbox, unchecked'
+      - assertVisible:
+          id: 'auth-privacy-acknowledgement'
+          text: 'checkbox, unchecked'
+- assertVisible:
+    id: 'auth-phone-submit'
+    enabled: false
+
+# Choose a deterministic numbering plan instead of relying on the simulator's
+# locale, then complete the form without submitting it to the offline API.
+- tapOn:
+    id: 'auth-country-selector'
+- extendedWaitUntil:
+    visible:
+      id: 'country-option-us'
+    timeout: 5000
+- tapOn:
+    id: 'country-option-us'
+- tapOn:
+    id: 'auth-phone-input'
+- inputText: '4155552671'
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - hideKeyboard
+- tapOn:
+    id: 'auth-age-confirmation'
+- tapOn:
+    id: 'auth-terms-acceptance'
+- tapOn:
+    id: 'auth-privacy-acknowledgement'
+
+- extendedWaitUntil:
+    visible:
+      id: 'auth-phone-submit'
+      enabled: true
+    timeout: 5000
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - assertVisible:
+          id: 'auth-age-confirmation'
+          checked: true
+      - assertVisible:
+          id: 'auth-terms-acceptance'
+          checked: true
+      - assertVisible:
+          id: 'auth-privacy-acknowledgement'
+          checked: true
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - assertVisible:
+          id: 'auth-age-confirmation'
+          text: 'checkbox, checked'
+      - assertVisible:
+          id: 'auth-terms-acceptance'
+          text: 'checkbox, checked'
+      - assertVisible:
+          id: 'auth-privacy-acknowledgement'
+          text: 'checkbox, checked'
+
+# Each mandatory acknowledgement remains a live gate. Do not tap Submit: this
+# flow deliberately makes no OTP/backend request.
+- tapOn:
+    id: 'auth-privacy-acknowledgement'
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - assertVisible:
+          id: 'auth-privacy-acknowledgement'
+          checked: false
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - assertVisible:
+          id: 'auth-privacy-acknowledgement'
+          text: 'checkbox, unchecked'
+- assertVisible:
+    id: 'auth-phone-submit'
+    enabled: false
+- tapOn:
+    id: 'auth-privacy-acknowledgement'
+- extendedWaitUntil:
+    visible:
+      id: 'auth-phone-submit'
+      enabled: true
+    timeout: 5000
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - assertVisible:
+          id: 'auth-privacy-acknowledgement'
+          checked: true
+- runFlow:
+    when:
+      platform: iOS
+    commands:
+      - assertVisible:
+          id: 'auth-privacy-acknowledgement'
+          text: 'checkbox, checked'

@@ -1,5 +1,4 @@
 import { type ConnectionOptions } from 'bullmq';
-import IORedis from 'ioredis';
 import { env } from '../config/env';
 
 /**
@@ -9,8 +8,12 @@ import { env } from '../config/env';
  * by Worker/QueueEvents. We keep this connection distinct from the app's
  * node-redis client (different driver, different semantics).
  *
- * Each call returns a fresh IORedis client so that queues and workers do not
- * share a single blocking connection.
+ * Return connection options, not a pre-created IORedis instance. BullMQ then
+ * owns the client lifecycle and closes it with Queue/Worker.close(); passing a
+ * client instance marks it as shared and leaks it unless every caller also
+ * tracks and quits that external instance.
  */
-export const bullConnection = (): ConnectionOptions =>
-  new IORedis(env.REDIS_URL, { maxRetriesPerRequest: null });
+export const bullConnection = (): ConnectionOptions => ({
+  url: env.REDIS_URL,
+  maxRetriesPerRequest: null,
+});

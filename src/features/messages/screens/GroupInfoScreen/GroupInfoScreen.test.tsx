@@ -54,6 +54,12 @@ describe('GroupInfoScreen', () => {
     expect(getByText(/Test User/)).toBeTruthy();
   });
 
+  it('exposes a named back button and navigates back', async () => {
+    const { getByLabelText, navigation } = renderInfo();
+    fireEvent.press(await waitFor(() => getByLabelText('Back')));
+    expect(navigation.goBack).toHaveBeenCalledTimes(1);
+  });
+
   it('Add people button navigates to AddGroupMembers', async () => {
     const { navigation, getByText } = renderInfo();
     fireEvent.press(await waitFor(() => getByText('Add people')));

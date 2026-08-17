@@ -1,28 +1,11 @@
-# Release signing & store credentials
+# Release signing and credentials
 
-> **Updated for the de-Expo migration.** This is now a **bare React Native**
-> project: `android/` is **committed and hand-maintained** (no `expo prebuild`,
-> no EAS Build, no EAS-managed credentials). Signing is done locally / in CI with
-> a standard Gradle keystore. iOS is not built from this repo (Android-only).
+ChatHouse has committed bare React Native projects for Android and iOS. Never
+commit private signing material, Firebase service accounts or store API keys.
 
-## TL;DR
+## Android
 
-- **Never commit a keystore or its passwords.** `.gitignore` excludes `*.jks`,
-  `*.keystore`, `*.p8`, `*.p12`, `*.key` (the shared `android/app/debug.keystore`
-  is the one intentional exception).
-- The release build reads the keystore + passwords from **Gradle properties**
-  (`CHATHOUSE_UPLOAD_*`). When they're absent, the `release` build type falls
-  back to **debug** signing so a local `assembleRelease` still produces an
-  installable — but **NON-shippable** — APK.
-- Ship an **`.aab`** (`:app:bundleRelease`) to Google Play; it splits per-ABI
-  automatically.
-
-## 1. Generate the upload keystore (one time)
-
-Use the JDK `keytool` (bundled with Android Studio at
-`…/Android Studio/jbr/bin/keytool`). Keep the resulting `.jks` and its passwords
-in a password manager / secret store — **if you lose them you can no longer
-update the app on Google Play.**
+### Create and store the upload key
 
 ```bash
 keytool -genkeypair -v \
@@ -30,17 +13,13 @@ keytool -genkeypair -v \
   -alias chathouse \
   -keyalg RSA -keysize 2048 -validity 10000 \
   -storetype JKS
-# answer the prompts (name/org/…); set a strong store + key password
 ```
 
-Place `chathouse-upload.jks` in `android/app/` (it is gitignored there).
+Keep the keystore in a password manager/secure backup. A local copy may be
+placed in `android/app/`; `*.jks` is ignored.
 
-## 2. Provide the signing credentials (never committed)
-
-Put these where Gradle can read them but git can't — typically
-`~/.gradle/gradle.properties` (outside the repo) for local builds, or
-`ORG_GRADLE_PROJECT_CHATHOUSE_UPLOAD_*` environment variables / encrypted CI
-secrets in CI:
+Supply all four values in `~/.gradle/gradle.properties`, `-P` options, or CI
+`ORG_GRADLE_PROJECT_*` secrets:
 
 ```properties
 CHATHOUSE_UPLOAD_STORE_FILE=chathouse-upload.jks
@@ -49,121 +28,118 @@ CHATHOUSE_UPLOAD_KEY_ALIAS=chathouse
 CHATHOUSE_UPLOAD_KEY_PASSWORD=********
 ```
 
-`android/app/build.gradle` wires these into `signingConfigs.release` and switches
-the `release` build type onto it only when `CHATHOUSE_UPLOAD_STORE_FILE` is set.
+Release tasks fail immediately if any value is absent. They never fall back to
+the shared debug key.
 
-## 3. Bump the version
+The store-artifact workflow runs `jarsigner -verify -strict`, rejects unsigned
+or partially signed entries, debug/weak signers and expired certificates, then
+compares the AAB signer SHA-256 with the certificate exported from the protected
+upload keystore. The resulting non-secret fingerprint is recorded in the
+Android artifact manifest. Keep an independently reviewed copy of that upload
+fingerprint in the password manager and Play Console records so a keystore
+replacement is an explicit release event.
 
-Manual now (EAS used to auto-increment). In `android/app/build.gradle`
-`defaultConfig`:
+### Version and build
 
-- `versionCode` — integer, **must increase** on every Play upload.
-- `versionName` — user-facing string (e.g. `1.0.1`).
+Choose an explicit, unused `VERSION_CODE` and a release `VERSION_NAME`. Defaults
+are for local/technical builds only. From the repository root:
 
-> **Footgun:** each `versionCode` is consumed **forever across all tracks** —
-> once internal-testing/closed-testing has seen a value, you can never reuse it
-> (even for a re-upload of a failed build). It currently sits at `1`, so the
-> first production submission already needs a bump; start production above
-> whatever internal testing has consumed.
-
-## 4. Build a signed release
-
-```bash
-cd android
-
-# App Bundle for the Play Store (recommended — per-ABI split delivery):
-./gradlew :app:bundleRelease
-#   → android/app/build/outputs/bundle/release/app-release.aab
-
-# Or a universal APK (sideload / non-Play distribution):
-./gradlew :app:assembleRelease
-#   → android/app/build/outputs/apk/release/app-release.apk
+```powershell
+.\scripts\build-release-aab.ps1 -VersionCode 42 -VersionName 1.4.0
 ```
 
-All four ABIs (`armeabi-v7a, arm64-v8a, x86, x86_64`) are built by default
-(`android/gradle.properties` → `reactNativeArchitectures`). On a constrained
-machine, override for faster local builds:
-`./gradlew :app:assembleRelease -PreactNativeArchitectures=arm64-v8a`. A full
-4-ABI `bundleRelease` compiles every native target ×4 and is best run in CI / on
-a machine with ample RAM.
+On macOS/Linux, use PowerShell 7 (`pwsh`) to run the same script. Never generate
+a store artifact with a raw `gradlew bundleRelease`; the production entrypoint
+also validates `.env.production`, Firebase, Maps and signing. Gradle permits a
+non-production Release package only when the shared debug key and the explicit
+`CHATHOUSE_ALLOW_DEBUG_RELEASE_SIGNING=true` test opt-in are both present.
 
-**R8 / minification is OFF by default** for release
-(`android.enableMinifyInReleaseBuilds` is unset). The app ships unminified — fine
-for React Native (Hermes already optimises the JS). If you later enable it to
-shrink the AAB, set `android.enableMinifyInReleaseBuilds=true`, then do a real
-`bundleRelease` + on-device smoke test and expand `android/app/proguard-rules.pro`
-as needed.
+Release builds use Hermes, R8 code optimization and resource shrinking. Smoke
+test the signed artifact on a physical device before uploading.
 
-> **CI guard:** if the `CHATHOUSE_UPLOAD_*` properties are missing, a release
-> build does **not** fail — it falls back to **debug** signing and produces a
-> debug-signed artifact. Play rejects debug-signed uploads (so it can't ship
-> insecurely), but to avoid a wasted CI cycle, assert the env var is present
-> before `bundleRelease` in CI, e.g. `test -n "$ORG_GRADLE_PROJECT_CHATHOUSE_UPLOAD_STORE_FILE"`.
+### Google/Firebase certificate restrictions
 
-## 5. Restrict the Google Maps API key (package + SHA-1)
+Register all relevant SHA-1/SHA-256 fingerprints for package
+`com.chathouse.app`:
 
-`react-native-maps` needs the `com.google.android.geo.API_KEY` (injected at build
-time via the `GOOGLE_MAPS_API_KEY` Gradle property / env var — never committed).
-Lock the key down in **Google Cloud Console → APIs & Services → Credentials →
-your key → Application restrictions → Android apps**:
+- local debug key;
+- upload key;
+- Google Play App Signing key (the certificate users actually receive).
 
-- Package name: `com.chathouse.app`
-- SHA-1 certificate fingerprint: add **both** the debug and the release
-  fingerprints. Get them with:
+Get local fingerprints with `./gradlew :app:signingReport`. Restrict the Maps
+API key to the package plus production signing certificate, and register the
+same apps/certificates in Firebase.
 
-```bash
-cd android && ./gradlew :app:signingReport
-#   → prints SHA1 / SHA-256 for each variant's keystore
-```
+## iOS
 
-For reference, the committed **debug** keystore's fingerprint (add this so debug
-builds can use Maps/Firebase too):
+1. Open `ios/ChatHouse.xcworkspace` in Xcode.
+2. Select the `ChatHouse` target and your Apple Developer Team.
+3. Keep bundle ID `com.chathouse.app` and enable Push Notifications,
+   Background Modes (audio/remote notifications), and Associated Domains.
+4. Verify the App ID provisioning profile contains those entitlements.
+5. Set `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` to unique values.
+6. Choose a generic iOS device and use Product > Archive.
 
-```
-SHA1: 5E:8F:16:06:2E:A3:CD:2C:4A:0D:54:78:76:BA:A6:F3:8C:AB:F6:25
-```
+Automatic signing is enabled in the project; CI Simulator builds disable code
+signing. For automated App Store delivery, use an App Store Connect API key
+stored as CI secrets (`.p8`, issuer ID and key ID). Never commit the key.
 
-The **release** SHA-1 differs and only appears in `signingReport` once the
-`CHATHOUSE_UPLOAD_*` properties point at your real upload keystore.
-Add the same SHA-1s to **Firebase console → Project settings → your Android app**
-so FCM / any Firebase Android API keeps working for signed builds.
+Generate and review `Gemfile.lock` and `ios/Podfile.lock` on macOS, then commit
+both files. The protected release workflow fails closed when either lockfile is
+missing and installs exclusively from those resolved versions.
 
-> ### ⚠️ Play App Signing — the load-bearing detail
->
-> When you upload an `.aab`, the app is enrolled in **Play App Signing** by
-> default: Google **re-signs** the installed app with its own _app-signing key_,
-> which is **different** from your upload keystore. So the certificate on a
-> Play-installed device is **not** the one `signingReport` prints.
->
-> If you register only the upload-key SHA-1 on Firebase/Maps, **FCM push and
-> Google Maps will silently fail for every Play-Store user** while working fine
-> in your local release build — a production-only break that's painful to debug.
->
-> **After the first upload**, go to **Play Console → (your app) → Test and
-> release → App integrity → App signing** and copy **both** certificates' SHA-1:
->
-> - **App signing key certificate** (Google's — used on real devices)
-> - **Upload key certificate** (yours)
->
-> Register **both** (plus debug) on the Maps API key restriction **and** on the
-> Firebase Android app. The release SHA from `signingReport` = the upload key
-> only, and is **not sufficient** once Play App Signing is active.
+Firebase Cloud Messaging on iOS also requires an APNs authentication key or
+certificate configured in the Firebase console. Push delivery must be tested
+on a physical device.
 
-## 6. Firebase / FCM
+## Shared release configuration
 
-`android/app/google-services.json` (gitignored — carries the project API key) must
-be present at build time. The release/upload SHA-1 from step 5 must be registered
-on the Firebase Android app. Backend push only **sends** when
-`FIREBASE_SERVICE_ACCOUNT` (service-account JSON) and `PUSH_DISPATCH_ENABLED=true`
-are set on the server — see `backend/.env.example`.
+Before any store build:
 
-## 7. Store submission
+- use a production `.env` with `ENV=production`, HTTPS API and WSS realtime/
+  LiveKit endpoints;
+- provide the real Android/iOS Firebase files;
+- set Sentry organization, project and auth token if source-map upload is
+  required;
+- retain signing keys and recovery access in at least two secure locations.
 
-Upload `app-release.aab` to the **Google Play Console** (Internal testing →
-Production), or automate with [gradle-play-publisher] / fastlane using a Play
-Console **service-account JSON** key (kept out of git). Store-listing
-requirements (privacy policy URL, support URL, age rating, Data safety form) are
-filled in the Play Console; the hosted legal documents to link are in
-[`docs/legal/`](./legal): `PRIVACY-POLICY.md` and `EULA.md`.
+The runtime environment validator rejects localhost and cleartext endpoints in
+production bundles.
 
-[gradle-play-publisher]: https://github.com/Triple-T/gradle-play-publisher
+## Protected CI artifact workflow
+
+Run **Mobile Store Artifacts - Signed Android and iOS** from the reviewed
+release commit on `main`. The workflow first requires the complete reusable CI
+gate, then produces the two artifact names consumed by the Go-Live preflight:
+
+- `android-production-aab`;
+- `ios-production-xcarchive`.
+
+Configure these base64-encoded production files in the protected `production`
+GitHub environment:
+
+- `MOBILE_PRODUCTION_ENV_BASE64`;
+- `FIREBASE_ANDROID_CONFIG_BASE64`;
+- `FIREBASE_IOS_CONFIG_BASE64`;
+- `ANDROID_UPLOAD_KEYSTORE_BASE64`;
+- `IOS_DISTRIBUTION_CERTIFICATE_BASE64`;
+- `IOS_APPSTORE_PROVISIONING_PROFILE_BASE64`.
+
+Also configure the Android signing passwords/alias
+(`ANDROID_UPLOAD_STORE_PASSWORD`, `ANDROID_UPLOAD_KEY_ALIAS`,
+`ANDROID_UPLOAD_KEY_PASSWORD`), the iOS certificate password
+(`IOS_DISTRIBUTION_CERTIFICATE_PASSWORD`) and the environment variable
+`IOS_TEAM_ID`.
+
+The workflow verifies that the Android bundle is not debug-signed. For iOS it
+verifies the archive and exported IPA use the expected Apple Distribution team,
+an App Store Connect profile, production APNs entitlement and the requested
+version/build. It intentionally does not upload to Play or TestFlight: use the
+verified artifacts on the Internal Testing/TestFlight tracks, then record those
+external runs in the protected Go-Live evidence. The iOS manifest records
+`artifact_sha256` for the exact `ChatHouse.xcarchive.tgz`, `ipa_sha256` for
+`ChatHouse.ipa`, and `build_number`; preserve these values with the release
+evidence. The Go-Live preflight recomputes both hashes, then compares
+`CFBundleIdentifier`, `CFBundleShortVersionString` and `CFBundleVersion`
+between the archive and IPA. Evidence for a repackaged or different TestFlight
+binary therefore fails closed.

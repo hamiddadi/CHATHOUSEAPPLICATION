@@ -1,28 +1,26 @@
-# ─────────────────────────────────────────────────────────────────────────────
-# CD — Deploy to Production
-#
-# Trigger: push of a semver tag matching v*.*.* (e.g. v1.4.2).
-# Flow:   build & push image (tagged with the semver + `latest`)  →
-#          deploy job gated behind the `production` GitHub Environment
-#          (manual approval / required reviewers)  →  SSH-deploy  →
-#          smoke tests  →  auto-rollback on failure  →  Slack notify.
-#
-# The `production` environment MUST be configured in repo
-#   Settings → Environments → production
-# with required reviewers (see .github/environments/staging.yml for the
-# documented pattern; create a `production` env the same way with stricter
-# reviewers). The `environment: production` key below makes this job WAIT for
-# manual approval before it runs.
-#
-# Required secrets: GITHUB_TOKEN (auto), PROD_HOST, PROD_USER, PROD_SSH_KEY,
-#                   SLACK_WEBHOOK_URL.
-# ─────────────────────────────────────────────────────────────────────────────
-name: CD — Deploy to Production
+name: CD - Deploy to Production
 
 on:
   push:
     tags:
       - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      allow_one_way_livekit_revocation_upgrade:
+        description: 'Authorize the audited first v1 cutover with no pre-v1 API rollback'
+        required: true
+        default: false
+        type: boolean
+      allow_one_way_database_role_upgrade:
+        description: 'Authorize the audited first DB-role v1 cutover with no pre-v1 API rollback'
+        required: true
+        default: false
+        type: boolean
+      acknowledge_one_way_state_contract_v2_cutover:
+        description: 'Acknowledge irreversible state-contract v2 cutover with no pre-v2 API rollback'
+        required: true
+        default: false
+        type: boolean
 
 concurrency:
   group: cd-production
@@ -30,173 +28,528 @@ concurrency:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}/api
 
 jobs:
-  # ───────────────────────── Build & push image to GHCR ──────────────────────
-  build-and-push:
-    name: Build & push image
+  full-ci:
+    name: Full CI gate
+    uses: ./.github/workflows/ci.yml
+    secrets: inherit
+
+  image-coordinates:
+    name: Resolve lowercase GHCR image name
+    runs-on: ubuntu-latest
+    outputs:
+      image_name: ${{ steps.normalize.outputs.name }}
+    steps:
+      - name: Normalize repository path for OCI
+        id: normalize
+        shell: bash
+        run: |
+          set -euo pipefail
+          image_name="${GITHUB_REPOSITORY,,}/api"
+          if [[ ! "$image_name" =~ ^[a-z0-9][a-z0-9._/-]+$ ]]; then
+            echo "Invalid lowercase image name: ${image_name}" >&2
+            exit 1
+          fi
+          echo "name=${image_name}" >> "$GITHUB_OUTPUT"
+
+  resolve-candidate:
+    name: Resolve staging-tested release candidate
+    needs: [full-ci, image-coordinates]
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      packages: write
+      actions: read
+      packages: read
     outputs:
       version: ${{ steps.meta.outputs.version }}
-      image_version: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }}
-      image_latest: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+      image_ref: ${{ steps.candidate.outputs.ref }}
+      source_sha: ${{ steps.source.outputs.sha }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
 
-      - name: Derive version from tag
+      - name: Validate stable SemVer release tag
         id: meta
+        env:
+          RELEASE_REF: ${{ github.ref_name }}
         run: |
-          # github.ref_name is the tag, e.g. "v1.4.2" → strip the leading "v".
-          VERSION="${GITHUB_REF_NAME#v}"
+          set -euo pipefail
+          if [[ ! "$RELEASE_REF" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "Release tag must be exactly vMAJOR.MINOR.PATCH with no leading zero, prerelease, or build metadata" >&2
+            exit 1
+          fi
+          VERSION="${RELEASE_REF#v}"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "Building production version ${VERSION}"
+          echo "Resolving staging-tested production version ${VERSION}"
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - name: Resolve the commit referenced by the release tag
+        id: source
+        run: |
+          set -euo pipefail
+          source_sha="$(git rev-parse 'HEAD^{commit}')"
+          if [[ ! "$source_sha" =~ ^[a-f0-9]{40}$ ]]; then
+            echo "Release tag did not resolve to a full commit SHA" >&2
+            exit 1
+          fi
+          echo "sha=${source_sha}" >> "$GITHUB_OUTPUT"
 
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
+      - name: Find a successful staging run for this exact commit
+        id: staging
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          runs="$(
+            gh api --method GET \
+              "/repos/${REPOSITORY}/actions/workflows/cd-staging.yml/runs" \
+              -f head_sha="$SOURCE_SHA" \
+              -f status=success \
+              -f per_page=100
+          )"
+          run_id="$(
+            jq -r --arg sha "$SOURCE_SHA" '
+              [
+                .workflow_runs[]
+                | select(
+                    .head_sha == $sha
+                    and .head_branch == "main"
+                    and (.event == "push" or .event == "workflow_dispatch")
+                    and .conclusion == "success"
+                  )
+              ]
+              | sort_by(.run_number, .run_attempt)
+              | last
+              | .id // empty
+            ' <<< "$runs"
+          )"
+          if [[ ! "$run_id" =~ ^[0-9]+$ ]]; then
+            echo "No successful push or workflow_dispatch staging run on main attests commit ${SOURCE_SHA}" >&2
+            exit 1
+          fi
+          echo "run_id=${run_id}" >> "$GITHUB_OUTPUT"
+
+      - name: Download staging acceptance evidence
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: staging-release-candidate-${{ steps.source.outputs.sha }}
+          path: ${{ runner.temp }}/staging-candidate
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: ${{ steps.staging.outputs.run_id }}
+
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build & push
-        uses: docker/build-push-action@v6
-        with:
-          context: ./backend
-          file: ./backend/Dockerfile
-          push: true
-          tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }}
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          labels: |
-            org.opencontainers.image.version=${{ steps.meta.outputs.version }}
-            org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+      - name: Validate immutable staging evidence and registry object
+        id: candidate
+        env:
+          CANDIDATE_FILE: ${{ runner.temp }}/staging-candidate/staging-release-candidate.json
+          EXPECTED_REPOSITORY: ${{ github.repository }}
+          EXPECTED_SHA: ${{ steps.source.outputs.sha }}
+          EXPECTED_RUN_ID: ${{ steps.staging.outputs.run_id }}
+          IMAGE_NAME: ${{ needs.image-coordinates.outputs.image_name }}
+        run: |
+          set -euo pipefail
+          [ -f "$CANDIDATE_FILE" ] || {
+            echo "Staging candidate evidence is missing" >&2
+            exit 1
+          }
+          schema_version="$(jq -er '.schema_version' "$CANDIDATE_FILE")"
+          repository="$(jq -er '.repository' "$CANDIDATE_FILE")"
+          source_sha="$(jq -er '.source_sha' "$CANDIDATE_FILE")"
+          image_ref="$(jq -er '.image_ref' "$CANDIDATE_FILE")"
+          run_id="$(jq -er '.staging_workflow_run_id' "$CANDIDATE_FILE")"
+          if [ "$schema_version" != "1" ] \
+            || [ "$repository" != "$EXPECTED_REPOSITORY" ] \
+            || [ "$source_sha" != "$EXPECTED_SHA" ] \
+            || [ "$run_id" != "$EXPECTED_RUN_ID" ]; then
+            echo "Staging candidate evidence does not match this release context" >&2
+            exit 1
+          fi
+          expected_prefix="${REGISTRY}/${IMAGE_NAME}@"
+          case "$image_ref" in
+            "$expected_prefix"sha256:*) digest="${image_ref#"$expected_prefix"}" ;;
+            *)
+              echo "Attested image does not belong to ${REGISTRY}/${IMAGE_NAME}" >&2
+              exit 1
+              ;;
+          esac
+          if [[ ! "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+            echo "Attested image is not an immutable sha256 digest" >&2
+            exit 1
+          fi
+          docker buildx imagetools inspect "$image_ref" >/dev/null
+          echo "ref=${image_ref}" >> "$GITHUB_OUTPUT"
+          echo "Production will promote exact staging digest ${image_ref}"
 
-  # ───────────────────────── Deploy to production (gated) ─────────────────────
   deploy-production:
     name: Deploy to production
-    needs: build-and-push
+    needs: resolve-candidate
     runs-on: ubuntu-latest
-    # `environment: production` enforces the manual-approval / required-reviewers
-    # protection rule configured in repo Settings → Environments → production.
+    permissions:
+      contents: read
+      packages: read
     environment:
       name: production
       url: https://api.chathouse.app
     steps:
-      - name: SSH deploy + smoke tests + auto-rollback
-        uses: appleboy/ssh-action@v1.2.0
+      - name: Require explicit public release enablement
+        shell: bash
         env:
-          NEW_IMAGE: ${{ needs.build-and-push.outputs.image_version }}
-          REGISTRY: ${{ env.REGISTRY }}
-          REGISTRY_USER: ${{ github.actor }}
-          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PUBLIC_RELEASE_ENABLED: ${{ vars.PUBLIC_RELEASE_ENABLED }}
+        run: |
+          set -euo pipefail
+          if [ "$PUBLIC_RELEASE_ENABLED" != 'true' ]; then
+            echo "PUBLIC_RELEASE_ENABLED must be exactly 'true' in the protected production environment" >&2
+            exit 1
+          fi
+
+      - name: Checkout deployment files
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Build versioned infrastructure bundle
+        env:
+          DEPLOY_BUNDLE_NAME: chathouse-infra-${{ github.sha }}.tgz
+        run: |
+          set -euo pipefail
+          tar -czf "$DEPLOY_BUNDLE_NAME" -C backend \
+            docker-compose.prod.yml \
+            Caddyfile \
+            livekit/livekit.yaml \
+            scripts/deploy \
+            scripts/backup \
+            docker/backup \
+            docker/monitoring
+
+      - name: Upload infrastructure bundle
+        uses: appleboy/scp-action@ff85246acaad7bdce478db94a363cd2bf7c90345 # v1.0.0
         with:
           host: ${{ secrets.PROD_HOST }}
           username: ${{ secrets.PROD_USER }}
           key: ${{ secrets.PROD_SSH_KEY }}
-          envs: NEW_IMAGE,REGISTRY,REGISTRY_USER,REGISTRY_TOKEN
+          fingerprint: ${{ secrets.PROD_HOST_FINGERPRINT }}
+          source: chathouse-infra-${{ github.sha }}.tgz
+          target: /tmp
+          overwrite: true
+
+      - name: Synchronize, deploy, smoke-test, and auto-rollback
+        uses: appleboy/ssh-action@7eaf76671a0d7eec5d98ee897acda4f968735a17 # v1.2.0
+        env:
+          NEW_IMAGE: ${{ needs.resolve-candidate.outputs.image_ref }}
+          REGISTRY: ${{ env.REGISTRY }}
+          REGISTRY_USER: ${{ github.actor }}
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEPLOY_BUNDLE: /tmp/chathouse-infra-${{ github.sha }}.tgz
+          DEPLOY_DIR: ${{ vars.DEPLOY_DIR || '/opt/chathouse/backend' }}
+          BASE_URL: ${{ vars.BASE_URL || 'http://localhost:4000' }}
+          API_SERVICE: ${{ vars.API_SERVICE || 'api' }}
+          CADDY_SERVICE: caddy
+          REQUIRE_PUBLIC_ENDPOINTS: 'true'
+          PUBLIC_API_URL: https://api.chathouse.app
+          PUBLIC_APP_URL: https://app.chathouse.com
+          ALLOW_ONE_WAY_LIVEKIT_REVOCATION_UPGRADE: ${{ inputs.allow_one_way_livekit_revocation_upgrade || 'false' }}
+          ALLOW_ONE_WAY_DATABASE_ROLE_UPGRADE: ${{ inputs.allow_one_way_database_role_upgrade || 'false' }}
+          ACKNOWLEDGE_ONE_WAY_STATE_CONTRACT_V2_CUTOVER: ${{ inputs.acknowledge_one_way_state_contract_v2_cutover || 'false' }}
+        with:
+          host: ${{ secrets.PROD_HOST }}
+          username: ${{ secrets.PROD_USER }}
+          key: ${{ secrets.PROD_SSH_KEY }}
+          fingerprint: ${{ secrets.PROD_HOST_FINGERPRINT }}
+          envs: NEW_IMAGE,REGISTRY,REGISTRY_USER,REGISTRY_TOKEN,DEPLOY_BUNDLE,DEPLOY_DIR,BASE_URL,API_SERVICE,CADDY_SERVICE,REQUIRE_PUBLIC_ENDPOINTS,PUBLIC_API_URL,PUBLIC_APP_URL,ALLOW_ONE_WAY_LIVEKIT_REVOCATION_UPGRADE,ALLOW_ONE_WAY_DATABASE_ROLE_UPGRADE,ACKNOWLEDGE_ONE_WAY_STATE_CONTRACT_V2_CUTOVER
           script_stop: true
-          command_timeout: 15m
+          # Migrations are capped at 35m and the authenticated media cutover at
+          # 32m; retain time for deterministic cleanup and verified recovery.
+          command_timeout: 90m
           script: |
             set -euo pipefail
             log() { printf '%s [deploy] %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$*"; }
 
-            DEPLOY_DIR="${DEPLOY_DIR:-/opt/chathouse/backend}"
-            cd "$DEPLOY_DIR"
+            [ -f "$DEPLOY_BUNDLE" ] || {
+              log "Deployment bundle not found: ${DEPLOY_BUNDLE}"
+              exit 1
+            }
+            install -d -m 0750 "$DEPLOY_DIR"
+            [ -f "$DEPLOY_DIR/.env" ] || {
+              log "Host-managed production env is missing: ${DEPLOY_DIR}/.env"
+              exit 1
+            }
+
+            STATE_DIR="$DEPLOY_DIR/.deploy-state"
+            install -d -m 0700 "$STATE_DIR"
+            PREVIOUS_COMPOSE="$STATE_DIR/docker-compose.prod.previous.yml"
+            HAD_PREVIOUS_COMPOSE=0
+            if [ -f "$DEPLOY_DIR/docker-compose.prod.yml" ]; then
+              cp "$DEPLOY_DIR/docker-compose.prod.yml" "$PREVIOUS_COMPOSE"
+              chmod 0600 "$PREVIOUS_COMPOSE"
+              HAD_PREVIOUS_COMPOSE=1
+            else
+              rm -f "$PREVIOUS_COMPOSE"
+            fi
+            PREVIOUS_CADDY="$STATE_DIR/Caddyfile.previous"
+            [ -f "$DEPLOY_DIR/Caddyfile" ] || {
+              log "Existing Caddyfile is missing; safe automatic rollback is unavailable"
+              exit 1
+            }
+            install -m 0600 "$DEPLOY_DIR/Caddyfile" "$PREVIOUS_CADDY"
+
+            STAGE_DIR="$(mktemp -d /tmp/chathouse-infra.XXXXXX)"
+            COMPOSE_ACTIVATED=0
+            CADDYFILE_ACTIVATED=0
+            restore_compose() {
+              [ "$COMPOSE_ACTIVATED" -eq 1 ] || return 0
+              if [ "$HAD_PREVIOUS_COMPOSE" -eq 1 ]; then
+                restore_tmp="$(mktemp "$DEPLOY_DIR/.docker-compose.prod.restore.XXXXXX")"
+                if ! install -m 0640 "$PREVIOUS_COMPOSE" "$restore_tmp"; then
+                  rm -f "$restore_tmp"
+                  return 1
+                fi
+                if ! mv -f "$restore_tmp" "$DEPLOY_DIR/docker-compose.prod.yml"; then
+                  rm -f "$restore_tmp"
+                  return 1
+                fi
+                log "Restored the previous Compose definition atomically"
+              else
+                rm -f "$DEPLOY_DIR/docker-compose.prod.yml" || return 1
+                log "Removed candidate Compose definition; none existed before deployment"
+              fi
+              COMPOSE_ACTIVATED=0
+            }
+            restore_caddyfile() {
+              [ "$CADDYFILE_ACTIVATED" -eq 1 ] || return 0
+              if cmp -s "$PREVIOUS_CADDY" "$DEPLOY_DIR/Caddyfile"; then
+                CADDYFILE_ACTIVATED=0
+                return 0
+              fi
+              restore_tmp="$(mktemp "$DEPLOY_DIR/.Caddyfile.restore.XXXXXX")"
+              if ! install -m 0644 "$PREVIOUS_CADDY" "$restore_tmp"; then
+                rm -f "$restore_tmp"
+                return 1
+              fi
+              if ! mv -f "$restore_tmp" "$DEPLOY_DIR/Caddyfile"; then
+                rm -f "$restore_tmp"
+                return 1
+              fi
+              log "Restored the previous Caddyfile atomically"
+              CADDYFILE_ACTIVATED=0
+            }
+            cleanup() {
+              status=$?
+              trap - EXIT
+              if [ "$status" -ne 0 ] && ! restore_caddyfile; then
+                log "CRITICAL: failed to restore the previous Caddyfile"
+                status=1
+              fi
+              if [ "$status" -ne 0 ] && ! restore_compose; then
+                log "CRITICAL: failed to restore the previous Compose definition"
+                status=1
+              fi
+              case "$STAGE_DIR" in /tmp/chathouse-infra.*) rm -rf "$STAGE_DIR" ;; esac
+              rm -f "$DEPLOY_BUNDLE"
+              exit "$status"
+            }
+            interrupt() {
+              trap - TERM INT HUP
+              log "Deployment shell interrupted; forcing failure cleanup"
+              exit 1
+            }
+            trap interrupt TERM INT HUP
+            trap cleanup EXIT
+            if tar -tzf "$DEPLOY_BUNDLE" | grep -Eq '(^/|(^|/)\.\.(/|$))'; then
+              log "Unsafe path found in deployment bundle"
+              exit 1
+            fi
+            tar -xzf "$DEPLOY_BUNDLE" -C "$STAGE_DIR"
+            for required in \
+              docker-compose.prod.yml \
+              Caddyfile \
+              scripts/deploy/deploy-image.sh \
+              scripts/deploy/state-contract-deploy-guard.sh \
+              scripts/deploy/livekit-deploy-guard.sh \
+              scripts/deploy/health-check.sh; do
+              [ -f "$STAGE_DIR/$required" ] || {
+                log "Bundle is missing required file: ${required}"
+                exit 1
+              }
+            done
+
+            # This archive is a reviewed versioned allowlist and cannot replace
+            # the host .env, external secret files, media, or Docker volumes.
+            # Install support files first, then atomically switch Caddy and
+            # Compose. The EXIT trap restores both exact previous definitions
+            # on every later failure, including public HTTPS smoke failures.
+            tar \
+              --exclude='docker-compose.prod.yml' \
+              --exclude='Caddyfile' \
+              -xzf "$DEPLOY_BUNDLE" \
+              --no-same-owner \
+              --no-same-permissions \
+              -C "$DEPLOY_DIR"
+            chmod 0755 "$DEPLOY_DIR"/scripts/deploy/*.sh "$DEPLOY_DIR"/scripts/backup/*.sh
+            candidate_caddy="$(mktemp "$DEPLOY_DIR/.Caddyfile.candidate.XXXXXX")"
+            install -m 0644 "$STAGE_DIR/Caddyfile" "$candidate_caddy"
+            mv -f "$candidate_caddy" "$DEPLOY_DIR/Caddyfile"
+            CADDYFILE_ACTIVATED=1
+            candidate_compose="$(mktemp "$DEPLOY_DIR/.docker-compose.prod.candidate.XXXXXX")"
+            install -m 0640 "$STAGE_DIR/docker-compose.prod.yml" "$candidate_compose"
+            mv -f "$candidate_compose" "$DEPLOY_DIR/docker-compose.prod.yml"
+            COMPOSE_ACTIVATED=1
 
             log "Logging in to ${REGISTRY}"
             echo "$REGISTRY_TOKEN" | docker login "$REGISTRY" -u "$REGISTRY_USER" --password-stdin
 
-            PREV_IMAGE="$(docker inspect --format '{{.Config.Image}}' chathouse-api 2>/dev/null || echo '')"
-            log "Previous image: ${PREV_IMAGE:-<none>}"
-            log "New image:      ${NEW_IMAGE}"
-
-            log "Pulling ${NEW_IMAGE}"
-            docker pull "$NEW_IMAGE"
-
-            export CHATHOUSE_API_IMAGE="$NEW_IMAGE"
-            log "Recreating api service (migrations run automatically via the image entrypoint)"
-            docker compose -f docker-compose.prod.yml up -d --no-deps --pull always api || \
-              docker compose -f docker-compose.prod.yml up -d --no-deps api
-
-            BASE_URL="${BASE_URL:-http://localhost:4000}"
-
-            # ── Smoke tests (retry up to 10× / 5s) ──
-            smoke() {
-              # /health → 200 with db + redis true
-              code="$(curl -fsS -o /tmp/health.json -w '%{http_code}' "${BASE_URL}/health" || echo 000)"
-              [ "$code" = "200" ] || { log "smoke: /health http=${code}"; return 1; }
-              grep -q '"database":true' /tmp/health.json || { log "smoke: database not healthy"; return 1; }
-              grep -q '"redis":true'    /tmp/health.json || { log "smoke: redis not healthy"; return 1; }
-              # /health/live → 200
-              code="$(curl -fsS -o /dev/null -w '%{http_code}' "${BASE_URL}/health/live" || echo 000)"
-              [ "$code" = "200" ] || { log "smoke: /health/live http=${code}"; return 1; }
-              # /api/users/me without a token → 401
-              code="$(curl -fsS -o /dev/null -w '%{http_code}' "${BASE_URL}/api/users/me" || echo 000)"
-              [ "$code" = "401" ] || { log "smoke: /api/users/me expected 401 got ${code}"; return 1; }
-              return 0
-            }
-
-            ok=0
-            for i in $(seq 1 10); do
-              if smoke; then log "Smoke tests OK on attempt ${i}"; ok=1; break; fi
-              log "Smoke attempt ${i}/10 failed; retrying in 5s"
-              sleep 5
-            done
-
-            if [ "$ok" -ne 1 ]; then
-              log "Smoke tests FAILED — rolling back"
-              if [ -n "$PREV_IMAGE" ]; then
-                export CHATHOUSE_API_IMAGE="$PREV_IMAGE"
-                docker pull "$PREV_IMAGE" || true
-                docker compose -f docker-compose.prod.yml up -d --no-deps api
-                log "Rolled back to ${PREV_IMAGE}"
-              else
-                log "No previous image recorded — cannot auto-rollback"
-              fi
-              exit 1
-            fi
-
-            log "Production deploy succeeded: ${NEW_IMAGE}"
+            DEPLOY_DIR="$DEPLOY_DIR" \
+              COMPOSE_FILE="$DEPLOY_DIR/docker-compose.prod.yml" \
+              ROLLBACK_COMPOSE_FILE="$PREVIOUS_COMPOSE" \
+              CADDY_SERVICE="$CADDY_SERVICE" \
+              CADDYFILE="$DEPLOY_DIR/Caddyfile" \
+              ROLLBACK_CADDYFILE="$PREVIOUS_CADDY" \
+              BASE_URL="$BASE_URL" \
+              API_SERVICE="$API_SERVICE" \
+              REQUIRE_PUBLIC_ENDPOINTS="$REQUIRE_PUBLIC_ENDPOINTS" \
+              PUBLIC_API_URL="$PUBLIC_API_URL" \
+              PUBLIC_APP_URL="$PUBLIC_APP_URL" \
+              ALLOW_ONE_WAY_LIVEKIT_REVOCATION_UPGRADE="$ALLOW_ONE_WAY_LIVEKIT_REVOCATION_UPGRADE" \
+              ALLOW_ONE_WAY_DATABASE_ROLE_UPGRADE="$ALLOW_ONE_WAY_DATABASE_ROLE_UPGRADE" \
+              ACKNOWLEDGE_ONE_WAY_STATE_CONTRACT_V2_CUTOVER="$ACKNOWLEDGE_ONE_WAY_STATE_CONTRACT_V2_CUTOVER" \
+              "$DEPLOY_DIR/scripts/deploy/deploy-image.sh" "$NEW_IMAGE"
+            COMPOSE_ACTIVATED=0
+            CADDYFILE_ACTIVATED=0
             docker image prune -f >/dev/null 2>&1 || true
 
-  # ───────────────────────── Slack notification ──────────────────────────────
-  notify:
-    name: Notify Slack
-    needs: [build-and-push, deploy-production]
+  promote-release:
+    name: Publish SemVer tag after production acceptance
+    needs: [resolve-candidate, deploy-production, image-coordinates]
     runs-on: ubuntu-latest
-    if: always()
+    permissions:
+      contents: read
+      packages: write
     steps:
-      - name: Compose message
-        id: msg
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Point the release tag at the accepted digest
+        env:
+          IMAGE_REF: ${{ needs.resolve-candidate.outputs.image_ref }}
+          VERSION: ${{ needs.resolve-candidate.outputs.version }}
+          IMAGE_NAME: ${{ needs.image-coordinates.outputs.image_name }}
         run: |
-          if [ "${{ needs.deploy-production.result }}" = "success" ]; then
-            echo "emoji=:rocket:" >> "$GITHUB_OUTPUT"
-            echo "text=PRODUCTION deploy SUCCEEDED — v${{ needs.build-and-push.outputs.version }}" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          if [[ ! "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "Invalid release version" >&2
+            exit 1
+          fi
+          expected_prefix="${REGISTRY}/${IMAGE_NAME}@"
+          case "$IMAGE_REF" in
+            "$expected_prefix"sha256:*) digest="${IMAGE_REF#"$expected_prefix"}" ;;
+            *)
+              echo "Release candidate does not belong to ${REGISTRY}/${IMAGE_NAME}" >&2
+              exit 1
+              ;;
+          esac
+          if [[ ! "$digest" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+            echo "Release candidate is not an immutable sha256 digest" >&2
+            exit 1
+          fi
+          release_ref="${REGISTRY}/${IMAGE_NAME}:${VERSION}"
+          inspect_error="$(mktemp)"
+          trap 'rm -f "$inspect_error"' EXIT
+
+          if existing_manifest="$(
+            docker buildx imagetools inspect \
+              "$release_ref" \
+              --format '{{json .Manifest.Digest}}' \
+              2>"$inspect_error"
+          )"; then
+            if ! existing_digest="$(
+              jq -er 'select(type == "string" and test("^sha256:[a-f0-9]{64}$"))' \
+                <<< "$existing_manifest"
+            )"; then
+              echo "Existing release tag did not resolve to one valid sha256 digest" >&2
+              exit 1
+            fi
+            if [ "$existing_digest" != "$digest" ]; then
+              echo "Refusing to reassign immutable release tag ${release_ref}: ${existing_digest} != ${digest}" >&2
+              exit 1
+            fi
+            echo "Release tag ${release_ref} already points to accepted digest ${digest}"
           else
-            echo "emoji=:rotating_light:" >> "$GITHUB_OUTPUT"
-            echo "text=PRODUCTION deploy FAILED — v${{ needs.build-and-push.outputs.version }} (result=${{ needs.deploy-production.result }})" >> "$GITHUB_OUTPUT"
+            if ! grep -Eiq 'manifest unknown|not found|no such manifest|(^|[^0-9])404([^0-9]|$)' "$inspect_error"; then
+              echo "Unable to prove whether release tag ${release_ref} already exists" >&2
+              cat "$inspect_error" >&2
+              exit 1
+            fi
+            # Re-check registry access to the immutable candidate before
+            # treating a tag-specific 404/not-found response as absence.
+            docker buildx imagetools inspect "$IMAGE_REF" >/dev/null
+            docker buildx imagetools create \
+              --prefer-index=false \
+              --tag "$release_ref" \
+              "$IMAGE_REF"
           fi
 
-      - name: Post to Slack
+          published_manifest="$(
+            docker buildx imagetools inspect \
+              "$release_ref" \
+              --format '{{json .Manifest.Digest}}'
+          )"
+          if ! published_digest="$(
+            jq -er 'select(type == "string" and test("^sha256:[a-f0-9]{64}$"))' \
+              <<< "$published_manifest"
+          )"; then
+            echo "Published release tag did not resolve to one valid sha256 digest" >&2
+            exit 1
+          fi
+          if [ "$published_digest" != "$digest" ]; then
+            echo "Release tag verification failed: ${published_digest} != ${digest}" >&2
+            exit 1
+          fi
+
+  notify:
+    name: Notify Slack
+    needs: [resolve-candidate, deploy-production, promote-release]
+    runs-on: ubuntu-latest
+    if: always()
+    permissions:
+      contents: read
+    env:
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      CANDIDATE_RESULT: ${{ needs.resolve-candidate.result }}
+      DEPLOY_RESULT: ${{ needs.deploy-production.result }}
+      PROMOTION_RESULT: ${{ needs.promote-release.result }}
+      VERSION: ${{ needs.resolve-candidate.outputs.version }}
+      REPOSITORY: ${{ github.repository }}
+      REVISION: ${{ github.sha }}
+      ACTOR: ${{ github.actor }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: Post result
         if: ${{ env.SLACK_WEBHOOK_URL != '' }}
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: |
-          payload=$(cat <<JSON
-          {
-            "text": "${{ steps.msg.outputs.emoji }} *${{ steps.msg.outputs.text }}*\n• repo: ${{ github.repository }}\n• tag: ${{ github.ref_name }}\n• sha: \`${{ github.sha }}\`\n• actor: ${{ github.actor }}\n• run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          }
-          JSON
-          )
-          curl -fsS -X POST -H 'Content-Type: application/json' -d "$payload" "$SLACK_WEBHOOK_URL"
+          set -euo pipefail
+          if [ "$DEPLOY_RESULT" = "success" ]; then
+            verdict="PRODUCTION deploy=${DEPLOY_RESULT}, SemVer promotion=${PROMOTION_RESULT} - v${VERSION}"
+          else
+            verdict="PRODUCTION release did not succeed - candidate=${CANDIDATE_RESULT}, deploy=${DEPLOY_RESULT}, promotion=${PROMOTION_RESULT}, version=${VERSION:-invalid}"
+          fi
+          payload="$(jq -n \
+            --arg text "${verdict}\nrepo: ${REPOSITORY}\nsha: ${REVISION}\nactor: ${ACTOR}\nrun: ${RUN_URL}" \
+            '{text: $text}')"
+          curl -fsS \
+            --connect-timeout 5 \
+            --max-time 15 \
+            --retry 2 \
+            -X POST \
+            -H 'Content-Type: application/json' \
+            -d "$payload" \
+            "$SLACK_WEBHOOK_URL"

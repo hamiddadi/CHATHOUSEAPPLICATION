@@ -3,7 +3,7 @@
  *
  * Mounts the feed, seeds the rooms-list infinite query (key = [...roomKeys.list(), {}])
  * with one live room so the FlatList renders a RoomCard past the skeleton, then
- * exercises the header icons (each navigates), the FAB (CreateRoom), a filter
+ * exercises the release-enabled header icons, the FAB (CreateRoom), a filter
  * pill (local state, no crash) and the card's Join button (navigates to Room).
  */
 import React from 'react';
@@ -61,16 +61,13 @@ describe('RoomFeedScreen', () => {
     expect(getByText('Morning standup')).toBeTruthy();
   });
 
-  it('navigates from each header icon to its destination', () => {
+  it('navigates from each release-enabled header icon and keeps Replays hidden', () => {
     const { navigation, getByLabelText } = mount();
     fireEvent.press(getByLabelText('Explore'));
     expect(navigation.navigate).toHaveBeenCalledWith('Explore');
     fireEvent.press(getByLabelText('Events'));
     expect(navigation.navigate).toHaveBeenCalledWith('Events');
-    fireEvent.press(getByLabelText('Replays'));
-    expect(navigation.navigate).toHaveBeenCalledWith('Replays');
-    fireEvent.press(getByLabelText('Notifications'));
-    expect(navigation.navigate).toHaveBeenCalledWith('Notifications');
+    expect(() => getByLabelText('Replays')).toThrow();
   });
 
   it('navigates to the ActivityFeed from the header activity bell', () => {

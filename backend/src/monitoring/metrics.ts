@@ -2,7 +2,7 @@ import type { NextFunction, Request, RequestHandler, Response } from 'express';
 import { collectDefaultMetrics, Counter, Gauge, Histogram, register } from 'prom-client';
 
 /**
- * Prometheus metrics for the Chathouse API.
+ * Prometheus metrics for the ChatHouse API.
  *
  * All custom and default metrics are namespaced with the `chathouse_` prefix
  * so a single Prometheus instance can scrape several services without label
@@ -64,25 +64,55 @@ export const dbQueryDuration = new Histogram({
   buckets: [0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5],
 });
 
-/**
- * Gauge of BullMQ jobs by queue and state. Update from a periodic collector,
- * e.g. for each queue: bullmqJobsGauge.set({ queue, state: 'waiting' }, count).
- * States typically tracked: waiting, active, completed, failed, delayed.
- */
+/** Gauge of BullMQ jobs, populated by the process-scoped periodic collector. */
 export const bullmqJobsGauge = new Gauge({
   name: 'chathouse_bullmq_jobs',
   help: 'Number of BullMQ jobs by queue and state',
   labelNames: ['queue', 'state'] as const,
 });
 
-/**
- * Optional gauge for the Prisma/PG connection pool. Populate from a periodic
- * collector if you expose pool stats; referenced by the DBPoolSaturated alert.
- */
-export const dbPoolConnectionsGauge = new Gauge({
-  name: 'chathouse_db_pool_connections',
-  help: 'Database connection pool usage by state (active, idle, max)',
-  labelNames: ['state'] as const,
+/** Redis allocator usage reported by `INFO memory`. */
+export const redisMemoryUsedBytesGauge = new Gauge({
+  name: 'chathouse_redis_memory_used_bytes',
+  help: 'Redis used_memory in bytes',
+});
+
+/** Configured Redis maxmemory ceiling; zero means no Redis-level ceiling. */
+export const redisMemoryMaxBytesGauge = new Gauge({
+  name: 'chathouse_redis_memory_max_bytes',
+  help: 'Configured Redis maxmemory in bytes (zero means unlimited)',
+});
+
+/** `used_memory / maxmemory`; zero when Redis has no configured ceiling. */
+export const redisMemoryUsageRatioGauge = new Gauge({
+  name: 'chathouse_redis_memory_usage_ratio',
+  help: 'Ratio of Redis used_memory to maxmemory (zero when maxmemory is unlimited)',
+});
+
+/** Whether the most recent Redis memory telemetry collection succeeded. */
+export const redisMemoryMetricsAvailableGauge = new Gauge({
+  name: 'chathouse_redis_memory_metrics_available',
+  help: '1 when the latest Redis INFO memory collection succeeded, otherwise 0',
+});
+
+/** Durable outbox outcomes, labelled only by the bounded server-owned topic. */
+export const outboxEventsTotal = new Counter({
+  name: 'chathouse_outbox_events_total',
+  help: 'Transactional outbox delivery outcomes',
+  labelNames: ['topic', 'result'] as const,
+});
+
+/** Current outbox rows by lifecycle status. */
+export const outboxBacklogGauge = new Gauge({
+  name: 'chathouse_outbox_backlog',
+  help: 'Current transactional outbox rows by status',
+  labelNames: ['status'] as const,
+});
+
+/** Age of the oldest undelivered event, or zero when the queue is empty. */
+export const outboxOldestPendingAgeSecondsGauge = new Gauge({
+  name: 'chathouse_outbox_oldest_pending_age_seconds',
+  help: 'Age in seconds of the oldest undelivered transactional outbox event',
 });
 
 /**
@@ -90,8 +120,8 @@ export const dbPoolConnectionsGauge = new Gauge({
  * counter. Mount it as early as practical so the timer covers downstream
  * middleware. The route label prefers the matched Express route pattern
  * (req.route?.path) to avoid high-cardinality raw paths (e.g. /api/users/:id
- * instead of /api/users/123); it falls back to req.path when no route matched
- * (404s, static, etc.).
+ * instead of /api/users/123). Unmatched requests use one constant label:
+ * attacker-controlled 404 paths must never create unbounded Prometheus series.
  */
 export const httpMetricsMiddleware: RequestHandler = (
   req: Request,
@@ -102,9 +132,9 @@ export const httpMetricsMiddleware: RequestHandler = (
 
   res.on('finish', () => {
     // baseUrl + route.path reconstructs the mounted pattern (router mounted at
-    // /api/users with route '/:id' -> '/api/users/:id'). Fall back to req.path.
+    // /api/users with route '/:id' -> '/api/users/:id').
     const routePath =
-      typeof req.route?.path === 'string' ? `${req.baseUrl}${req.route.path}` : req.path;
+      typeof req.route?.path === 'string' ? `${req.baseUrl}${req.route.path}` : 'unmatched';
 
     const labels = {
       method: req.method,

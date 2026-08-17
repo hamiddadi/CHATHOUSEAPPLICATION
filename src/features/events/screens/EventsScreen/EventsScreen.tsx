@@ -1,5 +1,5 @@
 import React, { memo, useCallback, useMemo, useState } from 'react';
-import { Alert, FlatList, Modal, Pressable, Text, View } from 'react-native';
+import { Alert, FlatList, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import MaterialIcons from '@react-native-vector-icons/material-icons';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -9,7 +9,7 @@ import type { TFunction } from 'i18next';
 import { Avatar } from '../../../../shared/components/Avatar';
 import { Loader } from '../../../../shared/components/Loader';
 import { EmptyState } from '../../../../shared/components/EmptyState';
-import { colors, spacing } from '../../../../shared/constants/theme';
+import { colors, layout, spacing } from '../../../../shared/constants/theme';
 import type { RoomStackParamList } from '../../../../core/navigation/types';
 import { useAuthStore } from '../../../auth/store/authStore';
 import { ExtCalendarExportButton, eventsApi } from '../../../extensions';
@@ -100,8 +100,8 @@ const EventCard: React.FC<CardProps> = memo(
           accessibilityLabel={`${isMine ? t('events.rsvp') : t('events.notRsvp')} · ${event.title}`}
           className={
             isMine
-              ? 'rounded-pill bg-primary-container py-sm items-center'
-              : 'rounded-pill bg-primary py-sm items-center'
+              ? 'rounded-pill bg-primary-container py-sm min-h-[44px] justify-center items-center'
+              : 'rounded-pill bg-primary py-sm min-h-[44px] justify-center items-center'
           }
         >
           <Text className="text-sm font-body-bold text-primary-on-container">
@@ -124,7 +124,7 @@ const EventCard: React.FC<CardProps> = memo(
                 accessibilityRole="button"
                 accessibilityState={{ disabled }}
                 accessibilityLabel={`${t('extensions.events.reschedule', 'Reprogrammer')} · ${event.title}`}
-                className="rounded-pill bg-overlay-white-5 border border-overlay-white-20 px-xl py-sm items-center"
+                className="rounded-pill bg-overlay-white-5 border border-overlay-white-20 px-xl py-sm min-h-[44px] justify-center items-center"
               >
                 <Text className="text-sm font-body-bold text-ink">
                   {t('extensions.events.reschedule', 'Reprogrammer')}
@@ -136,7 +136,7 @@ const EventCard: React.FC<CardProps> = memo(
                 accessibilityRole="button"
                 accessibilityState={{ disabled }}
                 accessibilityLabel={`${t('extensions.events.cancelEvent', 'Cancel event')} · ${event.title}`}
-                className="rounded-pill bg-overlay-white-5 border border-danger px-xl py-sm items-center"
+                className="rounded-pill bg-overlay-white-5 border border-danger px-xl py-sm min-h-[44px] justify-center items-center"
               >
                 <Text className="text-sm font-body-bold text-danger">
                   {t('extensions.events.cancelEvent', 'Cancel event')}
@@ -289,7 +289,7 @@ export const EventsScreen: React.FC = () => {
         </Pressable>
       </View>
 
-      <View className="flex-row gap-md px-xxl pb-md">
+      <View className="flex-row gap-md px-xxl pb-md" accessibilityRole="tablist">
         <TabPill
           label={t('events.tabs.upcoming')}
           active={tab === 'upcoming'}
@@ -339,13 +339,17 @@ export const EventsScreen: React.FC = () => {
         onRequestClose={() => setReschedulingEvent(null)}
       >
         <Pressable
-          className="flex-1 bg-black/50 justify-end"
+          className="flex-1 bg-black/50 justify-end items-center"
           onPress={() => setReschedulingEvent(null)}
-          accessibilityLabel={t('common.cancel')}
+          accessible={false}
         >
           <Pressable
             className="bg-surface-high rounded-t-3xl p-xxl gap-lg"
             onPress={() => undefined}
+            accessible={false}
+            focusable={false}
+            accessibilityViewIsModal
+            style={[styles.rescheduleSheet, { paddingBottom: insets.bottom + spacing.xxl }]}
           >
             <Text className="text-lg font-display text-ink">
               {t('extensions.events.reschedule', 'Reprogrammer')}
@@ -361,7 +365,8 @@ export const EventsScreen: React.FC = () => {
               disabled={rescheduling}
               accessibilityRole="button"
               accessibilityLabel={t('common.continue')}
-              className="rounded-pill bg-primary py-md items-center"
+              accessibilityState={{ disabled: rescheduling, busy: rescheduling }}
+              className="rounded-pill bg-primary py-md min-h-[44px] justify-center items-center"
             >
               <Text className="text-sm font-body-bold text-primary-on-container">
                 {t('common.continue')}
@@ -381,12 +386,12 @@ const TabPill: React.FC<{ label: string; active: boolean; onPress: () => void }>
 }) => (
   <Pressable
     onPress={onPress}
-    accessibilityRole="button"
+    accessibilityRole="tab"
     accessibilityState={{ selected: active }}
     className={
       active
-        ? 'px-xl py-sm rounded-pill bg-primary'
-        : 'px-xl py-sm rounded-pill bg-overlay-white-5 border border-overlay-white-10'
+        ? 'px-xl py-sm min-h-[44px] justify-center rounded-pill bg-primary'
+        : 'px-xl py-sm min-h-[44px] justify-center rounded-pill bg-overlay-white-5 border border-overlay-white-10'
     }
   >
     <Text
@@ -400,3 +405,11 @@ const TabPill: React.FC<{ label: string; active: boolean; onPress: () => void }>
     </Text>
   </Pressable>
 );
+
+const styles = StyleSheet.create({
+  rescheduleSheet: {
+    width: '100%',
+    maxWidth: layout.maxContentWidth,
+    maxHeight: '90%',
+  },
+});

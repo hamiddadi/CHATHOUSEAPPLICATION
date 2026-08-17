@@ -1,10 +1,7 @@
 import { apiClient } from '../../../shared/services/api/apiClient';
 import type { Envelope } from '../../../shared/types/api';
-
-// Grace window the backend applies before a soft-deleted account is purged
-// (users.service DELETION_GRACE_MS = 30 days). The `me` payload only carries
-// `deletedAt`; the permanent-deletion date is derived from it here.
-const DELETION_GRACE_MS = 30 * 24 * 60 * 60 * 1000;
+import { mapAuthUser } from '../../auth/services/authService';
+import type { AuthSession, AuthUser } from '../../auth/types/auth.types';
 
 export interface DeletionStatus {
   /** True when the account is soft-deleted and inside the grace window. */
@@ -20,6 +17,10 @@ export const privacyService = {
    * Pull the full user-data archive as raw JSON. Returned as a string so
    * the caller can hand it off to the Share sheet or write to disk
    * without going through React Query.
+   *
+   * The API produces bounded, chunked output, but React Native Axios still
+   * buffers `responseType: text` on the device. A future native direct-to-file
+   * transport can remove that client-side limit without changing this API URL.
    */
   async exportMyData(): Promise<string> {
     const res = await apiClient.get<string>('/users/me/export', {
@@ -39,26 +40,38 @@ export const privacyService = {
     return res.data.data;
   },
 
-  async cancelDeletion(): Promise<{ cancelled: true }> {
-    const res = await apiClient.post<Envelope<{ cancelled: true }>>('/users/me/cancel-deletion');
-    return res.data.data;
+  async cancelDeletion(): Promise<{
+    cancelled: true;
+    session: AuthSession;
+    user: AuthUser;
+  }> {
+    const res = await apiClient.post<
+      Envelope<{
+        cancelled: true;
+        session: AuthSession;
+        user: Parameters<typeof mapAuthUser>[0];
+      }>
+    >('/users/me/cancel-deletion');
+    return { ...res.data.data, user: mapAuthUser(res.data.data.user) };
   },
 
   /**
    * Reads the authoritative `/users/me` payload to tell whether the signed-in
-   * account is in the 30-day RGPD deletion grace window. A soft-deleted account
-   * still authenticates (auth.middleware lets it through precisely so it can
-   * self-cancel), so the client checks `deletedAt` to offer restoration.
+   * account is in its configured deletion grace window. This call is one of
+   * the narrow surfaces accepted by the signed recovery-only session.
    */
   async getDeletionStatus(): Promise<DeletionStatus> {
-    const res = await apiClient.get<Envelope<{ deletedAt?: string | null }>>('/users/me');
+    const res = await apiClient.get<
+      Envelope<{
+        deletedAt?: string | null;
+        permanentDeletionAt?: string | null;
+      }>
+    >('/users/me');
     const deletedAt = res.data.data.deletedAt ?? null;
     if (!deletedAt) {
       return { inGracePeriod: false, deletedAt: null, permanentDeletionAt: null };
     }
-    const permanentDeletionAt = new Date(
-      new Date(deletedAt).getTime() + DELETION_GRACE_MS,
-    ).toISOString();
+    const permanentDeletionAt = res.data.data.permanentDeletionAt ?? null;
     return { inGracePeriod: true, deletedAt, permanentDeletionAt };
   },
 };

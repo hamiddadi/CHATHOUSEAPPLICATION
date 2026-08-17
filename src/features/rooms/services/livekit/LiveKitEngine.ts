@@ -208,11 +208,10 @@ export const disconnectLiveKitRoom = (room: LiveKitRoom): void => {
  * Mute or unmute the local microphone.
  */
 export const setLiveKitMuted = async (room: LiveKitRoom, muted: boolean): Promise<void> => {
-  try {
-    await room.localParticipant.setMicrophoneEnabled(!muted);
-  } catch {
-    /* noop — room may not be connected */
-  }
+  // Publication failures are user-visible. In particular, an iOS
+  // NotAllowedError must reach roomAudioService so it can display the
+  // microphone-denied recovery UI instead of pretending that capture works.
+  await room.localParticipant.setMicrophoneEnabled(!muted);
 };
 
 /**

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Single-color speech-bubble silhouette for Android themed icons. -->
+    <path
+        android:fillColor="#000000"
+        android:fillType="evenOdd"
+        android:pathData="M40,28 H68 C77,28 84,35 84,44 V62 C84,71 77,78 68,78 H52 L40,88 V78 C31,78 24,71 24,62 V44 C24,35 31,28 40,28 Z M38,53 A4,4 0,1 0,46 53 A4,4 0,1 0,38 53 Z M50,53 A4,4 0,1 0,58 53 A4,4 0,1 0,50 53 Z M62,53 A4,4 0,1 0,70 53 A4,4 0,1 0,62 53 Z" />
+</vector>

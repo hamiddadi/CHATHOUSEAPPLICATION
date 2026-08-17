@@ -2,9 +2,10 @@
 #
 # test_backup.sh — CI-friendly smoke test for the backup pipeline.
 #
-# Runs a real pg_dump against a (throwaway) database, gzips it to a temp file,
-# asserts the file exists and is non-empty, then cleans up. Exits 0 on success,
-# 1 on failure. Intended to run in CI against a disposable Postgres instance.
+# Runs the production backup script against a disposable CI database, then
+# validates the generated gzip artifact. This intentionally calls pg_backup.sh
+# instead of duplicating its pipeline, so the smoke test cannot drift away from
+# the script deployed to operators.
 #
 # Uses the same env vars as pg_backup.sh.
 #
@@ -14,6 +15,9 @@ log() {
   printf '%s [test_backup] %s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$*"
 }
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
+BACKUP_SCRIPT="${SCRIPT_DIR}/pg_backup.sh"
+
 POSTGRES_HOST="${POSTGRES_HOST:-localhost}"
 POSTGRES_PORT="${POSTGRES_PORT:-5432}"
 POSTGRES_DB="${POSTGRES_DB:-chathouse}"
@@ -22,59 +26,55 @@ POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-chathouse}"
 
 export PGPASSWORD="${POSTGRES_PASSWORD}"
 
-TMP_FILE="$(mktemp "${TMPDIR:-/tmp}/chathouse_test_backup_XXXXXX.sql.gz")"
+TEST_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/chathouse_test_backup_XXXXXX")"
+TEST_BACKUP_DIR="${TEST_ROOT}/backups"
+mkdir -p "$TEST_BACKUP_DIR"
 
 cleanup() {
-  if [ -f "${TMP_FILE}" ]; then
-    rm -f "${TMP_FILE}"
-    log "Cleaned up temp file ${TMP_FILE}"
-  fi
+  case "$TEST_ROOT" in
+    "${TMPDIR:-/tmp}"/chathouse_test_backup_*) rm -rf -- "$TEST_ROOT" ;;
+    *) log "Refusing to remove unexpected test path: ${TEST_ROOT}" ;;
+  esac
 }
 trap cleanup EXIT
 
-log "Dumping '${POSTGRES_DB}' on ${POSTGRES_HOST}:${POSTGRES_PORT} to ${TMP_FILE}"
+log "Running pg_backup.sh for '${POSTGRES_DB}' on ${POSTGRES_HOST}:${POSTGRES_PORT}"
+POSTGRES_HOST="$POSTGRES_HOST" \
+POSTGRES_PORT="$POSTGRES_PORT" \
+POSTGRES_DB="$POSTGRES_DB" \
+POSTGRES_USER="$POSTGRES_USER" \
+POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
+BACKUP_DIR="$TEST_BACKUP_DIR" \
+BACKUP_RETENTION_DAYS=7 \
+S3_BACKUP_BUCKET='' \
+  bash "$BACKUP_SCRIPT"
 
-set +e
-pg_dump \
-  --host="${POSTGRES_HOST}" \
-  --port="${POSTGRES_PORT}" \
-  --username="${POSTGRES_USER}" \
-  --dbname="${POSTGRES_DB}" \
-  --no-owner \
-  --no-privileges \
-  | gzip -9 > "${TMP_FILE}"
-PIPE_STATUS=("${PIPESTATUS[@]}")
-set -e
-
-DUMP_RC="${PIPE_STATUS[0]}"
-GZIP_RC="${PIPE_STATUS[1]:-0}"
-
-if [ "${DUMP_RC}" -ne 0 ]; then
-  log "FAIL: pg_dump exited ${DUMP_RC}"
+mapfile -t BACKUP_FILES < <(
+  find "$TEST_BACKUP_DIR" -maxdepth 1 -type f -name 'backup_*.sql.gz' -print
+)
+if [ "${#BACKUP_FILES[@]}" -ne 1 ]; then
+  log "FAIL: expected exactly one backup artifact, found ${#BACKUP_FILES[@]}"
   exit 1
 fi
-if [ "${GZIP_RC}" -ne 0 ]; then
-  log "FAIL: gzip exited ${GZIP_RC}"
-  exit 1
-fi
+BACKUP_FILE="${BACKUP_FILES[0]}"
 
 # Assert: file exists.
-if [ ! -f "${TMP_FILE}" ]; then
-  log "FAIL: backup file does not exist: ${TMP_FILE}"
+if [ ! -f "${BACKUP_FILE}" ]; then
+  log "FAIL: backup file does not exist: ${BACKUP_FILE}"
   exit 1
 fi
 
 # Assert: size > 0.
-if [ ! -s "${TMP_FILE}" ]; then
-  log "FAIL: backup file is empty: ${TMP_FILE}"
+if [ ! -s "${BACKUP_FILE}" ]; then
+  log "FAIL: backup file is empty: ${BACKUP_FILE}"
   exit 1
 fi
 
-FILE_SIZE_BYTES="$(wc -c < "${TMP_FILE}" | tr -d '[:space:]')"
+FILE_SIZE_BYTES="$(wc -c < "${BACKUP_FILE}" | tr -d '[:space:]')"
 log "PASS: backup file exists and is non-empty (${FILE_SIZE_BYTES} bytes)."
 
-# Optional deeper check: ensure the gzip stream is valid.
-if gzip -t "${TMP_FILE}" 2>/dev/null; then
+# Ensure the generated gzip stream is valid.
+if gzip -t "${BACKUP_FILE}" 2>/dev/null; then
   log "PASS: gzip integrity check ok."
 else
   log "FAIL: gzip integrity check failed."

@@ -1,6 +1,11 @@
 import { getStateFromPath } from '@react-navigation/native';
 import type { LinkingOptions } from '@react-navigation/native';
+import { Linking } from 'react-native';
 import { useInviteStore } from '../../features/extensions/store/inviteStore';
+import {
+  getInitialNotificationDeepLink,
+  subscribeToNotificationDeepLinks,
+} from '../../features/notifications/services/notificationOpenService';
 import type { RootStackParamList } from './types';
 
 // Public web host for shareable deep links (profile / room / house). This is
@@ -56,6 +61,16 @@ const sanitizeInvitePath = (path: string): string =>
 
 export const linking: LinkingOptions<RootStackParamList> = {
   prefixes: ['chathouse://', SHARE_BASE_URL],
+  getInitialURL: async () =>
+    (await Linking.getInitialURL()) ?? (await getInitialNotificationDeepLink()),
+  subscribe: listener => {
+    const linkingSubscription = Linking.addEventListener('url', ({ url }) => listener(url));
+    const unsubscribeNotifications = subscribeToNotificationDeepLinks(listener);
+    return () => {
+      linkingSubscription.remove();
+      unsubscribeNotifications();
+    };
+  },
   // Normalize/sanitize the invite token before the navigator parses params.
   getStateFromPath: (path, options) => {
     // A house-invite link (`house/:houseId/invite/:token`) must reach
@@ -105,6 +120,8 @@ export const linking: LinkingOptions<RootStackParamList> = {
               CreateHouse: 'house/new',
               HouseInvitation: 'house/:houseId/invite/:inviteToken?',
               InviteMember: 'house/:houseId/invite-member',
+              Notifications: 'notifications',
+              FollowRequests: 'notifications/follow-requests',
             },
           },
           MapsTab: { screens: { Maps: 'map' } },
