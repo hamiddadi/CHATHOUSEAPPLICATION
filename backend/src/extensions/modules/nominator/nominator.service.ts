@@ -211,6 +211,7 @@ export const nominatorService = {
         data: { kind: 'nominator_accepted', inviteeId: newUserId },
         targetId: newUserId,
         targetType: 'user',
+        dedupeKey: `nominator-accepted:${inviterId}:${newUserId}`,
       });
     } catch {
       /* best-effort */

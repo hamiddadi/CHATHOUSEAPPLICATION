@@ -6,6 +6,9 @@ import { blacklistKey, SUSPENSION_CACHE_TTL_SECONDS } from '../middlewares/auth.
 
 export interface AuthedSocketData {
   userId: string;
+  impersonatorId?: string;
+  delegatedTokenJti?: string;
+  tokenExpiresAt?: number;
 }
 
 /**
@@ -38,8 +41,30 @@ export const socketAuth = async (socket: Socket, next: (err?: Error) => void): P
 
     // Use the SAME jti (or legacy hash) key as HTTP logout.
     const claims = verifyAccessToken(token);
+    // Recovery credentials are intentionally REST-only and may never open a
+    // normal realtime session, even if the account is restored milliseconds
+    // later. Explicit restoration rotates to a new active bearer.
+    if (claims.scope === 'account_recovery') {
+      return next(new Error('ACCOUNT_RESTORATION_REQUIRED'));
+    }
     const revoked = await redis.get(blacklistKey(token, claims.jti));
     if (revoked) return next(new Error('TOKEN_REVOKED'));
+
+    if (claims.act) {
+      const actor = await prisma.user.findUnique({
+        where: { id: claims.act.sub },
+        select: { appRole: true, suspendedUntil: true, deletedAt: true, tokenVersion: true },
+      });
+      if (
+        !actor ||
+        actor.deletedAt ||
+        actor.appRole !== 'SUPER_ADMIN' ||
+        (actor.suspendedUntil !== null && actor.suspendedUntil > new Date()) ||
+        actor.tokenVersion !== claims.act.tv
+      ) {
+        return next(new Error('TOKEN_REVOKED'));
+      }
+    }
 
     // Mirror HTTP requireAuth (auth.middleware.ts) exactly: enforce suspension
     // AND AUTH-03 token revocation (tokenVersion) over realtime too, sharing the
@@ -59,7 +84,7 @@ export const socketAuth = async (socket: Socket, next: (err?: Error) => void): P
         ? Number(cached.slice(2))
         : null;
     if (cachedTv !== null) {
-      if (claims.tv !== undefined && claims.tv !== cachedTv) {
+      if (claims.tv !== cachedTv) {
         return next(new Error('TOKEN_REVOKED'));
       }
     } else {
@@ -72,7 +97,7 @@ export const socketAuth = async (socket: Socket, next: (err?: Error) => void): P
         await redis.setEx(cacheKey, SUSPENSION_CACHE_TTL_SECONDS, 'd');
         return next(new Error('ACCOUNT_DELETED'));
       }
-      if (claims.tv !== undefined && claims.tv !== user.tokenVersion) {
+      if (claims.tv !== user.tokenVersion) {
         return next(new Error('TOKEN_REVOKED'));
       }
       const now = new Date();
@@ -91,7 +116,20 @@ export const socketAuth = async (socket: Socket, next: (err?: Error) => void): P
       if (isSuspended) return next(new Error('ACCOUNT_SUSPENDED'));
     }
 
-    (socket.data as AuthedSocketData).userId = claims.sub;
+    const data = socket.data as AuthedSocketData;
+    data.userId = claims.sub;
+    if (claims.act) {
+      // Delegated sockets must be individually addressable and must never
+      // outlive their signed bearer. Newly issued impersonation tokens always
+      // carry both claims; fail closed if a malformed/legacy delegated token
+      // omits either one.
+      if (!claims.jti || typeof claims.exp !== 'number') {
+        return next(new Error('UNAUTHORIZED'));
+      }
+      data.impersonatorId = claims.act.sub;
+      data.delegatedTokenJti = claims.jti;
+      data.tokenExpiresAt = claims.exp;
+    }
     next();
   } catch {
     next(new Error('UNAUTHORIZED'));

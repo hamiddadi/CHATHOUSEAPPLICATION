@@ -54,7 +54,8 @@ environment:
     - name: STAGING_USER # SSH user on the staging host
     - name: STAGING_SSH_KEY # private SSH key (PEM) for STAGING_USER
     - name: STAGING_HOST_FINGERPRINT # pinned SSH host key (SHA256:...)
-    - name: SLACK_WEBHOOK_URL # deploy notifications channel webhook
+    # SLACK_WEBHOOK_URL is optional and must be a repository/organization Actions
+    # secret: the notification job deliberately does not enter this Environment.
     # GITHUB_TOKEN is auto-provided to the workflow for GHCR push — not set here.
 
   # ── Environment VARIABLES (non-secret) ────────────────────────────────────
@@ -77,8 +78,55 @@ environment:
 #   • protection_rules.required_reviewers: [<at least one on-call/lead>]
 #   • protection_rules.prevent_self_review: true
 #   • protection_rules.allow_admins_to_bypass: false
-#   • deployment_branch_policy: tags only (custom policy allowing v*.*.*)
-#   • secrets: PROD_HOST, PROD_USER, PROD_SSH_KEY, PROD_HOST_FINGERPRINT,
-#              SLACK_WEBHOOK_URL
-# Referenced by `.github/workflows/cd-production.yml` (environment: production).
+#   • deployment_branch_policy: custom patterns allowing BOTH:
+#       - main
+#       - 'v*.*.*'
+#     `main` is required for the protected mobile-signing, Go-Live preflight
+#     and emergency rollback workflows. The tag pattern is required for normal
+#     production CD. Allowing `main` here does not authorize a backend release:
+#     `cd-production.yml` still rejects every ref that is not an exact stable
+#     `vMAJOR.MINOR.PATCH` tag before resolving the staging-tested digest.
+#   • environment_secrets:
+#       - PROD_HOST
+#       - PROD_USER
+#       - PROD_SSH_KEY
+#       - PROD_HOST_FINGERPRINT
+#       - MOBILE_PRODUCTION_ENV_BASE64
+#       - BACKEND_PRODUCTION_ENV_BASE64
+#       - FIREBASE_ANDROID_CONFIG_BASE64
+#       - FIREBASE_IOS_CONFIG_BASE64
+#       - ANDROID_UPLOAD_KEYSTORE_BASE64
+#       - ANDROID_UPLOAD_STORE_PASSWORD
+#       - ANDROID_UPLOAD_KEY_ALIAS
+#       - ANDROID_UPLOAD_KEY_PASSWORD
+#       - IOS_DISTRIBUTION_CERTIFICATE_BASE64
+#       - IOS_DISTRIBUTION_CERTIFICATE_PASSWORD
+#       - IOS_APPSTORE_PROVISIONING_PROFILE_BASE64
+#       - METRICS_TOKEN_BASE64
+#   • environment_variables:
+#       - DEPLOY_DIR
+#       - BASE_URL
+#       - API_SERVICE
+#       - PUBLIC_RELEASE_ENABLED
+#       - IOS_TEAM_ID
+#       - ANDROID_APP_SIGNING_SHA256
+#       - GO_LIVE_STORE_EVIDENCE_BASE64
+#       - API_HEALTH_URL
+#       - SUPPORT_URL
+#       - PRIVACY_URL
+#       - TERMS_URL
+#       - ACCOUNT_DELETION_URL
+#       - APP_URL
+#       - LIVEKIT_HTTPS_URL
+#   • repository_or_organization_secrets:
+#       - SLACK_WEBHOOK_URL
+#     The CD notification job has no `environment: production`, so an
+#     Environment-only webhook would be invisible and notifications would be
+#     skipped. This webhook is optional; scope it at repository/organization
+#     level when notifications are required.
+#   • automatic_secrets:
+#       - GITHUB_TOKEN
+#     GitHub injects this token; never create or copy it manually.
+# Referenced by `.github/workflows/cd-production.yml`, `rollback.yml`,
+# `mobile-store-artifacts.yml` and `go-live-preflight.yml`.
 # ─────────────────────────────────────────────────────────────────────────────

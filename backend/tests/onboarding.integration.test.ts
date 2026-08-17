@@ -13,6 +13,8 @@ const { mediaService } =
   require('../src/modules/media/media.service') as typeof import('../src/modules/media/media.service');
 const { connectRedis, disconnectRedis } =
   require('../src/config/redis') as typeof import('../src/config/redis');
+const { contactsService } =
+  require('../src/extensions/modules/contacts/contacts.service') as typeof import('../src/extensions/modules/contacts/contacts.service');
 /* eslint-enable @typescript-eslint/no-require-imports */
 
 const rand = () => Math.random().toString(36).slice(2, 10);
@@ -57,6 +59,86 @@ describe('Onboarding integration — interests + completion flag', () => {
     expect(me.status).toBe(200);
     expect(me.body.data.hasCompletedOnboarding).toBe(false);
     expect(me.body.data.interests).toEqual([]);
+  });
+
+  it('normalizes username writes and treats case-only variants as unavailable', async () => {
+    const owner = await registerUser(app);
+    const requester = await registerUser(app);
+    createdUserIds.push(owner.id, requester.id);
+    const mixed = `Case_${rand()}`;
+
+    const set = await request(app)
+      .patch('/api/users/me/username')
+      .set('Authorization', `Bearer ${owner.token}`)
+      .send({ username: mixed });
+    expect(set.status).toBe(200);
+    expect(set.body.data.username).toBe(mixed.toLowerCase());
+
+    const check = await request(app)
+      .get(`/api/users/check-username?q=${encodeURIComponent(mixed.toUpperCase())}`)
+      .set('Authorization', `Bearer ${requester.token}`);
+    expect(check.status).toBe(200);
+    expect(check.body.data.available).toBe(false);
+  });
+
+  it('keeps contact discovery opt-in off and validates explicit privacy updates', async () => {
+    const u = await registerUser(app);
+    createdUserIds.push(u.id);
+
+    const initial = await request(app)
+      .get('/api/users/me/contact-discovery')
+      .set('Authorization', `Bearer ${u.token}`);
+    expect(initial.status).toBe(200);
+    expect(initial.body.data.allowContactDiscovery).toBe(false);
+
+    const enabled = await request(app)
+      .patch('/api/users/me/contact-discovery')
+      .set('Authorization', `Bearer ${u.token}`)
+      .send({ allowContactDiscovery: true });
+    expect(enabled.status).toBe(200);
+    expect(enabled.body.data.allowContactDiscovery).toBe(true);
+
+    const ambiguous = await request(app)
+      .patch('/api/users/me/contact-discovery')
+      .set('Authorization', `Bearer ${u.token}`)
+      .send({ allowContactDiscovery: 'false' });
+    expect(ambiguous.status).toBe(400);
+    expect(ambiguous.body.error.code).toBe('VALIDATION_001');
+  });
+
+  it('matches only phone-bound users who explicitly opted into discovery', async () => {
+    const requester = await registerUser(app);
+    const visible = await registerUser(app);
+    const hidden = await registerUser(app);
+    createdUserIds.push(requester.id, visible.id, hidden.id);
+    const phoneSuffix = Math.floor(Math.random() * 1_000_000)
+      .toString()
+      .padStart(6, '0');
+    const requesterPhone = `+1554${phoneSuffix}`;
+    const visiblePhone = `+1555${phoneSuffix}`;
+    const hiddenPhone = `+1556${phoneSuffix}`;
+    await Promise.all([
+      prisma.user.update({
+        where: { id: requester.id },
+        data: { phoneNumber: requesterPhone, hasCompletedOnboarding: true },
+      }),
+      prisma.user.update({
+        where: { id: visible.id },
+        data: { phoneNumber: visiblePhone, allowContactDiscovery: true },
+      }),
+      prisma.user.update({
+        where: { id: hidden.id },
+        data: { phoneNumber: hiddenPhone, allowContactDiscovery: false },
+      }),
+    ]);
+
+    const matches = (await contactsService.match(requester.id, [
+      visiblePhone,
+      hiddenPhone,
+    ])) as Array<{
+      id: string;
+    }>;
+    expect(matches.map(match => match.id)).toEqual([visible.id]);
   });
 
   it('PATCH /users/me/interests lowercases + dedupes + caps at 10', async () => {

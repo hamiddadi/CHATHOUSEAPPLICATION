@@ -15,10 +15,11 @@ import {
 import MaterialIcons from '@react-native-vector-icons/material-icons';
 import { useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { chatmodApi } from '../../../extensions';
 import { Avatar } from '../../../../shared/components/Avatar';
 import { ContentReportSheet } from '../../../../shared/components/ContentReportSheet';
-import { colors, spacing, withAlpha } from '../../../../shared/constants/theme';
+import { colors, layout, spacing, withAlpha } from '../../../../shared/constants/theme';
 import { getSocket } from '../../../../shared/services/realtime/socketClient';
 import type { ContentReportReason } from '../../../../shared/types/moderation';
 import { errorMessage } from '../../../../shared/utils/errorMessage';
@@ -102,6 +103,7 @@ export const RoomChatSidebar: React.FC<RoomChatSidebarProps> = memo(
     canModerate = false,
   }) => {
     const { t } = useTranslation();
+    const insets = useSafeAreaInsets();
     // Can the viewer post? Chat must be on, and either open to all or the viewer
     // is a host/moderator. When they can't, we replace the composer with a note.
     const canPost = chatEnabled && (chatVisibility !== 'MODS_ONLY' || canModerate);
@@ -343,9 +345,10 @@ export const RoomChatSidebar: React.FC<RoomChatSidebarProps> = memo(
         <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
           <Pressable style={styles.backdrop} onPress={onClose} accessible={false}>
             <Pressable
-              style={styles.sheet}
+              style={[styles.sheet, { paddingBottom: insets.bottom }]}
               onPress={() => undefined}
               accessible={false}
+              focusable={false}
               accessibilityViewIsModal
               importantForAccessibility="yes"
             >
@@ -362,6 +365,7 @@ export const RoomChatSidebar: React.FC<RoomChatSidebarProps> = memo(
                     hitSlop={8}
                     accessibilityRole="button"
                     accessibilityLabel={t('roomChat.closeA11y')}
+                    style={styles.closeButton}
                   >
                     <MaterialIcons name="close" size={22} color={colors.text} />
                   </Pressable>
@@ -397,6 +401,7 @@ export const RoomChatSidebar: React.FC<RoomChatSidebarProps> = memo(
                       accessibilityRole="button"
                       accessibilityLabel={t('roomChat.cancelReplyA11y')}
                       hitSlop={8}
+                      style={styles.replyCancelButton}
                     >
                       <MaterialIcons name="close" size={16} color={colors.textMuted} />
                     </Pressable>
@@ -463,8 +468,15 @@ export const RoomChatSidebar: React.FC<RoomChatSidebarProps> = memo(
 RoomChatSidebar.displayName = 'RoomChatSidebar';
 
 const styles = StyleSheet.create({
-  backdrop: { flex: 1, backgroundColor: colors.modalBackdrop, justifyContent: 'flex-end' },
+  backdrop: {
+    flex: 1,
+    backgroundColor: colors.modalBackdrop,
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+  },
   sheet: {
+    width: '100%',
+    maxWidth: layout.maxContentWidth,
     backgroundColor: colors.surfaceHigh,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
@@ -481,6 +493,7 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.glassStrong,
   },
   title: { color: colors.text, fontSize: 16, fontWeight: '700' },
+  closeButton: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   listContent: { padding: spacing.lg, gap: spacing.sm },
   row: {
     flexDirection: 'row',
@@ -571,4 +584,5 @@ const styles = StyleSheet.create({
   replyBannerLabel: { color: colors.primary, fontSize: 11, fontWeight: '700' },
   replyBannerSnippet: { color: colors.textMuted, fontSize: 12, marginTop: 2 },
   replyBannerFlex: { flex: 1 },
+  replyCancelButton: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
 });

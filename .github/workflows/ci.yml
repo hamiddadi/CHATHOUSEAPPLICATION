@@ -30,7 +30,7 @@ jobs:
     name: Source - exact checked-out revision
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 0
       - name: Prove that CI validates the event SHA
@@ -58,7 +58,7 @@ jobs:
     name: Workflows - actionlint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Validate GitHub Actions workflows with a verified actionlint binary
         shell: bash
         run: |
@@ -71,17 +71,35 @@ jobs:
           mkdir -p "$install_dir"
           tar -xzf "$archive" -C "$install_dir" actionlint
           "$install_dir/actionlint" -color
+      - name: Lint every operational shell script
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -d '' shell_scripts < <(
+            find scripts backend/scripts docker -type f -name '*.sh' -print0
+          )
+          if [ "${#shell_scripts[@]}" -eq 0 ]; then
+            echo "No shell scripts were discovered" >&2
+            exit 1
+          fi
+          shellcheck --severity=warning "${shell_scripts[@]}"
+      - name: Reject mutable third-party action references
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test scripts/verify-action-pins.test.mjs
+          node scripts/verify-action-pins.mjs .github/workflows
 
   go-live-preflight-contract:
     name: Go-Live preflight - contract tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: ${{ env.NODE_VERSION }}
       - name: Test the dependency-free preflight and native CI harness
-        run: node --test scripts/go-live-preflight.test.mjs scripts/mobile-maestro-flows.test.mjs scripts/run-ios-maestro.test.mjs
+        run: node --test scripts/ci-guardrails.test.mjs scripts/go-live-preflight.test.mjs scripts/mobile-maestro-flows.test.mjs scripts/run-ios-maestro.test.mjs
       - name: Validate this exact checkout through the shared preflight
         env:
           GO_LIVE_EXPECTED_SHA: ${{ github.sha }}
@@ -92,21 +110,23 @@ jobs:
     name: Frontend — Lint + Prettier
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
       - run: npm ci
       - run: npm run lint -- --max-warnings 0
+      - run: npm run stylelint
+      - run: npm run test:dark-theme-contract
       - run: npm run format:check
 
   frontend-typecheck:
     name: Frontend — tsc
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
@@ -117,15 +137,15 @@ jobs:
     name: Frontend — Jest
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
       - run: npm ci
       - run: npm run test:ci
       - if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: frontend-coverage
           path: coverage/
@@ -136,16 +156,16 @@ jobs:
     name: Android — Build, lint + Maestro E2E
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
-      - uses: actions/setup-java@v5
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: temurin
           java-version: '17'
-      - uses: gradle/actions/setup-gradle@v5
+      - uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5
       - name: Test the fail-closed Android signature verifier
         run: node --test scripts/verify-android-jar-signature.test.mjs
       - run: npm ci
@@ -196,7 +216,7 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
       - name: Run smoke flow on an Android emulator
-        uses: reactivecircus/android-emulator-runner@v2
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2
         with:
           api-level: 35
           arch: x86_64
@@ -208,7 +228,7 @@ jobs:
           script: bash scripts/run-android-maestro.sh
       - name: Upload Android E2E diagnostics
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: android-maestro
           path: e2e-artifacts/android/
@@ -221,7 +241,7 @@ jobs:
     env:
       SENTRY_DISABLE_AUTO_UPLOAD: 'true'
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Require an App-Store-compatible Xcode toolchain
         shell: bash
         run: |
@@ -231,11 +251,11 @@ jobs:
             echo "Xcode 26 or newer is required for App Store submissions." >&2
             exit 1
           fi
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
-      - uses: ruby/setup-ruby@v1
+      - uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1
         with:
           ruby-version: '3.3'
       - run: npm ci
@@ -303,7 +323,7 @@ jobs:
         run: bash scripts/run-ios-maestro.sh
       - name: Upload iOS E2E diagnostics
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: ios-maestro
           path: e2e-artifacts/ios/
@@ -318,8 +338,8 @@ jobs:
       run:
         working-directory: backend
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
@@ -334,8 +354,8 @@ jobs:
       run:
         working-directory: backend
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
@@ -343,11 +363,13 @@ jobs:
       - run: npm ci
       - run: npx prisma generate
       - run: npm run typecheck
-      - name: Verify sourced Postgres bootstrap isolation
+      - name: Verify deployment and restore shell contracts
         run: |
           sh scripts/deploy/test-bootstrap-app-role-source.sh
+          bash scripts/deploy/test-state-contract-deploy-guard.sh
           bash scripts/deploy/test-livekit-deploy-guard.sh
           sh scripts/deploy/test-database-deploy-contract.sh
+          bash scripts/backup/test_pg_restore.sh
 
   backend-test:
     name: Backend — Jest (integration)
@@ -387,8 +409,8 @@ jobs:
       JWT_REFRESH_SECRET: ci_refresh_secret_0123456789abcdef012
       NODE_ENV: test
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
@@ -402,6 +424,14 @@ jobs:
         run: npx prisma migrate deploy
       - name: Assert migration/schema parity
         run: npx prisma migrate diff --from-url "$DATABASE_URL" --to-schema-datamodel prisma/schema.prisma --exit-code
+      - name: Exercise the real backup pipeline against CI Postgres
+        env:
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: '5433'
+          POSTGRES_DB: chathouse_test
+          POSTGRES_USER: chathouse
+          POSTGRES_PASSWORD: chathouse
+        run: bash scripts/backup/test_backup.sh
       - name: Bootstrap restricted CI application role
         env:
           POSTGRES_CONTAINER_ID: ${{ job.services.postgres.id }}
@@ -432,18 +462,74 @@ jobs:
         run: npx jest auth.coverage --runInBand -t 'rate limiter'
       - name: Upload backend coverage
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: backend-coverage
           path: backend/coverage/
           if-no-files-found: warn
           retention-days: 7
 
+  backend-seeded-smoke:
+    name: Backend — deterministic seeded API + Socket smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: chathouse
+          POSTGRES_PASSWORD: chathouse
+          POSTGRES_DB: chathouse_seed_test
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd="pg_isready -U chathouse -d chathouse_seed_test"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=10
+    env:
+      DATABASE_URL: postgresql://chathouse:chathouse@localhost:5433/chathouse_seed_test?schema=public
+      REDIS_URL: redis://localhost:6379
+      JWT_ACCESS_SECRET: ci_access_secret_0123456789abcdef0123
+      JWT_REFRESH_SECRET: ci_refresh_secret_0123456789abcdef012
+      NODE_ENV: test
+      RATE_LIMIT_MAX: '100000'
+      AUTH_RATE_LIMIT_MAX: '1000'
+      SEED_RANDOM_SEED: '20260815'
+      EXTENSIONS_ENABLED: 'false'
+      MEDIASOUP_ENABLED: 'false'
+      ROOM_RECORDING_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - run: npx prisma generate
+      - name: Apply migrations to the isolated seeded database
+        run: npx prisma migrate deploy
+      - name: Seed deterministically and execute both seeded smoke suites
+        run: npm run test:seeded -- --testTimeout=60000
+
   monitoring-config:
     name: Monitoring - render and validate
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Render Alertmanager and validate all monitoring configs
         run: |
           set -euo pipefail
@@ -453,6 +539,11 @@ jobs:
           printf '%s' 'https://hooks.slack.test/services/test/test/test' > "$secret_dir/slack"
           printf '%s' 'ci-smtp-password' > "$secret_dir/smtp"
           printf '%s' 'ci-metrics-token-at-least-32-bytes-long' > "$secret_dir/metrics"
+
+          docker compose -f backend/docker-compose.yml config --quiet
+          docker compose -f backend/docker-compose.test.yml config --quiet
+          BACKEND_HOST=127.0.0.1 \
+            docker compose -f docker-compose.apk.yml config --quiet
 
           METRICS_TOKEN_SECRET_FILE="$secret_dir/metrics" \
           GF_SECURITY_ADMIN_PASSWORD=ci-strong-password \
@@ -547,8 +638,8 @@ jobs:
       MEDIASOUP_ENABLED: 'false'
       ROOM_RECORDING_ENABLED: 'false'
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
@@ -597,7 +688,7 @@ jobs:
             tests/load/k6-smoke.js
       - name: Upload load diagnostics
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: backend-load
           path: |
@@ -611,7 +702,7 @@ jobs:
     name: Secrets — gitleaks
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           # Full history so gitleaks can scan every commit, not just HEAD.
           fetch-depth: 0
@@ -640,8 +731,8 @@ jobs:
       matrix:
         workdir: ['.', 'backend']
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: ${{ env.NODE_VERSION }}
       # Build and test tooling runs arbitrary repository inputs in CI, so

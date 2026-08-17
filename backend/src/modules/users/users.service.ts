@@ -1,4 +1,5 @@
-import { MediaKind, type Prisma } from '@prisma/client';
+import { randomUUID } from 'node:crypto';
+import { MediaKind, Prisma } from '@prisma/client';
 import { prisma, runWriteWithRetry } from '../../config/database';
 import { env } from '../../config/env';
 import { logger } from '../../config/logger';
@@ -17,10 +18,13 @@ import {
   scheduleStripeCancellation,
 } from '../../extensions/modules/payments/stripe.gdpr';
 import { scheduleBackgroundTask } from '../../utils/backgroundTasks';
+import { REFRESH_TTL_DAYS } from '../../utils/issueTokenPair';
+import { signAccessToken, signRefreshToken } from '../../utils/jwt';
 import { legalAcceptanceSelect, legalAcceptanceStatus } from '../auth/legal-acceptance';
 import { locationsForViewer } from './location-privacy';
 import type {
   CompleteOnboardingInput,
+  ContactDiscoveryInput,
   InterestsInput,
   LocationInput,
   NotifPrefsInput,
@@ -54,6 +58,7 @@ const meSelect = {
   email: true,
   phoneNumber: true,
   isVisible: true,
+  allowContactDiscovery: true,
   allowWaves: true,
   isPrivateAccount: true,
   dmPrivacy: true,
@@ -97,6 +102,7 @@ export const usersService = {
     if (!me) throw new AppError('USER_001');
     return {
       ...me,
+      accountState: me.deletedAt ? ('PENDING_DELETION' as const) : ('ACTIVE' as const),
       permanentDeletionAt: me.deletedAt
         ? new Date(me.deletedAt.getTime() + DELETION_GRACE_MS).toISOString()
         : null,
@@ -110,7 +116,11 @@ export const usersService = {
     // An empty string clears the handle (column is nullable VarChar(50)).
     const data: Prisma.UserUpdateInput = { ...input };
     if (input.avatarUrl !== undefined) {
-      await mediaService.assertOwnedMediaUrl(userId, input.avatarUrl, MediaKind.AVATAR);
+      data.avatarUrl = await mediaService.assertOwnedMediaUrl(
+        userId,
+        input.avatarUrl,
+        MediaKind.AVATAR,
+      );
     }
     if (input.twitter !== undefined) data.twitter = input.twitter.replace(/^@+/, '');
     if (input.instagram !== undefined) data.instagram = input.instagram.replace(/^@+/, '');
@@ -297,8 +307,12 @@ export const usersService = {
   },
 
   async checkUsername(input: UsernameAvailabilityInput) {
-    const existing = await prisma.user.findUnique({
-      where: { username: input.q },
+    const username = input.q.toLowerCase();
+    // Keep the application safe while older databases are being upgraded to
+    // a unique lower(username) index. `findUnique` uses PostgreSQL's
+    // case-sensitive text equality and would miss an existing "Alice".
+    const existing = await prisma.user.findFirst({
+      where: { username: { equals: username, mode: 'insensitive' } },
       select: { id: true },
     });
     return { available: existing === null };
@@ -329,20 +343,47 @@ export const usersService = {
   },
 
   async setUsername(userId: string, input: SetUsernameInput) {
-    const existing = await prisma.user.findUnique({
-      where: { username: input.username },
+    const username = input.username.toLowerCase();
+    const existing = await prisma.user.findFirst({
+      where: { username: { equals: username, mode: 'insensitive' } },
       select: { id: true },
     });
     if (existing && existing.id !== userId) throw new AppError('USER_002');
+    try {
+      return await prisma.user.update({
+        where: { id: userId },
+        data: {
+          username,
+          // Default displayName to the username on first set, so the UI always
+          // has something to show. User can refine via PATCH /users/me.
+          displayName: username,
+        },
+        select: meSelect,
+      });
+    } catch (err) {
+      // The DB unique constraint closes the race between the availability
+      // lookup and update; expose a stable domain error instead of a 500.
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        throw new AppError('USER_002');
+      }
+      throw err;
+    }
+  },
+
+  async getContactDiscovery(userId: string) {
+    const user = await prisma.user.findFirst({
+      where: { id: userId, deletedAt: null },
+      select: { allowContactDiscovery: true },
+    });
+    if (!user) throw new AppError('USER_001');
+    return user;
+  },
+
+  async setContactDiscovery(userId: string, input: ContactDiscoveryInput) {
     return prisma.user.update({
       where: { id: userId },
-      data: {
-        username: input.username,
-        // Default displayName to the username on first set, so the UI always
-        // has something to show. User can refine via PATCH /users/me.
-        displayName: input.username,
-      },
-      select: meSelect,
+      data: { allowContactDiscovery: input.allowContactDiscovery },
+      select: { allowContactDiscovery: true },
     });
   },
 
@@ -387,9 +428,14 @@ export const usersService = {
     if (input.bio !== undefined) data.bio = input.bio;
     if (input.avatarUrl !== undefined) {
       if (input.avatarUrl !== null) {
-        await mediaService.assertOwnedMediaUrl(userId, input.avatarUrl, MediaKind.AVATAR);
+        data.avatarUrl = await mediaService.assertOwnedMediaUrl(
+          userId,
+          input.avatarUrl,
+          MediaKind.AVATAR,
+        );
+      } else {
+        data.avatarUrl = null;
       }
-      data.avatarUrl = input.avatarUrl;
     }
     if (input.interests !== undefined) {
       data.interests = normaliseInterests(input.interests);
@@ -512,8 +558,25 @@ export const usersService = {
     ]);
     if (scheduled.count !== 1) throw new AppError('ACCOUNT_001');
 
-    await markUserDeletedInAuthCache(userId);
-    disconnectUserSockets(userId, 'account_deleted');
+    // Close live realtime authority immediately after the database commit,
+    // before any fallible post-commit cache or cleanup work can yield.
+    try {
+      disconnectUserSockets(userId, 'account_deleted');
+    } catch (err) {
+      logger.error('account-deletion: failed to disconnect live sockets', {
+        userId,
+        err: err instanceof Error ? err.message : String(err),
+      });
+    }
+    await markUserDeletedInAuthCache(userId).catch(err => {
+      // tokenVersion/deletedAt are already authoritative in PostgreSQL. Redis
+      // acceleration must never turn a committed deletion into a misleading
+      // 500 or prevent the remaining cleanup from running.
+      logger.error('account-deletion: failed to mark deleted auth cache', {
+        userId,
+        err: err instanceof Error ? err.message : String(err),
+      });
+    });
 
     // Marking the account deleted happens before room cleanup. This ordering
     // closes the race with scheduled go-live: its Room -> User transaction
@@ -614,43 +677,94 @@ export const usersService = {
     // (requestDeletion) sets `deletedAt` only. So an active suspension marks an
     // admin-origin deletion that this self-service endpoint must not lift —
     // otherwise a user could undo a moderator's ban by cancelling "deletion".
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { suspendedUntil: true },
-    });
-    if (!user) throw new AppError('USER_001');
-    if (user.suspendedUntil && user.suspendedUntil > new Date()) {
-      throw new AppError('AUTH_007');
-    }
-    // Restore only from a self-requested deletion. The updateMany guard keeps
-    // this atomic against a concurrent admin ban landing between the read and
-    // the write (the active-suspension condition is re-checked by the DB).
     const now = new Date();
-    await prisma.user.updateMany({
-      where: {
-        id: userId,
-        OR: [{ suspendedUntil: null }, { suspendedUntil: { lt: now } }],
-      },
-      data: { deletedAt: null },
+    const cutoff = new Date(now.getTime() - DELETION_GRACE_MS);
+    const refreshJti = randomUUID();
+    const refreshExpiresAt = new Date(now.getTime() + REFRESH_TTL_DAYS * 24 * 60 * 60 * 1000);
+    const restored = await runWriteWithRetry(() =>
+      prisma.$transaction(async tx => {
+        await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${userId} FOR NO KEY UPDATE`;
+        const user = await tx.user.findUnique({
+          where: { id: userId },
+          select: { deletedAt: true, suspendedUntil: true },
+        });
+        if (!user) throw new AppError('USER_001');
+        if (user.suspendedUntil && user.suspendedUntil > now) {
+          throw new AppError('AUTH_007');
+        }
+        if (!user.deletedAt || user.deletedAt <= cutoff) {
+          throw new AppError('AUTH_003');
+        }
+
+        // Rotate the authorization boundary atomically with restoration. Every
+        // recovery access token carries the old tokenVersion and every recovery
+        // refresh row is revoked before a new active family is issued below.
+        const restoredUser = await tx.user.update({
+          where: { id: userId },
+          data: { deletedAt: null, tokenVersion: { increment: 1 } },
+          select: { ...meSelect, tokenVersion: true },
+        });
+        await tx.refreshToken.updateMany({
+          where: { userId, revokedAt: null },
+          data: { revokedAt: now },
+        });
+        // The replacement credential must commit atomically with restoration.
+        // If this INSERT fails, PostgreSQL rolls deletedAt/tokenVersion back and
+        // the caller's recovery bearer remains retryable.
+        await tx.refreshToken.create({
+          data: { token: refreshJti, userId, expiresAt: refreshExpiresAt },
+        });
+        return restoredUser;
+      }),
+    );
+    // Cache coherence is post-commit and best-effort. Failing Redis must not
+    // turn a successful, atomically credentialed restoration into an opaque
+    // 500 that the now-revoked recovery session cannot retry.
+    await invalidateUserAuthCache(userId).catch(err => {
+      logger.warn('account-restoration: failed to invalidate auth cache', {
+        userId,
+        err: err instanceof Error ? err.message : String(err),
+      });
     });
-    await invalidateUserAuthCache(userId);
     await restoreStripeSubscription(userId).catch(err => {
       logger.warn('account-restoration: failed to resume pending Stripe subscription', {
         userId,
         err: err instanceof Error ? err.message : String(err),
       });
     });
-    return { cancelled: true };
+    // Signing is pure and uses the tokenVersion/jti already committed above;
+    // there is no fallible database step between restoration and the response.
+    const { tokenVersion, ...restoredUser } = restored;
+    const tokens = {
+      accessToken: signAccessToken(userId, tokenVersion),
+      refreshToken: signRefreshToken(userId, refreshJti),
+      scope: 'active' as const,
+    };
+    return {
+      cancelled: true as const,
+      session: {
+        ...tokens,
+        expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+      },
+      user: {
+        ...restoredUser,
+        accountState: 'ACTIVE' as const,
+        permanentDeletionAt: null,
+        ...legalAcceptanceStatus(restoredUser),
+      },
+    };
   },
 
   // ─── Notification Preferences ──────────────────────────
   async getNotificationPreferences(userId: string) {
-    const prefs = await prisma.notificationPreference.findUnique({ where: { userId } });
-    if (!prefs) {
-      // Return defaults
-      return prisma.notificationPreference.create({ data: { userId } });
-    }
-    return prefs;
+    // Prisma does not delegate an upsert with an empty update to PostgreSQL;
+    // concurrent first reads can therefore still race with P2002. Emit an
+    // actual INSERT ... ON CONFLICT DO NOTHING, then load the single winner.
+    await prisma.notificationPreference.createMany({
+      data: [{ userId }],
+      skipDuplicates: true,
+    });
+    return prisma.notificationPreference.findUniqueOrThrow({ where: { userId } });
   },
 
   async updateNotificationPreferences(userId: string, input: NotifPrefsInput) {

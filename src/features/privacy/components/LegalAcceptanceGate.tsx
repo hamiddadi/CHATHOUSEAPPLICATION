@@ -192,8 +192,10 @@ export const LegalAcceptanceGate: React.FC = () => {
           <Pressable
             testID="legal-gate-submit"
             accessibilityRole="button"
+            accessibilityLabel={t('privacy.legalGate.continue', 'Accept and continue')}
             accessibilityState={{
               disabled: !termsAccepted || !privacyAcknowledged || submitting,
+              busy: submitting,
             }}
             disabled={!termsAccepted || !privacyAcknowledged || submitting}
             onPress={submit}

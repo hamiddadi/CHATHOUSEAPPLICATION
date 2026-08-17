@@ -1,10 +1,11 @@
 import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import MaterialIcons from '@react-native-vector-icons/material-icons';
 import { useMutation } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Avatar } from '../../../../shared/components/Avatar';
-import { colors, spacing } from '../../../../shared/constants/theme';
+import { colors, layout, spacing } from '../../../../shared/constants/theme';
 import { apiClient } from '../../../../shared/services/api/apiClient';
 import { usePingUserToRoom } from '../../hooks/useRooms';
 import { messageService } from '../../../messages/services/messageService';
@@ -47,6 +48,7 @@ interface ProfileActionSheetProps {
 export const ProfileActionSheet: React.FC<ProfileActionSheetProps> = memo(
   ({ target, roomId, viewerId, onClose, onOpenProfile, onMessage }) => {
     const { t } = useTranslation();
+    const insets = useSafeAreaInsets();
     const follow = useMutation({ mutationFn: profileService.follow });
     const ping = usePingUserToRoom();
     const wave = useMutation({ mutationFn: realWave });
@@ -213,83 +215,97 @@ export const ProfileActionSheet: React.FC<ProfileActionSheetProps> = memo(
               style={styles.sheet}
               onPress={() => undefined}
               accessible={false}
+              focusable={false}
               accessibilityViewIsModal
               importantForAccessibility="yes"
             >
-              <View style={styles.handle} />
-              <View style={styles.header}>
-                <Avatar
-                  uri={target.avatarUrl ?? undefined}
-                  name={target.displayName ?? target.username ?? '?'}
-                  sizeValue={56}
-                />
-                <View style={styles.headerInfo}>
-                  <Text style={styles.name}>{target.displayName ?? target.username ?? '—'}</Text>
-                  <Text style={styles.username}>@{target.username ?? '—'}</Text>
-                </View>
-              </View>
-
-              {!isSelf ? (
-                <>
-                  <ActionRow icon="person-add" label={t('profile.follow')} onPress={handleFollow} />
-                  {onMessage ? (
-                    <ActionRow
-                      icon="chat"
-                      label={t('room.profileActions.message')}
-                      onPress={handleMessage}
-                    />
-                  ) : null}
-                  <ActionRow
-                    icon="notifications"
-                    label={t('room.profileActions.ping')}
-                    onPress={handlePing}
-                  />
-                  <ActionRow
-                    icon="waves"
-                    label={t('room.profileActions.wave')}
-                    onPress={handleWave}
-                  />
-                  <ActionRow
-                    icon="share"
-                    label={t('room.shareRoomAction')}
-                    onPress={handleShareRoom}
-                  />
-                  {extStatus.features.payments && externalPurchasesAllowed ? (
-                    <ActionRow
-                      icon="volunteer-activism"
-                      label={t('room.profileActions.tip')}
-                      onPress={handleTip}
-                    />
-                  ) : null}
-                  {onOpenProfile ? (
-                    <ActionRow
-                      icon="person"
-                      label={t('room.profileActions.openProfile')}
-                      onPress={handleOpenProfile}
-                    />
-                  ) : null}
-                  <ActionRow
-                    icon="flag"
-                    label={t('room.profileActions.report')}
-                    onPress={handleReport}
-                  />
-                  <ActionRow
-                    icon="block"
-                    label={t('room.profileActions.block')}
-                    onPress={handleBlock}
-                  />
-                </>
-              ) : (
-                <Text style={styles.selfNote}>{t('room.profileActions.self')}</Text>
-              )}
-              <Pressable
-                onPress={onClose}
-                style={styles.cancel}
-                accessibilityRole="button"
-                accessibilityLabel={t('common.close')}
+              <ScrollView
+                bounces={false}
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={[
+                  styles.sheetContent,
+                  { paddingBottom: Math.max(insets.bottom, spacing.xxl) },
+                ]}
               >
-                <Text style={styles.cancelLabel}>{t('common.cancel')}</Text>
-              </Pressable>
+                <View style={styles.handle} />
+                <View style={styles.header}>
+                  <Avatar
+                    uri={target.avatarUrl ?? undefined}
+                    name={target.displayName ?? target.username ?? '?'}
+                    sizeValue={56}
+                  />
+                  <View style={styles.headerInfo}>
+                    <Text style={styles.name}>{target.displayName ?? target.username ?? '—'}</Text>
+                    <Text style={styles.username}>@{target.username ?? '—'}</Text>
+                  </View>
+                </View>
+
+                {!isSelf ? (
+                  <>
+                    <ActionRow
+                      icon="person-add"
+                      label={t('profile.follow')}
+                      onPress={handleFollow}
+                    />
+                    {onMessage ? (
+                      <ActionRow
+                        icon="chat"
+                        label={t('room.profileActions.message')}
+                        onPress={handleMessage}
+                      />
+                    ) : null}
+                    <ActionRow
+                      icon="notifications"
+                      label={t('room.profileActions.ping')}
+                      onPress={handlePing}
+                    />
+                    <ActionRow
+                      icon="waves"
+                      label={t('room.profileActions.wave')}
+                      onPress={handleWave}
+                    />
+                    <ActionRow
+                      icon="share"
+                      label={t('room.shareRoomAction')}
+                      onPress={handleShareRoom}
+                    />
+                    {extStatus.features.payments && externalPurchasesAllowed ? (
+                      <ActionRow
+                        icon="volunteer-activism"
+                        label={t('room.profileActions.tip')}
+                        onPress={handleTip}
+                      />
+                    ) : null}
+                    {onOpenProfile ? (
+                      <ActionRow
+                        icon="person"
+                        label={t('room.profileActions.openProfile')}
+                        onPress={handleOpenProfile}
+                      />
+                    ) : null}
+                    <ActionRow
+                      icon="flag"
+                      label={t('room.profileActions.report')}
+                      onPress={handleReport}
+                    />
+                    <ActionRow
+                      icon="block"
+                      label={t('room.profileActions.block')}
+                      onPress={handleBlock}
+                    />
+                  </>
+                ) : (
+                  <Text style={styles.selfNote}>{t('room.profileActions.self')}</Text>
+                )}
+                <Pressable
+                  onPress={onClose}
+                  style={styles.cancel}
+                  accessibilityRole="button"
+                  accessibilityLabel={t('common.close')}
+                >
+                  <Text style={styles.cancelLabel}>{t('common.cancel')}</Text>
+                </Pressable>
+              </ScrollView>
             </Pressable>
           </Pressable>
         </Modal>
@@ -333,12 +349,20 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.modalBackdrop,
     justifyContent: 'flex-end',
+    alignItems: 'center',
   },
   sheet: {
+    width: '100%',
+    maxWidth: layout.maxContentWidth,
+    maxHeight: '90%',
+    overflow: 'hidden',
     backgroundColor: colors.surfaceHigh,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
-    padding: spacing.xxl,
+  },
+  sheetContent: {
+    paddingHorizontal: spacing.xxl,
+    paddingTop: spacing.xxl,
     gap: spacing.sm,
   },
   handle: {
@@ -374,6 +398,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
   },
   cancel: {
+    minHeight: 44,
     marginTop: spacing.md,
     alignItems: 'center',
     paddingVertical: spacing.md,

@@ -98,6 +98,7 @@ export const extEventsService = {
           data: { eventCancel: true, roomId, reason: reason ?? null },
           targetId: roomId,
           targetType: 'room',
+          dedupeKey: `room-canceled:${roomId}:${recipientId}`,
         });
         notified += 1;
       } catch (err) {

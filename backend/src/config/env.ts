@@ -57,6 +57,7 @@ const firebaseServiceAccountFromString = z.preprocess(
  * cause the process to exit with code 1 before any route is registered.
  */
 export const LIVEKIT_TOKEN_MAX_TTL_SECONDS = 300;
+export const JWT_LEGACY_NO_ISS_AUD_MAX_ROLLOUT_MS = 7 * 24 * 60 * 60 * 1000;
 
 // Accept a legacy value above the current ceiling (notably 3600 from older
 // local .env files), but clamp the parsed runtime value before it reaches the
@@ -78,6 +79,11 @@ const optionalUrlFromString = z.preprocess(
 const optionalTrimmedString = z.preprocess(
   value => (typeof value === 'string' && value.trim() === '' ? undefined : value),
   z.string().trim().min(1).optional(),
+);
+
+const optionalIsoDateTimeFromString = z.preprocess(
+  value => (typeof value === 'string' && value.trim() === '' ? undefined : value),
+  z.string().datetime({ offset: true }).optional(),
 );
 
 const isPrivateIpv4 = (hostname: string): boolean => {
@@ -137,6 +143,16 @@ const envSchema = z.object({
   JWT_REFRESH_SECRET: z.string().min(32, 'JWT_REFRESH_SECRET must be at least 32 chars'),
   JWT_ACCESS_TTL: z.string().default('15m'),
   JWT_REFRESH_TTL: z.string().default('7d'),
+  JWT_ISSUER: z.string().trim().min(1).default('chathouse-api'),
+  JWT_AUDIENCE: z.string().trim().min(1).default('chathouse-app'),
+  // Temporary rolling-deploy bridge for tokens minted before issuer/audience
+  // claims were introduced. Empty/unset is strict mode. Production additionally
+  // caps a configured cutoff to one refresh-token lifetime (seven days).
+  JWT_LEGACY_NO_ISS_AUD_ACCEPT_UNTIL: optionalIsoDateTimeFromString,
+  // Email/password authentication is retained solely for deliberate local
+  // and test workflows. It is disabled by default and cannot be enabled in
+  // production, where phone + OTP is the authoritative login path.
+  LEGACY_EMAIL_AUTH_ENABLED: boolFromString(false),
 
   CORS_ORIGINS: z
     .string()
@@ -219,6 +235,8 @@ const envSchema = z.object({
   MEDIA_STORAGE_DRIVER: z.enum(['local', 's3']).default('local'),
   MEDIA_URL_SIGNING_SECRET: z.string().min(32).optional(),
   MEDIA_EXPORT_URL_TTL_SECONDS: z.coerce.number().int().min(300).max(604800).default(3600),
+  MEDIA_APP_URL_TTL_SECONDS: z.coerce.number().int().min(60).max(3600).default(900),
+  MEDIA_LEGACY_STABLE_READ_UNTIL: z.string().datetime({ offset: true }).optional(),
   MEDIA_S3_BUCKET: z.string().min(1).optional(),
   MEDIA_S3_REGION: z.string().min(1).default('us-east-1'),
   MEDIA_S3_ENDPOINT: z.string().url().optional(),
@@ -258,6 +276,12 @@ const envSchema = z.object({
   // regardless of which entry point boots. Default true so the documented
   // extension features are actually reachable in production.
   EXTENSIONS_ENABLED: boolFromString(true),
+
+  // Exact phone-number matching is privacy-sensitive: keep it fail-closed
+  // until the operator has deliberately enabled contact discovery. Even when
+  // enabled, the route requires a phone-verified account and uses a small
+  // per-account request/batch budget.
+  CONTACT_MATCH_ENABLED: boolFromString(false),
 
   // ─── LiveKit (audio engine) ─────────────────────────────────────────
   // LIVEKIT_URL is the WebSocket endpoint of the LiveKit server. Shipped
@@ -461,6 +485,26 @@ export type Env = typeof env;
 
 if (env.NODE_ENV === 'production') {
   const serviceConfigErrors: string[] = [];
+  if (env.LEGACY_EMAIL_AUTH_ENABLED) {
+    serviceConfigErrors.push('LEGACY_EMAIL_AUTH_ENABLED must be false in production');
+  }
+  if (
+    env.JWT_LEGACY_NO_ISS_AUD_ACCEPT_UNTIL &&
+    Date.parse(env.JWT_LEGACY_NO_ISS_AUD_ACCEPT_UNTIL) >
+      Date.now() + JWT_LEGACY_NO_ISS_AUD_MAX_ROLLOUT_MS
+  ) {
+    serviceConfigErrors.push(
+      'JWT_LEGACY_NO_ISS_AUD_ACCEPT_UNTIL must not extend more than 7 days from boot',
+    );
+  }
+  if (
+    env.MEDIA_LEGACY_STABLE_READ_UNTIL &&
+    Date.parse(env.MEDIA_LEGACY_STABLE_READ_UNTIL) > Date.now() + 30 * 24 * 60 * 60 * 1000
+  ) {
+    serviceConfigErrors.push(
+      'MEDIA_LEGACY_STABLE_READ_UNTIL must not extend more than 30 days from boot',
+    );
+  }
   const requiredLiveKitFields = ['LIVEKIT_URL', 'LIVEKIT_API_KEY', 'LIVEKIT_API_SECRET'] as const;
   for (const field of requiredLiveKitFields) {
     if (!env[field]) serviceConfigErrors.push(`${field} is required in production`);

@@ -55,6 +55,11 @@ services:
       # inert for local testing but must never ship to production.
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-dev_only_access_secret_change_me_0123456789abcdef}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-dev_only_refresh_secret_change_me_0123456789abcdef}
+      JWT_ACCESS_TTL: ${JWT_ACCESS_TTL:-15m}
+      JWT_REFRESH_TTL: ${JWT_REFRESH_TTL:-7d}
+      JWT_ISSUER: ${JWT_ISSUER:-chathouse-api}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-chathouse-app}
+      JWT_LEGACY_NO_ISS_AUD_ACCEPT_UNTIL: ${JWT_LEGACY_NO_ISS_AUD_ACCEPT_UNTIL:-}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8081}
       PUBLIC_URL: ${PUBLIC_URL:-http://localhost:4000}
       MEDIA_STORAGE_DRIVER: local
@@ -64,7 +69,9 @@ services:
       # Dev/QA OTP bypass — these numbers skip the real SMS and log in with
       # OTP_TEST_CODE. Hard-gated to non-production in otp.service, so inert
       # whenever NODE_ENV=production. Override or clear via the host env / .env.
-      OTP_TEST_NUMBERS: ${OTP_TEST_NUMBERS:-550728585}
+      # Opt in explicitly for bypass accounts; an empty default prevents a
+      # copied dev stack from silently accepting the well-known test OTP.
+      OTP_TEST_NUMBERS: ${OTP_TEST_NUMBERS:-}
       OTP_TEST_CODE: ${OTP_TEST_CODE:-000000}
       # ─── mediasoup (phase 4) — narrow UDP port range to reduce host ports
       # exposed. Widen to 40000-49999 when load-testing many simultaneous
@@ -105,8 +112,8 @@ services:
       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-devsecretdevsecretdevsecretdevsecret}
       LIVEKIT_TOKEN_TTL_SECONDS: ${LIVEKIT_TOKEN_TTL_SECONDS:-300}
     ports:
-      - '4000:4000'
-      - '40000-40499:40000-40499/udp'
+      - '${DEV_BIND_ADDRESS:-127.0.0.1}:4000:4000'
+      - '${DEV_BIND_ADDRESS:-127.0.0.1}:40000-40499:40000-40499/udp'
     volumes:
       # Unserved local fallback for development only. Production is forced to
       # use private S3-compatible storage by env validation.
@@ -130,9 +137,9 @@ services:
       # Dev config moves the media UDP range below the Windows ephemeral range.
       - ./livekit/livekit.dev.yaml:/etc/livekit.yaml:ro
     ports:
-      - '7880:7880'
-      - '7881:7881'
-      - '41100-41199:41100-41199/udp'
+      - '${DEV_BIND_ADDRESS:-127.0.0.1}:7880:7880'
+      - '${DEV_BIND_ADDRESS:-127.0.0.1}:7881:7881'
+      - '${DEV_BIND_ADDRESS:-127.0.0.1}:41100-41199:41100-41199/udp'
 
   # ─── coturn STUN/TURN server (phase 5) ───────────────
   # Disabled in the default profile — local testing often works over host

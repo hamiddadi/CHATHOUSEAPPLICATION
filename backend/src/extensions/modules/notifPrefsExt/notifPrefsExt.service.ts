@@ -1,22 +1,12 @@
+import type { NotificationFrequencyTier } from '@prisma/client';
+import { prisma } from '../../../config/database';
 import { redis } from '../../../config/redis';
+import { ensureUserExtensionImported } from '../../utils/legacyExtensionImport';
 
-/**
- * Notification preferences extension (Module 12.6 / NOTIF-009/010/012).
- *
- * The existing `NotificationPreference` table only stores boolean toggles
- * per type. This extension adds two complementary axes that Clubhouse
- * exposes :
- *   - **Frequency tier** : infrequent / normal / frequent — clamps how
- *     often we deliver fan-out pushes (room_started_by_following, etc.).
- *   - **Per-club mute** : disable notifications for a specific Club.
- *   - **Per-user mute** : disable for a specific user.
- *
- * Stored in Redis to avoid schema migration on the existing
- * NotificationPreference model.
- */
-
+/** Durable notification preferences; Redis is retained only for throttling. */
 export type FrequencyTier = 'infrequent' | 'normal' | 'frequent';
 
+const IMPORT_NAMESPACE = 'notification-extension-preferences-v1';
 const freqKey = (userId: string) => `ext:notif:freq:${userId}`;
 const clubMuteKey = (userId: string) => `ext:notif:mute:club:${userId}`;
 const userMuteKey = (userId: string) => `ext:notif:mute:user:${userId}`;
@@ -25,177 +15,218 @@ const durableDeliveryClaimKey = (userId: string, kind: string, deliveryId: strin
   `ext:notif:deliveryclaim:${kind}:${userId}:${deliveryId}`;
 
 const FREQ_THROTTLE_MS: Record<FrequencyTier, number> = {
-  frequent: 0, // no throttling
-  normal: 60 * 60 * 1000, // 1h between same-kind pushes
-  infrequent: 24 * 60 * 60 * 1000, // 1 push per day per kind
+  frequent: 0,
+  normal: 60 * 60 * 1000,
+  infrequent: 24 * 60 * 60 * 1000,
 };
 
-/**
- * Check both mute sets and claim the frequency slot as one Redis operation.
- * Redis serialises Lua execution, so two workers cannot both observe an empty
- * slot and dispatch the same fan-out push concurrently.
- *
- * TIME comes from Redis rather than an application node, avoiding clock skew
- * when the mono-server is scaled later. Legacy timestamp keys without a TTL
- * are repaired by assigning the remaining quiet-window TTL.
- */
 const CAN_DELIVER_SCRIPT = `
-local actorId = ARGV[1]
-local clubId = ARGV[2]
-local throttleMs = tonumber(ARGV[3])
-
-if actorId ~= '' and redis.call('SISMEMBER', KEYS[1], actorId) == 1 then
-  return 0
-end
-if clubId ~= '' and redis.call('SISMEMBER', KEYS[2], clubId) == 1 then
-  return 0
-end
-if throttleMs <= 0 then
-  return 1
-end
-
+local throttleMs = tonumber(ARGV[1])
+if throttleMs <= 0 then return 1 end
 local nowParts = redis.call('TIME')
 local nowMs = (tonumber(nowParts[1]) * 1000) + math.floor(tonumber(nowParts[2]) / 1000)
-local lastRaw = redis.call('GET', KEYS[3])
-local lastMs = tonumber(lastRaw)
-
+local lastMs = tonumber(redis.call('GET', KEYS[1]))
 if lastMs and (nowMs - lastMs) < throttleMs then
   local remainingMs = throttleMs - (nowMs - lastMs)
-  if redis.call('PTTL', KEYS[3]) < 0 then
-    redis.call('PEXPIRE', KEYS[3], remainingMs)
-  end
+  if redis.call('PTTL', KEYS[1]) < 0 then redis.call('PEXPIRE', KEYS[1], remainingMs) end
   return 0
 end
-
-redis.call('SET', KEYS[3], tostring(nowMs), 'PX', throttleMs)
+redis.call('SET', KEYS[1], tostring(nowMs), 'PX', throttleMs)
 return 1
 `;
 
-/**
- * Durable variant of the frequency claim. A notification-specific claim is
- * written atomically with the shared quiet-window timestamp. Retries for that
- * same notification remain eligible after a provider failure, while a
- * different notification is still throttled. Mutes are intentionally checked
- * before the replay claim so a newly-muted actor/club takes effect at once.
- */
 const CAN_DELIVER_DURABLY_SCRIPT = `
-local actorId = ARGV[1]
-local clubId = ARGV[2]
-local throttleMs = tonumber(ARGV[3])
-
-if actorId ~= '' and redis.call('SISMEMBER', KEYS[1], actorId) == 1 then
-  return 0
-end
-if clubId ~= '' and redis.call('SISMEMBER', KEYS[2], clubId) == 1 then
-  return 0
-end
-if redis.call('EXISTS', KEYS[4]) == 1 then
-  return 1
-end
-if throttleMs <= 0 then
-  return 1
-end
-
+local throttleMs = tonumber(ARGV[1])
+if redis.call('EXISTS', KEYS[2]) == 1 then return 1 end
+if throttleMs <= 0 then return 1 end
 local nowParts = redis.call('TIME')
 local nowMs = (tonumber(nowParts[1]) * 1000) + math.floor(tonumber(nowParts[2]) / 1000)
-local lastRaw = redis.call('GET', KEYS[3])
-local lastMs = tonumber(lastRaw)
-
+local lastMs = tonumber(redis.call('GET', KEYS[1]))
 if lastMs and (nowMs - lastMs) < throttleMs then
   local remainingMs = throttleMs - (nowMs - lastMs)
-  if redis.call('PTTL', KEYS[3]) < 0 then
-    redis.call('PEXPIRE', KEYS[3], remainingMs)
-  end
+  if redis.call('PTTL', KEYS[1]) < 0 then redis.call('PEXPIRE', KEYS[1], remainingMs) end
   return 0
 end
-
-redis.call('SET', KEYS[3], tostring(nowMs), 'PX', throttleMs)
-redis.call('SET', KEYS[4], '1', 'PX', throttleMs)
+redis.call('SET', KEYS[1], tostring(nowMs), 'PX', throttleMs)
+redis.call('SET', KEYS[2], '1', 'PX', throttleMs)
 return 1
 `;
+
+const normalizeFrequency = (value: string | null): FrequencyTier =>
+  value === 'infrequent' || value === 'frequent' ? value : 'normal';
+const toDbFrequency = (tier: FrequencyTier): NotificationFrequencyTier =>
+  tier.toUpperCase() as NotificationFrequencyTier;
+
+interface LegacyPreferences {
+  frequency: FrequencyTier;
+  clubIds: string[];
+  userIds: string[];
+}
+
+const ensureImported = async (userId: string): Promise<void> => {
+  await ensureUserExtensionImported(
+    IMPORT_NAMESPACE,
+    userId,
+    async () => {
+      const [frequency, clubIds, userIds] = await Promise.all([
+        redis.get(freqKey(userId)),
+        redis.sMembers(clubMuteKey(userId)),
+        redis.sMembers(userMuteKey(userId)),
+      ]);
+      return { frequency: normalizeFrequency(frequency), clubIds, userIds };
+    },
+    async (tx, legacy: LegacyPreferences) => {
+      await tx.userNotificationExtensionPreference.createMany({
+        data: [{ userId, frequency: toDbFrequency(legacy.frequency) }],
+        skipDuplicates: true,
+      });
+      if (legacy.clubIds.length > 0) {
+        const clubs = await tx.club.findMany({
+          where: { id: { in: legacy.clubIds } },
+          select: { id: true },
+        });
+        await tx.notificationClubMute.createMany({
+          data: clubs.map(club => ({ userId, clubId: club.id })),
+          skipDuplicates: true,
+        });
+      }
+      if (legacy.userIds.length > 0) {
+        const users = await tx.user.findMany({
+          where: { id: { in: legacy.userIds, not: userId } },
+          select: { id: true },
+        });
+        await tx.notificationUserMute.createMany({
+          data: users.map(user => ({ userId, mutedUserId: user.id })),
+          skipDuplicates: true,
+        });
+      }
+    },
+  );
+};
+
+const muted = async (
+  userId: string,
+  opts: { clubId?: string | null; actorId?: string | null },
+): Promise<boolean> => {
+  const checks: Promise<unknown>[] = [];
+  if (opts.actorId) {
+    checks.push(
+      prisma.notificationUserMute.findUnique({
+        where: { userId_mutedUserId: { userId, mutedUserId: opts.actorId } },
+        select: { userId: true },
+      }),
+    );
+  }
+  if (opts.clubId) {
+    checks.push(
+      prisma.notificationClubMute.findUnique({
+        where: { userId_clubId: { userId, clubId: opts.clubId } },
+        select: { userId: true },
+      }),
+    );
+  }
+  return (await Promise.all(checks)).some(Boolean);
+};
 
 export const notifPrefsExtService = {
   async getFrequency(userId: string): Promise<FrequencyTier> {
-    const v = await redis.get(freqKey(userId));
-    return v === 'infrequent' || v === 'frequent' ? v : 'normal';
+    await ensureImported(userId);
+    const row = await prisma.userNotificationExtensionPreference.findUnique({
+      where: { userId },
+      select: { frequency: true },
+    });
+    return row ? (row.frequency.toLowerCase() as FrequencyTier) : 'normal';
   },
 
   async setFrequency(userId: string, tier: FrequencyTier): Promise<void> {
-    await redis.set(freqKey(userId), tier);
+    await ensureImported(userId);
+    await prisma.userNotificationExtensionPreference.upsert({
+      where: { userId },
+      create: { userId, frequency: toDbFrequency(tier) },
+      update: { frequency: toDbFrequency(tier) },
+    });
   },
 
   async listMutedClubs(userId: string): Promise<string[]> {
-    return redis.sMembers(clubMuteKey(userId));
+    await ensureImported(userId);
+    const rows = await prisma.notificationClubMute.findMany({
+      where: { userId },
+      select: { clubId: true },
+      orderBy: { createdAt: 'asc' },
+    });
+    return rows.map(row => row.clubId);
   },
+
   async muteClub(userId: string, clubId: string): Promise<void> {
-    await redis.sAdd(clubMuteKey(userId), clubId);
+    await ensureImported(userId);
+    await prisma.notificationClubMute.upsert({
+      where: { userId_clubId: { userId, clubId } },
+      create: { userId, clubId },
+      update: {},
+    });
   },
+
   async unmuteClub(userId: string, clubId: string): Promise<void> {
-    await redis.sRem(clubMuteKey(userId), clubId);
+    await ensureImported(userId);
+    await prisma.notificationClubMute.deleteMany({ where: { userId, clubId } });
   },
 
   async listMutedUsers(userId: string): Promise<string[]> {
-    return redis.sMembers(userMuteKey(userId));
-  },
-  async muteUser(userId: string, targetId: string): Promise<void> {
-    await redis.sAdd(userMuteKey(userId), targetId);
-  },
-  async unmuteUser(userId: string, targetId: string): Promise<void> {
-    await redis.sRem(userMuteKey(userId), targetId);
+    await ensureImported(userId);
+    const rows = await prisma.notificationUserMute.findMany({
+      where: { userId },
+      select: { mutedUserId: true },
+      orderBy: { createdAt: 'asc' },
+    });
+    return rows.map(row => row.mutedUserId);
   },
 
-  /**
-   * Returns true if the user is allowed to receive a *push* for the given
-   * `kind` right now. Three axes are consulted, cheapest first:
-   *   1. **Per-user mute** — the actor is muted ⇒ never push.
-   *   2. **Per-club mute** — the originating club is muted ⇒ never push.
-   *   3. **Frequency tier** — throttles same-`kind` fan-out pushes.
-   *
-   * Only the PUSH is gated; callers must still persist the in-app row +
-   * realtime emit so the bell stays accurate. Mute is a hard gate (no
-   * throttle bookkeeping happens once muted). The throttle "spends" a slot
-   * only when it would otherwise allow the push, so a muted club/user never
-   * resets a user's quiet window.
-   */
+  async muteUser(userId: string, targetId: string): Promise<void> {
+    await ensureImported(userId);
+    if (userId === targetId) return;
+    await prisma.notificationUserMute.upsert({
+      where: { userId_mutedUserId: { userId, mutedUserId: targetId } },
+      create: { userId, mutedUserId: targetId },
+      update: {},
+    });
+  },
+
+  async unmuteUser(userId: string, targetId: string): Promise<void> {
+    await ensureImported(userId);
+    await prisma.notificationUserMute.deleteMany({
+      where: { userId, mutedUserId: targetId },
+    });
+  },
+
   async canDeliver(
     userId: string,
     kind: string,
     opts: { clubId?: string | null; actorId?: string | null } = {},
   ): Promise<boolean> {
-    const { clubId, actorId } = opts;
+    await ensureImported(userId);
+    if (await muted(userId, opts)) return false;
     const tier = await this.getFrequency(userId);
-    const throttle = FREQ_THROTTLE_MS[tier];
     const result = await redis.eval(CAN_DELIVER_SCRIPT, {
-      keys: [userMuteKey(userId), clubMuteKey(userId), lastDeliveredKey(userId, kind)],
-      arguments: [actorId ?? '', clubId ?? '', String(throttle)],
+      keys: [lastDeliveredKey(userId, kind)],
+      arguments: [String(FREQ_THROTTLE_MS[tier])],
     });
     return Number(result) === 1;
   },
 
-  /**
-   * Outbox-safe gate. A failed provider attempt may retry with `deliveryId`
-   * without losing the frequency slot it already claimed.
-   */
   async canDeliverDurably(
     userId: string,
     kind: string,
-    opts: {
-      deliveryId: string;
-      clubId?: string | null;
-      actorId?: string | null;
-    },
+    opts: { deliveryId: string; clubId?: string | null; actorId?: string | null },
   ): Promise<boolean> {
-    const { clubId, actorId, deliveryId } = opts;
+    await ensureImported(userId);
+    if (await muted(userId, opts)) return false;
     const tier = await this.getFrequency(userId);
-    const throttle = FREQ_THROTTLE_MS[tier];
     const result = await redis.eval(CAN_DELIVER_DURABLY_SCRIPT, {
       keys: [
-        userMuteKey(userId),
-        clubMuteKey(userId),
         lastDeliveredKey(userId, kind),
-        durableDeliveryClaimKey(userId, kind, deliveryId),
+        durableDeliveryClaimKey(userId, kind, opts.deliveryId),
       ],
-      arguments: [actorId ?? '', clubId ?? '', String(throttle)],
+      arguments: [String(FREQ_THROTTLE_MS[tier])],
     });
     return Number(result) === 1;
   },

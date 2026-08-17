@@ -14,9 +14,11 @@ import {
   wakeNotificationDelivery,
 } from '../notifications/notification.outbox';
 import { MAX_GROUP_MEMBERS } from './groups.schema';
+import { decodeGroupCursor, encodeGroupCursor } from './groups.cursor';
 import type {
   AddGroupMembersInput,
   CreateGroupInput,
+  ListGroupsInput,
   ListGroupMessagesInput,
   RenameGroupInput,
   SendGroupMessageInput,
@@ -334,10 +336,27 @@ export const groupsService = {
     return this.detail(userId, creation.resourceId);
   },
 
-  /** All group conversations the user belongs to, newest activity first. */
-  async list(userId: string) {
-    const memberships = await prisma.conversationMember.findMany({
-      where: { userId },
+  /** One stable page of groups the user belongs to, newest activity first. */
+  async list(userId: string, input: Pick<ListGroupsInput, 'limit' | 'cursor'>) {
+    const decodedCursor = input.cursor ? decodeGroupCursor(input.cursor) : null;
+    if (input.cursor && !decodedCursor) throw new AppError('VALIDATION_001');
+    const cursorWhere: Prisma.ConversationMemberWhereInput = decodedCursor
+      ? {
+          conversation: {
+            OR: [
+              { updatedAt: { lt: decodedCursor.updatedAt } },
+              {
+                updatedAt: decodedCursor.updatedAt,
+                id: { lt: decodedCursor.conversationId },
+              },
+            ],
+          },
+        }
+      : {};
+    const rows = await prisma.conversationMember.findMany({
+      where: { userId, ...cursorWhere },
+      orderBy: [{ conversation: { updatedAt: 'desc' } }, { conversation: { id: 'desc' } }],
+      take: input.limit + 1,
       include: {
         conversation: {
           include: {
@@ -347,7 +366,7 @@ export const groupsService = {
             },
             messages: {
               where: { sender: { deletedAt: null } },
-              orderBy: { createdAt: 'desc' },
+              orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
               take: 1,
               include: { sender: { select: publicUser } },
             },
@@ -356,14 +375,21 @@ export const groupsService = {
       },
     });
 
+    const hasMore = rows.length > input.limit;
+    const memberships = hasMore ? rows.slice(0, input.limit) : rows;
     const unreadByConversation = await countUnreadByConversation(userId, memberships);
-    const summaries = memberships.map(m => {
+    const data = memberships.map(m => {
       const conv = m.conversation;
       const last = conv.messages[0] ?? null;
       return this.serialize(conv, last, unreadByConversation.get(conv.id) ?? 0);
     });
+    const last = memberships[memberships.length - 1]?.conversation;
 
-    return summaries.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
+    return {
+      data,
+      hasMore,
+      nextCursor: hasMore && last ? encodeGroupCursor(last.updatedAt, last.id) : null,
+    };
   },
 
   async detail(userId: string, conversationId: string) {
@@ -489,17 +515,18 @@ export const groupsService = {
     input: SendGroupVoiceInput,
     idempotencyKey?: string,
   ) {
+    const canonicalAudioUrl = mediaService.canonicalizeVoiceMediaUrl(input.audioUrl);
     const creation = await runIdempotentCreate({
       userId,
       scope: `groups.message:${conversationId}`,
       key: idempotencyKey,
-      payload: { kind: 'VOICE', ...input },
+      payload: { kind: 'VOICE', ...input, audioUrl: canonicalAudioUrl },
       create: async tx => {
         const authorization = await lockAndAuthorizeGroupSend(tx, userId, conversationId);
         const mediaObjectId = await mediaService.assertOwnedMediaUrlWithinTransaction(
           tx,
           userId,
-          input.audioUrl,
+          canonicalAudioUrl,
           MediaKind.VOICE,
         );
         const created = await tx.groupMessage.create({
@@ -507,7 +534,7 @@ export const groupsService = {
             conversationId,
             senderId: userId,
             kind: 'VOICE',
-            audioUrl: input.audioUrl,
+            audioUrl: canonicalAudioUrl,
             audioDurationMs: input.durationMs,
             mediaObjectId,
           },

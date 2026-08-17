@@ -2,8 +2,10 @@ import { MediaKind } from '@prisma/client';
 import { AppError } from '../../middlewares/error.middleware';
 import { mediaService } from '../media/media.service';
 
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
-const MAX_AUDIO_BYTES = 8 * 1024 * 1024;
+const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
+const MAX_AUDIO_BYTES = 4 * 1024 * 1024;
+const MAX_IMAGE_PIXELS = 16_000_000;
+const MAX_IMAGE_DIMENSION = 8_192;
 
 const IMAGE_MIME_EXT: Record<string, string> = {
   'image/jpeg': 'jpg',
@@ -37,7 +39,7 @@ interface DecodedMedia {
 }
 
 const parseDataUrl = (dataUrl: string): { mime: string; base64: string } | null => {
-  const match = /^data:([a-z0-9.+/-]+);base64,(.*)$/is.exec(dataUrl.trim());
+  const match = /^data:([a-z0-9.+/-]+);base64,(.*)$/is.exec(dataUrl);
   const mime = match?.[1];
   const base64 = match?.[2];
   return mime && base64 !== undefined ? { mime: mime.toLowerCase(), base64 } : null;
@@ -61,13 +63,16 @@ const extractPayload = (input: UploadInput): { mime: string; base64: string } =>
 };
 
 const decodeBase64 = (base64: string, maxBytes: number, label: string): Buffer => {
-  const clean = base64.replace(/\s/g, '');
+  // Data URLs emitted by the app are canonical base64. Rejecting whitespace
+  // avoids allocating a second full-size string with replace(), which was a
+  // major source of concurrent-upload memory amplification.
+  const clean = base64;
   const maxEncodedLength = Math.ceil(maxBytes / 3) * 4 + 4;
   if (clean.length === 0) throw new AppError('VALIDATION_001', `Empty ${label} data`);
   if (clean.length > maxEncodedLength) {
     throw new AppError('UPLOAD_001', `${label} exceeds the upload limit`);
   }
-  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(clean) || clean.length % 4 === 1) {
+  if (/\s/.test(clean) || !/^[A-Za-z0-9+/]*={0,2}$/.test(clean) || clean.length % 4 === 1) {
     throw new AppError('VALIDATION_001', `Malformed ${label} base64`);
   }
 
@@ -100,31 +105,154 @@ const isValidImageBytes = (mime: string, buffer: Buffer): boolean => {
   );
 };
 
+const assertSafeImageDimensions = (mime: string, buffer: Buffer): void => {
+  let width: number | null = null;
+  let height: number | null = null;
+  if (mime === 'image/png' && buffer.byteLength >= 24 && hasAscii(buffer, 12, 'IHDR')) {
+    width = buffer.readUInt32BE(16);
+    height = buffer.readUInt32BE(20);
+  } else if (mime === 'image/webp' && buffer.byteLength >= 30) {
+    if (hasAscii(buffer, 12, 'VP8X')) {
+      width = 1 + buffer.readUIntLE(24, 3);
+      height = 1 + buffer.readUIntLE(27, 3);
+    } else if (hasAscii(buffer, 12, 'VP8L') && buffer[20] === 0x2f) {
+      const bits = buffer.readUInt32LE(21);
+      width = 1 + (bits & 0x3fff);
+      height = 1 + ((bits >>> 14) & 0x3fff);
+    } else if (
+      hasAscii(buffer, 12, 'VP8 ') &&
+      buffer[23] === 0x9d &&
+      buffer[24] === 0x01 &&
+      buffer[25] === 0x2a
+    ) {
+      width = buffer.readUInt16LE(26) & 0x3fff;
+      height = buffer.readUInt16LE(28) & 0x3fff;
+    }
+  } else if (mime === 'image/jpeg') {
+    let offset = 2;
+    while (offset + 9 < buffer.byteLength) {
+      if (buffer[offset] !== 0xff) break;
+      const marker = buffer[offset + 1] ?? 0;
+      if (marker === 0xd8 || marker === 0xd9) {
+        offset += 2;
+        continue;
+      }
+      const length = buffer.readUInt16BE(offset + 2);
+      if (length < 2 || offset + 2 + length > buffer.byteLength) break;
+      if (
+        (marker >= 0xc0 && marker <= 0xc3) ||
+        (marker >= 0xc5 && marker <= 0xc7) ||
+        (marker >= 0xc9 && marker <= 0xcb) ||
+        (marker >= 0xcd && marker <= 0xcf)
+      ) {
+        height = buffer.readUInt16BE(offset + 5);
+        width = buffer.readUInt16BE(offset + 7);
+        break;
+      }
+      offset += 2 + length;
+    }
+  }
+  if (
+    width === null ||
+    height === null ||
+    width <= 0 ||
+    height <= 0 ||
+    width > MAX_IMAGE_DIMENSION ||
+    height > MAX_IMAGE_DIMENSION ||
+    width * height > MAX_IMAGE_PIXELS
+  ) {
+    throw new AppError('VALIDATION_001', 'Image dimensions are invalid or unsafe');
+  }
+};
+
+const assertImageContainerStructure = (mime: string, buffer: Buffer): void => {
+  let valid = false;
+  if (mime === 'image/png') {
+    valid =
+      buffer.byteLength >= 45 &&
+      buffer.readUInt32BE(8) === 13 &&
+      hasAscii(buffer, 12, 'IHDR') &&
+      buffer.readUInt32BE(buffer.byteLength - 12) === 0 &&
+      hasAscii(buffer, buffer.byteLength - 8, 'IEND');
+  } else if (mime === 'image/jpeg') {
+    valid =
+      buffer.byteLength >= 4 &&
+      buffer[buffer.byteLength - 2] === 0xff &&
+      buffer[buffer.byteLength - 1] === 0xd9;
+  } else if (mime === 'image/webp') {
+    const declaredSize = buffer.byteLength >= 8 ? buffer.readUInt32LE(4) + 8 : 0;
+    valid = declaredSize === buffer.byteLength;
+  }
+  if (!valid) throw new AppError('VALIDATION_001', 'Malformed or truncated image container');
+};
+
 const isValidAudioBytes = (mime: string, buffer: Buffer): boolean => {
   if (mime === 'audio/m4a' || mime === 'audio/x-m4a' || mime === 'audio/mp4') {
-    return buffer.byteLength >= 12 && hasAscii(buffer, 4, 'ftyp');
+    const firstBoxSize = buffer.byteLength >= 4 ? buffer.readUInt32BE(0) : 0;
+    return (
+      buffer.byteLength >= 16 &&
+      hasAscii(buffer, 4, 'ftyp') &&
+      firstBoxSize >= 12 &&
+      firstBoxSize <= buffer.byteLength
+    );
   }
   if (mime === 'audio/3gpp') {
-    return buffer.byteLength >= 12 && hasAscii(buffer, 4, 'ftyp');
+    const firstBoxSize = buffer.byteLength >= 4 ? buffer.readUInt32BE(0) : 0;
+    return (
+      buffer.byteLength >= 16 &&
+      hasAscii(buffer, 4, 'ftyp') &&
+      firstBoxSize >= 12 &&
+      firstBoxSize <= buffer.byteLength
+    );
   }
   if (mime === 'audio/aac') {
-    return buffer.byteLength >= 2 && buffer[0] === 0xff && ((buffer[1] ?? 0) & 0xf6) === 0xf0;
+    return buffer.byteLength >= 7 && buffer[0] === 0xff && ((buffer[1] ?? 0) & 0xf6) === 0xf0;
   }
   if (mime === 'audio/mpeg') {
+    let frameOffset = 0;
+    if (buffer.byteLength >= 10 && hasAscii(buffer, 0, 'ID3')) {
+      const sizeBytes = [buffer[6], buffer[7], buffer[8], buffer[9]];
+      if (sizeBytes.some(byte => byte === undefined || (byte & 0x80) !== 0)) return false;
+      frameOffset =
+        10 +
+        (((sizeBytes[0] ?? 0) << 21) |
+          ((sizeBytes[1] ?? 0) << 14) |
+          ((sizeBytes[2] ?? 0) << 7) |
+          (sizeBytes[3] ?? 0));
+      if (((buffer[5] ?? 0) & 0x10) !== 0) frameOffset += 10;
+    }
     return (
-      (buffer.byteLength >= 3 && hasAscii(buffer, 0, 'ID3')) ||
-      (buffer.byteLength >= 2 && buffer[0] === 0xff && ((buffer[1] ?? 0) & 0xe0) === 0xe0)
+      buffer.byteLength >= frameOffset + 4 &&
+      buffer[frameOffset] === 0xff &&
+      ((buffer[frameOffset + 1] ?? 0) & 0xe0) === 0xe0
     );
   }
   if (mime === 'audio/wav' || mime === 'audio/x-wav') {
-    return buffer.byteLength >= 12 && hasAscii(buffer, 0, 'RIFF') && hasAscii(buffer, 8, 'WAVE');
+    const declaredSize = buffer.byteLength >= 8 ? buffer.readUInt32LE(4) + 8 : 0;
+    const fmtOffset = buffer.indexOf(Buffer.from('fmt '), 12);
+    const dataOffset = buffer.indexOf(Buffer.from('data'), 12);
+    return (
+      buffer.byteLength >= 44 &&
+      hasAscii(buffer, 0, 'RIFF') &&
+      hasAscii(buffer, 8, 'WAVE') &&
+      declaredSize <= buffer.byteLength &&
+      fmtOffset >= 12 &&
+      dataOffset > fmtOffset
+    );
   }
   if (mime === 'audio/webm') {
     return (
-      buffer.byteLength >= 4 && buffer.subarray(0, 4).equals(Buffer.from([0x1a, 0x45, 0xdf, 0xa3]))
+      buffer.byteLength >= 16 &&
+      buffer.subarray(0, 4).equals(Buffer.from([0x1a, 0x45, 0xdf, 0xa3])) &&
+      buffer.subarray(0, Math.min(buffer.byteLength, 4096)).includes(Buffer.from('webm'))
     );
   }
-  return mime === 'audio/x-caf' && buffer.byteLength >= 4 && hasAscii(buffer, 0, 'caff');
+  return (
+    mime === 'audio/x-caf' &&
+    buffer.byteLength >= 8 &&
+    hasAscii(buffer, 0, 'caff') &&
+    buffer.readUInt16BE(4) === 1
+  );
 };
 
 const decodeMedia = (
@@ -145,8 +273,12 @@ const decodeMedia = (
   return { mime, extension, buffer };
 };
 
-export const decodeAvatar = (input: UploadInput): DecodedMedia =>
-  decodeMedia(input, IMAGE_MIME_EXT, MAX_IMAGE_BYTES, 'Image', isValidImageBytes);
+export const decodeAvatar = (input: UploadInput): DecodedMedia => {
+  const decoded = decodeMedia(input, IMAGE_MIME_EXT, MAX_IMAGE_BYTES, 'Image', isValidImageBytes);
+  assertSafeImageDimensions(decoded.mime, decoded.buffer);
+  assertImageContainerStructure(decoded.mime, decoded.buffer);
+  return decoded;
+};
 
 export const decodeAudio = (input: UploadInput): DecodedMedia =>
   decodeMedia(input, AUDIO_MIME_EXT, MAX_AUDIO_BYTES, 'Voice note', isValidAudioBytes);

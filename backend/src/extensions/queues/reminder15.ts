@@ -1,7 +1,11 @@
+import { createHash } from 'node:crypto';
 import { Queue, Worker, type Job } from 'bullmq';
 import { logger } from '../../config/logger';
 import { prisma } from '../../config/database';
-import { notificationsService } from '../../modules/notifications/notifications.service';
+import {
+  notificationDeliveryOutboxData,
+  wakeNotificationDelivery,
+} from '../../modules/notifications/notification.outbox';
 import { getBlockedIdSet } from '../../modules/social/blocks';
 import { bullConnection } from '../../queues/connection';
 
@@ -21,6 +25,9 @@ import { bullConnection } from '../../queues/connection';
 const QUEUE_NAME = 'ext-event-reminders-15';
 const LEAD_TIME_MS = 15 * 60 * 1000;
 const SCAN_INTERVAL_MS = 60 * 1000;
+const SCAN_PAGE_SIZE = 250;
+const RECIPIENT_PAGE_SIZE = 250;
+const REMINDER_ATTEMPTS = 5;
 
 export interface Reminder15JobData {
   roomId: string;
@@ -49,8 +56,12 @@ export const scheduleReminder15 = async (roomId: string, scheduledFor: Date): Pr
     {
       jobId: jobIdForRoom(roomId),
       delay,
-      removeOnComplete: true,
+      // Retain the completed job through the compensating scan window. A
+      // repeated scan then sees the same jobId instead of re-enqueueing it.
+      removeOnComplete: { age: 2 * 3600 },
       removeOnFail: { age: 24 * 3600 },
+      attempts: REMINDER_ATTEMPTS,
+      backoff: { type: 'exponential', delay: 5_000 },
     },
   );
 };
@@ -61,59 +72,154 @@ export const cancelReminder15 = async (roomId: string): Promise<void> => {
   if (job) await job.remove();
 };
 
-const processReminder15 = async (job: Job<Reminder15JobData>): Promise<void> => {
+const reminderNotificationId = (roomId: string, userId: string): string =>
+  `r15_${createHash('sha256').update(`${roomId}\0${userId}\0lead:15`).digest('hex')}`;
+
+interface ReminderRoom {
+  id: string;
+  title: string;
+  hostId: string;
+  clubId: string | null;
+}
+
+/**
+ * Persist one recipient page and its delivery hand-offs atomically. The stable
+ * notification id also makes a BullMQ retry safe without adding a schema
+ * column. Existing outbox keys are checked first so a user-deleted reminder is
+ * not resurrected by a late retry.
+ */
+const persistRecipientPage = async (
+  room: ReminderRoom,
+  candidates: string[],
+  blocked: Set<string>,
+): Promise<number> => {
+  const userIds = [...new Set(candidates)].filter(userId => !blocked.has(userId));
+  if (userIds.length === 0) return 0;
+
+  return prisma.$transaction(async tx => {
+    const deliveries = userIds.map(userId => {
+      const notificationId = reminderNotificationId(room.id, userId);
+      return {
+        userId,
+        notificationId,
+        outbox: notificationDeliveryOutboxData(notificationId, room.id),
+      };
+    });
+    const existing = await tx.outboxEvent.findMany({
+      where: { eventKey: { in: deliveries.map(item => item.outbox.eventKey) } },
+      select: { eventKey: true },
+    });
+    const existingKeys = new Set(existing.map(item => item.eventKey));
+    const fresh = deliveries.filter(item => !existingKeys.has(item.outbox.eventKey));
+    if (fresh.length === 0) return 0;
+
+    const created = await tx.notification.createMany({
+      data: fresh.map(item => ({
+        id: item.notificationId,
+        userId: item.userId,
+        actorId: room.hostId,
+        type: 'RSVP_REMINDER',
+        title: 'Starting soon',
+        body: `"${room.title}" starts in 15 minutes`,
+        data: { roomId: room.id, leadMinutes: 15 },
+        targetId: room.id,
+        targetType: 'room',
+      })),
+      skipDuplicates: true,
+    });
+    await tx.outboxEvent.createMany({
+      data: fresh.map(item => item.outbox),
+      skipDuplicates: true,
+    });
+    return created.count;
+  });
+};
+
+const pageRecipients = async (
+  load: (after: string | undefined) => Promise<Array<{ userId: string }>>,
+  visit: (userIds: string[]) => Promise<number>,
+): Promise<number> => {
+  let after: string | undefined;
+  let created = 0;
+  do {
+    const rows = await load(after);
+    if (rows.length === 0) break;
+    created += await visit(rows.map(row => row.userId));
+    after = rows.at(-1)?.userId;
+    if (rows.length < RECIPIENT_PAGE_SIZE) break;
+  } while (after);
+  return created;
+};
+
+export const processReminder15 = async (job: Job<Reminder15JobData>): Promise<void> => {
   const room = await prisma.room.findFirst({
     where: { id: job.data.roomId, host: { deletedAt: null } },
-    // EVEN-05: honor the per-user `RoomRsvp.reminder` toggle.
-    include: {
-      rsvps: {
-        where: { reminder: true, user: { deletedAt: null } },
-        select: { userId: true },
-      },
+    select: {
+      id: true,
+      title: true,
+      hostId: true,
+      clubId: true,
+      endedAt: true,
+      canceledAt: true,
+      scheduledFor: true,
     },
   });
   if (!room) return;
   if (room.endedAt) return; // canceled or ended
+
+  // BullMQ can deliver a retained/delayed job after the event was rescheduled.
+  // Never emit an obsolete reminder outside a narrow delivery tolerance.
+  if (room.canceledAt || !room.scheduledFor) return;
+  const untilStart = room.scheduledFor.getTime() - Date.now();
+  if (untilStart < 0 || untilStart > LEAD_TIME_MS + 2 * SCAN_INTERVAL_MS) return;
 
   // EVEN-06: align the T-15 audience with the T-5 reminder
   // (`eventReminders.ts`): opted-in RSVPs + the host + (for club rooms) every
   // active club member. The two reminders previously diverged — T-15 reached
   // RSVPs only — so subscribers who relied on the club fan-out missed it.
   const blocked = await getBlockedIdSet(room.hostId);
-  const recipientIds = new Set<string>(
-    room.rsvps.map(r => r.userId).filter(userId => !blocked.has(userId)),
-  );
-  recipientIds.add(room.hostId);
-  if (room.clubId) {
-    const members = await prisma.clubMember.findMany({
-      where: {
-        clubId: room.clubId,
-        user: { deletedAt: null, id: { notIn: [...blocked] } },
-      },
-      select: { userId: true },
-    });
-    for (const m of members) recipientIds.add(m.userId);
-  }
-  const recipients = Array.from(recipientIds);
-  const title = 'Starting soon';
-  const body = `"${room.title}" starts in 15 minutes`;
+  const persist = (userIds: string[]) => persistRecipientPage(room, userIds, blocked);
+  let created = await persist([room.hostId]);
 
-  for (const userId of recipients) {
-    try {
-      await notificationsService.create({
-        userId,
-        actorId: room.hostId,
-        type: 'RSVP_REMINDER',
-        title,
-        body,
-        data: { roomId: room.id, leadMinutes: 15 },
-        targetId: room.id,
-        targetType: 'room',
-      });
-    } catch (err) {
-      logger.error('ext.reminder15: failed to notify', { err, userId, roomId: room.id });
-    }
+  created += await pageRecipients(
+    after =>
+      prisma.roomRsvp.findMany({
+        where: {
+          roomId: room.id,
+          reminder: true,
+          user: { deletedAt: null },
+          ...(after ? { userId: { gt: after } } : {}),
+        },
+        select: { userId: true },
+        orderBy: { userId: 'asc' },
+        take: RECIPIENT_PAGE_SIZE,
+      }),
+    persist,
+  );
+
+  if (room.clubId) {
+    const clubId = room.clubId;
+    created += await pageRecipients(
+      after =>
+        prisma.clubMember.findMany({
+          where: {
+            clubId,
+            user: { deletedAt: null },
+            ...(after ? { userId: { gt: after } } : {}),
+          },
+          select: { userId: true },
+          orderBy: { userId: 'asc' },
+          take: RECIPIENT_PAGE_SIZE,
+        }),
+      persist,
+    );
   }
+
+  // Process one batch immediately; the process-scoped outbox poller drains
+  // any remaining pages. A wake failure is retryable with the BullMQ job and
+  // cannot duplicate rows because notification/outbox ids are deterministic.
+  await wakeNotificationDelivery(room.id);
+  logger.info('ext.reminder15: durable fanout queued', { roomId: room.id, created });
 };
 
 /**
@@ -126,25 +232,34 @@ const scanForUpcoming = async (): Promise<void> => {
   const windowStart = new Date(now + LEAD_TIME_MS - SCAN_INTERVAL_MS);
   const windowEnd = new Date(now + LEAD_TIME_MS + SCAN_INTERVAL_MS);
 
-  const rooms = await prisma.room.findMany({
-    where: {
-      scheduledFor: { gte: windowStart, lte: windowEnd },
-      endedAt: null,
-      host: { deletedAt: null },
-    },
-    select: { id: true, scheduledFor: true },
-  });
+  let after: string | undefined;
+  do {
+    const rooms = await prisma.room.findMany({
+      where: {
+        scheduledFor: { gte: windowStart, lte: windowEnd },
+        endedAt: null,
+        host: { deletedAt: null },
+        ...(after ? { id: { gt: after } } : {}),
+      },
+      select: { id: true, scheduledFor: true },
+      orderBy: { id: 'asc' },
+      take: SCAN_PAGE_SIZE,
+    });
 
-  for (const r of rooms) {
-    if (!r.scheduledFor) continue;
-    await scheduleReminder15(r.id, r.scheduledFor);
-  }
+    for (const room of rooms) {
+      if (!room.scheduledFor) continue;
+      await scheduleReminder15(room.id, room.scheduledFor);
+    }
+    after = rooms.at(-1)?.id;
+    if (rooms.length < SCAN_PAGE_SIZE) break;
+  } while (after);
 };
 
 export const startReminder15Worker = (): void => {
   if (worker) return;
   worker = new Worker<Reminder15JobData>(QUEUE_NAME, processReminder15, {
     connection: bullConnection(),
+    concurrency: 2,
   });
   worker.on('failed', (job, err) => {
     logger.error('ext.reminder15: job failed', { jobId: job?.id, err: err.message });

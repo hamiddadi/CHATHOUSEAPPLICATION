@@ -33,6 +33,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 LABEL org.chathouse.database-role-contract="v1"
 LABEL org.chathouse.livekit-revocation-contract="v1"
+LABEL org.chathouse.state-contract="v2"
 
 # openssl for Prisma engines. python3 is kept because mediasoup-worker runs
 # as a separate native process — a few runtime tools (libstdc++, libatomic)

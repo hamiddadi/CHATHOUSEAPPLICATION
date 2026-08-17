@@ -1,4 +1,7 @@
 import { prisma } from '../../../config/database';
+import { AppError } from '../../../middlewares/error.middleware';
+
+export const CONTACT_MATCH_MAX_NUMBERS = 500;
 
 const PUBLIC_USER = {
   id: true,
@@ -32,10 +35,22 @@ export const contactsService = {
 
     // De-duplicate; the router already caps the array length.
     const unique = Array.from(new Set(phoneNumbers));
+    if (unique.length > CONTACT_MATCH_MAX_NUMBERS) throw new AppError('VALIDATION_001');
+
+    // Production authentication is phone/OTP based. Requiring a phone-bound
+    // requester prevents a legacy/test-only email account from becoming a
+    // cheap phone-number enumeration identity if it ever reaches this service
+    // outside the public router.
+    const requester = await prisma.user.findFirst({
+      where: { id: userId, deletedAt: null, hasCompletedOnboarding: true },
+      select: { phoneNumber: true },
+    });
+    if (!requester?.phoneNumber) throw new AppError('CONTACT_001');
 
     const matched = await prisma.user.findMany({
       where: {
         phoneNumber: { in: unique },
+        allowContactDiscovery: true,
         deletedAt: null,
         id: { not: userId },
         blocksCreated: { none: { blockedId: userId } },

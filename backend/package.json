@@ -14,7 +14,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint \"src/**/*.ts\" \"tests/**/*.ts\" --max-warnings 0",
     "test": "jest --runInBand",
-    "test:ci": "jest --ci --coverage --runInBand",
+    "test:ci": "node --max-old-space-size=4096 ./node_modules/jest/bin/jest.js --ci --coverage --runInBand",
     "test:debug": "jest --runInBand --detectOpenHandles",
     "test:watch": "jest --watch",
     "test:seeded": "tsx scripts/seed.ts && jest --config jest.seed.config.js --runInBand",

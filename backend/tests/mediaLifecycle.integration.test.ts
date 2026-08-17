@@ -10,7 +10,7 @@ const { mediaService } =
   require('../src/modules/media/media.service') as typeof import('../src/modules/media/media.service');
 const { privateObjectStore } =
   require('../src/modules/media/object-storage') as typeof import('../src/modules/media/object-storage');
-const { mediaUrlFor } =
+const { legacyStableMediaUrlFor } =
   require('../src/modules/media/media-url') as typeof import('../src/modules/media/media-url');
 /* eslint-enable @typescript-eslint/no-require-imports */
 
@@ -57,7 +57,7 @@ const createLegacyVoiceMetadata = async (ownerId: string, now: Date) => {
   return {
     mediaId,
     storageKey,
-    url: mediaUrlFor(mediaId, 'http://localhost'),
+    url: legacyStableMediaUrlFor(mediaId, 'http://localhost'),
   };
 };
 
@@ -232,8 +232,14 @@ describe('Private media lifecycle cleanup', () => {
     const now = new Date();
     const directVoice = await createOldVoice(owner.id, now);
     const groupVoice = await createOldVoice(owner.id, now);
+    const directUrl = mediaService.canonicalizeVoiceMediaUrl(directVoice.url);
+    const groupUrl = mediaService.canonicalizeVoiceMediaUrl(groupVoice.url);
     const conversation = await prisma.conversation.create({
-      data: { ownerId: owner.id, title: `Media cleanup ${rand()}` },
+      data: {
+        ownerId: owner.id,
+        title: `Media cleanup ${rand()}`,
+        members: { create: { userId: owner.id } },
+      },
       select: { id: true },
     });
     await prisma.message.create({
@@ -241,7 +247,7 @@ describe('Private media lifecycle cleanup', () => {
         senderId: owner.id,
         receiverId: receiver.id,
         kind: 'VOICE',
-        audioUrl: directVoice.url,
+        audioUrl: directUrl,
         audioDurationMs: 1_000,
         mediaObjectId: directVoice.id,
       },
@@ -251,7 +257,7 @@ describe('Private media lifecycle cleanup', () => {
         conversationId: conversation.id,
         senderId: owner.id,
         kind: 'VOICE',
-        audioUrl: groupVoice.url,
+        audioUrl: groupUrl,
         audioDurationMs: 1_000,
         mediaObjectId: groupVoice.id,
       },
@@ -274,7 +280,11 @@ describe('Private media lifecycle cleanup', () => {
     userIds.push(owner.id, receiver.id);
     const now = new Date();
     const conversation = await prisma.conversation.create({
-      data: { ownerId: owner.id, title: `Legacy media ${rand()}` },
+      data: {
+        ownerId: owner.id,
+        title: `Legacy media ${rand()}`,
+        members: { create: { userId: owner.id } },
+      },
       select: { id: true },
     });
     const legacyRows = [
@@ -297,8 +307,8 @@ describe('Private media lifecycle cleanup', () => {
       `;
     }
 
-    const directUrl = mediaUrlFor(legacyRows[0]!.mediaId, 'http://localhost');
-    const groupUrl = mediaUrlFor(legacyRows[1]!.mediaId, 'http://localhost');
+    const directUrl = legacyStableMediaUrlFor(legacyRows[0]!.mediaId, 'http://localhost');
+    const groupUrl = legacyStableMediaUrlFor(legacyRows[1]!.mediaId, 'http://localhost');
     // Deliberately omit mediaObjectId from both legacy message shapes. The
     // migration trigger must establish the durable relation before INSERT.
     await prisma.$executeRaw`

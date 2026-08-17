@@ -285,7 +285,9 @@ export const SettingsScreen: React.FC = () => {
         accessibilityRole="button"
         accessibilityLabel={t('settings.sendWaveA11y', 'Send a wave')}
         accessibilityState={{ disabled: !user }}
-        className={`bg-primary/10 px-lg py-xs rounded-pill${user ? '' : ' opacity-50'}`}
+        className={`min-h-[44px] justify-center bg-primary/10 px-lg py-xs rounded-pill${
+          user ? '' : ' opacity-50'
+        }`}
       >
         <Text className="text-sm font-body-bold text-primary">{t('feed.wave', 'Wave 👋')}</Text>
       </Pressable>

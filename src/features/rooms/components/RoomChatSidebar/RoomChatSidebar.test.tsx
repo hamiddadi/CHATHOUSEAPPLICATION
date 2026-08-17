@@ -191,7 +191,7 @@ describe('RoomChatSidebar content reporting', () => {
       });
       expect(pendingButton.findByType(ActivityIndicator).props.color).toBe(colors.onPrimary);
     });
-    expect(sendSpy).toHaveBeenCalledWith(ROOM_ID, 'Only once', undefined);
+    expect(sendSpy).toHaveBeenCalledWith(ROOM_ID, 'Only once', expect.any(String), undefined);
 
     await act(async () => {
       resolveSend({ ...messages[0]!, id: 'sent-room-message' });

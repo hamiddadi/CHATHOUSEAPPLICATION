@@ -193,6 +193,47 @@ describe('production push environment', () => {
     expect(output).toContain('JWT_ACCESS_SECRET and LIVEKIT_API_SECRET must use distinct secrets');
   });
 
+  it('refuses to enable legacy email/password auth in production', async () => {
+    process.env = {
+      ...validProductionEnv(),
+      FIREBASE_USE_ADC: 'true',
+      LEGACY_EMAIL_AUTH_ENABLED: 'true',
+    };
+
+    const output = await expectBootRejection();
+
+    expect(output).toContain('LEGACY_EMAIL_AUTH_ENABLED must be false in production');
+  });
+
+  it('rejects a JWT legacy-claims cutoff more than seven days in the future', async () => {
+    process.env = {
+      ...validProductionEnv(),
+      FIREBASE_USE_ADC: 'true',
+      JWT_LEGACY_NO_ISS_AUD_ACCEPT_UNTIL: new Date(
+        Date.now() + 8 * 24 * 60 * 60 * 1000,
+      ).toISOString(),
+    };
+
+    const output = await expectBootRejection();
+
+    expect(output).toContain(
+      'JWT_LEGACY_NO_ISS_AUD_ACCEPT_UNTIL must not extend more than 7 days from boot',
+    );
+  });
+
+  it('allows a past JWT legacy-claims cutoff as fail-closed strict mode', async () => {
+    const expiredCutoff = new Date(Date.now() - 60_000).toISOString();
+    process.env = {
+      ...validProductionEnv(),
+      FIREBASE_USE_ADC: 'true',
+      JWT_LEGACY_NO_ISS_AUD_ACCEPT_UNTIL: expiredCutoff,
+    };
+
+    const { env } = await import('../src/config/env');
+
+    expect(env.JWT_LEGACY_NO_ISS_AUD_ACCEPT_UNTIL).toBe(expiredCutoff);
+  });
+
   it('keeps Stripe optional when Compose supplies all Stripe values empty', async () => {
     process.env = {
       ...validProductionEnv(),

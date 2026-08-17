@@ -1440,7 +1440,7 @@
     "delete": {
       "title": "Supprimer mon compte",
       "description": "La demande désactive immédiatement votre compte, révoque vos sessions et masque votre profil. La purge définitive intervient après 30 jours.",
-      "grace": "Pendant ces 30 jours, une connexion réussie réactive automatiquement un compte supprimé volontairement. Sans connexion, les données et médias privés sont purgés.",
+      "grace": "Pendant ces 30 jours, la connexion ouvre une session limitée à la récupération. Ton compte n’est restauré qu’après ta confirmation explicite. Sans restauration, les données et médias privés sont purgés.",
       "confirmInputLabel": "Pour confirmer, saisissez : ",
       "buttonDelete": "Demander la suppression du compte",
       "buttonCancel": "Annuler",
@@ -1558,7 +1558,7 @@
     "restore": {
       "title": "Compte programmé pour suppression",
       "body": "Votre compte est en cours de suppression. Souhaitez-vous le restaurer et conserver vos données ?",
-      "dismiss": "Plus tard",
+      "dismiss": "Se déconnecter",
       "confirm": "Restaurer",
       "successTitle": "Compte restauré",
       "successBody": "Bon retour — votre compte est de nouveau actif.",
@@ -1635,6 +1635,7 @@
       "CLUB_008": "Ce lien d'invitation a expiré.",
       "CLUB_009": "Ce lien d'invitation est invalide.",
       "ACCOUNT_001": "La suppression du compte est déjà programmée.",
+      "ACCOUNT_002": "Restaure ton compte avant de continuer.",
       "AGE_001": "Tu dois confirmer que tu as au moins 16 ans.",
       "MAPS_001": "Active ta visibilité sur la carte avant de partager ta position.",
       "UPLOAD_001": "Ce fichier multimédia est trop volumineux.",

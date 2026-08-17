@@ -5,6 +5,7 @@ import { authedUserId } from '../../utils/authedUserId';
 import {
   addGroupMembersSchema,
   createGroupSchema,
+  listGroupsSchema,
   listGroupMessagesSchema,
   renameGroupSchema,
   sendGroupMessageSchema,
@@ -27,8 +28,9 @@ export const groupsController = {
   },
 
   async list(req: Request, res: Response) {
-    const groups = await groupsService.list(authedUserId(req));
-    sendOk(res, groups);
+    const input = listGroupsSchema.parse(req.query);
+    const page = await groupsService.list(authedUserId(req), input);
+    sendOk(res, input.paginated ? page : page.data);
   },
 
   async detail(req: Request, res: Response) {

@@ -17,6 +17,7 @@
   },
   "ios": {
     "artifact_sha256": "__64_HEXADECIMAL_XCARCHIVE_TGZ_SHA256__",
+    "ipa_sha256": "__64_HEXADECIMAL_IPA_SHA256__",
     "build_number": "__IOS_BUILD_NUMBER__",
     "testflight": {
       "status": "pending",

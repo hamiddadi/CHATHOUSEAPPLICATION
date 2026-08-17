@@ -3,15 +3,18 @@ import { Prisma, type AppRole } from '@prisma/client';
 import { prisma, runWriteWithRetry } from '../../config/database';
 import { redis } from '../../config/redis';
 import { logger } from '../../config/logger';
+import { blacklistKey } from '../../middlewares/auth.middleware';
 import { AppError } from '../../middlewares/error.middleware';
 import { closeRoom as closeSfuRoom } from '../../webrtc/mediasoup.manager';
 import {
+  disconnectDelegatedActorSockets,
+  disconnectDelegatedTokenSockets,
   disconnectUserSockets,
   emitHallwayRoomClosed,
   emitRoomEnded,
   forceAllSocketsLeaveRoom,
 } from '../../socket/realtime';
-import { signImpersonationToken } from '../../utils/jwt';
+import { signImpersonationToken, verifyAccessToken } from '../../utils/jwt';
 import { cancelEventReminder } from '../../queues/eventReminders';
 import { recordingsService } from '../recordings/recordings.service';
 import { notificationsService } from '../notifications/notifications.service';
@@ -454,7 +457,12 @@ export const adminService = {
         if (ROLE_RANK[input.role] > ROLE_RANK[lockedActor.appRole]) {
           throw new AppError('ADMIN_002');
         }
-        assertCanActOn(lockedActor, lockedTarget);
+        // Role management is the one operation where a SUPER_ADMIN must be
+        // able to demote another SUPER_ADMIN. Other administrative actions
+        // keep the stricter "target rank must be lower" rule.
+        if (lockedTarget.appRole !== 'SUPER_ADMIN') {
+          assertCanActOn(lockedActor, lockedTarget);
+        }
         if (lockedTarget.appRole === 'SUPER_ADMIN' && input.role !== 'SUPER_ADMIN') {
           const remaining = await tx.user.count({
             where: { appRole: 'SUPER_ADMIN', id: { not: targetUserId } },
@@ -466,19 +474,25 @@ export const adminService = {
           data: { appRole: input.role },
           select: publicAdminUser,
         });
+        await auditLogService.record(
+          {
+            actorId,
+            action: 'USER_ROLE_CHANGED',
+            targetUserId,
+            targetType: 'user',
+            targetId: targetUserId,
+            metadata: { from: lockedTarget.appRole, to: input.role },
+            ip: ctx.ip,
+            userAgent: ctx.userAgent,
+          },
+          tx,
+        );
         return { updated, previousRole: lockedTarget.appRole };
       }),
     );
-    await auditLogService.record({
-      actorId,
-      action: 'USER_ROLE_CHANGED',
-      targetUserId,
-      targetType: 'user',
-      targetId: targetUserId,
-      metadata: { from: atomicMutation.previousRole, to: input.role },
-      ip: ctx.ip,
-      userAgent: ctx.userAgent,
-    });
+    if (atomicMutation.previousRole === 'SUPER_ADMIN' && input.role !== 'SUPER_ADMIN') {
+      disconnectDelegatedActorSockets(targetUserId);
+    }
     return atomicMutation.updated;
   },
   /**
@@ -531,12 +545,34 @@ export const adminService = {
             },
             select: publicAdminUser,
           });
+          await auditLogService.record(
+            {
+              actorId,
+              action: 'USER_SUSPENDED',
+              targetUserId,
+              targetType: 'user',
+              targetId: targetUserId,
+              metadata: {
+                until: expiresAt.toISOString(),
+                durationMinutes: input.durationMinutes ?? null,
+                reason: input.reason,
+              },
+              ip: ctx.ip,
+              userAgent: ctx.userAgent,
+            },
+            tx,
+          );
           return { updated, revocations };
         },
         { maxWait: 5_000, timeout: 15_000 },
       ),
     );
     const { updated } = mutation;
+
+    // The durable revocation is committed. Tear down realtime sessions before
+    // any best-effort Redis/provider work so an outage cannot leave the user
+    // connected with an already-revoked credential.
+    disconnectUserSockets(targetUserId, 'account_suspended');
 
     // Force the lockout to land within the cache TTL window. We mark the
     // cache "suspended" up to the same expiry so requireAuth doesn't even
@@ -545,25 +581,18 @@ export const adminService = {
       SUSPENSION_CACHE_TTL_SEC, // cap 1h to avoid stale cache after a manual unsuspend
       Math.max(30, Math.ceil((expiresAt.getTime() - Date.now()) / 1000)),
     );
-    await redis.setEx(`user:susp:${targetUserId}`, ttlSec, '1');
-    disconnectUserSockets(targetUserId, 'account_suspended');
-    await wakeAdminPresenceRevocations('admin.suspend', mutation.revocations);
+    await redis
+      .setEx(`user:susp:${targetUserId}`, ttlSec, '1')
+      .catch(err =>
+        logger.warn('admin.suspend: suspension cache update failed', { err, targetUserId }),
+      );
+    await wakeAdminPresenceRevocations('admin.suspend', mutation.revocations).catch(err =>
+      logger.warn('admin.suspend: presence revocation wake scheduling failed', {
+        err,
+        targetUserId,
+      }),
+    );
     await finalizeAdminHostedRoomClosures('admin.suspend', mutation.revocations.rooms);
-
-    await auditLogService.record({
-      actorId,
-      action: 'USER_SUSPENDED',
-      targetUserId,
-      targetType: 'user',
-      targetId: targetUserId,
-      metadata: {
-        until: expiresAt.toISOString(),
-        durationMinutes: input.durationMinutes ?? null,
-        reason: input.reason,
-      },
-      ip: ctx.ip,
-      userAgent: ctx.userAgent,
-    });
 
     return updated;
   },
@@ -599,6 +628,22 @@ export const adminService = {
           data: { suspendedUntil: null, suspensionReason: null },
           select: publicAdminUser,
         });
+        await auditLogService.record(
+          {
+            actorId,
+            action: 'USER_UNSUSPENDED',
+            targetUserId,
+            targetType: 'user',
+            targetId: targetUserId,
+            metadata: {
+              previousUntil: lockedTarget.suspendedUntil?.toISOString() ?? null,
+              previousReason: lockedTarget.suspensionReason,
+            },
+            ip: ctx.ip,
+            userAgent: ctx.userAgent,
+          },
+          tx,
+        );
         return {
           updated,
           previousUntil: lockedTarget.suspendedUntil,
@@ -607,19 +652,6 @@ export const adminService = {
       }),
     );
     await redis.del(`user:susp:${targetUserId}`);
-    await auditLogService.record({
-      actorId,
-      action: 'USER_UNSUSPENDED',
-      targetUserId,
-      targetType: 'user',
-      targetId: targetUserId,
-      metadata: {
-        previousUntil: atomicMutation.previousUntil?.toISOString() ?? null,
-        previousReason: atomicMutation.previousReason,
-      },
-      ip: ctx.ip,
-      userAgent: ctx.userAgent,
-    });
     return atomicMutation.updated;
   },
 
@@ -671,25 +703,41 @@ export const adminService = {
             data: { revokedAt: deletedAt },
           });
           await tx.pushToken.deleteMany({ where: { userId: targetUserId } });
+          await auditLogService.record(
+            {
+              actorId,
+              action: 'USER_DELETED',
+              targetUserId,
+              targetType: 'user',
+              targetId: targetUserId,
+              ip: ctx.ip,
+              userAgent: ctx.userAgent,
+            },
+            tx,
+          );
           return transitions;
         },
         { maxWait: 5_000, timeout: 15_000 },
       ),
     );
-    await redis.setEx(`user:susp:${targetUserId}`, SUSPENSION_CACHE_TTL_SEC, '1');
+
+    // As with suspend(), socket revocation must be the first post-commit side
+    // effect. Cache/provider outages are logged but cannot undo the committed
+    // deletion or keep an authenticated realtime session alive.
     disconnectUserSockets(targetUserId, 'account_deleted');
-    await wakeAdminPresenceRevocations('admin.deleteUser', revocations);
+    await redis
+      .setEx(`user:susp:${targetUserId}`, SUSPENSION_CACHE_TTL_SEC, '1')
+      .catch(err =>
+        logger.warn('admin.deleteUser: suspension cache update failed', { err, targetUserId }),
+      );
+    await wakeAdminPresenceRevocations('admin.deleteUser', revocations).catch(err =>
+      logger.warn('admin.deleteUser: presence revocation wake scheduling failed', {
+        err,
+        targetUserId,
+      }),
+    );
     await finalizeAdminHostedRoomClosures('admin.deleteUser', revocations.rooms);
 
-    await auditLogService.record({
-      actorId,
-      action: 'USER_DELETED',
-      targetUserId,
-      targetType: 'user',
-      targetId: targetUserId,
-      ip: ctx.ip,
-      userAgent: ctx.userAgent,
-    });
     return { deleted: true as const };
   },
 
@@ -733,40 +781,57 @@ export const adminService = {
     // deliberately apply no actor/target rank check here so moderators can
     // triage the queue (including reports that happen to name a superior)
     // without being able to penalise anyone above their tier.
-    const report = await prisma.report.findUnique({ where: { id: reportId } });
-    if (!report) throw new AppError('NOT_FOUND_001');
-    if (report.resolvedAt) return { ok: true as const };
+    return runWriteWithRetry(() =>
+      prisma.$transaction(async tx => {
+        // The router checked the role before entering the service, but a
+        // concurrent suspension/demotion can land while this request waits on
+        // the report row. Lock and revalidate the actor inside the mutation so
+        // the authorization decision and the write have one serial order.
+        await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${actorId} FOR UPDATE`;
+        const lockedActor = await tx.user.findUnique({
+          where: { id: actorId },
+          select: { appRole: true, deletedAt: true, suspendedUntil: true },
+        });
+        if (!lockedActor) throw new AppError('AUTH_003');
+        assertActiveAdminActor(lockedActor, 'MODERATOR');
 
-    // MODE-05: resolve conditionally (WHERE resolvedAt IS NULL) so two
-    // concurrent resolutions can't both pass the read-then-write check above
-    // and each write a duplicate AuditLog line. Only the call that actually
-    // flipped the row (count === 1) records the audit entry.
-    const resolved = await prisma.report.updateMany({
-      where: { id: reportId, resolvedAt: null },
-      data: { resolvedAt: new Date() },
-    });
-    if (resolved.count !== 1) return { ok: true as const };
+        const report = await tx.report.findUnique({ where: { id: reportId } });
+        if (!report) throw new AppError('NOT_FOUND_001');
+        if (report.resolvedAt) return { ok: true as const };
 
-    await auditLogService.record({
-      actorId,
-      action: input.outcome === 'resolved' ? 'REPORT_RESOLVED' : 'REPORT_DISMISSED',
-      targetUserId: report.reportedId ?? report.contentAuthorId,
-      targetRoomId: report.reportedRoomId,
-      targetType: 'report',
-      targetId: reportId,
-      metadata: {
-        notes: input.notes ?? null,
-        kind: report.targetKind,
-        reason: report.reason,
-        reportedMessageId: report.reportedMessageId,
-        reportedGroupMessageId: report.reportedGroupMessageId,
-        reportedRoomMessageId: report.reportedRoomMessageId,
-        contentContextId: report.contentContextId,
-      },
-      ip: ctx.ip,
-      userAgent: ctx.userAgent,
-    });
-    return { ok: true as const };
+        // MODE-05: resolve conditionally (WHERE resolvedAt IS NULL) so two
+        // concurrent resolutions cannot write duplicate audit rows.
+        const resolved = await tx.report.updateMany({
+          where: { id: reportId, resolvedAt: null },
+          data: { resolvedAt: new Date() },
+        });
+        if (resolved.count !== 1) return { ok: true as const };
+
+        await auditLogService.record(
+          {
+            actorId,
+            action: input.outcome === 'resolved' ? 'REPORT_RESOLVED' : 'REPORT_DISMISSED',
+            targetUserId: report.reportedId ?? report.contentAuthorId,
+            targetRoomId: report.reportedRoomId,
+            targetType: 'report',
+            targetId: reportId,
+            metadata: {
+              notes: input.notes ?? null,
+              kind: report.targetKind,
+              reason: report.reason,
+              reportedMessageId: report.reportedMessageId,
+              reportedGroupMessageId: report.reportedGroupMessageId,
+              reportedRoomMessageId: report.reportedRoomMessageId,
+              contentContextId: report.contentContextId,
+            },
+            ip: ctx.ip,
+            userAgent: ctx.userAgent,
+          },
+          tx,
+        );
+        return { ok: true as const };
+      }),
+    );
   },
 
   // ──────────────────── Rooms ────────────────────
@@ -834,6 +899,23 @@ export const adminService = {
           await tx.outboxEvent.create({
             data: livekitRoomRevocationOutboxData(roomId, transitionId),
           });
+          await auditLogService.record(
+            {
+              actorId,
+              action: 'ROOM_FORCE_ENDED',
+              targetRoomId: roomId,
+              targetType: 'room',
+              targetId: roomId,
+              metadata: {
+                title: room.title,
+                reason: input.reason,
+                participantsCount: userIds.length,
+              },
+              ip: ctx.ip,
+              userAgent: ctx.userAgent,
+            },
+            tx,
+          );
           return { room, closed: true as const, userIds };
         },
         { maxWait: 5_000, timeout: 15_000 },
@@ -885,20 +967,11 @@ export const adminService = {
           data: { roomId, reason: input.reason },
           targetId: roomId,
           targetType: 'room',
+          dedupeKey: `room-ended-by-admin:${roomId}:${userId}`,
         }),
       ),
     );
 
-    await auditLogService.record({
-      actorId,
-      action: 'ROOM_FORCE_ENDED',
-      targetRoomId: roomId,
-      targetType: 'room',
-      targetId: roomId,
-      metadata: { title: room.title, reason: input.reason, participantsCount: userIds.length },
-      ip: ctx.ip,
-      userAgent: ctx.userAgent,
-    });
     return { ended: true as const };
   },
 
@@ -968,24 +1041,42 @@ export const adminService = {
     };
   }> {
     if (actorId === targetUserId) throw new AppError('ADMIN_002');
-    const target = await prisma.user.findUnique({
-      where: { id: targetUserId },
-      select: {
-        id: true,
-        username: true,
-        displayName: true,
-        avatarUrl: true,
-        appRole: true,
-        deletedAt: true,
-        suspendedUntil: true,
-      },
-    });
+    const [actor, target] = await Promise.all([
+      prisma.user.findUnique({
+        where: { id: actorId },
+        select: { appRole: true, deletedAt: true, suspendedUntil: true, tokenVersion: true },
+      }),
+      prisma.user.findUnique({
+        where: { id: targetUserId },
+        select: {
+          id: true,
+          username: true,
+          displayName: true,
+          avatarUrl: true,
+          appRole: true,
+          deletedAt: true,
+          suspendedUntil: true,
+          tokenVersion: true,
+        },
+      }),
+    ]);
+    if (!actor) throw new AppError('AUTH_003');
+    assertActiveAdminActor(actor, 'SUPER_ADMIN');
     if (!target) throw new AppError('USER_001');
     if (target.appRole === 'SUPER_ADMIN') throw new AppError('ADMIN_002');
     if (target.deletedAt) throw new AppError('USER_001');
+    if (target.suspendedUntil && target.suspendedUntil > new Date()) {
+      throw new AppError('AUTH_007');
+    }
 
     const ttlSec = 15 * 60;
-    const token = signImpersonationToken(targetUserId, actorId, ttlSec);
+    const token = signImpersonationToken(
+      targetUserId,
+      actorId,
+      target.tokenVersion,
+      actor.tokenVersion,
+      ttlSec,
+    );
 
     await auditLogService.record({
       actorId,
@@ -1010,16 +1101,35 @@ export const adminService = {
     };
   },
 
-  /**
-   * Audit-only end-of-impersonation marker. The client just stops sending
-   * the impersonation token; this endpoint exists so the trail captures
-   * the explicit "the admin handed back control" moment too.
-   */
+  /** Revoke one exact delegated bearer, then record the end of its session. */
   async stopImpersonation(
     actorId: string,
     targetUserId: string,
+    token: string,
     ctx: ActorContext,
   ): Promise<{ ok: true }> {
+    const claims = verifyAccessToken(token);
+    if (
+      !claims.act ||
+      claims.act.sub !== actorId ||
+      claims.sub !== targetUserId ||
+      !claims.jti ||
+      typeof claims.exp !== 'number'
+    ) {
+      // The primary bearer authorized the endpoint, but it cannot revoke a
+      // delegated session owned by another actor or issued for another target.
+      throw new AppError('AUTH_003');
+    }
+
+    // verifyAccessToken rejects an already-expired token. At the integer-second
+    // boundary retain the denylist entry for at least one second so a token
+    // accepted by this request cannot race one final protected request.
+    const ttlSec = Math.max(1, claims.exp - Math.floor(Date.now() / 1000));
+    await redis.setEx(blacklistKey(token, claims.jti), ttlSec, '1');
+    disconnectDelegatedTokenSockets(claims.jti);
+
+    // Deliberately after Redis: an IMPERSONATION_ENDED row must never claim a
+    // bearer was handed back while that bearer is still accepted by requireAuth.
     await auditLogService.record({
       actorId,
       action: 'IMPERSONATION_ENDED',

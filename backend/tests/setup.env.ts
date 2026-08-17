@@ -22,6 +22,7 @@ process.env.JWT_ACCESS_SECRET =
   process.env.JWT_ACCESS_SECRET ?? 'test-access-secret-that-is-at-least-32-characters-long';
 process.env.JWT_REFRESH_SECRET =
   process.env.JWT_REFRESH_SECRET ?? 'test-refresh-secret-that-is-at-least-32-characters-long';
+process.env.LEGACY_EMAIL_AUTH_ENABLED = 'true';
 process.env.CORS_ORIGINS = process.env.CORS_ORIGINS ?? 'http://localhost:8081';
 // authLimiter is in-memory and shared across suites. Bump the process-wide cap
 // so request-heavy integration suites cannot starve one another. The dedicated

@@ -1,17 +1,25 @@
 #!/usr/bin/env bash
+# Test inputs are read by the sourced deployment guards in this shell.
+# shellcheck disable=SC2034
 # Deterministic tests for the sourceable LiveKit deployment/recovery decisions.
 set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
+# shellcheck source=./state-contract-deploy-guard.sh
+source "${SCRIPT_DIR}/state-contract-deploy-guard.sh"
 # shellcheck source=./livekit-deploy-guard.sh
 source "${SCRIPT_DIR}/livekit-deploy-guard.sh"
 
+REQUIRED_STATE_CONTRACT=v2
 REQUIRED_LIVEKIT_REVOCATION_CONTRACT=v1
 REQUIRED_DATABASE_ROLE_CONTRACT=v1
+ACKNOWLEDGE_ONE_WAY_STATE_CONTRACT_V2_CUTOVER=false
 ALLOW_ONE_WAY_LIVEKIT_REVOCATION_UPGRADE=false
 ALLOW_ONE_WAY_DATABASE_ROLE_UPGRADE=false
+PREV_IMAGE_STATE_COMPATIBLE=0
 PREV_IMAGE_LIVEKIT_COMPATIBLE=0
 PREV_IMAGE_DATABASE_ROLE_COMPATIBLE=0
+MOCK_STATE_CONTRACT=v2
 MOCK_IMAGE_CONTRACT=
 MOCK_DATABASE_ROLE_CONTRACT=
 LOG_OUTPUT=
@@ -26,6 +34,10 @@ image_livekit_revocation_contract() {
 
 image_database_role_contract() {
   printf '%s\n' "$MOCK_DATABASE_ROLE_CONTRACT"
+}
+
+image_state_contract() {
+  printf '%s\n' "$MOCK_STATE_CONTRACT"
 }
 
 # A pre-v1 predecessor must be rejected before the caller is allowed to mutate
@@ -68,8 +80,8 @@ MOCK_DATABASE_ROLE_CONTRACT=v1
 preflight_previous_api_database_role_contract running-container repo/api@sha256:double-v1
 [ "$PREV_IMAGE_DATABASE_ROLE_COMPATIBLE" -eq 1 ]
 
-# Automatic API rollback revalidates both contracts immediately before the
-# only mutating activation call.
+# Automatic API rollback revalidates every runtime contract immediately before
+# the only mutating activation call.
 ROLLBACK_COMPOSE_FILE=rollback-compose.yml
 PREV_IMAGE=repo/api@sha256:previous-api
 API_ACTIVATION_CALLS=
@@ -77,6 +89,15 @@ activate_image() {
   API_ACTIVATION_CALLS="${1}|${2}"
 }
 
+# A one-way state-v2 preflight never becomes a latent automatic rollback.
+MOCK_DATABASE_ROLE_CONTRACT=v1
+if activate_previous_image; then
+  printf '%s\n' 'known pre-v2 predecessor unexpectedly reached activation' >&2
+  exit 1
+fi
+[ -z "$API_ACTIVATION_CALLS" ]
+
+PREV_IMAGE_STATE_COMPATIBLE=1
 MOCK_DATABASE_ROLE_CONTRACT=
 if activate_previous_image; then
   printf '%s\n' 'rollback activation accepted a missing database-role label' >&2

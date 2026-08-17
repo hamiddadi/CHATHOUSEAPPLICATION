@@ -143,16 +143,53 @@ services:
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
 
+  # One-way, idempotent application cutover for private-media URL columns.
+  # It runs with the restricted application role after DDL/grants and records
+  # its completion in DeploymentCutover. deploy-image.sh keeps the old API
+  # stopped until this service succeeds.
+  media-reference-cutover:
+    image: ${CHATHOUSE_API_IMAGE:?CHATHOUSE_API_IMAGE is required (set by the CD pipeline)}
+    restart: 'no'
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 64
+    depends_on:
+      db-role-grants:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_APP_USER}:${POSTGRES_APP_PASSWORD}@postgres:5432/${POSTGRES_DB:-chathouse}?schema=public&connection_limit=1&pool_timeout=10&connect_timeout=5&statement_timeout=120000
+      PUBLIC_URL: ${PUBLIC_URL:?PUBLIC_URL is required (e.g. https://api.chathouse.app)}
+      MEDIA_URL_SIGNING_SECRET: ${MEDIA_URL_SIGNING_SECRET:?MEDIA_URL_SIGNING_SECRET is required}
+    command: ['node', 'dist/workers/mediaReferenceCutover.worker.js']
+
   api:
     image: ${CHATHOUSE_API_IMAGE:?CHATHOUSE_API_IMAGE is required (set by the CD pipeline)}
     container_name: chathouse-api
     restart: unless-stopped
+    stop_grace_period: 15s
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    mem_limit: ${API_MEMORY_LIMIT:-1g}
+    cpus: ${API_CPU_LIMIT:-2.0}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
       db-role-grants:
+        condition: service_completed_successfully
+      media-reference-cutover:
         condition: service_completed_successfully
       livekit-revocation-worker:
         condition: service_healthy
@@ -161,12 +198,20 @@ services:
       # Extension routers remain enabled by default. Stripe is a separately
       # optional sub-feature controlled by its complete credential set below.
       EXTENSIONS_ENABLED: ${EXTENSIONS_ENABLED:-true}
+      CONTACT_MATCH_ENABLED: ${CONTACT_MATCH_ENABLED:-false}
       PORT: 4000
       HOST: 0.0.0.0
-      DATABASE_URL: postgresql://${POSTGRES_APP_USER}:${POSTGRES_APP_PASSWORD}@postgres:5432/${POSTGRES_DB:-chathouse}?schema=public
+      DATABASE_URL: postgresql://${POSTGRES_APP_USER}:${POSTGRES_APP_PASSWORD}@postgres:5432/${POSTGRES_DB:-chathouse}?schema=public&connection_limit=${DATABASE_CONNECTION_LIMIT:-20}&pool_timeout=${DATABASE_POOL_TIMEOUT_SECONDS:-10}&connect_timeout=${DATABASE_CONNECT_TIMEOUT_SECONDS:-5}&statement_timeout=${DATABASE_STATEMENT_TIMEOUT_MS:-20000}
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?JWT_ACCESS_SECRET is required}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET is required}
+      JWT_ACCESS_TTL: ${JWT_ACCESS_TTL:-15m}
+      JWT_REFRESH_TTL: ${JWT_REFRESH_TTL:-7d}
+      JWT_ISSUER: ${JWT_ISSUER:-chathouse-api}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-chathouse-app}
+      # Temporary rolling-deploy bridge. Leave empty for strict validation;
+      # production boot rejects a timestamp more than seven days ahead.
+      JWT_LEGACY_NO_ISS_AUD_ACCEPT_UNTIL: ${JWT_LEGACY_NO_ISS_AUD_ACCEPT_UNTIL:-}
       CORS_ORIGINS: ${CORS_ORIGINS:?CORS_ORIGINS is required (e.g. https://app.chathouse.com)}
       PUBLIC_URL: ${PUBLIC_URL:?PUBLIC_URL is required (e.g. https://api.chathouse.app)}
       # Keep the public deletion deadline, the purge worker and the documented
@@ -205,7 +250,12 @@ services:
       # local filesystem fallback is accepted in production.
       MEDIA_STORAGE_DRIVER: s3
       MEDIA_URL_SIGNING_SECRET: ${MEDIA_URL_SIGNING_SECRET:?MEDIA_URL_SIGNING_SECRET is required}
+      MEDIA_APP_URL_TTL_SECONDS: ${MEDIA_APP_URL_TTL_SECONDS:-900}
       MEDIA_EXPORT_URL_TTL_SECONDS: ${MEDIA_EXPORT_URL_TTL_SECONDS:-3600}
+      # Set to a timestamp no more than 30 days after the first state-v2
+      # deployment so already-cached stable URLs survive the bounded cutover.
+      # The expired default keeps greenfield deployments strict.
+      MEDIA_LEGACY_STABLE_READ_UNTIL: ${MEDIA_LEGACY_STABLE_READ_UNTIL:-1970-01-01T00:00:00Z}
       MEDIA_S3_BUCKET: ${MEDIA_S3_BUCKET:?MEDIA_S3_BUCKET is required}
       MEDIA_S3_REGION: ${MEDIA_S3_REGION:?MEDIA_S3_REGION is required}
       MEDIA_S3_ENDPOINT: ${MEDIA_S3_ENDPOINT:?MEDIA_S3_ENDPOINT is required}
@@ -271,6 +321,18 @@ services:
     # Loopback only — the reverse proxy terminates TLS and forwards here.
     ports:
       - '127.0.0.1:4000:4000'
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:4000/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 20s
 
   # Security-critical LiveKit revocations and signed provider webhooks must
   # remain available even when the HTTP API has a deterministic boot failure.
@@ -280,6 +342,16 @@ services:
     container_name: chathouse-livekit-revocation-worker
     restart: unless-stopped
     stop_grace_period: 30s
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: ${LIVEKIT_WORKER_MEMORY_LIMIT:-512m}
+    cpus: ${LIVEKIT_WORKER_CPU_LIMIT:-1.0}
     depends_on:
       postgres:
         condition: service_healthy
@@ -288,7 +360,7 @@ services:
     # Deliberately minimal: this process does not import the API env parser and
     # receives no Redis, JWT, delivery, Firebase, Stripe or media credentials.
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_APP_USER}:${POSTGRES_APP_PASSWORD}@postgres:5432/${POSTGRES_DB:-chathouse}?schema=public&connect_timeout=5&pool_timeout=5&statement_timeout=20000
+      DATABASE_URL: postgresql://${POSTGRES_APP_USER}:${POSTGRES_APP_PASSWORD}@postgres:5432/${POSTGRES_DB:-chathouse}?schema=public&connection_limit=${LIVEKIT_WORKER_DATABASE_CONNECTION_LIMIT:-5}&connect_timeout=5&pool_timeout=5&statement_timeout=20000
       LIVEKIT_URL: ${LIVEKIT_URL:?LIVEKIT_URL is required (wss://...)}
       LIVEKIT_INTERNAL_URL: ${LIVEKIT_INTERNAL_URL:-}
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?LIVEKIT_API_KEY is required}

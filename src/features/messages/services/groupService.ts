@@ -7,7 +7,9 @@ import type { ContentReportReason, ContentReportResult } from '../../../shared/t
  * Group DM (Backchannel groups) service. Separate from the 1:1 messageService
  * because groups have their own backend tables (Conversation / GroupMessage).
  * Backend contract — backend/src/modules/groups:
- *   GET   /groups                 → GroupConversation[]
+ *   GET   /groups?limit&cursor&paginated=true
+ *                                      → { data: GroupConversation[], nextCursor, hasMore }
+ *                                      (legacy fallback: GroupConversation[])
  *   POST  /groups                 → GroupConversation   { title?, memberIds[] }
  *   GET   /groups/:id             → GroupConversation
  *   GET   /groups/:id/messages?limit&before&paginated=true
@@ -57,7 +59,7 @@ interface RawGroupConversation {
 interface RawPage<T> {
   data: T[];
   nextCursor: string | null;
-  hasMore: boolean;
+  hasMore?: boolean;
 }
 
 export interface GroupMessage {
@@ -94,6 +96,12 @@ export interface GroupConversation {
 export interface GroupMessagePage {
   items: GroupMessage[];
   nextCursor: string | null;
+}
+
+export interface GroupConversationPage {
+  items: GroupConversation[];
+  nextCursor: string | null;
+  hasMore: boolean;
 }
 
 const toSummary = (u: RawUser): UserSummary => ({
@@ -139,9 +147,39 @@ const toConversation = (c: RawGroupConversation): GroupConversation => ({
 });
 
 export const groupService = {
-  async list(): Promise<GroupConversation[]> {
-    const res = await apiClient.get<Envelope<RawGroupConversation[]>>('/groups');
-    return res.data.data.map(toConversation);
+  /**
+   * One activity-ordered group page. During a rolling deployment an older
+   * backend may ignore `paginated=true` and return the historical bare array;
+   * treat that response as a complete page instead of crashing the client.
+   */
+  async list(opts: { cursor?: string; limit?: number } = {}): Promise<GroupConversationPage> {
+    const params: Record<string, string | number | boolean> = { paginated: true };
+    if (opts.cursor) params.cursor = opts.cursor;
+    if (opts.limit) params.limit = opts.limit;
+    const res = await apiClient.get<
+      Envelope<RawPage<RawGroupConversation> | RawGroupConversation[]>
+    >('/groups', { params });
+    const payload = res.data.data;
+
+    if (Array.isArray(payload)) {
+      return {
+        items: payload.map(toConversation),
+        nextCursor: null,
+        hasMore: false,
+      };
+    }
+
+    const nextCursor =
+      typeof payload.nextCursor === 'string' && payload.nextCursor.length > 0
+        ? payload.nextCursor
+        : null;
+    return {
+      items: payload.data.map(toConversation),
+      nextCursor,
+      // Older paginated deployments may omit hasMore; the cursor remains the
+      // authoritative continuation signal in that case.
+      hasMore: payload.hasMore ?? nextCursor !== null,
+    };
   },
 
   async detail(id: string): Promise<GroupConversation> {

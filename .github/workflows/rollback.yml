@@ -14,6 +14,10 @@ on:
         description: Exact current-repository GHCR digest (repository@sha256:64-lowercase-hex)
         type: string
         required: true
+      staging_run_id:
+        description: Successful CD - Deploy to Staging run ID that attested this exact digest
+        type: string
+        required: true
 
 concurrency:
   group: cd-${{ inputs.environment }}
@@ -29,6 +33,7 @@ jobs:
     environment: ${{ inputs.environment }}
     permissions:
       contents: read
+      actions: read
       packages: read
     env:
       # Resolve credentials only from the explicitly selected environment.
@@ -75,6 +80,109 @@ jobs:
           echo "image=${image}" >> "$GITHUB_OUTPUT"
           echo "Resolved immutable image: ${image}"
 
+      - name: Validate staging workflow provenance
+        id: provenance
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPOSITORY: ${{ github.repository }}
+          STAGING_RUN_ID: ${{ inputs.staging_run_id }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$STAGING_RUN_ID" =~ ^[1-9][0-9]*$ ]]; then
+            echo "staging_run_id must be a positive numeric GitHub Actions run ID" >&2
+            exit 1
+          fi
+
+          workflow="$(
+            gh api --method GET \
+              "/repos/${REPOSITORY}/actions/workflows/cd-staging.yml"
+          )"
+          workflow_id="$(jq -er '.id' <<< "$workflow")"
+          workflow_path="$(jq -er '.path' <<< "$workflow")"
+          if [[ ! "$workflow_id" =~ ^[1-9][0-9]*$ ]] \
+            || [ "$workflow_path" != '.github/workflows/cd-staging.yml' ]; then
+            echo "Unable to resolve the canonical staging workflow identity" >&2
+            exit 1
+          fi
+
+          run="$(
+            gh api --method GET \
+              "/repos/${REPOSITORY}/actions/runs/${STAGING_RUN_ID}"
+          )"
+          run_id="$(jq -er '.id' <<< "$run")"
+          run_attempt="$(jq -er '.run_attempt' <<< "$run")"
+          run_workflow_id="$(jq -er '.workflow_id' <<< "$run")"
+          run_repository="$(jq -er '.repository.full_name' <<< "$run")"
+          head_branch="$(jq -er '.head_branch' <<< "$run")"
+          head_sha="$(jq -er '.head_sha' <<< "$run")"
+          run_event="$(jq -er '.event' <<< "$run")"
+          run_status="$(jq -er '.status' <<< "$run")"
+          run_conclusion="$(jq -er '.conclusion' <<< "$run")"
+
+          if [[ ! "$run_attempt" =~ ^[1-9][0-9]*$ ]] \
+            || [ "$run_id" != "$STAGING_RUN_ID" ] \
+            || [ "$run_workflow_id" != "$workflow_id" ] \
+            || [ "$run_repository" != "$REPOSITORY" ] \
+            || [ "$head_branch" != 'main' ] \
+            || { [ "$run_event" != 'push' ] && [ "$run_event" != 'workflow_dispatch' ]; } \
+            || [ "$run_status" != 'completed' ] \
+            || [ "$run_conclusion" != 'success' ]; then
+            echo "staging_run_id is not a successful canonical staging run on main for this repository" >&2
+            exit 1
+          fi
+          if [[ ! "$head_sha" =~ ^[a-f0-9]{40}$ ]]; then
+            echo "Staging run did not expose one valid source commit SHA" >&2
+            exit 1
+          fi
+          echo "head_sha=${head_sha}" >> "$GITHUB_OUTPUT"
+          echo "run_attempt=${run_attempt}" >> "$GITHUB_OUTPUT"
+          echo "Validated staging run ${run_id}, attempt ${run_attempt}, for ${head_sha}"
+
+      - name: Download staging rollback evidence
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: staging-release-candidate-${{ steps.provenance.outputs.head_sha }}
+          path: ${{ runner.temp }}/rollback-staging-evidence
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.staging_run_id }}
+
+      - name: Bind rollback digest to staging evidence
+        env:
+          EVIDENCE_DIR: ${{ runner.temp }}/rollback-staging-evidence
+          EXPECTED_IMAGE_REF: ${{ steps.resolve.outputs.image }}
+          EXPECTED_REPOSITORY: ${{ github.repository }}
+          EXPECTED_RUN_ID: ${{ inputs.staging_run_id }}
+          EXPECTED_RUN_ATTEMPT: ${{ steps.provenance.outputs.run_attempt }}
+          EXPECTED_SOURCE_SHA: ${{ steps.provenance.outputs.head_sha }}
+        run: |
+          set -euo pipefail
+          candidate_file="${EVIDENCE_DIR}/staging-release-candidate.json"
+          mapfile -d '' evidence_files < <(find "$EVIDENCE_DIR" -type f -print0)
+          if [ "${#evidence_files[@]}" -ne 1 ] \
+            || [ "${evidence_files[0]:-}" != "$candidate_file" ] \
+            || [ ! -s "$candidate_file" ]; then
+            echo "Staging evidence must contain exactly one non-empty staging-release-candidate.json" >&2
+            exit 1
+          fi
+
+          schema_version="$(jq -er '.schema_version' "$candidate_file")"
+          repository="$(jq -er '.repository' "$candidate_file")"
+          source_sha="$(jq -er '.source_sha' "$candidate_file")"
+          image_ref="$(jq -er '.image_ref' "$candidate_file")"
+          run_id="$(jq -er '.staging_workflow_run_id' "$candidate_file")"
+          run_attempt="$(jq -er '.staging_workflow_run_attempt' "$candidate_file")"
+          if [ "$schema_version" != '1' ] \
+            || [ "$repository" != "$EXPECTED_REPOSITORY" ] \
+            || [ "$source_sha" != "$EXPECTED_SOURCE_SHA" ] \
+            || [ "$run_id" != "$EXPECTED_RUN_ID" ] \
+            || [ "$run_attempt" != "$EXPECTED_RUN_ATTEMPT" ] \
+            || [ "$image_ref" != "$EXPECTED_IMAGE_REF" ]; then
+            echo "Staging evidence does not bind this repository, run, commit and rollback digest" >&2
+            exit 1
+          fi
+          echo "Rollback digest is bound to successful staging evidence from run ${run_id}"
+
       - name: Validate selected environment credentials
         shell: bash
         run: |
@@ -87,7 +195,7 @@ jobs:
           done
 
       - name: Activate rollback target and verify health
-        uses: appleboy/ssh-action@v1.2.0
+        uses: appleboy/ssh-action@7eaf76671a0d7eec5d98ee897acda4f968735a17 # v1.2.0
         env:
           ROLLBACK_IMAGE: ${{ steps.resolve.outputs.image }}
           REGISTRY: ${{ env.REGISTRY }}
@@ -129,6 +237,7 @@ jobs:
           JOB_STATUS: ${{ job.status }}
           TARGET_ENVIRONMENT: ${{ inputs.environment }}
           TARGET_IMAGE: ${{ steps.resolve.outputs.image }}
+          STAGING_RUN_ID: ${{ inputs.staging_run_id }}
           REPOSITORY: ${{ github.repository }}
           ACTOR: ${{ github.actor }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -141,7 +250,7 @@ jobs:
             verdict="ROLLBACK FAILED"
           fi
           payload="$(jq -n \
-            --arg text "${verdict} on ${TARGET_ENVIRONMENT}\nimage: ${TARGET_IMAGE:-invalid}\nrepo: ${REPOSITORY}\nactor: ${ACTOR}\nrun: ${RUN_URL}" \
+            --arg text "${verdict} on ${TARGET_ENVIRONMENT}\nimage: ${TARGET_IMAGE:-invalid}\nstaging evidence run: ${STAGING_RUN_ID}\nrepo: ${REPOSITORY}\nactor: ${ACTOR}\nrun: ${RUN_URL}" \
             '{text: $text}')"
           curl -fsS \
             --connect-timeout 5 \

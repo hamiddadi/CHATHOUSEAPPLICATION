@@ -30,6 +30,14 @@ import { inflateRawSync } from 'node:zlib';
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_ROOT = path.resolve(SCRIPT_DIR, '..');
 const PACKAGE_ID = 'com.chathouse.app';
+const ASSOCIATION_JSON_MAX_BYTES = 128 * 1024;
+const REQUIRED_PUBLIC_LINK_PATHS = [
+  '/invite/chathouse-preflight',
+  '/room/chathouse-preflight',
+  '/u/chathouse-preflight',
+  '/house/chathouse-preflight',
+  '/house/chathouse-preflight/invite/chathouse-token',
+];
 const DEFAULT_SCOPES = ['source', 'production', 'android', 'ios', 'network', 'legal', 'evidence'];
 const ALLOWED_SCOPES = [...DEFAULT_SCOPES, 'native'];
 const PLACEHOLDER_PATTERN =
@@ -316,6 +324,30 @@ export function validateProductionLiveKitAndStripe(values = {}) {
   return `LiveKit public/TLS validé; Stripe ${stripeRequested ? 'activé et complet' : 'désactivé'}`;
 }
 
+const JWT_LEGACY_NO_ISS_AUD_MAX_ROLLOUT_MS = 7 * 24 * 60 * 60 * 1000;
+
+export function validateJwtIssuerAudienceRollout(values = {}, nowMs = Date.now()) {
+  const rawCutoff = String(values.JWT_LEGACY_NO_ISS_AUD_ACCEPT_UNTIL ?? '').trim();
+  if (!rawCutoff) return 'validation JWT stricte (pont legacy desactive)';
+
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/u.test(rawCutoff)) {
+    throw new Error('JWT_LEGACY_NO_ISS_AUD_ACCEPT_UNTIL doit etre un timestamp ISO avec fuseau');
+  }
+  const cutoffMs = Date.parse(rawCutoff);
+  if (!Number.isFinite(cutoffMs)) {
+    throw new Error('JWT_LEGACY_NO_ISS_AUD_ACCEPT_UNTIL est invalide');
+  }
+  if (cutoffMs > nowMs + JWT_LEGACY_NO_ISS_AUD_MAX_ROLLOUT_MS) {
+    throw new Error(
+      'JWT_LEGACY_NO_ISS_AUD_ACCEPT_UNTIL ne doit pas depasser sept jours apres le preflight',
+    );
+  }
+
+  return cutoffMs <= nowMs
+    ? 'validation JWT stricte (cutoff legacy expire)'
+    : `pont JWT legacy borne jusqu'au ${new Date(cutoffMs).toISOString()}`;
+}
+
 export function buildPublicEndpoints(mobileEnv = {}, overrides = {}) {
   const apiUrl = mobileEnv.API_BASE_URL
     ? new URL(mobileEnv.API_BASE_URL)
@@ -385,6 +417,361 @@ export function plistString(text, key) {
     new RegExp(`<key>\\s*${escapedKey}\\s*<\\/key>\\s*<string>([\\s\\S]*?)<\\/string>`, 'u'),
   );
   return match ? decodeXml(match[1].trim()) : '';
+}
+
+function plistAssociatedDomains(text) {
+  const match = text.match(
+    /<key>\s*com\.apple\.developer\.associated-domains\s*<\/key>\s*<array>([\s\S]*?)<\/array>/u,
+  );
+  if (!match) return [];
+  return [...match[1].matchAll(/<string>([\s\S]*?)<\/string>/gu)].map(item =>
+    decodeXml(item[1].trim()),
+  );
+}
+
+function validateAssociationJsonResponse(response, text, label) {
+  const contentType = String(response?.headers?.get?.('content-type') ?? '')
+    .split(';', 1)[0]
+    .trim()
+    .toLowerCase();
+  if (contentType !== 'application/json') {
+    throw new Error(`${label}: Content-Type doit être application/json`);
+  }
+
+  const declaredLength = String(response?.headers?.get?.('content-length') ?? '').trim();
+  if (declaredLength && !/^\d+$/u.test(declaredLength)) {
+    throw new Error(`${label}: Content-Length invalide`);
+  }
+  const actualLength = Buffer.byteLength(text, 'utf8');
+  if (
+    actualLength > ASSOCIATION_JSON_MAX_BYTES ||
+    (declaredLength && Number(declaredLength) > ASSOCIATION_JSON_MAX_BYTES)
+  ) {
+    throw new Error(`${label}: le document dépasse 128 Kio`);
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(`${label}: document JSON invalide`);
+  }
+}
+
+function xmlAttribute(attributes, name) {
+  for (const attribute of attributes.matchAll(
+    /(?:^|\s)([A-Za-z_][A-Za-z0-9_.:-]*)\s*=\s*"([^"]*)"/gu,
+  )) {
+    if (attribute[1] === name) return attribute[2];
+  }
+  return '';
+}
+
+function androidAutoVerifyHosts(manifest) {
+  const hosts = [];
+  for (const intentFilter of manifest.matchAll(
+    /<intent-filter\b([^>]*)>([\s\S]*?)<\/intent-filter>/gu,
+  )) {
+    if (xmlAttribute(intentFilter[1], 'android:autoVerify') !== 'true') continue;
+    for (const dataTag of intentFilter[2].matchAll(/<data\b([^>]*)\/?\s*>/gu)) {
+      if (xmlAttribute(dataTag[1], 'android:scheme') !== 'https') continue;
+      const host = xmlAttribute(dataTag[1], 'android:host').trim().toLowerCase();
+      if (host) hosts.push(host);
+    }
+  }
+  return [...new Set(hosts)];
+}
+
+function resolveAndroidAppLinksTarget(manifest, appUrl) {
+  const declaredHosts = androidAutoVerifyHosts(manifest);
+  if (!declaredHosts.length) {
+    throw new Error(
+      'NO-GO App Links: aucun hôte HTTPS autoVerify déclaré dans AndroidManifest.xml',
+    );
+  }
+  if (declaredHosts.some(host => host.includes('*') || host.includes(':') || host.includes('/'))) {
+    throw new Error(`NO-GO App Links: hôte Android non exact (${declaredHosts.join(', ')})`);
+  }
+
+  let controlledUrl;
+  try {
+    controlledUrl = validatePublicUrl(appUrl, ['https:']);
+  } catch (error) {
+    throw new Error(
+      `NO-GO App Links: URL d'application contrôlée invalide: ${
+        error instanceof Error ? error.message : error
+      }`,
+    );
+  }
+  if (controlledUrl.port) {
+    throw new Error("NO-GO App Links: l'URL d'application doit utiliser le port HTTPS standard");
+  }
+  const controlledHost = controlledUrl.hostname.toLowerCase();
+  if (!declaredHosts.includes(controlledHost)) {
+    throw new Error(
+      `NO-GO App Links: l'hôte contrôlé ${controlledHost} diverge des hôtes Android déclarés (${declaredHosts.join(
+        ', ',
+      )})`,
+    );
+  }
+  return {
+    host: controlledHost,
+    assetLinksUrl: `https://${controlledHost}/.well-known/assetlinks.json`,
+  };
+}
+
+export async function validateAndroidAppLinks({
+  manifest,
+  appUrl,
+  signingSha256,
+  timeoutMs = 10000,
+  fetchImpl = globalThis.fetch,
+}) {
+  const { host, assetLinksUrl } = resolveAndroidAppLinksTarget(manifest, appUrl);
+  const configuredFingerprint = normalizeFingerprint(signingSha256);
+  if (!/^[A-F0-9]{64}$/u.test(configuredFingerprint)) {
+    throw new Error('NO-GO App Links: empreinte Play App Signing absente ou invalide');
+  }
+
+  let response;
+  let text;
+  try {
+    ({ response, text } = await fetchText(assetLinksUrl, timeoutMs, {
+      fetchImpl,
+      rejectRedirects: true,
+    }));
+  } catch (error) {
+    throw new Error(
+      `NO-GO App Links: assetlinks.json HTTPS direct sur ${host} invalide: ${
+        error instanceof Error ? error.message : error
+      }`,
+    );
+  }
+
+  const statements = validateAssociationJsonResponse(response, text, 'NO-GO App Links');
+  if (!Array.isArray(statements)) {
+    throw new Error('NO-GO App Links: assetlinks.json doit contenir un tableau JSON');
+  }
+  const statement = statements.find(item => {
+    const published = Array.isArray(item?.target?.sha256_cert_fingerprints)
+      ? item.target.sha256_cert_fingerprints.map(normalizeFingerprint)
+      : [];
+    return (
+      Array.isArray(item?.relation) &&
+      item.relation.includes('delegate_permission/common.handle_all_urls') &&
+      item?.target?.namespace === 'android_app' &&
+      item.target.package_name === PACKAGE_ID &&
+      published.includes(configuredFingerprint)
+    );
+  });
+  if (!statement) {
+    throw new Error(
+      `NO-GO App Links: relation handle_all_urls, package ${PACKAGE_ID} et empreinte Play exacts absents`,
+    );
+  }
+  return `hôte ${host}, assetlinks.json direct, relation ${PACKAGE_ID} et empreinte Play associés`;
+}
+
+function associationPatternMatches(pattern, pathname) {
+  if (typeof pattern !== 'string' || !pattern) return false;
+  let patternIndex = 0;
+  let pathIndex = 0;
+  let lastStar = -1;
+  let lastStarMatch = 0;
+
+  while (pathIndex < pathname.length) {
+    const character = pattern[patternIndex];
+    if (character === '?' || character === pathname[pathIndex]) {
+      patternIndex += 1;
+      pathIndex += 1;
+    } else if (character === '*') {
+      lastStar = patternIndex;
+      patternIndex += 1;
+      lastStarMatch = pathIndex;
+    } else if (lastStar >= 0) {
+      patternIndex = lastStar + 1;
+      lastStarMatch += 1;
+      pathIndex = lastStarMatch;
+    } else {
+      return false;
+    }
+  }
+  while (pattern[patternIndex] === '*') patternIndex += 1;
+  return patternIndex === pattern.length;
+}
+
+function legacyPathsCover(paths, pathname) {
+  if (!Array.isArray(paths)) return false;
+  for (const rawRule of paths) {
+    if (typeof rawRule !== 'string') continue;
+    const excluded = rawRule.startsWith('NOT ');
+    const rule = excluded ? rawRule.slice(4) : rawRule;
+    if (associationPatternMatches(rule, pathname)) return !excluded;
+  }
+  return false;
+}
+
+function componentsCover(components, pathname) {
+  if (!Array.isArray(components)) return false;
+  for (const component of components) {
+    if (!component || typeof component !== 'object' || Array.isArray(component)) continue;
+    // Canonical shared URLs contain no required query or fragment. A component
+    // that constrains either one cannot prove that the plain shared URL opens.
+    if (Object.hasOwn(component, '?') || Object.hasOwn(component, '#')) continue;
+    const rule = component['/'];
+    if (associationPatternMatches(rule, pathname)) return component.exclude !== true;
+  }
+  return false;
+}
+
+function associationDetailsForApp(rawDetails, expectedAppId) {
+  if (Array.isArray(rawDetails)) {
+    return rawDetails.filter(detail => {
+      const appIds = Array.isArray(detail?.appIDs)
+        ? detail.appIDs
+        : typeof detail?.appID === 'string'
+          ? [detail.appID]
+          : [];
+      return appIds.includes(expectedAppId);
+    });
+  }
+  if (
+    rawDetails &&
+    typeof rawDetails === 'object' &&
+    !Array.isArray(rawDetails) &&
+    Object.hasOwn(rawDetails, expectedAppId)
+  ) {
+    return [rawDetails[expectedAppId]];
+  }
+  return [];
+}
+
+function detailCoversPath(detail, pathname) {
+  if (!detail || typeof detail !== 'object' || Array.isArray(detail)) return false;
+  return Array.isArray(detail.components)
+    ? componentsCover(detail.components, pathname)
+    : legacyPathsCover(detail.paths, pathname);
+}
+
+function resolveIosUniversalLinksTarget(entitlements, appUrl) {
+  const declarations = plistAssociatedDomains(entitlements).filter(value =>
+    value.startsWith('applinks:'),
+  );
+  if (!declarations.length) {
+    throw new Error(
+      'NO-GO Universal Links: aucun domaine applinks déclaré dans les entitlements iOS',
+    );
+  }
+
+  const declaredHosts = declarations.map(declaration => {
+    const rawHost = declaration.slice('applinks:'.length).trim();
+    if (!rawHost || rawHost.includes('*')) {
+      throw new Error(
+        `NO-GO Universal Links: domaine applinks non exact interdit (${declaration})`,
+      );
+    }
+
+    let declaredUrl;
+    try {
+      declaredUrl = validatePublicUrl(`https://${rawHost}`, ['https:']);
+    } catch (error) {
+      throw new Error(
+        `NO-GO Universal Links: domaine applinks invalide (${declaration}): ${
+          error instanceof Error ? error.message : error
+        }`,
+      );
+    }
+    if (
+      declaredUrl.hostname.toLowerCase() !== rawHost.toLowerCase() ||
+      declaredUrl.port ||
+      declaredUrl.pathname !== '/' ||
+      declaredUrl.search ||
+      declaredUrl.hash
+    ) {
+      throw new Error(
+        `NO-GO Universal Links: ${declaration} doit déclarer un hôte exact sans port, chemin, requête ni fragment`,
+      );
+    }
+    return declaredUrl.hostname.toLowerCase();
+  });
+
+  let controlledUrl;
+  try {
+    controlledUrl = validatePublicUrl(appUrl, ['https:']);
+  } catch (error) {
+    throw new Error(
+      `NO-GO Universal Links: URL d'application contrôlée invalide: ${
+        error instanceof Error ? error.message : error
+      }`,
+    );
+  }
+  if (controlledUrl.port) {
+    throw new Error(
+      "NO-GO Universal Links: l'URL d'application contrôlée doit utiliser le port HTTPS standard",
+    );
+  }
+
+  const controlledHost = controlledUrl.hostname.toLowerCase();
+  if (!declaredHosts.includes(controlledHost)) {
+    throw new Error(
+      `NO-GO Universal Links: l'hôte contrôlé ${controlledHost} diverge des applinks iOS déclarés (${declaredHosts.join(
+        ', ',
+      )})`,
+    );
+  }
+
+  return {
+    host: controlledHost,
+    aasaUrl: `https://${controlledHost}/.well-known/apple-app-site-association`,
+  };
+}
+
+export async function validateIosUniversalLinks({
+  entitlements,
+  appUrl,
+  teamId,
+  timeoutMs = 10000,
+  fetchImpl = globalThis.fetch,
+}) {
+  const { host, aasaUrl } = resolveIosUniversalLinksTarget(entitlements, appUrl);
+  if (!/^[A-Z0-9]{10}$/u.test(teamId ?? '')) {
+    throw new Error('NO-GO Universal Links: Team ID Apple absent ou invalide');
+  }
+
+  let response;
+  let text;
+  try {
+    ({ response, text } = await fetchText(aasaUrl, timeoutMs, {
+      fetchImpl,
+      rejectRedirects: true,
+    }));
+  } catch (error) {
+    throw new Error(
+      `NO-GO Universal Links: AASA HTTPS direct sur ${host} invalide: ${
+        error instanceof Error ? error.message : error
+      }`,
+    );
+  }
+
+  const association = validateAssociationJsonResponse(response, text, 'NO-GO Universal Links');
+  const expectedAppId = `${teamId}.${PACKAGE_ID}`;
+  const rawDetails = association?.applinks?.details ?? [];
+  const matchingDetails = associationDetailsForApp(rawDetails, expectedAppId);
+  if (!matchingDetails.length) {
+    throw new Error(
+      `NO-GO Universal Links: association ${expectedAppId} absente de l'AASA sur ${host}`,
+    );
+  }
+  const uncoveredPaths = REQUIRED_PUBLIC_LINK_PATHS.filter(
+    pathname => !matchingDetails.some(detail => detailCoversPath(detail, pathname)),
+  );
+  if (uncoveredPaths.length) {
+    throw new Error(
+      `NO-GO Universal Links: routes partagées non couvertes pour ${expectedAppId}: ${uncoveredPaths.join(
+        ', ',
+      )}`,
+    );
+  }
+  return `hôte ${host}, AASA JSON directe et ${REQUIRED_PUBLIC_LINK_PATHS.length} routes ${expectedAppId} couvertes`;
 }
 
 export function validateIosFirebaseText(text) {
@@ -1666,6 +2053,7 @@ function validateBackendProductionEnv(root) {
   const envPath = productionPaths(root).backendEnv;
   const values = parseEnv(readText(envPath, 'environnement backend production'));
   validateProductionLiveKitAndStripe(values);
+  validateJwtIssuerAudienceRollout(values);
   const required = [
     'POSTGRES_USER',
     'POSTGRES_PASSWORD',
@@ -1985,11 +2373,16 @@ function plutilExtract(plistPath, keyPath) {
   return String(run('plutil', ['-extract', keyPath, 'raw', '-o', '-', plistPath])).trim();
 }
 
-function findFirstDirectory(parent, suffix) {
+function findUniqueDirectory(parent, suffix, label) {
   const entries = existsSync(parent)
-    ? readdirSync(parent).filter(entry => entry.endsWith(suffix))
+    ? readdirSync(parent)
+        .filter(entry => entry.endsWith(suffix))
+        .sort()
     : [];
-  return entries.length ? path.join(parent, entries[0]) : '';
+  if (entries.length !== 1) {
+    throw new Error(`${label}: un seul dossier ${suffix} est requis (${entries.length} trouvé)`);
+  }
+  return path.join(parent, entries[0]);
 }
 
 function verifyIosArchive(root, teamId, mobileEnv) {
@@ -2014,7 +2407,7 @@ function verifyIosArchive(root, teamId, mobileEnv) {
   }
 
   const applications = path.join(archivePath, 'Products', 'Applications');
-  const appPath = findFirstDirectory(applications, '.app');
+  const appPath = findUniqueDirectory(applications, '.app', 'archive iOS production');
   requireDirectory(appPath, 'application signée dans l’archive');
   run('codesign', ['--verify', '--deep', '--strict', appPath]);
   const signatureResult = spawnSync('codesign', ['-dvvv', appPath], {
@@ -2083,31 +2476,157 @@ function verifyIosArchive(root, teamId, mobileEnv) {
   return `${path.basename(archivePath)}, Apple Distribution, Team ${teamId}`;
 }
 
-function iosArchiveBuildNumber(archivePath) {
-  requireDirectory(archivePath, 'archive iOS liée aux preuves TestFlight');
-  const appPath = findFirstDirectory(path.join(archivePath, 'Products', 'Applications'), '.app');
-  requireDirectory(appPath, 'application iOS liée aux preuves TestFlight');
-  const buildNumber = plutilExtract(path.join(appPath, 'Info.plist'), 'CFBundleVersion');
-  if (!/^[1-9][0-9]*$/u.test(buildNumber)) {
-    throw new Error(`numéro de build iOS invalide dans l'archive: ${buildNumber || 'absent'}`);
-  }
-  return buildNumber;
+function iosAppMetadata(infoPlistPath, label) {
+  requireFile(infoPlistPath, `Info.plist ${label}`);
+  return {
+    bundleId: plutilExtract(infoPlistPath, 'CFBundleIdentifier'),
+    versionName: plutilExtract(infoPlistPath, 'CFBundleShortVersionString'),
+    buildNumber: plutilExtract(infoPlistPath, 'CFBundleVersion'),
+  };
 }
 
-async function fetchText(url, timeoutMs) {
+function iosArchiveMetadata(archivePath) {
+  requireDirectory(archivePath, 'archive iOS liée aux preuves TestFlight');
+  if (!archivePath.toLowerCase().endsWith('.xcarchive')) {
+    throw new Error("l'archive iOS liée aux preuves doit être un .xcarchive");
+  }
+  const appPath = findUniqueDirectory(
+    path.join(archivePath, 'Products', 'Applications'),
+    '.app',
+    'archive iOS liée aux preuves TestFlight',
+  );
+  return iosAppMetadata(path.join(appPath, 'Info.plist'), "de l'archive iOS");
+}
+
+function iosIpaMetadata(ipaPath) {
+  requireFile(ipaPath, 'IPA liée aux preuves TestFlight');
+  if (path.extname(ipaPath).toLowerCase() !== '.ipa') {
+    throw new Error("l'artefact iOS TestFlight doit être un .ipa");
+  }
+
+  const ipa = readFileSync(ipaPath);
+  let entries;
+  try {
+    entries = readZipDirectory(ipa);
+  } catch (error) {
+    throw new Error(
+      `IPA invalide: ${String(error instanceof Error ? error.message : error).replace(/^AAB:\s*/u, '')}`,
+    );
+  }
+  const unsafeEntry = entries.find(entry => {
+    const segments = entry.name.split('/');
+    return entry.name.startsWith('/') || entry.name.includes('\\') || segments.includes('..');
+  });
+  if (unsafeEntry) throw new Error(`IPA: chemin ZIP non sûr: ${unsafeEntry.name}`);
+
+  const appInfoEntries = entries.filter(entry =>
+    /^Payload\/[^/]+\.app\/Info\.plist$/u.test(entry.name),
+  );
+  if (appInfoEntries.length !== 1) {
+    throw new Error(
+      `IPA: un seul Info.plist d'application principal est requis (${appInfoEntries.length} trouvé)`,
+    );
+  }
+  if (appInfoEntries[0].uncompressedSize > 1024 * 1024) {
+    throw new Error("IPA: l'Info.plist principal dépasse 1 Mio");
+  }
+
+  const temporaryDirectory = mkdtempSync(path.join(tmpdir(), 'chathouse-ipa-info-'));
+  const temporaryPlist = path.join(temporaryDirectory, 'Info.plist');
+  try {
+    let infoPlist;
+    try {
+      infoPlist = extractZipEntry(ipa, appInfoEntries[0]);
+    } catch (error) {
+      throw new Error(
+        `IPA invalide: ${String(error instanceof Error ? error.message : error).replace(/^AAB:\s*/u, '')}`,
+      );
+    }
+    writeFileSync(temporaryPlist, infoPlist);
+    return iosAppMetadata(temporaryPlist, "de l'IPA");
+  } finally {
+    rmSync(temporaryDirectory, { recursive: true, force: true });
+  }
+}
+
+export function validateIosArtifactIdentity(archiveMetadata, ipaMetadata) {
+  const normalizeMetadata = (metadata, label) => {
+    const normalized = {
+      bundleId: String(metadata?.bundleId ?? '').trim(),
+      versionName: String(metadata?.versionName ?? '').trim(),
+      buildNumber: String(metadata?.buildNumber ?? '').trim(),
+    };
+    if (normalized.bundleId !== PACKAGE_ID) {
+      throw new Error(`${label}: bundle ID iOS inattendu (${normalized.bundleId || 'absent'})`);
+    }
+    if (!/^\d+\.\d+\.\d+$/u.test(normalized.versionName)) {
+      throw new Error(`${label}: version iOS invalide (${normalized.versionName || 'absente'})`);
+    }
+    if (!/^[1-9][0-9]*$/u.test(normalized.buildNumber)) {
+      throw new Error(
+        `${label}: numéro de build iOS invalide (${normalized.buildNumber || 'absent'})`,
+      );
+    }
+    return normalized;
+  };
+
+  const archive = normalizeMetadata(archiveMetadata, 'archive iOS');
+  const ipa = normalizeMetadata(ipaMetadata, 'IPA');
+  const mismatches = ['bundleId', 'versionName', 'buildNumber'].filter(
+    field => archive[field] !== ipa[field],
+  );
+  if (mismatches.length) {
+    throw new Error(
+      `l'IPA ne correspond pas au bundle/version/build de l'archive (${mismatches.join(', ')})`,
+    );
+  }
+  return archive;
+}
+
+async function fetchText(
+  url,
+  timeoutMs,
+  { fetchImpl = globalThis.fetch, rejectRedirects = false } = {},
+) {
+  const requestedUrl = new URL(url);
+  if (requestedUrl.protocol !== 'https:') throw new Error('HTTPS requis');
+  if (typeof fetchImpl !== 'function') throw new Error('client HTTPS indisponible');
+
   let response;
   try {
-    response = await fetch(url, {
-      redirect: 'follow',
+    response = await fetchImpl(requestedUrl.href, {
+      redirect: rejectRedirects ? 'error' : 'follow',
       signal: AbortSignal.timeout(timeoutMs),
       headers: { 'user-agent': 'ChatHouse-Go-Live-Preflight/1.0' },
     });
   } catch (error) {
-    throw new Error(`HTTPS inaccessible (${error instanceof Error ? error.message : error})`);
+    const reason = error instanceof Error ? error.message : error;
+    throw new Error(
+      rejectRedirects
+        ? `HTTPS direct inaccessible; redirections interdites (${reason})`
+        : `HTTPS inaccessible (${reason})`,
+    );
+  }
+
+  if (
+    rejectRedirects &&
+    (response.redirected || (response.status >= 300 && response.status < 400))
+  ) {
+    throw new Error('redirection interdite pour cette ressource');
   }
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  const finalUrl = new URL(response.url);
+  let finalUrl;
+  try {
+    finalUrl = new URL(response.url);
+  } catch {
+    throw new Error('URL HTTPS finale absente ou invalide');
+  }
   if (finalUrl.protocol !== 'https:') throw new Error('redirection finale non HTTPS');
+  if (rejectRedirects && finalUrl.href !== requestedUrl.href) {
+    throw new Error(
+      `redirection ou réponse depuis une URL différente interdite (${finalUrl.href})`,
+    );
+  }
   const text = await response.text();
   if (!text.trim()) throw new Error('réponse vide');
   return { response, text };
@@ -2153,7 +2672,9 @@ export function validateAcceptanceEvidence(
   expectedSha,
   aabPath,
   iosArchiveTarballPath,
-  iosBuildNumber,
+  iosIpaPath,
+  archiveMetadata,
+  ipaMetadata,
 ) {
   if (normalizeSha(data?.source_sha) !== normalizeSha(expectedSha)) {
     throw new Error('source_sha des preuves ne correspond pas au commit contrôlé');
@@ -2205,8 +2726,18 @@ export function validateAcceptanceEvidence(
   ) {
     throw new Error("le SHA-256 de l'archive iOS ne correspond pas à la preuve TestFlight");
   }
+  requireFile(iosIpaPath, 'IPA liée aux preuves TestFlight');
+  if (path.extname(iosIpaPath).toLowerCase() !== '.ipa') {
+    throw new Error("l'artefact iOS TestFlight doit être un .ipa");
+  }
+  const expectedIpaHash = normalizeSha(data?.ios?.ipa_sha256);
+  if (!/^[a-f0-9]{64}$/u.test(expectedIpaHash) || expectedIpaHash !== hashFile(iosIpaPath)) {
+    throw new Error("le SHA-256 de l'IPA ne correspond pas à la preuve TestFlight");
+  }
+
+  const iosIdentity = validateIosArtifactIdentity(archiveMetadata, ipaMetadata);
   const evidenceBuildNumber = String(data?.ios?.build_number ?? '').trim();
-  const archiveBuildNumber = String(iosBuildNumber ?? '').trim();
+  const archiveBuildNumber = iosIdentity.buildNumber;
   if (!/^[1-9][0-9]*$/u.test(evidenceBuildNumber) || evidenceBuildNumber !== archiveBuildNumber) {
     throw new Error(
       `le numéro de build iOS des preuves (${evidenceBuildNumber || 'absent'}) ne correspond pas ` +
@@ -2355,51 +2886,30 @@ async function runPreflight(options) {
     }
 
     await reporter.check('network', 'android-app-links', async () => {
-      const appOrigin = new URL(endpoints.app).origin;
-      const { text } = await fetchText(
-        `${appOrigin}/.well-known/assetlinks.json`,
-        options.timeoutMs,
+      const manifest = readText(
+        path.join(root, 'android', 'app', 'src', 'main', 'AndroidManifest.xml'),
+        'manifeste Android',
       );
-      const statements = JSON.parse(text);
-      if (!Array.isArray(statements)) {
-        throw new Error('assetlinks.json doit contenir un tableau JSON');
-      }
-      const statement = statements.find(item => item?.target?.package_name === PACKAGE_ID);
-      if (!statement) throw new Error(`association ${PACKAGE_ID} absente`);
-      const configuredFingerprint = normalizeFingerprint(
-        process.env.GO_LIVE_ANDROID_APP_SIGNING_SHA256,
-      );
-      if (!/^[A-F0-9]{64}$/u.test(configuredFingerprint)) {
-        throw new Error('GO_LIVE_ANDROID_APP_SIGNING_SHA256 absent/invalide');
-      }
-      const published = (statement.target?.sha256_cert_fingerprints ?? []).map(
-        normalizeFingerprint,
-      );
-      if (!published.includes(configuredFingerprint)) {
-        throw new Error('empreinte Play App Signing absente de assetlinks.json');
-      }
-      return `package ${PACKAGE_ID} et empreinte Play associés`;
+      return validateAndroidAppLinks({
+        manifest,
+        appUrl: endpoints.app,
+        signingSha256: process.env.GO_LIVE_ANDROID_APP_SIGNING_SHA256,
+        timeoutMs: options.timeoutMs,
+      });
     });
 
     await reporter.check('network', 'ios-universal-links', async () => {
-      const appOrigin = new URL(endpoints.app).origin;
-      const { text } = await fetchText(
-        `${appOrigin}/.well-known/apple-app-site-association`,
-        options.timeoutMs,
+      const entitlements = readText(
+        path.join(root, 'ios', 'ChatHouse', 'ChatHouse.entitlements'),
+        'entitlements iOS',
       );
-      const association = JSON.parse(text);
       const teamId = context.iosTeam ?? iosTeamId(root);
-      const expectedAppId = `${teamId}.${PACKAGE_ID}`;
-      const rawDetails = association?.applinks?.details ?? [];
-      const appIds = Array.isArray(rawDetails)
-        ? rawDetails.flatMap(item =>
-            Array.isArray(item?.appIDs) ? item.appIDs : item?.appID ? [item.appID] : [],
-          )
-        : Object.keys(rawDetails);
-      if (!appIds.includes(expectedAppId)) {
-        throw new Error(`association ${expectedAppId} absente`);
-      }
-      return `application ${expectedAppId} associée`;
+      return validateIosUniversalLinks({
+        entitlements,
+        appUrl: endpoints.app,
+        teamId,
+        timeoutMs: options.timeoutMs,
+      });
     });
   }
 
@@ -2515,12 +3025,18 @@ async function runPreflight(options) {
         root,
         process.env.GO_LIVE_IOS_ARCHIVE || path.join('artifacts', 'ChatHouse-production.xcarchive'),
       );
+      const iosIpaPath = path.resolve(
+        root,
+        process.env.GO_LIVE_IOS_IPA || path.join('artifacts', 'ChatHouse.ipa'),
+      );
       return validateAcceptanceEvidence(
         data,
         expectedSha,
         aabPath,
         iosArchiveTarballPath,
-        iosArchiveBuildNumber(iosArchivePath),
+        iosIpaPath,
+        iosArchiveMetadata(iosArchivePath),
+        iosIpaMetadata(iosIpaPath),
       );
     });
   }

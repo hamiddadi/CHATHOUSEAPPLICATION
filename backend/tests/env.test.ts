@@ -7,6 +7,7 @@ describe('env validation', () => {
     expect(env.NODE_ENV).toBe('test');
     expect(env.JWT_ACCESS_SECRET.length).toBeGreaterThanOrEqual(32);
     expect(env.CORS_ORIGINS).toEqual(['http://localhost:8081']);
+    expect(env.CONTACT_MATCH_ENABLED).toBe(false);
   });
 
   it('rejects short JWT secrets', () => {

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { publicContentString } from '../../utils/publicContentModeration';
+import { strictBooleanQuery } from '../../utils/strictBooleanQuery';
 
 export const createRoomSchema = z
   .object({
@@ -82,11 +83,11 @@ export const sendReactionSchema = z.object({
 });
 
 export const listRoomsSchema = z.object({
-  live: z.coerce.boolean().optional(),
+  live: strictBooleanQuery.optional(),
   filter: z.enum(['live', 'upcoming', 'mine', 'past']).optional(),
   clubId: z.string().min(1).optional(),
   // When true, restrict the hallway feed to club-attached rooms only.
-  clubs: z.coerce.boolean().optional(),
+  clubs: strictBooleanQuery.optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
 });
 

@@ -5,7 +5,7 @@ import type { OpenApiComponents } from './components';
 
 export const registerUsersPaths = (
   registry: OpenAPIRegistry,
-  { ErrorBody, SuccessVoid, UserPublic }: OpenApiComponents,
+  { ErrorBody, SuccessVoid, UserPublic, AuthUser, AuthSession }: OpenApiComponents,
 ): void => {
   registry.registerPath({
     method: 'get',
@@ -14,10 +14,11 @@ export const registerUsersPaths = (
     security: [{ bearerAuth: [] }],
     responses: {
       200: {
-        description: 'Current user profile (includes private fields like email, location).',
+        description:
+          'Current user profile, including accountState and deletion timestamps. This is the only profile read allowed to a recovery-only session.',
         content: {
           'application/json': {
-            schema: z.object({ success: z.literal(true), data: UserPublic }),
+            schema: z.object({ success: z.literal(true), data: AuthUser }),
           },
         },
       },
@@ -88,12 +89,17 @@ export const registerUsersPaths = (
     security: [{ bearerAuth: [] }],
     responses: {
       200: {
-        description: 'Cancels a self-requested deletion; moderation bans cannot be restored.',
+        description:
+          'Explicitly restores a self-deleted account during its grace period. Requires an account_recovery bearer, revokes the recovery family, and returns a fresh active session. Moderation bans cannot be restored.',
         content: {
           'application/json': {
             schema: z.object({
               success: z.literal(true),
-              data: z.object({ cancelled: z.literal(true) }),
+              data: z.object({
+                cancelled: z.literal(true),
+                session: AuthSession,
+                user: AuthUser,
+              }),
             }),
           },
         },

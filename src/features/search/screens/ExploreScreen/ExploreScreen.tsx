@@ -130,7 +130,12 @@ export const ExploreScreen: React.FC = () => {
   return (
     <View className="flex-1 bg-background" style={{ paddingTop: insets.top }}>
       <View className="flex-row items-center gap-md px-xxl py-lg">
-        <Pressable onPress={goBack} accessibilityRole="button" hitSlop={8}>
+        <Pressable
+          onPress={goBack}
+          accessibilityRole="button"
+          accessibilityLabel={t('common.back', 'Back')}
+          hitSlop={8}
+        >
           <MaterialIcons name="arrow-back" size={24} color={colors.text} />
         </Pressable>
         <Text className="text-xl font-display text-ink flex-1">{t('explore.title')}</Text>

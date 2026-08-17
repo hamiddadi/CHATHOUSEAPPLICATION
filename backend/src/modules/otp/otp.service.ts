@@ -7,7 +7,7 @@ import { logger } from '../../config/logger';
 import { sendSms } from '../../config/smsSender';
 import { AppError } from '../../middlewares/error.middleware';
 import { issueTokenPair } from '../../utils/issueTokenPair';
-import { ensureLoginAllowedAndRestore } from '../auth/account-lifecycle';
+import { resolveAccountSessionScope } from '../auth/account-lifecycle';
 import {
   legalAcceptanceStatus,
   resolveLegalAcceptance,
@@ -78,28 +78,36 @@ const establishSession = async (
   // must replace on SetupProfile; frontend routes them there via `isNewUser`.
   const existing = await prisma.user.findUnique({
     where: { phoneNumber },
-    select: { id: true, deletedAt: true, suspendedUntil: true, ageConfirmedAt: true },
   });
   const isNewUser = existing === null;
-  const user = await prisma.user.upsert({
-    where: { phoneNumber },
-    create: {
-      phoneNumber,
-      ...(ageConfirmed ? { ageConfirmedAt: new Date() } : {}),
-      ...legalAcceptance,
-    },
-    update: {
-      ...(ageConfirmed && !existing?.ageConfirmedAt ? { ageConfirmedAt: new Date() } : {}),
-      ...legalAcceptance,
-    },
-  });
 
-  if (existing) await ensureLoginAllowedAndRestore(existing);
-  const tokens = await issueTokenPair(user.id);
+  // Proving possession of the phone number does not authorize account-state or
+  // profile writes. A pending-deletion account gets a recovery-only session;
+  // it is restored only by the explicit cancel-deletion endpoint.
+  const scope = existing ? resolveAccountSessionScope(existing) : 'active';
+
+  const user =
+    existing && scope === 'account_recovery'
+      ? existing
+      : await prisma.user.upsert({
+          where: { phoneNumber },
+          create: {
+            phoneNumber,
+            ...(ageConfirmed ? { ageConfirmedAt: new Date() } : {}),
+            ...legalAcceptance,
+          },
+          update: {
+            ...(ageConfirmed && !existing?.ageConfirmedAt ? { ageConfirmedAt: new Date() } : {}),
+            ...legalAcceptance,
+          },
+        });
+
+  const tokens = await issueTokenPair(user.id, { scope });
   return {
     session: {
       accessToken: tokens.accessToken,
       refreshToken: tokens.refreshToken,
+      scope: tokens.scope,
       expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
     },
     user: {
@@ -117,6 +125,13 @@ const establishSession = async (
       privacyNoticeAcknowledgedVersion: user.privacyNoticeAcknowledgedVersion,
       privacyNoticeAcknowledgedAt: user.privacyNoticeAcknowledgedAt?.toISOString() ?? null,
       legalAcceptanceLocale: user.legalAcceptanceLocale,
+      accountState: user.deletedAt ? ('PENDING_DELETION' as const) : ('ACTIVE' as const),
+      deletedAt: user.deletedAt?.toISOString() ?? null,
+      permanentDeletionAt: user.deletedAt
+        ? new Date(
+            user.deletedAt.getTime() + env.ACCOUNT_DELETION_GRACE_DAYS * 24 * 60 * 60 * 1000,
+          ).toISOString()
+        : null,
       ...legalAcceptanceStatus(user),
     },
     isNewUser,

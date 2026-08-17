@@ -1,12 +1,12 @@
 import { MediaKind, Prisma } from '@prisma/client';
 import type { ClubMemberRole } from '@prisma/client';
-import { prisma } from '../../config/database';
-import { redis } from '../../config/redis';
-import { logger } from '../../config/logger';
+import { prisma, runWriteWithRetry } from '../../config/database';
 import { AppError } from '../../middlewares/error.middleware';
+import { clubExtensionCleanupOutboxData } from '../../extensions/club-extension-cleanup.outbox';
 import { notificationsService } from '../notifications/notifications.service';
 import { getBlockedIdSet } from '../social/blocks';
 import { mediaService } from '../media/media.service';
+import { mediaReferenceFor } from '../media/media-url';
 import { runIdempotentCreate } from '../../utils/idempotency';
 import { clubInclude, privacyToDb, publicUser, toApi, toSummary } from './clubs.mapper';
 import type { ViewerMembership } from './clubs.mapper';
@@ -234,8 +234,13 @@ export const clubsService = {
   },
 
   async create(ownerId: string, input: CreateClubInput, idempotencyKey?: string) {
+    let canonicalIconUrl = input.iconUrl ?? null;
     if (input.iconUrl) {
-      await mediaService.assertOwnedMediaUrl(ownerId, input.iconUrl, MediaKind.AVATAR);
+      canonicalIconUrl = await mediaService.assertOwnedMediaUrl(
+        ownerId,
+        input.iconUrl,
+        MediaKind.AVATAR,
+      );
     }
 
     const name = input.name.trim();
@@ -243,7 +248,7 @@ export const clubsService = {
       userId: ownerId,
       scope: 'clubs.create',
       key: idempotencyKey,
-      payload: input,
+      payload: { ...input, iconUrl: canonicalIconUrl },
       create: async tx => {
         // Club creation is intentionally rare. A transaction-scoped advisory
         // lock gives us one serial order for the global unique name/slug checks
@@ -256,11 +261,24 @@ export const clubsService = {
         // Re-check account activity and quota only after acquiring the lock;
         // checks performed before the transaction are vulnerable to TOCTOU
         // races from another device using a different idempotency key.
-        const owner = await tx.user.findUnique({
-          where: { id: ownerId },
-          select: { deletedAt: true },
-        });
-        if (!owner || owner.deletedAt) throw new AppError('USER_001');
+        // IdempotencyKey's user FK already holds FOR KEY SHARE. NO KEY UPDATE
+        // still serializes account activity changes/deletion, while remaining
+        // compatible with another distinct idempotency claim waiting on the
+        // global club-create advisory lock (avoids a KEY SHARE/UPDATE cycle).
+        const owner = await tx.$queryRaw<{ id: string }[]>`
+          SELECT "id" FROM "User"
+          WHERE "id" = ${ownerId} AND "deletedAt" IS NULL
+          FOR NO KEY UPDATE`;
+        if (owner.length === 0) throw new AppError('USER_001');
+
+        const iconMediaObjectId = input.iconUrl
+          ? await mediaService.assertOwnedMediaUrlWithinTransaction(
+              tx,
+              ownerId,
+              input.iconUrl,
+              MediaKind.AVATAR,
+            )
+          : null;
 
         const existingCount = await tx.club.count({ where: { ownerId } });
         if (existingCount >= 3) throw new AppError('CLUB_006');
@@ -280,7 +298,8 @@ export const clubsService = {
             privacy: privacyToDb(input.privacy),
             category: input.category,
             categoryEmoji: input.categoryEmoji,
-            iconUrl: input.iconUrl ?? null,
+            iconUrl: canonicalIconUrl,
+            iconMediaObjectId,
             ownerId,
             memberCount: 1,
             members: {
@@ -449,6 +468,9 @@ export const clubsService = {
           title: 'Club invitation',
           body: `You've been invited to join ${club.name}`,
           data: { clubId, inviterId } as Prisma.InputJsonValue,
+          targetId: clubId,
+          targetType: 'club',
+          dedupeKey: `club-invite:${clubId}:${userId}`,
         }),
       ),
     );
@@ -650,24 +672,56 @@ export const clubsService = {
       where: { clubId_userId: { clubId, userId: viewerId } },
     });
     if (!membership || membership.role !== 'ADMIN') throw new AppError('CLUB_002');
-    if (input.iconUrl) {
-      await mediaService.assertOwnedMediaUrl(viewerId, input.iconUrl, MediaKind.AVATAR);
-    }
+    const updated = await runWriteWithRetry(() =>
+      prisma.$transaction(
+        async tx => {
+          const caller = await tx.$queryRaw<{ id: string }[]>`
+            SELECT "id" FROM "User"
+            WHERE "id" = ${viewerId} AND "deletedAt" IS NULL
+            FOR UPDATE`;
+          if (caller.length === 0) throw new AppError('USER_001');
+          await tx.$queryRaw`SELECT "id" FROM "Club" WHERE "id" = ${clubId} FOR UPDATE`;
 
-    const data: Prisma.ClubUpdateInput = {};
-    if (input.name !== undefined) data.name = input.name.trim();
-    if (input.description !== undefined) data.description = input.description?.trim() || null;
-    if (input.rules !== undefined) data.rules = input.rules?.trim() || null;
-    if (input.iconUrl !== undefined) data.iconUrl = input.iconUrl;
-    if (input.category !== undefined) data.category = input.category;
-    if (input.categoryEmoji !== undefined) data.categoryEmoji = input.categoryEmoji;
-    if (input.privacy !== undefined) data.privacy = privacyToDb(input.privacy);
+          const currentClub = await tx.club.findFirst({
+            where: activeClubForViewerWhere(clubId, viewerId),
+            select: { id: true },
+          });
+          if (!currentClub) throw new AppError('CLUB_001');
+          const currentMembership = await tx.clubMember.findUnique({
+            where: { clubId_userId: { clubId, userId: viewerId } },
+            select: { role: true },
+          });
+          if (currentMembership?.role !== 'ADMIN') throw new AppError('CLUB_002');
 
-    const updated = await prisma.club.update({
-      where: { id: clubId },
-      data,
-      include: clubInclude,
-    });
+          const data: Prisma.ClubUncheckedUpdateInput = {};
+          if (input.name !== undefined) data.name = input.name.trim();
+          if (input.description !== undefined) data.description = input.description?.trim() || null;
+          if (input.rules !== undefined) data.rules = input.rules?.trim() || null;
+          if (input.iconUrl !== undefined) {
+            if (input.iconUrl) {
+              const sourceIconUrl = input.iconUrl;
+              const mediaId = await mediaService.assertOwnedMediaUrlWithinTransaction(
+                tx,
+                viewerId,
+                sourceIconUrl,
+                MediaKind.AVATAR,
+              );
+              data.iconUrl = mediaReferenceFor(mediaId, new URL(sourceIconUrl).origin);
+              data.iconMediaObjectId = mediaId;
+            } else {
+              data.iconUrl = null;
+              data.iconMediaObjectId = null;
+            }
+          }
+          if (input.category !== undefined) data.category = input.category;
+          if (input.categoryEmoji !== undefined) data.categoryEmoji = input.categoryEmoji;
+          if (input.privacy !== undefined) data.privacy = privacyToDb(input.privacy);
+
+          return tx.club.update({ where: { id: clubId }, data, include: clubInclude });
+        },
+        { maxWait: 10_000, timeout: 15_000 },
+      ),
+    );
     const viewerMembership = await this.resolveViewerMembership(viewerId, clubId);
     return toApi(updated, viewerId, viewerMembership);
   },
@@ -680,28 +734,15 @@ export const clubsService = {
     if (!club) throw new AppError('CLUB_001');
     if (club.ownerId !== viewerId) throw new AppError('CLUB_005');
 
-    await prisma.$transaction([
-      prisma.clubMember.deleteMany({ where: { clubId } }),
-      prisma.club.delete({ where: { id: clubId } }),
-    ]);
-
-    // CLUB-07: the clubreq + clubMeta extensions keep state in Redis keyed by
-    // clubId. Purge those keys so a deleted club leaves no orphaned join
-    // requests / metadata behind. Best-effort: a Redis hiccup must not fail an
-    // otherwise-successful deletion.
-    try {
-      const reqIndexKey = `ext:clubreq:club:${clubId}`;
-      const pendingUserIds = await redis.sMembers(reqIndexKey);
-      const keysToDelete = [
-        reqIndexKey,
-        ...pendingUserIds.map(uid => `ext:clubreq:${clubId}:${uid}`),
-        `ext:clubmeta:${clubId}`,
-        `ext:clubmeta:featured:${clubId}`,
-      ];
-      await redis.del(keysToDelete);
-    } catch (err) {
-      logger.warn('clubs.remove: extension key purge failed', { err, clubId });
-    }
+    await prisma.$transaction(async tx => {
+      const [lockedClub] = await tx.$queryRaw<{ ownerId: string }[]>`
+        SELECT "ownerId" FROM "Club" WHERE "id" = ${clubId} FOR UPDATE`;
+      if (!lockedClub) throw new AppError('CLUB_001');
+      if (lockedClub.ownerId !== viewerId) throw new AppError('CLUB_005');
+      await tx.clubMember.deleteMany({ where: { clubId } });
+      await tx.outboxEvent.create({ data: clubExtensionCleanupOutboxData(clubId, 'all') });
+      await tx.club.delete({ where: { id: clubId } });
+    });
 
     return { deleted: true as const };
   },

@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version_name:
-        description: Store version shared by Android and iOS (for example 1.0.0)
+        description: Three-integer store version shared by Android and iOS (for example 1.0.0)
         required: true
         type: string
       android_version_code:
@@ -35,7 +35,7 @@ jobs:
     outputs:
       sha: ${{ steps.source.outputs.sha }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           fetch-depth: 0
 
@@ -66,8 +66,8 @@ jobs:
           IOS_BUILD_NUMBER: ${{ inputs.ios_build_number }}
         run: |
           set -euo pipefail
-          [[ "$VERSION_NAME" =~ ^[0-9]+(\.[0-9]+){1,3}([+-][0-9A-Za-z.-]+)?$ ]] || {
-            echo "version_name is invalid" >&2
+          [[ "$VERSION_NAME" =~ ^[0-9]+[.][0-9]+[.][0-9]+$ ]] || {
+            echo "version_name must contain exactly three dot-separated integers" >&2
             exit 1
           }
           [[ "$ANDROID_VERSION_CODE" =~ ^[1-9][0-9]*$ ]] || {
@@ -85,21 +85,21 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           ref: ${{ needs.source-gate.outputs.sha }}
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: '22.23.1'
           cache: npm
 
-      - uses: actions/setup-java@v5
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: temurin
           java-version: '17'
 
-      - uses: gradle/actions/setup-gradle@v5
+      - uses: gradle/actions/setup-gradle@0723195856401067f7a2779048b490ace7a47d7c # v5
 
       - name: Install JavaScript dependencies
         run: npm ci
@@ -196,7 +196,7 @@ jobs:
             }' > artifacts/android-production-manifest.json
 
       - name: Upload signed Android evidence
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: android-production-aab
           path: |
@@ -211,7 +211,7 @@ jobs:
     runs-on: macos-latest
     environment: production
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           ref: ${{ needs.source-gate.outputs.sha }}
 
@@ -226,20 +226,34 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: '22.23.1'
           cache: npm
 
-      - uses: ruby/setup-ruby@v1
+      - uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1
         with:
           ruby-version: '3.3'
 
+      - name: Require committed Ruby and CocoaPods lockfiles
+        shell: bash
+        run: |
+          set -euo pipefail
+          for lockfile in Gemfile.lock ios/Podfile.lock; do
+            [ -s "$lockfile" ] || {
+              echo "$lockfile is required for a deterministic iOS release" >&2
+              echo "Generate and review it on macOS, then commit it before rerunning this workflow" >&2
+              exit 1
+            }
+          done
+
       - name: Install JavaScript, Ruby and CocoaPods dependencies
         run: |
+          set -euo pipefail
           npm ci
+          bundle config set --local deployment 'true'
           bundle install
-          bundle exec pod install --project-directory=ios --repo-update
+          bundle exec pod install --project-directory=ios --deployment
 
       - name: Materialize protected iOS build inputs
         shell: bash
@@ -318,11 +332,35 @@ jobs:
               -c 'Print :Entitlements:application-identifier' \
               "$profile_plist"
           )"
+          if ! beta_reports_active="$(
+            /usr/libexec/PlistBuddy \
+              -c 'Print :Entitlements:beta-reports-active' \
+              "$profile_plist" 2>/dev/null
+          )"; then
+            echo "Provisioning profile lacks beta-reports-active" >&2
+            exit 1
+          fi
           if [ "$profile_team" != "$IOS_TEAM_ID" ] \
             || [ "$application_identifier" != "${IOS_TEAM_ID}.com.chathouse.app" ] \
-            || [[ ! "$profile_uuid" =~ ^[A-Fa-f0-9-]{36}$ ]] \
+            || [[ ! "$profile_uuid" =~ ^[A-Fa-f0-9]{8}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{12}$ ]] \
             || [ -z "$profile_name" ]; then
             echo "Provisioning profile does not match the production app/team" >&2
+            exit 1
+          fi
+          [ "$beta_reports_active" = true ] || {
+            echo "Provisioning profile is not an App Store Connect profile" >&2
+            exit 1
+          }
+          if /usr/libexec/PlistBuddy \
+            -c 'Print :ProvisionedDevices' \
+            "$profile_plist" >/dev/null 2>&1; then
+            echo "Ad Hoc/development profiles with ProvisionedDevices are forbidden" >&2
+            exit 1
+          fi
+          if /usr/libexec/PlistBuddy \
+            -c 'Print :ProvisionsAllDevices' \
+            "$profile_plist" >/dev/null 2>&1; then
+            echo "Enterprise profiles with ProvisionsAllDevices are forbidden" >&2
             exit 1
           fi
           profile_dir="$HOME/Library/MobileDevice/Provisioning Profiles"
@@ -359,7 +397,65 @@ jobs:
             CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
             COMPILER_INDEX_STORE_ENABLE=NO
 
-      - name: Verify and package the signed xcarchive
+      - name: Export an App Store Connect IPA
+        shell: bash
+        env:
+          IOS_TEAM_ID: ${{ vars.IOS_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          archive_path="$RUNNER_TEMP/ChatHouse.xcarchive"
+          export_path="$RUNNER_TEMP/ChatHouse-app-store-export"
+          export_options_json="$RUNNER_TEMP/ExportOptions.json"
+          export_options_plist="$RUNNER_TEMP/ExportOptions.plist"
+          ipa_path="$export_path/ChatHouse.ipa"
+
+          [ -d "$archive_path" ] || {
+            echo "Signed archive is missing before App Store Connect export" >&2
+            exit 1
+          }
+          [ ! -e "$export_path" ] || {
+            echo "Refusing to reuse a stale App Store Connect export directory" >&2
+            exit 1
+          }
+
+          jq -n \
+            --arg team_id "$IOS_TEAM_ID" \
+            --arg profile_name "$CHATHOUSE_IOS_PROFILE_NAME" \
+            '{
+              destination: "export",
+              method: "app-store-connect",
+              signingStyle: "manual",
+              signingCertificate: "Apple Distribution",
+              teamID: $team_id,
+              manageAppVersionAndBuildNumber: false,
+              provisioningProfiles: {
+                "com.chathouse.app": $profile_name
+              },
+              stripSwiftSymbols: true,
+              uploadSymbols: true
+            }' > "$export_options_json"
+          plutil -convert xml1 -o "$export_options_plist" "$export_options_json"
+          plutil -lint "$export_options_plist"
+
+          xcodebuild -exportArchive \
+            -archivePath "$archive_path" \
+            -exportPath "$export_path" \
+            -exportOptionsPlist "$export_options_plist"
+
+          shopt -s nullglob
+          ipa_files=("$export_path"/*.ipa)
+          shopt -u nullglob
+          if (( ${#ipa_files[@]} != 1 )) || [ "${ipa_files[0]:-}" != "$ipa_path" ]; then
+            echo "App Store Connect export must produce exactly ChatHouse.ipa" >&2
+            exit 1
+          fi
+          [ -s "$ipa_path" ] || {
+            echo "App Store Connect export did not produce ChatHouse.ipa" >&2
+            exit 1
+          }
+          unzip -tq "$ipa_path"
+
+      - name: Verify and package the signed App Store Connect artifacts
         shell: bash
         env:
           SOURCE_SHA: ${{ needs.source-gate.outputs.sha }}
@@ -370,10 +466,28 @@ jobs:
           set -euo pipefail
           archive_path="$RUNNER_TEMP/ChatHouse.xcarchive"
           app_path="$archive_path/Products/Applications/ChatHouse.app"
+          ipa_path="$RUNNER_TEMP/ChatHouse-app-store-export/ChatHouse.ipa"
+          ipa_payload="$RUNNER_TEMP/ChatHouse-ipa-payload"
           if [[ ! -d "$app_path" || ! -s "$app_path/embedded.mobileprovision" ]]; then
             echo "Signed archive or embedded profile is missing" >&2
             exit 1
           fi
+          [ -s "$ipa_path" ] || {
+            echo "Exported App Store Connect IPA is missing" >&2
+            exit 1
+          }
+          [ ! -e "$ipa_payload" ] || {
+            echo "Refusing to verify a stale IPA payload directory" >&2
+            exit 1
+          }
+          mkdir -p "$ipa_payload"
+          ditto -x -k "$ipa_path" "$ipa_payload"
+          exported_app="$ipa_payload/Payload/ChatHouse.app"
+          if [[ ! -d "$exported_app" || ! -s "$exported_app/embedded.mobileprovision" ]]; then
+            echo "Exported IPA does not contain the expected signed application" >&2
+            exit 1
+          fi
+
           codesign --verify --deep --strict "$app_path"
           codesign -dvv "$app_path" 2> "$RUNNER_TEMP/codesign.txt"
           grep -F "TeamIdentifier=${IOS_TEAM_ID}" "$RUNNER_TEMP/codesign.txt"
@@ -381,52 +495,135 @@ jobs:
             echo "Development-signed archive is forbidden" >&2
             exit 1
           fi
+          codesign --verify --deep --strict "$exported_app"
+          codesign -dvv "$exported_app" 2> "$RUNNER_TEMP/exported-codesign.txt"
+          grep -F "TeamIdentifier=${IOS_TEAM_ID}" "$RUNNER_TEMP/exported-codesign.txt"
+          if grep -Eqi 'Apple Development|iPhone Developer' "$RUNNER_TEMP/exported-codesign.txt"; then
+            echo "Development-signed IPA is forbidden" >&2
+            exit 1
+          fi
+
+          verify_app_store_connect_profile() {
+            local profile_plist="$1"
+            local profile_label="$2"
+            local profile_team
+            local application_identifier
+            local aps_environment
+            local beta_reports_active
+
+            profile_team="$(/usr/libexec/PlistBuddy -c 'Print :TeamIdentifier:0' "$profile_plist")"
+            application_identifier="$(
+              /usr/libexec/PlistBuddy \
+                -c 'Print :Entitlements:application-identifier' \
+                "$profile_plist"
+            )"
+            aps_environment="$(
+              /usr/libexec/PlistBuddy \
+                -c 'Print :Entitlements:aps-environment' \
+                "$profile_plist"
+            )"
+            if ! beta_reports_active="$(
+              /usr/libexec/PlistBuddy \
+                -c 'Print :Entitlements:beta-reports-active' \
+                "$profile_plist" 2>/dev/null
+            )"; then
+              echo "$profile_label lacks beta-reports-active" >&2
+              return 1
+            fi
+
+            if [ "$profile_team" != "$IOS_TEAM_ID" ] \
+              || [ "$application_identifier" != "${IOS_TEAM_ID}.com.chathouse.app" ] \
+              || [ "$aps_environment" != production ] \
+              || [ "$beta_reports_active" != true ]; then
+              echo "$profile_label does not use the required App Store Connect profile" >&2
+              return 1
+            fi
+            if /usr/libexec/PlistBuddy \
+              -c 'Print :ProvisionedDevices' \
+              "$profile_plist" >/dev/null 2>&1; then
+              echo "$profile_label embeds an Ad Hoc/development profile" >&2
+              return 1
+            fi
+            if /usr/libexec/PlistBuddy \
+              -c 'Print :ProvisionsAllDevices' \
+              "$profile_plist" >/dev/null 2>&1; then
+              echo "$profile_label embeds an Enterprise profile" >&2
+              return 1
+            fi
+          }
 
           embedded_plist="$RUNNER_TEMP/embedded-profile.plist"
           security cms -D -i "$app_path/embedded.mobileprovision" > "$embedded_plist"
-          aps_environment="$(
-            /usr/libexec/PlistBuddy \
-              -c 'Print :Entitlements:aps-environment' \
-              "$embedded_plist"
-          )"
-          [ "$aps_environment" = production ] || {
-            echo "Archive profile does not carry production APNs entitlement" >&2
-            exit 1
-          }
+          verify_app_store_connect_profile "$embedded_plist" "Signed archive"
+
+          exported_plist="$RUNNER_TEMP/exported-profile.plist"
+          security cms -D -i "$exported_app/embedded.mobileprovision" > "$exported_plist"
+          verify_app_store_connect_profile "$exported_plist" "Exported IPA"
+
           actual_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app_path/Info.plist")"
           actual_build="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app_path/Info.plist")"
-          if [[ "$actual_version" != "$VERSION_NAME" || "$actual_build" != "$BUILD_NUMBER" ]]; then
+          actual_bundle_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app_path/Info.plist")"
+          if [[ "$actual_bundle_id" != com.chathouse.app \
+            || "$actual_version" != "$VERSION_NAME" \
+            || "$actual_build" != "$BUILD_NUMBER" ]]; then
             echo "Archived version/build does not match workflow inputs" >&2
+            exit 1
+          fi
+          exported_version="$(
+            /usr/libexec/PlistBuddy \
+              -c 'Print :CFBundleShortVersionString' \
+              "$exported_app/Info.plist"
+          )"
+          exported_build="$(
+            /usr/libexec/PlistBuddy \
+              -c 'Print :CFBundleVersion' \
+              "$exported_app/Info.plist"
+          )"
+          exported_bundle_id="$(
+            /usr/libexec/PlistBuddy \
+              -c 'Print :CFBundleIdentifier' \
+              "$exported_app/Info.plist"
+          )"
+          if [[ "$exported_bundle_id" != com.chathouse.app \
+            || "$exported_version" != "$VERSION_NAME" \
+            || "$exported_build" != "$BUILD_NUMBER" ]]; then
+            echo "Exported IPA version/build does not match workflow inputs" >&2
             exit 1
           fi
 
           mkdir -p artifacts
+          cp "$ipa_path" artifacts/ChatHouse.ipa
           tar -czf artifacts/ChatHouse.xcarchive.tgz \
             -C "$RUNNER_TEMP" \
             ChatHouse.xcarchive
-          sha256="$(shasum -a 256 artifacts/ChatHouse.xcarchive.tgz | awk '{print $1}')"
+          archive_sha256="$(shasum -a 256 artifacts/ChatHouse.xcarchive.tgz | awk '{print $1}')"
+          ipa_sha256="$(shasum -a 256 artifacts/ChatHouse.ipa | awk '{print $1}')"
           jq -n \
             --arg platform ios \
             --arg source_sha "$SOURCE_SHA" \
             --arg version_name "$VERSION_NAME" \
             --arg build_number "$BUILD_NUMBER" \
             --arg team_id "$IOS_TEAM_ID" \
-            --arg sha256 "$sha256" \
+            --arg archive_sha256 "$archive_sha256" \
+            --arg ipa_sha256 "$ipa_sha256" \
             '{
               platform: $platform,
               source_sha: $source_sha,
               version_name: $version_name,
               build_number: $build_number,
               team_id: $team_id,
-              artifact_sha256: $sha256,
-              archive_tar_sha256: $sha256
+              export_method: "app-store-connect",
+              artifact_sha256: $archive_sha256,
+              archive_tar_sha256: $archive_sha256,
+              ipa_sha256: $ipa_sha256
             }' > artifacts/ios-production-manifest.json
 
       - name: Upload signed iOS evidence
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: ios-production-xcarchive
           path: |
+            artifacts/ChatHouse.ipa
             artifacts/ChatHouse.xcarchive.tgz
             artifacts/ios-production-manifest.json
           if-no-files-found: error

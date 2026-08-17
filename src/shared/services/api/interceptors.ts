@@ -48,7 +48,11 @@ const performRefresh = async (client: AxiosInstance): Promise<AuthSession | null
       if (!current?.refreshToken) return null;
       const res = await client.post<{
         success: true;
-        data: { accessToken: string; refreshToken: string };
+        data: {
+          accessToken: string;
+          refreshToken: string;
+          scope: 'active' | 'account_recovery';
+        };
       }>(
         '/auth/refresh',
         { refreshToken: current.refreshToken },
@@ -59,6 +63,7 @@ const performRefresh = async (client: AxiosInstance): Promise<AuthSession | null
       const next: AuthSession = {
         accessToken: res.data.data.accessToken,
         refreshToken: res.data.data.refreshToken,
+        scope: res.data.data.scope,
         // tokenStorage expects a rough expiresAt — not used for validation,
         // only for UI hints. See ACCESS_TOKEN_TTL_MS above.
         expiresAt: new Date(Date.now() + ACCESS_TOKEN_TTL_MS).toISOString(),

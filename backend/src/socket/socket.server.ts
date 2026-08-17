@@ -2,6 +2,7 @@ import type { Server as HttpServer } from 'node:http';
 import { Server, type Socket } from 'socket.io';
 import { createAdapter } from '@socket.io/redis-adapter';
 import { env } from '../config/env';
+import { wsConnectionsGauge } from '../monitoring/metrics';
 import { logger } from '../config/logger';
 import { redis } from '../config/redis';
 import {
@@ -12,9 +13,10 @@ import {
 import { registerCaptionsRealtime } from '../extensions/realtime/captions.realtime';
 import { roomsService } from '../modules/rooms/rooms.service';
 import { setRealtimeServer } from './realtime';
-import { socketAuth } from './socket.middleware';
+import { socketAuth, type AuthedSocketData } from './socket.middleware';
 import {
   attachSocketEventRateLimiter,
+  DistributedSocketEventRateLimiter,
   MAX_SOCKET_PAYLOAD_BYTES,
   SocketEventRateLimiter,
 } from './socket.rate-limit';
@@ -25,7 +27,7 @@ import { registerRtcHandlers } from './handlers/rtc.handler';
 import { registerHallwayHandlers } from './handlers/hallway.handler';
 import { registerLatencyHandlers } from './handlers/latency.handler';
 import { registerPresenceHandlers } from './handlers/presence.handler';
-import { userChannel } from './channels';
+import { delegatedActorChannel, delegatedTokenChannel, userChannel } from './channels';
 import {
   drainSocketDisconnectCleanups as drainRoomDisconnectCleanups,
   enqueueSocketDisconnectCleanup,
@@ -101,6 +103,7 @@ export const createSocketServer = async (httpServer: HttpServer): Promise<Server
 
   io.use(socketAuth);
   const eventRateLimiter = new SocketEventRateLimiter();
+  const distributedEventRateLimiter = new DistributedSocketEventRateLimiter(redis);
 
   // Publish the live Server reference so the HTTP layer can fan events
   // into the socket tier (hallway broadcasts, etc.) without importing
@@ -128,14 +131,44 @@ export const createSocketServer = async (httpServer: HttpServer): Promise<Server
   });
 
   io.on('connection', (socket: Socket) => {
-    const userId = socket.data.userId as string;
+    const auth = socket.data as AuthedSocketData;
+    const userId = auth.userId;
+    wsConnectionsGauge.inc();
+    // Register the matching decrement before feature handlers. If a later
+    // registration unexpectedly throws, closing the socket still releases the
+    // gauge exactly once.
+    socket.once('disconnect', () => wsConnectionsGauge.dec());
     logger.info(`socket connected user=${userId} id=${socket.id}`);
-    attachSocketEventRateLimiter(socket, eventRateLimiter);
+    attachSocketEventRateLimiter(socket, eventRateLimiter, distributedEventRateLimiter);
     let disconnectingRoomChannels: string[] = [];
     // Account-level fan-out/revocation must not depend on any feature handler
     // being registered. Joining twice is idempotent (chat.handler also joins
     // this channel for backward compatibility).
     void socket.join(userChannel(userId));
+    if (auth.impersonatorId && auth.delegatedTokenJti && auth.tokenExpiresAt) {
+      void socket.join([
+        delegatedActorChannel(auth.impersonatorId),
+        delegatedTokenChannel(auth.delegatedTokenJti),
+      ]);
+    }
+
+    // Socket.IO authenticates only during the handshake. Close delegated
+    // sessions at their JWT expiry so a quiet, already-open socket cannot keep
+    // acting as the target after the bearer is no longer valid over HTTP.
+    let delegatedExpiryTimer: NodeJS.Timeout | undefined;
+    if (auth.impersonatorId && auth.tokenExpiresAt) {
+      const remainingMs = auth.tokenExpiresAt * 1000 - Date.now();
+      if (remainingMs <= 0) {
+        socket.emit('auth:revoked', { reason: 'impersonation_expired' });
+        socket.disconnect(true);
+      } else {
+        delegatedExpiryTimer = setTimeout(() => {
+          socket.emit('auth:revoked', { reason: 'impersonation_expired' });
+          socket.disconnect(true);
+        }, remainingMs);
+        delegatedExpiryTimer.unref();
+      }
+    }
 
     registerRoomHandlers(io, socket);
     registerChatHandlers(io, socket);
@@ -155,6 +188,7 @@ export const createSocketServer = async (httpServer: HttpServer): Promise<Server
     });
 
     socket.on('disconnect', reason => {
+      if (delegatedExpiryTimer) clearTimeout(delegatedExpiryTimer);
       // RTP transports are scoped to one concrete socket/device. Releasing
       // them here does not interrupt another device for the same account,
       // which owns separate transports.

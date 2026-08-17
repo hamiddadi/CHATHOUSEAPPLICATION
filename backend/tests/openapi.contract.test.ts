@@ -1,5 +1,7 @@
 import request from 'supertest';
 import type { Express } from 'express';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { buildOpenApiDocument } from '../src/config/openapi';
 
 /* eslint-disable @typescript-eslint/no-require-imports */
@@ -50,6 +52,8 @@ describe('OpenAPI release contract', () => {
     ['post', '/api/rooms/{id}/join'],
     ['post', '/api/rooms/{id}/leave'],
     ['post', '/api/rooms/{id}/end'],
+    ['post', '/api/rooms/{id}/messages'],
+    ['post', '/api/rooms/{id}/reactions'],
     ['post', '/api/follow/{userId}'],
     ['delete', '/api/follow/{userId}'],
     ['get', '/api/follow/requests'],
@@ -69,6 +73,12 @@ describe('OpenAPI release contract', () => {
     ['patch', '/api/maps/location'],
     ['post', '/api/upload/avatar'],
     ['post', '/api/upload/voice'],
+    ['get', '/api/explore'],
+    ['get', '/api/recordings'],
+    ['get', '/api/recordings/room/{roomId}'],
+    ['get', '/api/recordings/users/{userId}'],
+    ['post', '/api/push/register'],
+    ['post', '/api/push/unregister'],
   ] as const;
 
   it.each(requiredOperations)(
@@ -130,6 +140,36 @@ describe('OpenAPI release contract', () => {
     }
   });
 
+  it('documents the explicit account-restoration session boundary', () => {
+    const login = JSON.stringify(asObject(asObject(paths['/api/auth/login'])['post']));
+    const otp = JSON.stringify(asObject(asObject(paths['/api/auth/verify-otp'])['post']));
+    const refresh = JSON.stringify(asObject(asObject(paths['/api/auth/refresh'])['post']));
+    const me = JSON.stringify(asObject(asObject(paths['/api/users/me'])['get']));
+    const cancel = JSON.stringify(
+      asObject(asObject(paths['/api/users/me/cancel-deletion'])['post']),
+    );
+
+    expect(login).toContain('account_recovery');
+    expect(otp).toContain('recovery-only');
+    expect(refresh).toContain('recovery-scoped');
+    expect(me).toContain('accountState');
+    expect(cancel).toContain('account_recovery');
+    expect(cancel).toContain('fresh active session');
+  });
+
+  it('marks legacy email authentication unavailable in production', () => {
+    for (const path of ['/api/auth/register', '/api/auth/login']) {
+      const operation = asObject(asObject(paths[path])['post']);
+      expect(operation['deprecated']).toBe(true);
+      expect(operation['summary']).toContain('non-production only');
+      expect(operation['description']).toContain('always unavailable in production');
+
+      const unavailable = asObject(asObject(operation['responses'])['404']);
+      expect(unavailable['description']).toContain('AUTH_009');
+      expect(JSON.stringify(unavailable)).toContain('AUTH_009');
+    }
+  });
+
   it('documents idempotency headers on retry-sensitive creates', () => {
     for (const path of [
       '/api/rooms',
@@ -139,6 +179,8 @@ describe('OpenAPI release contract', () => {
       '/api/groups/{id}/members',
       '/api/chat/{userId}',
       '/api/chat/{userId}/voice',
+      '/api/rooms/{id}/messages',
+      '/api/rooms/{id}/reactions',
     ]) {
       const operation = asObject(asObject(paths[path])['post']);
       expect(operation['parameters']).toEqual(
@@ -153,7 +195,78 @@ describe('OpenAPI release contract', () => {
     }
   });
 
-  it('distinguishes exactly-once message persistence from at-least-once delivery', () => {
+  it('keeps every mounted core mobile router represented in the contract', () => {
+    const source = readFileSync(path.join(__dirname, '../src/app.ts'), 'utf8');
+    const mountedPrefixes = [...source.matchAll(/app\.use\(\s*['"](\/api\/[^'"]+)['"]\s*,/g)]
+      .map(match => match[1])
+      .filter((prefix): prefix is string => Boolean(prefix));
+    // Admin is an operator-only, feature-gated surface and intentionally not
+    // part of the mobile API contract.
+    const excluded = new Set([
+      '/api/admin',
+      // Swagger UI is a non-production documentation surface, not part of the
+      // mobile API described by the document it serves.
+      '/api/docs',
+    ]);
+    const documentedPaths = Object.keys(paths);
+    for (const prefix of mountedPrefixes) {
+      if (excluded.has(prefix)) continue;
+      expect({
+        prefix,
+        documented: documentedPaths.some(route => route.startsWith(prefix)),
+      }).toEqual({ prefix, documented: true });
+    }
+  });
+
+  it('requires every extension mount to be documented or explicitly tracked as contract debt', () => {
+    const source = readFileSync(path.join(__dirname, '../src/extensions/mount.ts'), 'utf8');
+    const mounts = [...source.matchAll(/app\.use\(\s*['"](\/api\/ext\/[^'"]+)['"]\s*,/g)]
+      .map(match => match[1])
+      .filter((prefix): prefix is string => Boolean(prefix));
+    const trackedDebt = new Set([
+      '/api/ext/suggestions',
+      '/api/ext/contacts',
+      '/api/ext/presence',
+      '/api/ext/topics',
+      '/api/ext/events',
+      '/api/ext/chatmod',
+      '/api/ext/privacy',
+      '/api/ext/search',
+      '/api/ext/audio',
+      '/api/ext/netquality',
+      '/api/ext/clubreq',
+      '/api/ext/payments',
+      '/api/ext/premium',
+      '/api/ext/captions',
+      '/api/ext/twitter',
+      '/api/ext/calendar',
+      '/api/ext/share',
+      '/api/ext/speak-invite',
+      '/api/ext/hide-room',
+      '/api/ext/notif-prefs',
+      '/api/ext/chat-reactions',
+      '/api/ext/recently-played',
+      '/api/ext/room-settings',
+      '/api/ext/badges',
+      '/api/ext/nominator',
+      '/api/ext/search-history',
+      '/api/ext/club-meta',
+      '/api/ext/profile-links',
+      '/api/ext/invites',
+      '/api/ext/health',
+    ]);
+    const documentedPaths = Object.keys(paths);
+    for (const prefix of mounts) {
+      expect(
+        documentedPaths.some(route => route.startsWith(prefix)) || trackedDebt.has(prefix),
+      ).toBe(true);
+    }
+    // Removing/renaming a route must also remove its debt entry; stale entries
+    // make the gate fail instead of silently accumulating forever.
+    expect([...trackedDebt].filter(prefix => !mounts.includes(prefix))).toEqual([]);
+  });
+
+  it('distinguishes exactly-once message persistence from best-effort arrival', () => {
     for (const path of [
       '/api/chat/{userId}',
       '/api/chat/{userId}/voice',
@@ -165,15 +278,15 @@ describe('OpenAPI release contract', () => {
       const description = created['description'];
       expect(description).toEqual(expect.any(String));
       expect(description).toContain('exactly once per Idempotency-Key');
-      expect(description).toContain('at least once');
+      expect(description).toContain('best effort');
       expect(description).toContain('messageId');
       expect(description).toContain('notificationId');
       expect(description).not.toContain('fanned out exactly once');
     }
   });
 
-  it('documents legacy arrays and opt-in paginated message envelopes', () => {
-    for (const path of ['/api/chat/{userId}', '/api/groups/{id}/messages']) {
+  it('documents legacy arrays and opt-in paginated chat/group envelopes', () => {
+    for (const path of ['/api/chat/{userId}', '/api/groups', '/api/groups/{id}/messages']) {
       const operation = asObject(asObject(paths[path])['get']);
       const ok = asObject(asObject(operation['responses'])['200']);
       expect(ok['description']).toContain('paginated=true');

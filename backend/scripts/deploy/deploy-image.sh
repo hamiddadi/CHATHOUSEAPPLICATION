@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Compatibility flags deliberately cross source boundaries into the deployment
+# guard files, which ShellCheck cannot follow when it analyzes files separately.
+# shellcheck disable=SC2034
 #
 # Activate one API image digest with the production Compose definition. When
 # CADDY_SERVICE is set, validate and reload the candidate Caddy configuration
@@ -33,8 +36,10 @@ DB_BOOTSTRAP_SERVICE="${DB_BOOTSTRAP_SERVICE:-db-role-bootstrap}"
 DB_MIGRATION_SERVICE="${DB_MIGRATION_SERVICE:-migrate}"
 DB_GRANTS_SERVICE="${DB_GRANTS_SERVICE:-db-role-grants}"
 DB_MAINTENANCE_CHECK_SERVICE="${DB_MAINTENANCE_CHECK_SERVICE:-db-maintenance-check}"
+MEDIA_REFERENCE_CUTOVER_SERVICE="${MEDIA_REFERENCE_CUTOVER_SERVICE:-media-reference-cutover}"
 LIVEKIT_REVOCATION_WORKER_SERVICE="${LIVEKIT_REVOCATION_WORKER_SERVICE:-livekit-revocation-worker}"
 LIVEKIT_REVOCATION_WORKER_CONTAINER_NAME="${LIVEKIT_REVOCATION_WORKER_CONTAINER_NAME:-chathouse-livekit-revocation-worker}"
+ACKNOWLEDGE_ONE_WAY_STATE_CONTRACT_V2_CUTOVER="${ACKNOWLEDGE_ONE_WAY_STATE_CONTRACT_V2_CUTOVER:-false}"
 ALLOW_ONE_WAY_LIVEKIT_REVOCATION_UPGRADE="${ALLOW_ONE_WAY_LIVEKIT_REVOCATION_UPGRADE:-false}"
 ALLOW_ONE_WAY_DATABASE_ROLE_UPGRADE="${ALLOW_ONE_WAY_DATABASE_ROLE_UPGRADE:-false}"
 RUN_DATABASE_MIGRATIONS="${RUN_DATABASE_MIGRATIONS:-true}"
@@ -45,18 +50,30 @@ BASE_URL="${BASE_URL:-http://localhost:4000}"
 MAX_ATTEMPTS="${MAX_ATTEMPTS:-10}"
 DATABASE_MAINTENANCE_ACTIVE=0
 LIVEKIT_WORKER_GUARD_ACTIVE=0
+API_ACTIVATION_ACTIVE=0
+PREV_IMAGE_STATE_COMPATIBLE=0
 PREV_IMAGE_LIVEKIT_COMPATIBLE=0
 PREV_IMAGE_DATABASE_ROLE_COMPATIBLE=0
+REQUIRED_STATE_CONTRACT=v2
 REQUIRED_DATABASE_ROLE_CONTRACT=v1
 REQUIRED_LIVEKIT_REVOCATION_CONTRACT=v1
 MIGRATION_COMMAND_TIMEOUT=35m
 MIGRATION_TERMINATION_GRACE=2m
-MIGRATION_CONTAINER_NAME="chathouse-prisma-migrate-$$"
+CUTOVER_COMMAND_TIMEOUT=32m
+CUTOVER_TERMINATION_GRACE=2m
+# Fixed names let a later deployment clean up one-offs orphaned by SIGKILL,
+# host disconnect or runner loss before it permits any writer to restart.
+MIGRATION_CONTAINER_NAME="chathouse-prisma-migrate"
+CUTOVER_CONTAINER_NAME="chathouse-media-reference-cutover"
 LIVEKIT_WORKER_HEALTH_ATTEMPTS=15
 
 case "$RUN_DATABASE_MIGRATIONS" in
   true|false) ;;
   *) die "RUN_DATABASE_MIGRATIONS must be true or false" ;;
+esac
+case "$ACKNOWLEDGE_ONE_WAY_STATE_CONTRACT_V2_CUTOVER" in
+  true|false) ;;
+  *) die "ACKNOWLEDGE_ONE_WAY_STATE_CONTRACT_V2_CUTOVER must be true or false" ;;
 esac
 case "$ALLOW_ONE_WAY_LIVEKIT_REVOCATION_UPGRADE" in
   true|false) ;;
@@ -69,6 +86,7 @@ esac
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 HEALTH_CHECK="${SCRIPT_DIR}/health-check.sh"
+STATE_CONTRACT_DEPLOY_GUARD="${SCRIPT_DIR}/state-contract-deploy-guard.sh"
 LIVEKIT_DEPLOY_GUARD="${SCRIPT_DIR}/livekit-deploy-guard.sh"
 
 command -v docker >/dev/null 2>&1 || die "docker not found on PATH"
@@ -77,6 +95,7 @@ command -v timeout >/dev/null 2>&1 || die "timeout not found on PATH"
 [ -f "$ENV_FILE" ] || die "production env file '${ENV_FILE}' does not exist"
 [ -f "$COMPOSE_FILE" ] || die "compose file '${COMPOSE_FILE}' does not exist"
 [ -x "$HEALTH_CHECK" ] || die "health check '${HEALTH_CHECK}' is not executable"
+[ -r "$STATE_CONTRACT_DEPLOY_GUARD" ] || die "state-contract deploy guard '${STATE_CONTRACT_DEPLOY_GUARD}' is not readable"
 [ -r "$LIVEKIT_DEPLOY_GUARD" ] || die "LiveKit deploy guard '${LIVEKIT_DEPLOY_GUARD}' is not readable"
 if [ ! -f "$ROLLBACK_COMPOSE_FILE" ]; then
   log "Previous Compose snapshot is unavailable; rollback will use the current definition"
@@ -115,6 +134,12 @@ image_livekit_revocation_contract() {
 image_database_role_contract() {
   docker image inspect \
     --format '{{ with index .Config.Labels "org.chathouse.database-role-contract" }}{{ . }}{{ end }}' \
+    "$1" 2>/dev/null
+}
+
+image_state_contract() {
+  docker image inspect \
+    --format '{{ with index .Config.Labels "org.chathouse.state-contract" }}{{ . }}{{ end }}' \
     "$1" 2>/dev/null
 }
 
@@ -210,6 +235,8 @@ activate_livekit_worker_with_contract() {
   activate_livekit_worker "$file" "$image"
 }
 
+# shellcheck source=./state-contract-deploy-guard.sh
+source "$STATE_CONTRACT_DEPLOY_GUARD"
 # shellcheck source=./livekit-deploy-guard.sh
 source "$LIVEKIT_DEPLOY_GUARD"
 
@@ -261,6 +288,50 @@ run_migrations_bounded() {
   fi
 }
 
+stop_cutover_container_and_wait() {
+  if docker inspect "$CUTOVER_CONTAINER_NAME" >/dev/null 2>&1; then
+    log "Stopping the private-media cutover container before API recovery"
+    docker rm -f "$CUTOVER_CONTAINER_NAME" >/dev/null 2>&1 || {
+      log "CRITICAL: unable to remove cutover container '${CUTOVER_CONTAINER_NAME}'"
+      return 1
+    }
+  fi
+  if docker inspect "$CUTOVER_CONTAINER_NAME" >/dev/null 2>&1; then
+    log "CRITICAL: cutover container '${CUTOVER_CONTAINER_NAME}' is still present"
+    return 1
+  fi
+
+  log "Waiting for the private-media cutover transaction to become quiescent"
+  compose_for "$COMPOSE_FILE" run --rm --no-deps "$DB_MAINTENANCE_CHECK_SERVICE" \
+    --wait-for-cutover-idle
+}
+
+run_media_reference_cutover_bounded() {
+  local file="$1"
+  local cutover_status=0
+
+  stop_cutover_container_and_wait || return 1
+  timeout \
+    --foreground \
+    --signal=TERM \
+    --kill-after="$CUTOVER_TERMINATION_GRACE" \
+    "$CUTOVER_COMMAND_TIMEOUT" \
+    docker compose \
+      --env-file "$ENV_FILE" \
+      --project-directory "$DEPLOY_DIR" \
+      -f "$file" \
+      run --name "$CUTOVER_CONTAINER_NAME" --rm --no-deps "$MEDIA_REFERENCE_CUTOVER_SERVICE" \
+    || cutover_status=$?
+
+  if [ "$cutover_status" -ne 0 ]; then
+    if [ "$cutover_status" -eq 124 ] || [ "$cutover_status" -eq 137 ]; then
+      log "Private-media cutover exceeded its ${CUTOVER_COMMAND_TIMEOUT} safety bound"
+    fi
+    stop_cutover_container_and_wait || return 1
+    return "$cutover_status"
+  fi
+}
+
 prepare_database() {
   local file="$1"
   local image="$2"
@@ -278,8 +349,10 @@ prepare_database() {
     case "$maintenance_status" in
       0)
         log "Stopping the API for the blocking-migration maintenance window"
-        compose_for "$file" stop "$API_SERVICE" || return 1
+        # Set the recovery guard before invoking Compose: a signal or partial
+        # failure during `stop` may already have removed the only API writer.
         DATABASE_MAINTENANCE_ACTIVE=1
+        compose_for "$file" stop "$API_SERVICE" || return 1
         ;;
       3) ;;
       *)
@@ -295,6 +368,11 @@ prepare_database() {
 
   log "Reapplying restricted grants after the migration step"
   compose_for "$file" run --rm --no-deps "$DB_GRANTS_SERVICE" || return 1
+
+  if [ "$DATABASE_MAINTENANCE_ACTIVE" -eq 1 ]; then
+    log "Running irreversible private-media reference cutover while API writers remain stopped"
+    run_media_reference_cutover_bounded "$file" || return 1
+  fi
 }
 
 container_id() {
@@ -417,14 +495,15 @@ verify_internal_health() {
   BASE_URL="$BASE_URL" \
     MAX_ATTEMPTS="$MAX_ATTEMPTS" \
     REQUIRE_PUBLIC_ENDPOINTS=false \
-    PUBLIC_API_URL= \
-    PUBLIC_APP_URL= \
+    PUBLIC_API_URL='' \
+    PUBLIC_APP_URL='' \
     bash "$HEALTH_CHECK"
 }
 
 recover_interrupted_maintenance() {
   local signal="$1"
   local caddy_recovered=1
+  local api_recovered=1
 
   # Avoid recursive traps if the remote runner sends another signal while the
   # recovery commands are executing.
@@ -434,6 +513,29 @@ recover_interrupted_maintenance() {
     if [ "$LIVEKIT_WORKER_GUARD_ACTIVE" -eq 1 ] \
       && ! restore_previous_livekit_security_worker; then
       log "CRITICAL: interrupted deployment left no healthy LiveKit security worker"
+      exit 1
+    fi
+    if [ "$API_ACTIVATION_ACTIVE" -eq 1 ]; then
+      api_recovered=0
+      if [ -n "$CADDY_SERVICE" ]; then
+        caddy_recovered=0
+        if restore_caddyfile \
+          && validate_caddy "$ROLLBACK_COMPOSE_FILE" \
+          && activate_caddy "$ROLLBACK_COMPOSE_FILE"; then
+          caddy_recovered=1
+        fi
+      fi
+      if [ -n "${PREV_IMAGE:-}" ] \
+        && activate_previous_image \
+        && verify_internal_health; then
+        api_recovered=1
+      fi
+      if [ "$api_recovered" -eq 1 ] && [ "$caddy_recovered" -eq 1 ]; then
+        API_ACTIVATION_ACTIVE=0
+        log "Interrupted API activation recovered; previous API is healthy"
+      else
+        log "CRITICAL: interrupted API activation could not restore a healthy previous API"
+      fi
     fi
     exit 1
   fi
@@ -441,6 +543,10 @@ recover_interrupted_maintenance() {
   log "Maintenance was active; restoring the previous infrastructure before exit"
   if ! stop_migration_container_and_wait; then
     log "CRITICAL: migration cleanup is unproven; refusing to restart API writers"
+    exit 1
+  fi
+  if ! stop_cutover_container_and_wait; then
+    log "CRITICAL: private-media cutover cleanup is unproven; refusing to restart API writers"
     exit 1
   fi
   if ! restore_previous_livekit_security_worker; then
@@ -456,10 +562,13 @@ recover_interrupted_maintenance() {
     fi
   fi
 
+  api_recovered=0
   if [ -n "${PREV_IMAGE:-}" ] \
-    && [ "$caddy_recovered" -eq 1 ] \
     && activate_previous_image \
     && verify_internal_health; then
+    api_recovered=1
+  fi
+  if [ "$api_recovered" -eq 1 ] && [ "$caddy_recovered" -eq 1 ]; then
     DATABASE_MAINTENANCE_ACTIVE=0
     log "Interrupted maintenance recovered; previous API is healthy"
   else
@@ -493,8 +602,14 @@ docker pull "$NEW_IMAGE" || die "unable to pull immutable image '${NEW_IMAGE}'"
 
 # Images produced before the role split still execute CREATE INDEX during API
 # boot. They cannot safely run with the restricted runtime DSN, so fail closed
-# before touching the database. The LiveKit contract is mandatory for forward,
-# manual rollback and captured previous-image activation alike.
+# before touching the database. State v2 is mandatory because the Redis-to-
+# Postgres and private-media cutovers cannot be consumed by older API images.
+# Every contract applies to forward, manual rollback and captured previous-
+# image activation alike.
+IMAGE_STATE_CONTRACT="$(image_state_contract "$NEW_IMAGE")" \
+  || die "unable to inspect the state contract label on '${NEW_IMAGE}'"
+[ "$IMAGE_STATE_CONTRACT" = "$REQUIRED_STATE_CONTRACT" ] \
+  || die "image is incompatible with state contract '${REQUIRED_STATE_CONTRACT}'"
 IMAGE_DATABASE_ROLE_CONTRACT="$(image_database_role_contract "$NEW_IMAGE")" \
   || die "unable to inspect the database-role contract label on '${NEW_IMAGE}'"
 [ "$IMAGE_DATABASE_ROLE_CONTRACT" = "$REQUIRED_DATABASE_ROLE_CONTRACT" ] \
@@ -506,8 +621,10 @@ IMAGE_LIVEKIT_REVOCATION_CONTRACT="$(image_livekit_revocation_contract "$NEW_IMA
 LIVEKIT_WORKER_GUARD_ACTIVE=1
 
 # Establish rollback compatibility before bootstrap/grants, maintenance, API
-# shutdown or migrations. The first v1 cutover is deliberately one-way and is
-# possible only with an explicit, documented operator acknowledgement.
+# shutdown or migrations. The first state-contract v2 cutover is deliberately
+# irreversible and possible only with an explicit operator acknowledgement.
+preflight_previous_api_state_contract "$CURRENT_CONTAINER" "$PREV_IMAGE" \
+  || die "captured previous API image is not a safe state-contract rollback target"
 preflight_previous_api_livekit_contract "$CURRENT_CONTAINER" "$PREV_IMAGE" \
   || die "captured previous API image is not a safe LiveKit rollback target"
 preflight_previous_api_database_role_contract "$CURRENT_CONTAINER" "$PREV_IMAGE" \
@@ -531,10 +648,13 @@ if ! prepare_database "$COMPOSE_FILE" "$NEW_IMAGE"; then
     if ! stop_migration_container_and_wait; then
       die "CRITICAL: database preparation failed and migration quiescence is unproven; refusing to restart API writers"
     fi
+    if ! stop_cutover_container_and_wait; then
+      die "CRITICAL: database preparation failed and cutover quiescence is unproven; refusing to restart API writers"
+    fi
     if ! restore_previous_livekit_security_worker; then
       die "CRITICAL: database preparation failed and no healthy LiveKit security worker can be guaranteed; refusing to restart API writers"
     fi
-    log "Database preparation failed during maintenance; restarting the previous API image"
+    log "Database preparation failed during maintenance; checking whether the previous API remains a compatible recovery target"
     if activate_previous_image && verify_internal_health; then
       DATABASE_MAINTENANCE_ACTIVE=0
       die "database preparation failed; previous API image restored"
@@ -552,7 +672,7 @@ if ! activate_livekit_worker_with_contract "$COMPOSE_FILE" "$NEW_IMAGE"; then
     die "CRITICAL: candidate LiveKit security worker failed and no contract-v1 worker could be recovered; API activation refused"
   fi
   if [ "$DATABASE_MAINTENANCE_ACTIVE" -eq 1 ] && [ -n "$PREV_IMAGE" ]; then
-    log "Candidate LiveKit security worker failed during maintenance; restarting the previous API image"
+    log "Candidate LiveKit security worker failed during maintenance; checking whether the previous API remains a compatible recovery target"
     if activate_previous_image && verify_internal_health; then
       DATABASE_MAINTENANCE_ACTIVE=0
       die "candidate LiveKit security worker failed; previous API restored with a healthy security worker"
@@ -564,14 +684,9 @@ fi
 
 deploy_ok=0
 candidate_activated=0
+API_ACTIVATION_ACTIVE=1
 if activate_image_with_runtime_contracts "$COMPOSE_FILE" "$NEW_IMAGE"; then
   candidate_activated=1
-elif [ "$RUN_DATABASE_MIGRATIONS" = false ]; then
-  log "Rollback target API activation failed; restoring the captured worker before exit"
-  if ! restore_previous_livekit_security_worker; then
-    die "CRITICAL: rollback target API activation failed and the captured worker could not be restored"
-  fi
-  die "rollback target activation refused; current API worker remains authoritative"
 fi
 if [ "$candidate_activated" -eq 1 ]; then
   if [ -n "$CADDY_SERVICE" ]; then
@@ -587,11 +702,12 @@ fi
 
 if [ "$deploy_ok" -eq 1 ]; then
   DATABASE_MAINTENANCE_ACTIVE=0
+  API_ACTIVATION_ACTIVE=0
   log "Deployment succeeded: ${NEW_IMAGE}"
   exit 0
 fi
 
-log "Deployment failed after activation started; restoring previous infrastructure"
+log "Deployment failed after activation started; attempting compatible previous-infrastructure recovery"
 
 rollback_ok=0
 caddyfile_restored=1
@@ -635,6 +751,7 @@ fi
 
 if [ "$rollback_ok" -eq 1 ]; then
   DATABASE_MAINTENANCE_ACTIVE=0
+  API_ACTIVATION_ACTIVE=0
   log "Previous image '${PREV_IMAGE}' and Caddy configuration restored and healthy"
   exit 1
 fi

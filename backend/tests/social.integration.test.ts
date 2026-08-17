@@ -309,9 +309,9 @@ describe('Social actions — wave + block + report', () => {
     const deliveryGate = new Promise<void>(resolve => {
       releaseDelivery = resolve;
     });
-    const originalDelivery = notificationsService.deliverPersisted.bind(notificationsService);
+    const originalDelivery = notificationsService.deliverPersistedStrict.bind(notificationsService);
     const delayedDelivery = jest
-      .spyOn(notificationsService, 'deliverPersisted')
+      .spyOn(notificationsService, 'deliverPersistedStrict')
       .mockImplementation(async (row, options) => {
         signalDeliveryStarted();
         await deliveryGate;
@@ -360,25 +360,20 @@ describe('Social actions — wave + block + report', () => {
     });
     await redis.set(`notif:unread:${owner.id}`, '0', { EX: 60 });
 
-    let signalDeliveryBadge!: () => void;
-    let releaseDeliveryBadge!: () => void;
-    const deliveryReachedBadge = new Promise<void>(resolve => {
-      signalDeliveryBadge = resolve;
+    let signalDurablePreference!: () => void;
+    let releaseDurablePreference!: () => void;
+    const durablePreferenceStarted = new Promise<void>(resolve => {
+      signalDurablePreference = resolve;
     });
-    const deliveryBadgeGate = new Promise<void>(resolve => {
-      releaseDeliveryBadge = resolve;
+    const durablePreferenceGate = new Promise<void>(resolve => {
+      releaseDurablePreference = resolve;
     });
-    const originalRefresh = notificationsService.refreshUnreadCount.bind(notificationsService);
-    let interceptedDeliveryRefresh = false;
-    const refresh = jest
-      .spyOn(notificationsService, 'refreshUnreadCount')
-      .mockImplementation(async userId => {
-        if (userId === owner.id && !interceptedDeliveryRefresh) {
-          interceptedDeliveryRefresh = true;
-          signalDeliveryBadge();
-          await deliveryBadgeGate;
-        }
-        return originalRefresh(userId);
+    const durablePreference = jest
+      .spyOn(notifPrefsExtService, 'canDeliverDurably')
+      .mockImplementation(async () => {
+        signalDurablePreference();
+        await durablePreferenceGate;
+        return true;
       });
 
     try {
@@ -386,7 +381,7 @@ describe('Social actions — wave + block + report', () => {
         .post(`/api/follow/${owner.id}`)
         .set('Authorization', `Bearer ${requester.token}`)
         .then(response => response);
-      await deliveryReachedBadge;
+      await durablePreferenceStarted;
       expect(
         await prisma.notification.count({
           where: { userId: owner.id, actorId: requester.id, type: 'FOLLOW_REQUEST' },
@@ -399,19 +394,16 @@ describe('Social actions — wave + block + report', () => {
       expect(block.status).toBe(200);
       expect(await redis.get(`notif:unread:${owner.id}`)).toBe('0');
 
-      releaseDeliveryBadge();
+      releaseDurablePreference();
       expect((await followPromise).status).toBe(200);
       expect(await redis.get(`notif:unread:${owner.id}`)).toBe('0');
       const unread = await request(app)
         .get('/api/notifications/unread-count')
         .set('Authorization', `Bearer ${owner.token}`);
       expect(unread.body.data.count).toBe(0);
-      expect(refresh.mock.calls.filter(([userId]) => userId === owner.id).length).toBeGreaterThan(
-        1,
-      );
     } finally {
-      releaseDeliveryBadge();
-      refresh.mockRestore();
+      releaseDurablePreference();
+      durablePreference.mockRestore();
     }
   });
 
@@ -433,7 +425,7 @@ describe('Social actions — wave + block + report', () => {
       releasePreferenceCheck = resolve;
     });
     const preference = jest
-      .spyOn(notifPrefsExtService, 'canDeliver')
+      .spyOn(notifPrefsExtService, 'canDeliverDurably')
       .mockImplementation(async () => {
         signalPreferenceCheck();
         await preferenceGate;
@@ -458,7 +450,7 @@ describe('Social actions — wave + block + report', () => {
       expect(preference).toHaveBeenCalledWith(
         owner.id,
         'FOLLOW_REQUEST',
-        expect.objectContaining({ actorId: requester.id }),
+        expect.objectContaining({ actorId: requester.id, deliveryId: expect.any(String) }),
       );
       expect(dispatch).not.toHaveBeenCalled();
     } finally {

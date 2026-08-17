@@ -16,6 +16,7 @@ interface ContentEvidence {
   contentAuthorId: string;
   contentSnapshot: string | null;
   contentAudioUrl: string | null;
+  contentMediaObjectId: string | null;
   contentAudioDurationMs: number | null;
   contentKind: MessageKind;
   contentCreatedAt: Date;
@@ -76,6 +77,7 @@ const reportContent = async (
         contentAuthorId: evidence.contentAuthorId,
         contentSnapshot: evidence.contentSnapshot,
         contentAudioUrl: evidence.contentAudioUrl,
+        contentMediaObjectId: evidence.contentMediaObjectId,
         contentAudioDurationMs: evidence.contentAudioDurationMs,
         contentKind: evidence.contentKind,
         contentCreatedAt: evidence.contentCreatedAt,
@@ -109,6 +111,7 @@ export const contentReportsService = {
         receiverId: true,
         content: true,
         audioUrl: true,
+        mediaObjectId: true,
         audioDurationMs: true,
         kind: true,
         createdAt: true,
@@ -121,6 +124,7 @@ export const contentReportsService = {
       contentAuthorId: message.senderId,
       contentSnapshot: message.content,
       contentAudioUrl: message.kind === 'VOICE' ? message.audioUrl : null,
+      contentMediaObjectId: message.kind === 'VOICE' ? message.mediaObjectId : null,
       contentAudioDurationMs: message.kind === 'VOICE' ? message.audioDurationMs : null,
       contentKind: message.kind,
       contentCreatedAt: message.createdAt,
@@ -148,6 +152,7 @@ export const contentReportsService = {
         senderId: true,
         content: true,
         audioUrl: true,
+        mediaObjectId: true,
         audioDurationMs: true,
         kind: true,
         createdAt: true,
@@ -161,6 +166,7 @@ export const contentReportsService = {
       contentAuthorId: message.senderId,
       contentSnapshot: message.content,
       contentAudioUrl: message.kind === 'VOICE' ? message.audioUrl : null,
+      contentMediaObjectId: message.kind === 'VOICE' ? message.mediaObjectId : null,
       contentAudioDurationMs: message.kind === 'VOICE' ? message.audioDurationMs : null,
       contentKind: message.kind,
       contentCreatedAt: message.createdAt,
@@ -220,6 +226,7 @@ export const contentReportsService = {
       contentAuthorId: message.userId,
       contentSnapshot: message.content,
       contentAudioUrl: null,
+      contentMediaObjectId: null,
       contentAudioDurationMs: null,
       contentKind: 'TEXT',
       contentCreatedAt: message.createdAt,

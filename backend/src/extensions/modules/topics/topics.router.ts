@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { requireAuth } from '../../../middlewares/auth.middleware';
 import { asyncHandler } from '../../../utils/asyncHandler';
@@ -20,25 +21,35 @@ topicsRouter.get(
 topicsRouter.get(
   '/trending',
   asyncHandler(async (_req, res) => {
-    const rooms = await prisma.room.findMany({
-      // Global aggregate: include only genuinely OPEN rooms. Counting SOCIAL
-      // rooms here would expose their topics to users outside the follow graph.
-      where: {
-        isLive: true,
-        isPrivate: false,
-        roomType: 'OPEN',
-        endedAt: null,
-        host: { deletedAt: null },
-      },
-      select: { topic: true, topics: true },
-    });
-    const counts = new Map<string, number>();
-    for (const r of rooms) {
-      const slugs = new Set<string>();
-      for (const tp of r.topics ?? []) slugs.add(tp.toLowerCase());
-      if (r.topic) slugs.add(r.topic.toLowerCase());
-      for (const s of slugs) counts.set(s, (counts.get(s) ?? 0) + 1);
-    }
+    // Aggregate in PostgreSQL instead of materialising every live room in the
+    // API process. DISTINCT(room, slug) preserves the previous rule that a
+    // topic duplicated between `topic` and `topics[]` counts once per room.
+    const rows = await prisma.$queryRaw<Array<{ slug: string; count: bigint }>>(Prisma.sql`
+      SELECT topic.slug, COUNT(*)::bigint AS count
+      FROM (
+        SELECT DISTINCT room.id, LOWER(raw_topic.value) AS slug
+        FROM "Room" AS room
+        INNER JOIN "User" AS host ON host.id = room."hostId"
+        CROSS JOIN LATERAL UNNEST(
+          room.topics || CASE
+            WHEN room.topic IS NULL THEN ARRAY[]::text[]
+            ELSE ARRAY[room.topic]
+          END
+        ) AS raw_topic(value)
+        WHERE room."isLive" = true
+          AND room."isPrivate" = false
+          AND room."roomType" = 'OPEN'
+          AND room."endedAt" IS NULL
+          AND host."deletedAt" IS NULL
+          AND LOWER(raw_topic.value) IN (${Prisma.join(
+            FLAT_TOPICS.map(topic => topic.slug.toLowerCase()),
+          )})
+      ) AS topic
+      GROUP BY topic.slug
+      ORDER BY count DESC, topic.slug ASC
+      LIMIT 20
+    `);
+    const counts = new Map(rows.map(row => [row.slug, Number(row.count)]));
     const items = FLAT_TOPICS.map(tp => ({
       slug: tp.slug,
       label: tp.label,

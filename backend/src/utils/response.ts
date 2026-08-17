@@ -1,4 +1,5 @@
 import type { Response } from 'express';
+import { materializePrivateMediaUrls } from '../modules/media/media-url';
 
 export interface ApiSuccess<T> {
   success: true;
@@ -11,7 +12,9 @@ export interface ApiError {
 }
 
 export const sendOk = <T>(res: Response, data: T, status = 200): Response =>
-  res.status(status).json({ success: true, data } satisfies ApiSuccess<T>);
+  res
+    .status(status)
+    .json({ success: true, data: materializePrivateMediaUrls(data) } satisfies ApiSuccess<T>);
 
 export const sendError = (
   res: Response,

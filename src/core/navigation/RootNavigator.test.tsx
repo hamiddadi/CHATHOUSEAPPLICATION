@@ -8,6 +8,7 @@
 import React from 'react';
 import { render } from '@testing-library/react-native';
 import { mockAuthenticated, resetAuth } from '../../test-utils/renderScreen';
+import { useAuthStore } from '../../features/auth/store/authStore';
 import { RootNavigator } from './RootNavigator';
 
 // Captures the props RootNavigator passes to NavigationContainer (notably
@@ -56,8 +57,7 @@ jest.mock('./OnboardingNavigator', () => {
   return { OnboardingNavigator: () => ReactActual.createElement(Text, null, 'ONBOARDING_STACK') };
 });
 
-// The account-restoration gate makes an authenticated /users/me call on mount;
-// stub it to a no-op so these routing tests stay isolated from the network.
+// The account-restoration gate is covered separately; keep routing isolated.
 jest.mock('../../features/privacy', () => ({
   AccountRestorationGate: () => null,
   LegalAcceptanceGate: () => null,
@@ -119,5 +119,22 @@ describe('RootNavigator', () => {
 
     expect(getByText('AUTH_STACK')).toBeTruthy();
     expect(mockContainerProps[0]?.initialState).toBeUndefined();
+  });
+
+  it('never mounts Main or extensions navigation for a recovery-only session', () => {
+    mockAuthenticated({
+      accountState: 'PENDING_DELETION',
+      deletedAt: new Date().toISOString(),
+      permanentDeletionAt: new Date(Date.now() + 60_000).toISOString(),
+    });
+    useAuthStore.setState(state => ({
+      status: 'restoration_required',
+      session: state.session ? { ...state.session, scope: 'account_recovery' } : null,
+    }));
+
+    const { getByText, queryByText } = render(<RootNavigator />);
+    expect(getByText('AUTH_STACK')).toBeTruthy();
+    expect(queryByText('MAIN_STACK')).toBeNull();
+    expect(queryByText('ONBOARDING_STACK')).toBeNull();
   });
 });

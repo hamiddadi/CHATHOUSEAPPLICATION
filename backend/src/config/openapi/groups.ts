@@ -3,6 +3,7 @@ import { z } from 'zod';
 import {
   addGroupMembersSchema,
   createGroupSchema,
+  listGroupsSchema,
   listGroupMessagesSchema,
   sendGroupMessageSchema,
   sendGroupVoiceSchema,
@@ -22,7 +23,7 @@ export const registerGroupsPaths = (
     'Idempotency-Key': z.string().min(8).max(128).optional(),
   });
   const genericResource = z.object({ id: z.string() }).passthrough();
-  const messageListResponse = z.union([
+  const legacyOrPaginatedListResponse = z.union([
     z.object({
       success: z.literal(true),
       data: z.array(genericResource),
@@ -42,17 +43,20 @@ export const registerGroupsPaths = (
     path: '/api/groups',
     tags: ['Groups'],
     security: [{ bearerAuth: [] }],
+    request: { query: listGroupsSchema },
     responses: {
       200: {
-        description: 'Groups containing the authenticated user.',
+        description:
+          'Groups containing the authenticated user. Returns the legacy array by default, or a stable { data, nextCursor, hasMore } page when paginated=true.',
         content: {
           'application/json': {
-            schema: z.object({
-              success: z.literal(true),
-              data: z.array(genericResource),
-            }),
+            schema: legacyOrPaginatedListResponse,
           },
         },
+      },
+      400: {
+        description: 'Invalid limit, cursor, or pagination mode',
+        content: { 'application/json': { schema: ErrorBody } },
       },
     },
   });
@@ -126,7 +130,7 @@ export const registerGroupsPaths = (
           'Messages visible to a current group member. Returns the legacy message array by default, or a { data, nextCursor, hasMore } page when paginated=true.',
         content: {
           'application/json': {
-            schema: messageListResponse,
+            schema: legacyOrPaginatedListResponse,
           },
         },
       },
@@ -148,7 +152,7 @@ export const registerGroupsPaths = (
     responses: {
       201: {
         description:
-          'Persists the text message exactly once per Idempotency-Key. Realtime and push delivery are at least once; consumers must deduplicate with messageId and notificationId.',
+          'Persists the text message exactly once per Idempotency-Key. Realtime and push arrival are best effort; consumers must deduplicate delivery attempts with messageId and notificationId.',
         content: {
           'application/json': {
             schema: z.object({
@@ -184,7 +188,7 @@ export const registerGroupsPaths = (
     responses: {
       201: {
         description:
-          'Persists the voice message exactly once per Idempotency-Key. Realtime and push delivery are at least once; consumers must deduplicate with messageId and notificationId.',
+          'Persists the voice message exactly once per Idempotency-Key. Realtime and push arrival are best effort; consumers must deduplicate delivery attempts with messageId and notificationId.',
         content: {
           'application/json': {
             schema: z.object({

@@ -13,6 +13,7 @@ import {
   listUsersSchema,
   resolveReportSchema,
   setRoleSchema,
+  stopImpersonationSchema,
   suspendSchema,
 } from './admin.schema';
 
@@ -147,10 +148,12 @@ export const adminController = {
   },
 
   async stopImpersonation(req: Request, res: Response) {
+    const { token } = stopImpersonationSchema.parse(req.body);
     const ctx = auditLogService.context(req);
     const result = await adminService.stopImpersonation(
       requireUserId(req),
       param(req, 'userId'),
+      token,
       ctx,
     );
     sendOk(res, result);

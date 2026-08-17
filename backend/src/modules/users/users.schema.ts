@@ -23,6 +23,8 @@ export const visibilitySchema = z.object({
   isVisible: z.boolean(),
 });
 
+export const contactDiscoverySchema = z.object({ allowContactDiscovery: z.boolean() }).strict();
+
 // Whitelist of toggleable notification preferences. `.strict()` rejects any
 // unexpected key so the raw body can't be mass-assigned into prisma.upsert.
 export const notifPrefsSchema = z
@@ -54,7 +56,8 @@ export const usernameAvailabilitySchema = z.object({
     .string()
     .min(3)
     .max(24)
-    .regex(/^[a-z0-9_]+$/i, 'letters, digits and underscores only'),
+    .regex(/^[a-z0-9_]+$/i, 'letters, digits and underscores only')
+    .transform(username => username.toLowerCase()),
 });
 
 export const setUsernameSchema = z.object({
@@ -62,7 +65,8 @@ export const setUsernameSchema = z.object({
     .string()
     .min(3)
     .max(24)
-    .regex(/^[a-z0-9_]+$/i, 'letters, digits and underscores only'),
+    .regex(/^[a-z0-9_]+$/i, 'letters, digits and underscores only')
+    .transform(username => username.toLowerCase()),
 });
 
 export const interestsSchema = z.object({
@@ -93,6 +97,7 @@ export const completeOnboardingSchema = z.object({
 
 export type UpdateMeInput = z.infer<typeof updateMeSchema>;
 export type VisibilityInput = z.infer<typeof visibilitySchema>;
+export type ContactDiscoveryInput = z.infer<typeof contactDiscoverySchema>;
 export type NotifPrefsInput = z.infer<typeof notifPrefsSchema>;
 export type LocationInput = z.infer<typeof locationSchema>;
 export type SearchQueryInput = z.infer<typeof searchQuerySchema>;

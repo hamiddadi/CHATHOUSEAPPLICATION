@@ -20,6 +20,7 @@ export const ERROR_CODES = {
   AUTH_006: { status: 409, message: 'Username already taken' },
   AUTH_007: { status: 403, message: 'Account suspended' },
   AUTH_008: { status: 403, message: 'Insufficient privileges' },
+  AUTH_009: { status: 404, message: 'Authentication method not found' },
   ADMIN_001: { status: 403, message: 'Cannot demote the only super-admin' },
   ADMIN_002: { status: 403, message: 'Cannot modify a higher-ranked admin' },
   // 403 Forbidden — the surface exists but is administratively disabled.
@@ -56,6 +57,7 @@ export const ERROR_CODES = {
   USER_004: { status: 403, message: 'Cannot block yourself' },
   USER_005: { status: 429, message: 'Wave already sent recently' },
   USER_006: { status: 403, message: 'User does not accept waves' },
+  CONTACT_001: { status: 403, message: 'Contact discovery is unavailable for this account' },
 
   MAPS_001: {
     status: 403,
@@ -117,6 +119,10 @@ export const ERROR_CODES = {
   ACCOUNT_001: {
     status: 409,
     message: 'Account already scheduled for deletion',
+  },
+  ACCOUNT_002: {
+    status: 403,
+    message: 'Account restoration required',
   },
   AGE_001: {
     status: 403,
@@ -239,17 +245,25 @@ const describe = (
 export const errorMiddleware: ErrorRequestHandler = (err, req: Request, res, next) => {
   const { code, message, status, details } = describe(err);
 
-  logger.error(`${req.method} ${sanitizeRequestUrl(req.originalUrl)} → ${code} ${status}`, {
+  const metadata = {
     err: err instanceof Error ? err.message : err,
     stack: err instanceof Error && env.NODE_ENV !== 'production' ? err.stack : undefined,
-    details,
-  });
+    details: env.NODE_ENV !== 'production' ? details : undefined,
+    requestId: req.requestId,
+  };
+  const logMessage = `${req.method} ${sanitizeRequestUrl(req.originalUrl)} → ${code} ${status}`;
+  if (status >= 500) logger.error(logMessage, metadata);
+  else if (status === 429) logger.warn(logMessage, metadata);
+  else logger.info(logMessage, metadata);
 
   // Report unexpected server-side failures (5xx) to Sentry. 4xx are client
   // errors (validation, auth, not-found) and are intentionally not captured to
   // keep the issue stream signal-rich. No-op when SENTRY_DSN is unset.
   if (status >= 500) {
-    Sentry.captureException(err);
+    Sentry.withScope(scope => {
+      if (req.requestId) scope.setTag('request_id', req.requestId);
+      Sentry.captureException(err);
+    });
   }
 
   // A streamed response may fail after its status and headers are already on

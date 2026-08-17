@@ -162,14 +162,16 @@ describe('Individual content reports', () => {
       body: voiceBytes,
       requestOrigin: 'http://localhost',
     });
+    const canonicalVoiceUrl = mediaService.canonicalizeVoiceMediaUrl(voice.url);
 
     const directMessage = await prisma.message.create({
       data: {
         senderId: author.id,
         receiverId: reporter.id,
         kind: 'VOICE',
-        audioUrl: voice.url,
+        audioUrl: canonicalVoiceUrl,
         audioDurationMs: 8_250,
+        mediaObjectId: voice.id,
       },
     });
     const conversation = await prisma.conversation.create({
@@ -184,8 +186,9 @@ describe('Individual content reports', () => {
         conversationId: conversation.id,
         senderId: author.id,
         kind: 'VOICE',
-        audioUrl: voice.url,
+        audioUrl: canonicalVoiceUrl,
         audioDurationMs: 8_250,
+        mediaObjectId: voice.id,
       },
     });
 
@@ -217,23 +220,20 @@ describe('Individual content reports', () => {
           targetKind: 'DIRECT_MESSAGE',
           reportedMessageId: directMessage.id,
           contentKind: 'VOICE',
-          contentAudioUrl: voice.url,
+          contentAudioUrl: canonicalVoiceUrl,
+          contentMediaObjectId: voice.id,
           contentAudioDurationMs: 8_250,
         }),
         expect.objectContaining({
           targetKind: 'GROUP_MESSAGE',
           reportedGroupMessageId: groupMessage.id,
           contentKind: 'VOICE',
-          contentAudioUrl: voice.url,
+          contentAudioUrl: canonicalVoiceUrl,
+          contentMediaObjectId: voice.id,
           contentAudioDurationMs: 8_250,
         }),
       ]),
     );
-
-    const evidenceRead = await request(app).get(new URL(voice.url).pathname);
-    expect(evidenceRead.status).toBe(200);
-    expect(evidenceRead.headers['content-type']).toMatch(/^audio\/wav/);
-    expect(evidenceRead.body).toEqual(voiceBytes);
 
     const reporterExport = await request(app).get('/api/users/me/export').set(auth(reporter.token));
     expect(reporterExport.status).toBe(200);
@@ -258,16 +258,24 @@ describe('Individual content reports', () => {
       expect.arrayContaining([
         expect.objectContaining({
           id: directReport.body.data.reportId,
-          contentAudioUrl: voice.url,
+          contentAudioUrl: expect.stringMatching(/\/media\/[^/]+\/\d{10}\//),
           contentAudioDurationMs: 8_250,
         }),
         expect.objectContaining({
           id: groupReport.body.data.reportId,
-          contentAudioUrl: voice.url,
+          contentAudioUrl: expect.stringMatching(/\/media\/[^/]+\/\d{10}\//),
           contentAudioDurationMs: 8_250,
         }),
       ]),
     );
+    const evidenceUrl = adminRows.find(
+      row => row.id === directReport.body.data.reportId,
+    )?.contentAudioUrl;
+    expect(evidenceUrl).toMatch(/\/media\/[^/]+\/\d{10}\//);
+    const evidenceRead = await request(app).get(new URL(evidenceUrl!).pathname);
+    expect(evidenceRead.status).toBe(200);
+    expect(evidenceRead.headers['content-type']).toMatch(/^audio\/wav/);
+    expect(evidenceRead.body).toEqual(voiceBytes);
   });
 
   it('reports a group message only for a current conversation member', async () => {

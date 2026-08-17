@@ -1,6 +1,10 @@
 import { prisma } from '../config/database';
 import { redis } from '../config/redis';
 import { purgeLivekitRevocationsForUser } from '../modules/rooms/livekit-revocation.outbox';
+import { audioService } from './modules/audio/audio.service';
+import { clubMetaService } from './modules/clubMeta/clubMeta.service';
+import { notifPrefsExtService } from './modules/notifPrefsExt/notifPrefsExt.service';
+import { profileLinksService } from './modules/profileLinks/profileLinks.service';
 
 const DIRECT_USER_KEY_PREFIXES = [
   'ext:audio:prefs:',
@@ -43,6 +47,23 @@ const deleteKeys = async (keys: readonly string[]): Promise<void> => {
     const chunk = keys.slice(offset, offset + 500);
     if (chunk.length > 0) await redis.del([...chunk]);
   }
+};
+
+/**
+ * Promote metadata for the bounded set of clubs currently owned by the user,
+ * because those clubs may be transferred rather than deleted. PostgreSQL
+ * commits the metadata + import marker before the Redis fallback is removed.
+ * Unowned legacy clubs stay lazy: their importer neutralizes an internal
+ * reference if its MediaObject has already been purged.
+ */
+const promoteOwnedClubMetadataForPurge = async (
+  ownedClubIds: readonly string[],
+): Promise<string[]> => {
+  const affectedClubIds = [...new Set(ownedClubIds)].sort();
+  for (const clubId of affectedClubIds) {
+    await clubMetaService.get(clubId);
+  }
+  return affectedClubIds;
 };
 
 const reactionKeysForMessage = async (messageId: string): Promise<string[]> =>
@@ -118,15 +139,15 @@ export const exportExtensionData = async (userId: string) => {
     reactionUserKeys,
     lastDeliveryKeys,
   ] = await Promise.all([
-    redis.get(`ext:audio:prefs:${userId}`),
+    audioService.get(userId),
     redis.sMembers(`ext:badges:${userId}`),
     redis.zRangeWithScores(`ext:hiddenz:${userId}`, 0, -1),
     redis.get(`ext:nominator:count:${userId}`),
     invitationHistoryFor(userId),
-    redis.get(`ext:notif:freq:${userId}`),
-    redis.sMembers(`ext:notif:mute:club:${userId}`),
-    redis.sMembers(`ext:notif:mute:user:${userId}`),
-    redis.get(`ext:profile:links:${userId}`),
+    notifPrefsExtService.getFrequency(userId),
+    notifPrefsExtService.listMutedClubs(userId),
+    notifPrefsExtService.listMutedUsers(userId),
+    profileLinksService.list(userId),
     redis.zRangeWithScores(`ext:recent:${userId}`, 0, -1),
     redis.lRange(`ext:searchhist:${userId}`, 0, -1),
     scanKeys(`ext:netq:*:${userId}`),
@@ -178,16 +199,22 @@ export const exportExtensionData = async (userId: string) => {
       })),
     ),
     Promise.all(
-      ownedClubs.map(async club => ({
-        clubId: club.id,
-        coverUrl: (await redis.hGet(`ext:clubmeta:${club.id}`, 'coverUrl')) ?? null,
-        featuredMemberIds: await redis.lRange(`ext:clubmeta:featured:${club.id}`, 0, -1),
-      })),
+      ownedClubs.map(async club => {
+        // An export is a stored-data inventory, not a viewer-filtered UI read.
+        // Passing the owner as viewer hid featured members who had blocked the
+        // owner (or vice versa), making the exported club metadata incomplete.
+        const metadata = await clubMetaService.get(club.id);
+        return {
+          clubId: club.id,
+          coverUrl: metadata.coverUrl,
+          featuredMemberIds: metadata.featuredMembers.map(member => member.id),
+        };
+      }),
     ),
   ]);
 
   return {
-    audioPreferences: parseJson<unknown>(audioPreferences),
+    audioPreferences,
     manualBadges,
     hiddenRooms: hiddenRooms.map(item => ({
       roomId: item.value,
@@ -198,12 +225,12 @@ export const exportExtensionData = async (userId: string) => {
       history: invitationHistory,
     },
     notificationPreferences: {
-      frequency: notificationFrequency ?? 'normal',
+      frequency: notificationFrequency,
       mutedClubIds: mutedClubs,
       mutedUserIds: mutedUsers,
       lastDelivery: lastNotificationDelivery,
     },
-    profileLinks: parseJson<unknown[]>(profileLinks) ?? [],
+    profileLinks,
     recentlyPlayed: recentlyPlayed.map(item => ({
       roomId: item.value,
       playedAtEpochMs: item.score,
@@ -250,7 +277,7 @@ const anonymizeNominatorHistoryReferences = async (userId: string): Promise<void
  * The function throws on Redis/DB failure so the hard-delete worker can retry
  * instead of declaring an account purged while personal extension data remains.
  */
-export const purgeExtensionDataForUser = async (userId: string): Promise<void> => {
+export const purgeExtensionDataForUser = async (userId: string): Promise<string[]> => {
   const [hostedRooms, ownedClubs, authoredOrHostedMessages, nominatorRows] = await Promise.all([
     prisma.room.findMany({ where: { hostId: userId }, select: { id: true } }),
     prisma.club.findMany({ where: { ownerId: userId }, select: { id: true } }),
@@ -262,6 +289,8 @@ export const purgeExtensionDataForUser = async (userId: string): Promise<void> =
     }),
     redis.lRange(`ext:nominator:history:${userId}`, 0, -1),
   ]);
+
+  const promotedClubIds = await promoteOwnedClubMetadataForPurge(ownedClubs.map(club => club.id));
 
   // OutboxEvent intentionally has no User FK so provider retries survive a
   // normal domain transition. Remove its embedded userId explicitly before
@@ -305,16 +334,6 @@ export const purgeExtensionDataForUser = async (userId: string): Promise<void> =
     ]);
   }
 
-  for (const { id: clubId } of ownedClubs) {
-    const pendingIds = await redis.sMembers(`ext:clubreq:club:${clubId}`);
-    await deleteKeys([
-      `ext:clubreq:club:${clubId}`,
-      ...pendingIds.map(id => `ext:clubreq:${clubId}:${id}`),
-      `ext:clubmeta:${clubId}`,
-      `ext:clubmeta:featured:${clubId}`,
-    ]);
-  }
-
   for (const { id } of authoredOrHostedMessages) {
     await deleteKeys(await reactionKeysForMessage(id));
   }
@@ -347,4 +366,5 @@ export const purgeExtensionDataForUser = async (userId: string): Promise<void> =
   }
 
   await deleteKeys([...directKeys, ...patternGroups.flat(), ...embeddedKeysToDelete]);
+  return promotedClubIds;
 };

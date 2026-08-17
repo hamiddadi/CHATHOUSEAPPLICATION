@@ -15,14 +15,6 @@ export const variantContainerClass: Record<ButtonVariant, string> = {
   danger: 'bg-danger',
 };
 
-export const variantPressedClass: Record<ButtonVariant, string> = {
-  primary: 'opacity-90',
-  primaryContainer: 'opacity-85',
-  ghost: 'bg-glass-strong',
-  outline: 'bg-glass',
-  danger: 'opacity-90',
-};
-
 /** Inline pressed styles belong to the Pressable surface, not its contents. */
 export const variantPressedStyle: Record<ButtonVariant, ViewStyle> = {
   primary: { opacity: 0.9 },

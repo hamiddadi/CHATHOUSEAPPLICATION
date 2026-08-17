@@ -349,17 +349,18 @@ export const chatService = {
     });
     const handle = sender?.displayName ?? sender?.username ?? 'Someone';
 
+    const canonicalAudioUrl = mediaService.canonicalizeVoiceMediaUrl(input.audioUrl);
     const creation = await runIdempotentCreate({
       userId: senderId,
       scope: `chat.message:${receiverId}`,
       key: idempotencyKey,
-      payload: { kind: 'VOICE', ...input },
+      payload: { kind: 'VOICE', ...input, audioUrl: canonicalAudioUrl },
       create: async tx => {
         await assertCanDirectMessageWithinTransaction(tx, senderId, receiverId);
         const mediaObjectId = await mediaService.assertOwnedMediaUrlWithinTransaction(
           tx,
           senderId,
-          input.audioUrl,
+          canonicalAudioUrl,
           MediaKind.VOICE,
         );
         const created = await tx.message.create({
@@ -367,7 +368,7 @@ export const chatService = {
             senderId,
             receiverId,
             kind: 'VOICE',
-            audioUrl: input.audioUrl,
+            audioUrl: canonicalAudioUrl,
             audioDurationMs: input.durationMs,
             mediaObjectId,
           },

@@ -30,4 +30,10 @@ describe('ExtPlaygroundScreen', () => {
     const { getByLabelText } = renderScreen(<ExtPlaygroundScreen />, {});
     expect(() => fireEvent.press(getByLabelText('Open @clubhouse on Twitter'))).not.toThrow();
   });
+
+  it('gives its developer inputs explicit accessible names', () => {
+    const { getByLabelText } = renderScreen(<ExtPlaygroundScreen />, {});
+    expect(getByLabelText('Room ID')).toBeTruthy();
+    expect(getByLabelText('Interests, separated by commas')).toBeTruthy();
+  });
 });

@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { prisma, runWriteWithRetry } from '../config/database';
 import { AppError } from '../middlewares/error.middleware';
-import { signAccessToken, signRefreshToken } from './jwt';
+import { resolveAccountSessionScope } from '../modules/auth/account-lifecycle';
+import { signAccessToken, signRefreshToken, type SessionTokenScope } from './jwt';
 
 export const REFRESH_TTL_DAYS = 7;
 
@@ -14,7 +15,9 @@ const MAX_ACTIVE_SESSIONS = 10;
 
 export const issueTokenPair = async (
   userId: string,
-): Promise<{ accessToken: string; refreshToken: string }> => {
+  options: { scope?: SessionTokenScope } = {},
+): Promise<{ accessToken: string; refreshToken: string; scope: SessionTokenScope }> => {
+  const scope = options.scope ?? 'active';
   const jti = randomUUID();
   const expiresAt = new Date(Date.now() + REFRESH_TTL_DAYS * 24 * 60 * 60 * 1000);
 
@@ -26,7 +29,7 @@ export const issueTokenPair = async (
           // concurrent logins can all observe the same active-token set and
           // temporarily exceed MAX_ACTIVE_SESSIONS.
           const locked = await tx.$queryRaw<{ id: string }[]>`
-            SELECT id FROM "User" WHERE id = ${userId} FOR UPDATE`;
+            SELECT id FROM "User" WHERE id = ${userId} FOR NO KEY UPDATE`;
           if (locked.length === 0) throw new AppError('AUTH_003');
 
           // AUTH-03: stamp the current tokenVersion into the access token so
@@ -35,10 +38,9 @@ export const issueTokenPair = async (
             where: { id: userId },
             select: { tokenVersion: true, deletedAt: true, suspendedUntil: true },
           });
-          if (!user || user.deletedAt) throw new AppError('AUTH_003');
-          if (user.suspendedUntil && user.suspendedUntil > new Date()) {
-            throw new AppError('AUTH_007');
-          }
+          if (!user) throw new AppError('AUTH_003');
+          const authoritativeScope = resolveAccountSessionScope({ id: userId, ...user });
+          if (authoritativeScope !== scope) throw new AppError('AUTH_003');
 
           await tx.refreshToken.create({ data: { token: jti, userId, expiresAt } });
           const surplus = await tx.refreshToken.findMany({
@@ -61,7 +63,8 @@ export const issueTokenPair = async (
   );
 
   return {
-    accessToken: signAccessToken(userId, tokenVersion),
-    refreshToken: signRefreshToken(userId, jti),
+    accessToken: signAccessToken(userId, tokenVersion, scope),
+    refreshToken: signRefreshToken(userId, jti, scope),
+    scope,
   };
 };

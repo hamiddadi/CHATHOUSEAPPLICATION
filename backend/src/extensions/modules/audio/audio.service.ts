@@ -1,13 +1,13 @@
+import type {
+  AudioQualityTier as DbAudioQualityTier,
+  DropInMode as DbDropInMode,
+  UserAudioPreference,
+} from '@prisma/client';
+import { prisma } from '../../../config/database';
 import { redis } from '../../../config/redis';
+import { ensureUserExtensionImported } from '../../utils/legacyExtensionImport';
 
-/**
- * Audio quality tier preferences (Module 6.2 / 17.2 / AUDIO-004..006).
- *
- * Stored in Redis (no schema migration). Mediasoup's actual codec config
- * stays the existing Opus baseline; the tier selection is a *client hint*
- * the mobile app reads to set its sending bitrate / DTX / sample rate.
- */
-
+/** PostgreSQL-backed client audio hints with one-time legacy Redis import. */
 export type AudioQualityTier = 'standard' | 'high' | 'music';
 export type DropInMode = 'silent' | 'normal';
 
@@ -25,15 +25,15 @@ const DEFAULTS: AudioPreferences = {
   dropInMode: 'normal',
 };
 
+const IMPORT_NAMESPACE = 'audio-preferences-v1';
 const key = (userId: string) => `ext:audio:prefs:${userId}`;
 
-const coerceTier = (t: unknown): AudioQualityTier =>
-  t === 'high' || t === 'music' ? t : 'standard';
-
-const coerceDropIn = (m: unknown): DropInMode => (m === 'silent' ? 'silent' : 'normal');
+const coerceTier = (tier: unknown): AudioQualityTier =>
+  tier === 'high' || tier === 'music' ? tier : 'standard';
+const coerceDropIn = (mode: unknown): DropInMode => (mode === 'silent' ? 'silent' : 'normal');
 
 const parse = (raw: string | null): AudioPreferences => {
-  if (!raw) return DEFAULTS;
+  if (!raw) return { ...DEFAULTS };
   try {
     const obj = JSON.parse(raw) as Partial<AudioPreferences>;
     return {
@@ -43,41 +43,79 @@ const parse = (raw: string | null): AudioPreferences => {
       dropInMode: coerceDropIn(obj.dropInMode),
     };
   } catch {
-    return DEFAULTS;
+    return { ...DEFAULTS };
   }
 };
 
+const toDbTier = (tier: AudioQualityTier): DbAudioQualityTier =>
+  tier.toUpperCase() as DbAudioQualityTier;
+const toDbDropIn = (mode: DropInMode): DbDropInMode => mode.toUpperCase() as DbDropInMode;
+
+const toApi = (row: UserAudioPreference | null): AudioPreferences =>
+  row
+    ? {
+        qualityTier: row.qualityTier.toLowerCase() as AudioQualityTier,
+        spatialAudio: row.spatialAudio,
+        noiseSuppression: row.noiseSuppression,
+        dropInMode: row.dropInMode.toLowerCase() as DropInMode,
+      }
+    : { ...DEFAULTS };
+
+const ensureImported = async (userId: string): Promise<void> => {
+  await ensureUserExtensionImported(
+    IMPORT_NAMESPACE,
+    userId,
+    async () => parse(await redis.get(key(userId))),
+    async (tx, legacy) => {
+      await tx.userAudioPreference.createMany({
+        data: [
+          {
+            userId,
+            qualityTier: toDbTier(legacy.qualityTier),
+            spatialAudio: legacy.spatialAudio,
+            noiseSuppression: legacy.noiseSuppression,
+            dropInMode: toDbDropIn(legacy.dropInMode),
+          },
+        ],
+        skipDuplicates: true,
+      });
+    },
+  );
+};
+
+const get = async (userId: string): Promise<AudioPreferences> => {
+  await ensureImported(userId);
+  return toApi(await prisma.userAudioPreference.findUnique({ where: { userId } }));
+};
+
 export const audioService = {
-  async get(userId: string): Promise<AudioPreferences> {
-    const raw = await redis.get(key(userId));
-    return parse(raw);
-  },
+  get,
 
   async update(userId: string, patch: Partial<AudioPreferences>): Promise<AudioPreferences> {
-    const current = await this.get(userId);
-    const next: AudioPreferences = {
-      ...current,
-      ...patch,
-    };
-    // Validate tier
-    if (
-      next.qualityTier !== 'standard' &&
-      next.qualityTier !== 'high' &&
-      next.qualityTier !== 'music'
-    ) {
-      next.qualityTier = current.qualityTier;
-    }
-    if (next.dropInMode !== 'silent' && next.dropInMode !== 'normal') {
-      next.dropInMode = current.dropInMode;
-    }
-    await redis.set(key(userId), JSON.stringify(next));
-    return next;
+    await ensureImported(userId);
+    const qualityTier = patch.qualityTier ? coerceTier(patch.qualityTier) : undefined;
+    const dropInMode = patch.dropInMode ? coerceDropIn(patch.dropInMode) : undefined;
+    const row = await prisma.userAudioPreference.upsert({
+      where: { userId },
+      create: {
+        userId,
+        qualityTier: toDbTier(qualityTier ?? DEFAULTS.qualityTier),
+        spatialAudio: patch.spatialAudio ?? DEFAULTS.spatialAudio,
+        noiseSuppression: patch.noiseSuppression ?? DEFAULTS.noiseSuppression,
+        dropInMode: toDbDropIn(dropInMode ?? DEFAULTS.dropInMode),
+      },
+      update: {
+        ...(qualityTier ? { qualityTier: toDbTier(qualityTier) } : {}),
+        ...(patch.spatialAudio !== undefined ? { spatialAudio: patch.spatialAudio } : {}),
+        ...(patch.noiseSuppression !== undefined
+          ? { noiseSuppression: patch.noiseSuppression }
+          : {}),
+        ...(dropInMode ? { dropInMode: toDbDropIn(dropInMode) } : {}),
+      },
+    });
+    return toApi(row);
   },
 
-  /**
-   * Return the mediasoup-compatible client hints for a given tier. The
-   * mobile app feeds these into its producer constraints.
-   */
   hintsForTier(tier: AudioQualityTier): {
     maxBitrate: number;
     sampleRate: number;

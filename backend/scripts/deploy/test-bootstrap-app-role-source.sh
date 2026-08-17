@@ -3,7 +3,7 @@
 # init hook instead of launching it as a separate process.
 set -eu
 
-SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 BOOTSTRAP_SCRIPT="${SCRIPT_DIR}/bootstrap-app-role.sh"
 
 [ -f "$BOOTSTRAP_SCRIPT" ] || {

@@ -13,7 +13,9 @@ const { connectRedis, disconnectRedis } =
   require('../src/config/redis') as typeof import('../src/config/redis');
 const { mediaService } =
   require('../src/modules/media/media.service') as typeof import('../src/modules/media/media.service');
-const { expiringMediaUrlFor } =
+const { expiringMediaUrlFor, legacyStableMediaUrlFor } =
+  require('../src/modules/media/media-url') as typeof import('../src/modules/media/media-url');
+const { materializePrivateMediaUrls } =
   require('../src/modules/media/media-url') as typeof import('../src/modules/media/media-url');
 /* eslint-enable @typescript-eslint/no-require-imports */
 
@@ -22,6 +24,8 @@ const PNG_BASE64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
 const PNG_DATA_URL = `data:image/png;base64,${PNG_BASE64}`;
 const PNG_BYTES = Buffer.from(PNG_BASE64, 'base64');
+const DIFFERENT_VALID_PNG_BASE64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==';
 
 const register = async (app: Express) => {
   const username = `up_${rand()}`;
@@ -75,7 +79,7 @@ describe('Private media uploads', () => {
     expect(uploaded.status).toBe(201);
     expect(uploaded.body.data).toEqual({
       id: expect.any(String),
-      url: expect.stringMatching(/\/media\/[^/]+\/[^/]+$/),
+      url: expect.stringMatching(/\/media\/[^/]+\/\d{10}\/[^/]+$/),
     });
 
     const path = new URL(uploaded.body.data.url as string).pathname;
@@ -83,6 +87,7 @@ describe('Private media uploads', () => {
     expect(read.status).toBe(200);
     expect(read.headers['content-type']).toMatch(/^image\/png/);
     expect(read.headers['cache-control']).toContain('private');
+    expect(read.headers['cache-control']).toContain('no-store');
     expect(read.headers['x-content-type-options']).toBe('nosniff');
     expect(Buffer.isBuffer(read.body)).toBe(true);
     expect(read.body).toEqual(PNG_BYTES);
@@ -96,6 +101,12 @@ describe('Private media uploads', () => {
       `/media/${uploaded.body.data.id as string}/invalid-signature`,
     );
     expect(invalidSignature.status).toBe(404);
+
+    const legacyStablePath = new URL(
+      legacyStableMediaUrlFor(uploaded.body.data.id as string, 'http://localhost'),
+    ).pathname;
+    const legacyStableRead = await request(app).get(legacyStablePath);
+    expect(legacyStableRead.status).toBe(404);
 
     const temporaryUrl = expiringMediaUrlFor(uploaded.body.data.id as string, 'http://localhost');
     const temporaryPath = new URL(temporaryUrl).pathname;
@@ -134,12 +145,11 @@ describe('Private media uploads', () => {
       }),
     ).toBe(1);
 
-    const changedPng = Buffer.concat([PNG_BYTES, Buffer.from([0])]).toString('base64');
     const conflict = await request(app)
       .post('/api/upload/avatar')
       .set('Authorization', `Bearer ${user.token}`)
       .set('Idempotency-Key', idempotencyKey)
-      .send({ base64: changedPng, mime: 'image/png' });
+      .send({ base64: DIFFERENT_VALID_PNG_BASE64, mime: 'image/png' });
     expect(conflict.status).toBe(409);
     expect(conflict.body.error.code).toBe('IDEMPOTENCY_001');
     expect(
@@ -164,6 +174,19 @@ describe('Private media uploads', () => {
       .set('Authorization', `Bearer ${user.token}`)
       .send({ avatarUrl: uploaded.body.data.url });
     expect(profile.status).toBe(200);
+
+    const stored = await prisma.user.findUnique({
+      where: { id: user.id },
+      select: { avatarUrl: true },
+    });
+    expect(stored?.avatarUrl).toMatch(/\/media-ref\/[^/]+\/[^/]+$/);
+    expect(profile.body.data.avatarUrl).toMatch(/\/media\/[^/]+\/\d{10}\/[^/]+$/);
+
+    jest.useFakeTimers().setSystemTime(new Date(Date.now() + 20 * 60 * 1000));
+    const refreshed = materializePrivateMediaUrls({ avatarUrl: stored?.avatarUrl }).avatarUrl;
+    jest.useRealTimers();
+    expect(refreshed).toMatch(/\/media\/[^/]+\/\d{10}\/[^/]+$/);
+    expect(refreshed).not.toBe(profile.body.data.avatarUrl);
 
     const exported = await request(app)
       .get('/api/users/me/export')

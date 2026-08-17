@@ -1,10 +1,11 @@
 import React, { memo, useCallback, useRef } from 'react';
-import { Alert, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import MaterialIcons from '@react-native-vector-icons/material-icons';
 import { useMutation } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Avatar } from '../../../../shared/components/Avatar';
-import { colors, spacing } from '../../../../shared/constants/theme';
+import { colors, layout, spacing } from '../../../../shared/constants/theme';
 import type { RoomParticipant } from '../../../../shared/types/domain';
 import { errorMessage } from '../../../../shared/utils/errorMessage';
 import { useKickFromRoom, useSetMute, useSetRole } from '../../hooks/useRooms';
@@ -28,6 +29,7 @@ interface HostActionsSheetProps {
 export const HostActionsSheet: React.FC<HostActionsSheetProps> = memo(
   ({ target, roomId, viewerIsHost, onClose }) => {
     const { t } = useTranslation();
+    const insets = useSafeAreaInsets();
     const setMute = useSetMute();
     const setRole = useSetRole();
     const kick = useKickFromRoom();
@@ -163,89 +165,99 @@ export const HostActionsSheet: React.FC<HostActionsSheetProps> = memo(
             style={styles.sheet}
             onPress={() => undefined}
             accessible={false}
+            focusable={false}
             accessibilityViewIsModal
             importantForAccessibility="yes"
           >
-            <View style={styles.handle} />
-            <View style={styles.header}>
-              <Avatar
-                uri={target.avatarUrl ?? undefined}
-                name={target.displayName}
-                sizeValue={48}
-              />
-              <View style={styles.headerText}>
-                <Text style={styles.displayName}>{target.displayName}</Text>
-                <Text style={styles.username}>@{target.username}</Text>
-              </View>
-            </View>
-
-            {isOnStage && (
-              <ActionRow
-                icon={muted ? 'mic' : 'mic-off'}
-                label={
-                  muted
-                    ? t('room.hostActions.unmuteParticipant')
-                    : t('room.hostActions.muteParticipant')
-                }
-                onPress={handleMute}
-                disabled={isPending}
-              />
-            )}
-            {!isOnStage && (
-              <ActionRow
-                icon="mic"
-                label={t('room.hostActions.promoteSpeaker')}
-                onPress={() => handlePromote('SPEAKER')}
-                disabled={isPending}
-              />
-            )}
-            {!isOnStage && (
-              <ActionRow
-                icon="record-voice-over"
-                label={t('room.hostActions.nominateSpeaker')}
-                onPress={handleNominate}
-                disabled={isPending}
-              />
-            )}
-            {isOnStage && (
-              <ActionRow
-                icon="mic-off"
-                label={t('room.hostActions.moveToAudience')}
-                onPress={() => handlePromote('LISTENER')}
-                disabled={isPending}
-              />
-            )}
-            <ActionRow
-              icon="shield"
-              label={t('room.hostActions.makeModerator')}
-              onPress={() => handlePromote('MODERATOR')}
-              disabled={isPending}
-            />
-            {viewerIsHost && (
-              <ActionRow
-                icon="star"
-                label={t('room.hostActions.transferHost')}
-                onPress={handleTransferHost}
-                disabled={isPending}
-              />
-            )}
-            <ActionRow
-              icon="block"
-              label={t('room.hostActions.kickBan')}
-              onPress={handleKick}
-              destructive
-              disabled={isPending}
-            />
-            <Pressable
-              onPress={handleClose}
-              style={[styles.cancel, isPending ? styles.disabled : null]}
-              accessibilityRole="button"
-              accessibilityLabel={t('common.cancel')}
-              accessibilityState={{ disabled: isPending }}
-              disabled={isPending}
+            <ScrollView
+              bounces={false}
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={[
+                styles.sheetContent,
+                { paddingBottom: Math.max(insets.bottom, spacing.xxl) },
+              ]}
             >
-              <Text style={styles.cancelLabel}>{t('common.cancel')}</Text>
-            </Pressable>
+              <View style={styles.handle} />
+              <View style={styles.header}>
+                <Avatar
+                  uri={target.avatarUrl ?? undefined}
+                  name={target.displayName}
+                  sizeValue={48}
+                />
+                <View style={styles.headerText}>
+                  <Text style={styles.displayName}>{target.displayName}</Text>
+                  <Text style={styles.username}>@{target.username}</Text>
+                </View>
+              </View>
+
+              {isOnStage && (
+                <ActionRow
+                  icon={muted ? 'mic' : 'mic-off'}
+                  label={
+                    muted
+                      ? t('room.hostActions.unmuteParticipant')
+                      : t('room.hostActions.muteParticipant')
+                  }
+                  onPress={handleMute}
+                  disabled={isPending}
+                />
+              )}
+              {!isOnStage && (
+                <ActionRow
+                  icon="mic"
+                  label={t('room.hostActions.promoteSpeaker')}
+                  onPress={() => handlePromote('SPEAKER')}
+                  disabled={isPending}
+                />
+              )}
+              {!isOnStage && (
+                <ActionRow
+                  icon="record-voice-over"
+                  label={t('room.hostActions.nominateSpeaker')}
+                  onPress={handleNominate}
+                  disabled={isPending}
+                />
+              )}
+              {isOnStage && (
+                <ActionRow
+                  icon="mic-off"
+                  label={t('room.hostActions.moveToAudience')}
+                  onPress={() => handlePromote('LISTENER')}
+                  disabled={isPending}
+                />
+              )}
+              <ActionRow
+                icon="shield"
+                label={t('room.hostActions.makeModerator')}
+                onPress={() => handlePromote('MODERATOR')}
+                disabled={isPending}
+              />
+              {viewerIsHost && (
+                <ActionRow
+                  icon="star"
+                  label={t('room.hostActions.transferHost')}
+                  onPress={handleTransferHost}
+                  disabled={isPending}
+                />
+              )}
+              <ActionRow
+                icon="block"
+                label={t('room.hostActions.kickBan')}
+                onPress={handleKick}
+                destructive
+                disabled={isPending}
+              />
+              <Pressable
+                onPress={handleClose}
+                style={[styles.cancel, isPending ? styles.disabled : null]}
+                accessibilityRole="button"
+                accessibilityLabel={t('common.cancel')}
+                accessibilityState={{ disabled: isPending }}
+                disabled={isPending}
+              >
+                <Text style={styles.cancelLabel}>{t('common.cancel')}</Text>
+              </Pressable>
+            </ScrollView>
           </Pressable>
         </Pressable>
       </Modal>
@@ -284,12 +296,20 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.modalBackdrop,
     justifyContent: 'flex-end',
+    alignItems: 'center',
   },
   sheet: {
+    width: '100%',
+    maxWidth: layout.maxContentWidth,
+    maxHeight: '90%',
+    overflow: 'hidden',
     backgroundColor: colors.surfaceHigh,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
-    padding: spacing.xxl,
+  },
+  sheetContent: {
+    paddingHorizontal: spacing.xxl,
+    paddingTop: spacing.xxl,
     gap: spacing.sm,
   },
   handle: {
@@ -322,6 +342,7 @@ const styles = StyleSheet.create({
   rowLabelDanger: { color: colors.danger },
   disabled: { opacity: 0.45 },
   cancel: {
+    minHeight: 44,
     marginTop: spacing.md,
     alignItems: 'center',
     paddingVertical: spacing.md,

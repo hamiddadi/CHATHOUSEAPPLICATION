@@ -1,4 +1,5 @@
 import type { Server, Socket } from 'socket.io';
+import { materializePrivateMediaUrls } from '../../modules/media/media-url';
 import { roomsService } from '../../modules/rooms/rooms.service';
 import { logger } from '../../config/logger';
 import { roomChannel } from '../channels';
@@ -55,7 +56,10 @@ export const registerRoomHandlers = (io: Server, socket: Socket): void => {
         isInRoom: true,
         isListener: true,
       }).catch(err => logger.warn('room:join map presence update failed', { err }));
-      socket.emit('room:participants', { participants: room.participants });
+      socket.emit(
+        'room:participants',
+        materializePrivateMediaUrls({ participants: room.participants }),
+      );
       ack?.(true);
     } catch (err) {
       logger.warn('room:join failed', { err });

@@ -310,6 +310,7 @@ export const EditProfileScreen: React.FC = () => {
               onPress={handlePickImage}
               accessibilityRole="button"
               accessibilityLabel={t('profile.edit.changePhotoA11y', 'Change profile photo')}
+              hitSlop={4}
               className="absolute -bottom-xxs -right-xxs w-10 h-10 rounded-pill bg-primary items-center justify-center border-2 border-background"
             >
               <MaterialIcons name="photo-camera" size={18} color={colors.onPrimary} />

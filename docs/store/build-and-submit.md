@@ -55,6 +55,11 @@ bundle exec pod install --project-directory=ios
 open ios/ChatHouse.xcworkspace
 ```
 
+The first dependency resolution must produce and review both `Gemfile.lock` and
+`ios/Podfile.lock`. Commit them before requesting a protected release artifact.
+The CI release job deliberately runs Bundler in deployment mode and CocoaPods
+with `--deployment`; it will not update or invent dependency versions.
+
 In Xcode, select the production team/profile, increment version/build, archive,
 validate, and distribute to TestFlight. Verify APNs/FCM on a physical TestFlight
 device before App Review.
@@ -67,11 +72,16 @@ an applicable regional alternative-billing program. Also verify that an
 existing server-side Premium entitlement does not unlock paid-only mobile
 functionality (profile-viewer history or the expanded profile-link allowance).
 
-For command-line CI archives, provide an Apple Distribution certificate,
-provisioning profile and App Store Connect API key through the CI secret store.
-The protected mobile-artifact workflow produces
-`ios-production-xcarchive`, which can then be validated/exported and uploaded
-to TestFlight from the authorized App Store Connect account.
+For command-line CI archives, provide an Apple Distribution certificate and an
+App Store Connect provisioning profile through the CI secret store. The
+protected mobile-artifact workflow produces `ios-production-xcarchive`
+containing both a verified `ChatHouse.xcarchive.tgz` and an exported,
+App-Store-Connect-signed `ChatHouse.ipa`. It does not upload either artifact;
+upload the verified IPA to TestFlight from an authorized App Store Connect
+account, then copy its exact `ipa_sha256` into the protected Go-Live evidence.
+The preflight rejects an IPA whose hash, bundle ID, marketing version or build
+number differs from the downloaded release archive. An App Store Connect API
+key is required only if that separate upload is automated.
 
 ## Domain association files
 

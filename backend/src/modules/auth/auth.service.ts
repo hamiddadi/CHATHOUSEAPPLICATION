@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { hash, compare } from 'bcrypt';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../../config/database';
 import { env } from '../../config/env';
 import { AppError } from '../../middlewares/error.middleware';
@@ -10,7 +11,7 @@ import { disconnectUserSockets } from '../../socket/realtime';
 import { sendMail } from '../../config/mailer';
 import { logger } from '../../config/logger';
 import { scheduleBackgroundTask } from '../../utils/backgroundTasks';
-import { ensureLoginAllowedAndRestore } from './account-lifecycle';
+import { resolveAccountSessionScope } from './account-lifecycle';
 import {
   currentLegalDocumentVersion,
   legalAcceptanceSelect,
@@ -42,6 +43,7 @@ const userToPublic = (u: {
   privacyNoticeAcknowledgedVersion: string | null;
   privacyNoticeAcknowledgedAt: Date | null;
   legalAcceptanceLocale: string | null;
+  deletedAt?: Date | null;
 }) => ({
   id: u.id,
   username: u.username ?? '',
@@ -54,6 +56,13 @@ const userToPublic = (u: {
   privacyNoticeAcknowledgedVersion: u.privacyNoticeAcknowledgedVersion,
   privacyNoticeAcknowledgedAt: u.privacyNoticeAcknowledgedAt?.toISOString() ?? null,
   legalAcceptanceLocale: u.legalAcceptanceLocale,
+  accountState: u.deletedAt ? ('PENDING_DELETION' as const) : ('ACTIVE' as const),
+  deletedAt: u.deletedAt?.toISOString() ?? null,
+  permanentDeletionAt: u.deletedAt
+    ? new Date(
+        u.deletedAt.getTime() + env.ACCOUNT_DELETION_GRACE_DAYS * 24 * 60 * 60 * 1000,
+      ).toISOString()
+    : null,
   ...legalAcceptanceStatus(u),
 });
 
@@ -78,25 +87,51 @@ export const authService = {
     if (usernameTaken) throw new AppError('AUTH_006');
 
     const passwordHash = await hash(input.password, SALT_ROUNDS);
-    const user = await prisma.user.create({
-      data: {
-        username,
-        email,
-        passwordHash,
-        displayName: input.displayName ?? input.username,
-        ...(input.ageConfirmed ? { ageConfirmedAt: new Date() } : {}),
-        ...legalAcceptance,
-      },
-      select: {
-        id: true,
-        username: true,
-        email: true,
-        displayName: true,
-        avatarUrl: true,
-        bio: true,
-        ...legalAcceptanceSelect,
-      },
-    });
+    let user;
+    try {
+      user = await prisma.user.create({
+        data: {
+          username,
+          email,
+          passwordHash,
+          displayName: input.displayName ?? input.username,
+          ...(input.ageConfirmed ? { ageConfirmedAt: new Date() } : {}),
+          ...legalAcceptance,
+        },
+        select: {
+          id: true,
+          username: true,
+          email: true,
+          displayName: true,
+          avatarUrl: true,
+          bio: true,
+          ...legalAcceptanceSelect,
+        },
+      });
+    } catch (error) {
+      // The availability reads above provide the friendly fast path, but two
+      // registrations can pass them concurrently. The database unique indexes
+      // are authoritative; translate their race winner into the same stable
+      // API errors instead of leaking a Prisma P2002 as SERVER_001.
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        const target = Array.isArray(error.meta?.['target'])
+          ? error.meta['target'].join(',')
+          : String(error.meta?.['target'] ?? '');
+        if (/email/i.test(target)) throw new AppError('AUTH_005');
+        if (/username/i.test(target)) throw new AppError('AUTH_006');
+
+        // Some Prisma/driver combinations omit the conflicting columns from
+        // P2002 metadata. Resolve that case from the now-committed winner so a
+        // known registration collision still cannot escape as a 500.
+        const [emailWinner, usernameWinner] = await Promise.all([
+          prisma.user.findUnique({ where: { email }, select: { id: true } }),
+          prisma.user.findUnique({ where: { username }, select: { id: true } }),
+        ]);
+        if (emailWinner) throw new AppError('AUTH_005');
+        if (usernameWinner) throw new AppError('AUTH_006');
+      }
+      throw error;
+    }
 
     const tokens = await issueTokenPair(user.id);
     return { user: userToPublic(user), ...tokens };
@@ -119,8 +154,8 @@ export const authService = {
     const ok = await compare(input.password, user.passwordHash);
     if (!ok) throw new AppError('AUTH_001');
 
-    await ensureLoginAllowedAndRestore(user);
-    const tokens = await issueTokenPair(user.id);
+    const scope = resolveAccountSessionScope(user);
+    const tokens = await issueTokenPair(user.id, { scope });
     return {
       user: userToPublic(user),
       ...tokens,
@@ -147,18 +182,17 @@ export const authService = {
       throw new AppError('AUTH_004');
     }
 
-    // AUTH-01: a suspended or soft-deleted (or vanished) account must not be
-    // able to extend its session via refresh, even though its JWT still
-    // verifies. Mirror requireAuth's verdicts (AUTH_007 suspended, AUTH_003
-    // absent/deleted).
+    // Recovery refresh tokens remain recovery-scoped. A signed scope can never
+    // be upgraded through refresh; only explicit cancel-deletion rotates the
+    // account to a fresh active token family.
     const user = await prisma.user.findUnique({
       where: { id: record.userId },
       select: { suspendedUntil: true, deletedAt: true },
     });
-    if (!user || user.deletedAt) throw new AppError('AUTH_003');
-    if (user.suspendedUntil && user.suspendedUntil > new Date()) {
-      throw new AppError('AUTH_007');
-    }
+    if (!user) throw new AppError('AUTH_003');
+    const authoritativeScope = resolveAccountSessionScope({ id: record.userId, ...user });
+    const requestedScope = claims.scope ?? 'active';
+    if (authoritativeScope !== requestedScope) throw new AppError('AUTH_003');
 
     // AUTH-02: atomic conditional rotation. Two concurrent refreshes with the
     // same jti both reach here, but only one wins the conditional update
@@ -170,7 +204,7 @@ export const authService = {
     });
     if (rotated.count !== 1) throw new AppError('AUTH_004');
 
-    return issueTokenPair(record.userId);
+    return issueTokenPair(record.userId, { scope: requestedScope });
   },
 
   async logout(userId: string, accessToken: string) {
@@ -210,41 +244,49 @@ export const authService = {
     const normalizedEmail = input.email.toLowerCase();
     await scheduleBackgroundTask(
       (async () => {
-        // Match the normalized (lowercase) email stored at registration time.
-        const user = await prisma.user.findUnique({ where: { email: normalizedEmail } });
-        // Phone-only users (no email) cannot use password reset either. Perform
-        // the same token/hash work without persisting it as defense in depth;
-        // the HTTP response itself is already detached from this task in prod.
-        if (!user || !user.email) {
-          hashResetToken(randomBytes(RESET_TOKEN_BYTES).toString('hex'));
-          return;
-        }
-
         const raw = randomBytes(RESET_TOKEN_BYTES).toString('hex');
         const tokenHash = hashResetToken(raw);
         const expiresAt = new Date(Date.now() + RESET_TOKEN_TTL_MINUTES * 60 * 1000);
-
-        // Invalidate every previous token and persist the replacement atomically.
         const issuedAt = new Date();
-        await prisma.$transaction([
-          prisma.passwordResetToken.updateMany({
+        const recipient = await prisma.$transaction(async tx => {
+          // Serialize token issuance with account deletion/suspension. The
+          // generic HTTP response remains identical, but an inactive account
+          // must neither gain a fresh credential nor trigger outbound email.
+          await tx.$queryRaw`SELECT id FROM "User" WHERE email = ${normalizedEmail} FOR NO KEY UPDATE`;
+          const user = await tx.user.findUnique({
+            where: { email: normalizedEmail },
+            select: { id: true, email: true, deletedAt: true, suspendedUntil: true },
+          });
+          if (
+            !user?.email ||
+            user.deletedAt ||
+            (user.suspendedUntil && user.suspendedUntil > issuedAt)
+          ) {
+            return null;
+          }
+
+          // Invalidate every previous token and persist the replacement while
+          // the account-state lock is still held.
+          await tx.passwordResetToken.updateMany({
             where: { userId: user.id, usedAt: null },
             data: { usedAt: issuedAt },
-          }),
-          prisma.passwordResetToken.create({
+          });
+          await tx.passwordResetToken.create({
             data: { tokenHash, userId: user.id, expiresAt },
-          }),
-        ]);
+          });
+          return { id: user.id, email: user.email };
+        });
+        if (!recipient) return;
 
         await sendMail({
-          to: user.email,
+          to: recipient.email,
           subject: 'Reset your ChatHouse password',
           text: `Use this token within ${RESET_TOKEN_TTL_MINUTES} minutes to reset your password:\n\n${raw}`,
         });
         // Never log the raw reset token, even in dev/test.
         if (env.NODE_ENV === 'test') {
           logger.debug(
-            `[reset] token issued for user ${user.id} (ttl ${RESET_TOKEN_TTL_MINUTES}m)`,
+            `[reset] token issued for user ${recipient.id} (ttl ${RESET_TOKEN_TTL_MINUTES}m)`,
           );
         }
       })(),
@@ -267,6 +309,23 @@ export const authService = {
     const passwordHash = await hash(input.newPassword, SALT_ROUNDS);
     const now = new Date();
     await prisma.$transaction(async tx => {
+      // Lock the account before the reset-token row. This matches the
+      // moderation/GDPR lock order and makes a concurrent suspension either
+      // happen wholly before (reject) or wholly after this reset. A valid
+      // email token must not mutate a moderation-locked account.
+      await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${record.userId} FOR UPDATE`;
+      const user = await tx.user.findUnique({
+        where: { id: record.userId },
+        select: { deletedAt: true, suspendedUntil: true },
+      });
+      if (!user) throw new AppError('AUTH_003');
+      if (user.suspendedUntil && user.suspendedUntil > now) {
+        throw new AppError('AUTH_007');
+      }
+      if (user.deletedAt) {
+        throw new AppError('AUTH_003', 'Reset token invalid or expired');
+      }
+
       const consumed = await tx.passwordResetToken.updateMany({
         where: {
           id: record.id,

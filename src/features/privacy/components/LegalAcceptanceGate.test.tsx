@@ -15,8 +15,9 @@ describe('LegalAcceptanceGate', () => {
     mockAuthenticated({ legalAcceptanceRequired: true });
     useAuthStore.setState({ acceptLegalDocuments });
 
-    const { getByTestId } = render(<LegalAcceptanceGate />);
+    const { getByLabelText, getByTestId } = render(<LegalAcceptanceGate />);
     const submit = getByTestId('legal-gate-submit');
+    expect(submit).toBe(getByLabelText('Accept and continue'));
     expect(submit.props.accessibilityState.disabled).toBe(true);
 
     fireEvent.press(getByTestId('legal-gate-terms-checkbox'));

@@ -5,6 +5,7 @@ import { AppError } from '../../middlewares/error.middleware';
 import { authedUserId as requireUserId } from '../../utils/authedUserId';
 import {
   completeOnboardingSchema,
+  contactDiscoverySchema,
   interestsSchema,
   locationSchema,
   notifPrefsSchema,
@@ -37,6 +38,17 @@ export const usersController = {
   async setVisibility(req: Request, res: Response) {
     const input = visibilitySchema.parse(req.body);
     const result = await usersService.setVisibility(requireUserId(req), input);
+    sendOk(res, result);
+  },
+
+  async getContactDiscovery(req: Request, res: Response) {
+    const result = await usersService.getContactDiscovery(requireUserId(req));
+    sendOk(res, result);
+  },
+
+  async setContactDiscovery(req: Request, res: Response) {
+    const input = contactDiscoverySchema.parse(req.body);
+    const result = await usersService.setContactDiscovery(requireUserId(req), input);
     sendOk(res, result);
   },
 

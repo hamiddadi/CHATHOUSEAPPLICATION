@@ -85,8 +85,9 @@ refuses any database whose name does not contain `test`.
 - Go-live checklist: [`docs/GO-LIVE.md`](docs/GO-LIVE.md)
 - Legal release dossier: [`docs/legal/README.md`](docs/legal/README.md)
 
-The CI verifies lint, formatting, TypeScript, Jest, backend migrations/tests,
-Android assemble/lint, and an iOS Simulator build.
+The CI verifies lint (including CSS/NativeWind and operational shell scripts),
+formatting, TypeScript, Jest, Compose rendering, backend migrations/tests,
+backup/restore contracts, Android assemble/lint, and an iOS Simulator build.
 
 ## Architecture
 

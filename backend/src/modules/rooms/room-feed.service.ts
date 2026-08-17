@@ -38,6 +38,46 @@ export const getPersonalizedRoomFeed = async (
   );
   const topicLower = filters.topic?.toLowerCase();
 
+  // Start the bounded candidate read alongside the viewer graph lookups. None
+  // depends on the others, and serialising them adds a full database round trip
+  // to this read-heavy endpoint.
+  const candidatesPromise = prisma.room.findMany({
+    where: {
+      AND: [discoverableRoomWhere(viewerId)],
+      isLive: true,
+      endedAt: null,
+      ...(filters.clubs ? { clubId: { not: null } } : {}),
+      ...(topicLower
+        ? {
+            OR: [
+              { topic: { equals: topicLower, mode: 'insensitive' as const } },
+              { topics: { has: topicLower } },
+              { title: { contains: topicLower, mode: 'insensitive' as const } },
+            ],
+          }
+        : {}),
+    },
+    select: {
+      id: true,
+      hostId: true,
+      title: true,
+      topic: true,
+      topics: true,
+      createdAt: true,
+      participantCount: true,
+      participants: {
+        where: {
+          leftAt: null,
+          role: { not: 'LISTENER' as const },
+          user: { deletedAt: null },
+        },
+        select: { userId: true },
+      },
+    },
+    orderBy: { createdAt: 'desc' as const },
+    take: candidatePoolSize,
+  });
+
   const [viewer, followedIds, blockedIds, candidates] = await Promise.all([
     prisma.user.findUnique({
       where: { id: viewerId },
@@ -50,40 +90,12 @@ export const getPersonalizedRoomFeed = async (
       })
       .then(rows => new Set(rows.map(row => row.followingId))),
     getBlockedIdSet(viewerId),
-    prisma.room.findMany({
-      where: {
-        AND: [discoverableRoomWhere(viewerId)],
-        isLive: true,
-        endedAt: null,
-        ...(filters.clubs ? { clubId: { not: null } } : {}),
-        ...(topicLower
-          ? {
-              OR: [
-                { topic: { equals: topicLower, mode: 'insensitive' } },
-                { topics: { has: topicLower } },
-                { title: { contains: topicLower, mode: 'insensitive' } },
-              ],
-            }
-          : {}),
-      },
-      include: {
-        host: { select: publicUser },
-        participants: {
-          where: { leftAt: null, user: { deletedAt: null } },
-          select: {
-            userId: true,
-            role: true,
-            isMuted: true,
-            user: { select: publicUser },
-          },
-        },
-        club: { select: { id: true, name: true, iconUrl: true } },
-        _count: { select: { rsvps: true } },
-      },
-      orderBy: { createdAt: 'desc' },
-      take: candidatePoolSize,
-    }),
+    candidatesPromise,
   ]);
+  // Phase 1 deliberately keeps the candidate window lightweight. Previously
+  // every page hydrated every listener + public profile for up to 1,000 rooms,
+  // only to discard almost all of them after ranking. Scoring needs only room
+  // metadata, the denormalized active count and active speaker ids.
   const interests = new Set((viewer?.interests ?? []).map(interest => interest.toLowerCase()));
 
   const visibleCandidates = candidates
@@ -94,14 +106,11 @@ export const getPersonalizedRoomFeed = async (
     }))
     .filter(room => {
       if (!filters.following || followedIds.has(room.hostId)) return true;
-      return room.participants.some(
-        participant => participant.role !== 'LISTENER' && followedIds.has(participant.userId),
-      );
+      return room.participants.some(participant => followedIds.has(participant.userId));
     });
 
   const scored = visibleCandidates.map(room => {
-    const speakers = room.participants.filter(participant => participant.role !== 'LISTENER');
-    const followSpeakerCount = speakers.filter(participant =>
+    const followSpeakerCount = room.participants.filter(participant =>
       followedIds.has(participant.userId),
     ).length;
 
@@ -119,7 +128,7 @@ export const getPersonalizedRoomFeed = async (
 
     const popularity = Math.min(
       POPULARITY_CAP,
-      Math.floor(room.participants.length / POPULARITY_BUCKET),
+      Math.floor(room.participantCount / POPULARITY_BUCKET),
     );
     const score =
       followSpeakerCount * FOLLOW_SPEAKER_WEIGHT + topicMatch * TOPIC_MATCH_WEIGHT + popularity;
@@ -131,12 +140,56 @@ export const getPersonalizedRoomFeed = async (
     return right.room.createdAt.getTime() - left.room.createdAt.getTime();
   });
 
-  return scored.slice(offset, offset + limit).map(({ room, followSpeakerCount }) => ({
-    ...room,
-    knownSpeakers: room.participants
-      .filter(participant => followedIds.has(participant.userId) && participant.role !== 'LISTENER')
-      .slice(0, 3)
-      .map(participant => participant.user),
-    hasKnownSpeakers: followSpeakerCount > 0,
-  }));
+  const selected = scored.slice(offset, offset + limit);
+  if (selected.length === 0) return [];
+
+  // Phase 2 hydrates only the selected page. Preserve the ranking order after
+  // Prisma's unordered `id in (...)` lookup and remove blocked participants
+  // before returning the public room payload.
+  const hydrated = await prisma.room.findMany({
+    // Re-check discovery policy at hydration time: a host can end or restrict a
+    // room between the ranking query and this second round trip.
+    where: {
+      id: { in: selected.map(item => item.room.id) },
+      AND: [discoverableRoomWhere(viewerId)],
+      isLive: true,
+      endedAt: null,
+    },
+    include: {
+      host: { select: publicUser },
+      participants: {
+        where: { leftAt: null, user: { deletedAt: null } },
+        select: {
+          userId: true,
+          role: true,
+          isMuted: true,
+          user: { select: publicUser },
+        },
+      },
+      club: { select: { id: true, name: true, iconUrl: true } },
+      _count: { select: { rsvps: true } },
+    },
+  });
+  const byId = new Map(hydrated.map(room => [room.id, room]));
+
+  return selected.flatMap(({ room: candidate, followSpeakerCount }) => {
+    const room = byId.get(candidate.id);
+    if (!room) return [];
+    const participants = room.participants.filter(
+      participant => !blockedIds.has(participant.userId),
+    );
+    return [
+      {
+        ...room,
+        participants,
+        knownSpeakers: participants
+          .filter(
+            participant => followedIds.has(participant.userId) && participant.role !== 'LISTENER',
+          )
+          .slice(0, 3)
+          .map(participant => participant.user),
+        hasKnownSpeakers: followSpeakerCount > 0,
+      },
+    ];
+  });
 };

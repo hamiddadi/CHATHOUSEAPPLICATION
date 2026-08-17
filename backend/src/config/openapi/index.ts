@@ -11,6 +11,7 @@ import { registerFollowPaths } from './follow';
 import { registerGroupsPaths } from './groups';
 import { registerMapsPaths } from './maps';
 import { registerUploadPaths } from './uploads';
+import { registerOperationalPaths } from './operational';
 
 /**
  * OpenAPI document generator. Composed from one registration module per
@@ -31,6 +32,7 @@ export const buildOpenApiDocument = () => {
   registerGroupsPaths(registry, components);
   registerMapsPaths(registry, components);
   registerUploadPaths(registry, components);
+  registerOperationalPaths(registry, components);
 
   const generator = new OpenApiGeneratorV3(registry.definitions);
   return generator.generateDocument({

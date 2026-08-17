@@ -5,6 +5,10 @@ const mockEmitHallwayRoomCreated = jest.fn();
 const mockRoomUpdate = jest.fn();
 const mockParticipantUpsert = jest.fn();
 const mockUserUpdate = jest.fn();
+const mockRoomFindFirst = jest.fn();
+const mockClubMemberFindMany = jest.fn();
+const mockNotificationCreate = jest.fn();
+const mockGetBlockedIdSet = jest.fn();
 
 const roomState = {
   id: 'scheduled-room-1',
@@ -50,6 +54,8 @@ jest.mock('../src/config/database', () => ({
   prisma: {
     $transaction: (...args: unknown[]) =>
       mockTransaction(...(args as Parameters<typeof mockTransaction>)),
+    room: { findFirst: (...args: unknown[]) => mockRoomFindFirst(...args) },
+    clubMember: { findMany: (...args: unknown[]) => mockClubMemberFindMany(...args) },
   },
   runWriteWithRetry: (...args: unknown[]) =>
     mockRunWriteWithRetry(...(args as Parameters<typeof mockRunWriteWithRetry>)),
@@ -65,9 +71,13 @@ jest.mock('../src/extensions/queues/reminder15', () => ({
   scheduleReminder15: jest.fn(),
 }));
 jest.mock('../src/modules/notifications/notifications.service', () => ({
-  notificationsService: { create: jest.fn() },
+  notificationsService: {
+    create: (...args: unknown[]) => mockNotificationCreate(...args),
+  },
 }));
-jest.mock('../src/modules/social/blocks', () => ({ getBlockedIdSet: jest.fn() }));
+jest.mock('../src/modules/social/blocks', () => ({
+  getBlockedIdSet: (...args: unknown[]) => mockGetBlockedIdSet(...args),
+}));
 jest.mock('../src/queues/connection', () => ({ bullConnection: jest.fn() }));
 jest.mock('../src/socket/realtime', () => ({
   emitHallwayRoomCreated: (...args: unknown[]) => mockEmitHallwayRoomCreated(...args),
@@ -120,5 +130,42 @@ describe('scheduled room ROOM_STARTED fan-out repair', () => {
     expect(mockUserUpdate).toHaveBeenCalledTimes(1);
     expect(mockEmitHallwayRoomCreated).toHaveBeenCalledTimes(1);
     expect(roomState.totalAttendees).toBe(1);
+  });
+
+  it('caps reminder delivery at 50 concurrent durable creates for large clubs', async () => {
+    const memberCount = 123;
+    mockRoomFindFirst.mockResolvedValue({
+      id: roomState.id,
+      hostId: roomState.hostId,
+      clubId: 'club-1',
+      title: roomState.title,
+      endedAt: null,
+      rsvps: [],
+    });
+    mockGetBlockedIdSet.mockResolvedValue(new Set<string>());
+    mockClubMemberFindMany.mockResolvedValue(
+      Array.from({ length: memberCount }, (_value, index) => ({ userId: `member-${index}` })),
+    );
+
+    let inFlight = 0;
+    let maxInFlight = 0;
+    mockNotificationCreate.mockImplementation(async () => {
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise<void>(resolve => setImmediate(resolve));
+      inFlight -= 1;
+      return { id: `notification-${mockNotificationCreate.mock.calls.length}` };
+    });
+
+    await _internals.processReminder({
+      data: { roomId: roomState.id, kind: 'remind' },
+    } as Parameters<typeof _internals.processReminder>[0]);
+
+    expect(mockNotificationCreate).toHaveBeenCalledTimes(memberCount + 1);
+    expect(maxInFlight).toBe(50);
+    expect(inFlight).toBe(0);
+    expect(
+      new Set(mockNotificationCreate.mock.calls.map(([input]) => input.dedupeKey)),
+    ).toHaveProperty('size', memberCount + 1);
   });
 });

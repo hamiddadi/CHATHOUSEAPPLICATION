@@ -131,6 +131,7 @@ const notifyRecipient = async (
       data: { roomId: room.id, source },
       targetId: room.id,
       targetType: 'room',
+      dedupeKey: `room-started:${room.id}:${userId}`,
     });
     await markRecipientDone(room.id, userId);
     return 'created';

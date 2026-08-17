@@ -82,7 +82,11 @@ export const runIdempotentCreate = async ({
           return { resourceId: assertSameRequest(existing, requestHash), replayed: true };
         }
         if (existing) {
-          await tx.idempotencyKey.delete({ where: { id: existing.id } });
+          // Two requests can both observe the same expired row. Conditional
+          // deletion lets one remove it while the other proceeds to the
+          // unique-claim race below; `delete()` would make the loser throw
+          // P2025 before the normal P2002 replay path can resolve the winner.
+          await tx.idempotencyKey.deleteMany({ where: { id: existing.id } });
         }
 
         const claim = await tx.idempotencyKey.create({

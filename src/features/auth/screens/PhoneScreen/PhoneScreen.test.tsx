@@ -53,10 +53,11 @@ describe('PhoneScreen', () => {
   });
 
   it('toggles the age-confirmation checkbox without crashing', () => {
-    const { getByTestId } = renderScreen(<PhoneScreen />, {
+    const { getByLabelText, getByTestId } = renderScreen(<PhoneScreen />, {
       route: { name: 'Phone', params: {} },
     });
     const checkbox = getByTestId('auth-age-confirmation');
+    expect(checkbox).toBe(getByLabelText('I confirm I am at least 16 years old'));
     expect(checkbox.props.accessibilityState.checked).toBe(false);
     fireEvent.press(checkbox);
     expect(checkbox.props.accessibilityState.checked).toBe(true);

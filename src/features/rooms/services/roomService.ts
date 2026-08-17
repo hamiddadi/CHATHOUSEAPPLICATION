@@ -471,6 +471,7 @@ export const roomService = {
   async sendMessage(
     roomId: string,
     content: string,
+    idempotencyKey: string,
     replyToId?: string,
   ): Promise<{
     id: string;
@@ -487,10 +488,14 @@ export const roomService = {
         user: RawUser;
         replyTo: { id: string; content: string; user: RawUser } | null;
       }>
-    >(`/rooms/${roomId}/messages`, {
-      content,
-      ...(replyToId ? { replyToId } : {}),
-    });
+    >(
+      `/rooms/${roomId}/messages`,
+      {
+        content,
+        ...(replyToId ? { replyToId } : {}),
+      },
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    );
     return {
       id: res.data.data.id,
       content: res.data.data.content,
@@ -518,8 +523,12 @@ export const roomService = {
     return res.data.data;
   },
 
-  async sendReaction(roomId: string, emoji: string): Promise<{ ok: true }> {
-    await apiClient.post(`/rooms/${roomId}/reactions`, { emoji });
+  async sendReaction(roomId: string, emoji: string, idempotencyKey: string): Promise<{ ok: true }> {
+    await apiClient.post(
+      `/rooms/${roomId}/reactions`,
+      { emoji },
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    );
     return { ok: true };
   },
 

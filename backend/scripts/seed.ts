@@ -51,16 +51,53 @@ const prisma = new PrismaClient();
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+const parseRandomSeed = (): number => {
+  const raw = process.env.SEED_RANDOM_SEED ?? '20260815';
+  if (!/^\d{1,10}$/u.test(raw)) {
+    throw new Error('SEED_RANDOM_SEED must be an unsigned 32-bit integer');
+  }
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value > 0xffff_ffff) {
+    throw new Error('SEED_RANDOM_SEED must be an unsigned 32-bit integer');
+  }
+  return value;
+};
+
+const RANDOM_SEED = parseRandomSeed();
+const SEED_REFERENCE_DATE = '2026-08-15T12:00:00.000Z';
+const LOCAL_LEGAL_DOCUMENT_VERSION = '2026-07-29';
+let randomState = RANDOM_SEED >>> 0;
+const random = (): number => {
+  randomState = (Math.imul(1_664_525, randomState) + 1_013_904_223) >>> 0;
+  return randomState / 0x1_0000_0000;
+};
+
 const BCRYPT_ROUNDS = 10;
 const hashPassword = (plain: string) => bcrypt.hashSync(plain, BCRYPT_ROUNDS);
 
-const pick = <T>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)] as T;
+const pick = <T>(arr: T[]): T => arr[Math.floor(random() * arr.length)] as T;
 const pickN = <T>(arr: T[], n: number): T[] => {
-  const shuffled = [...arr].sort(() => 0.5 - Math.random());
+  const shuffled = [...arr];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j] as T, shuffled[i] as T];
+  }
   return shuffled.slice(0, Math.min(n, shuffled.length));
 };
-const randInt = (min: number, max: number) => Math.floor(Math.random() * (max - min + 1)) + min;
-const randBool = (pct = 0.5) => Math.random() < pct;
+const randInt = (min: number, max: number) => Math.floor(random() * (max - min + 1)) + min;
+const randBool = (pct = 0.5) => random() < pct;
+
+const seedLegalDocumentVersion = (): string => {
+  const configured = process.env.LEGAL_DOCUMENT_VERSION?.trim();
+  if (configured !== undefined && !/^\d{4}-\d{2}-\d{2}$/u.test(configured)) {
+    throw new Error('LEGAL_DOCUMENT_VERSION must be an ISO date (YYYY-MM-DD)');
+  }
+  if (configured) return configured;
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('LEGAL_DOCUMENT_VERSION is required when seeding in production');
+  }
+  return LOCAL_LEGAL_DOCUMENT_VERSION;
+};
 
 const CATEGORIES = ['tech', 'design', 'crypto', 'ai', 'music', 'business', 'health'] as const;
 const CATEGORY_EMOJIS: Record<string, string> = {
@@ -84,7 +121,25 @@ const NOTIF_TYPES: NotificationType[] = [
   'HAND_ACCEPTED',
   'RSVP_REMINDER',
   'NEW_MESSAGE',
+  'ROOM_CANCELED',
+  'ROOM_ENDED_BY_ADMIN',
+  'FOLLOW_REQUEST',
 ];
+const NOTIF_TARGET_TYPES = {
+  ROOM_INVITE: 'room',
+  NEW_FOLLOWER: 'user',
+  ROOM_STARTED: 'room',
+  SPEAKER_REQUEST: 'room',
+  MENTION: 'user',
+  CLUB_INVITE: 'club',
+  WAVE: 'user',
+  HAND_ACCEPTED: 'room',
+  RSVP_REMINDER: 'room',
+  NEW_MESSAGE: 'user',
+  ROOM_CANCELED: 'room',
+  ROOM_ENDED_BY_ADMIN: 'room',
+  FOLLOW_REQUEST: 'user',
+} as const satisfies Record<NotificationType, 'room' | 'club' | 'user'>;
 const EMOJIS = ['👍', '❤️', '🔥', '😂', '👏', '🙌', '💯', '🎉'];
 
 // ---------------------------------------------------------------------------
@@ -92,7 +147,34 @@ const EMOJIS = ['👍', '❤️', '🔥', '😂', '👏', '🙌', '💯', '🎉'
 // ---------------------------------------------------------------------------
 async function main() {
   const faker = await loadFaker();
+  faker.seed(RANDOM_SEED);
+  // faker.seed() controls generated values but relative date helpers otherwise
+  // still use the wall clock. Pin their reference so the same seed produces
+  // the same timestamps on every CI run.
+  faker.setDefaultRefDate(SEED_REFERENCE_DATE);
+  console.log(`Deterministic random seed: ${RANDOM_SEED}`);
   console.log('\n🌱 CHATHOUSE SEED — starting…\n');
+
+  // Seeded users already own the synthetic rooms, messages and reactions
+  // created below. Persist the same explicit, versioned acknowledgement an
+  // active user must submit so the QA fixtures exercise guarded UGC routes
+  // without bypassing requireCurrentLegalAcceptance.
+  const legalDocumentVersion = seedLegalDocumentVersion();
+  const legalAcceptedAt = new Date(SEED_REFERENCE_DATE);
+  const seededLegalAcceptance = {
+    termsAcceptedVersion: legalDocumentVersion,
+    termsAcceptedAt: legalAcceptedAt,
+    privacyNoticeAcknowledgedVersion: legalDocumentVersion,
+    privacyNoticeAcknowledgedAt: legalAcceptedAt,
+    legalAcceptanceLocale: 'en',
+  } satisfies Pick<
+    Prisma.UserCreateInput,
+    | 'termsAcceptedVersion'
+    | 'termsAcceptedAt'
+    | 'privacyNoticeAcknowledgedVersion'
+    | 'privacyNoticeAcknowledgedAt'
+    | 'legalAcceptanceLocale'
+  >;
 
   // ═══════════════════════════════════════════════════════════════════════
   // STEP 1: Users (500 normal + 1 admin + 5 test)
@@ -189,7 +271,7 @@ async function main() {
 
   // Insert all users in a transaction
   const createdUsers = await prisma.$transaction(
-    usersData.map(data => prisma.user.create({ data })),
+    usersData.map(data => prisma.user.create({ data: { ...data, ...seededLegalAcceptance } })),
   );
   const userIds = createdUsers.map(u => u.id);
   console.log(`  ✅ ${createdUsers.length} users created`);
@@ -267,14 +349,27 @@ async function main() {
   }
 
   const createdClubs = await prisma.$transaction(
-    clubsData.map(data => prisma.club.create({ data })),
+    clubsData.map(data => {
+      const ownerId = data.ownerId;
+      if (typeof ownerId !== 'string') {
+        throw new Error('Seed club fixture is missing its ownerId');
+      }
+      return prisma.club.create({
+        data: {
+          ...data,
+          // The owner/ADMIN invariant is enforced by a deferred database
+          // trigger, so both rows must be committed in the same transaction.
+          members: { create: { userId: ownerId, role: 'ADMIN' } },
+        },
+      });
+    }),
   );
   console.log(`  ✅ ${createdClubs.length} clubs created`);
 
   // Club members
   console.log('  👥 Adding club members…');
   const clubMemberPairs = new Set<string>();
-  let totalClubMembers = 0;
+  let totalClubMembers = createdClubs.length;
 
   for (const club of createdClubs) {
     const memberCount = randInt(5, 50);
@@ -283,9 +378,6 @@ async function main() {
 
     // Owner is always ADMIN
     clubMemberPairs.add(`${club.id}:${club.ownerId}`);
-    await prisma.clubMember.create({
-      data: { clubId: club.id, userId: club.ownerId, role: 'ADMIN' },
-    });
 
     for (const uid of members) {
       const key = `${club.id}:${uid}`;
@@ -527,7 +619,17 @@ async function main() {
       HAND_ACCEPTED: 'Promoted to Speaker',
       RSVP_REMINDER: 'Event Starting Soon',
       NEW_MESSAGE: 'New Message',
+      ROOM_CANCELED: 'Room Canceled',
+      ROOM_ENDED_BY_ADMIN: 'Room Ended',
+      FOLLOW_REQUEST: 'Follow Request',
     };
+    const targetType = NOTIF_TARGET_TYPES[type];
+    const targetId =
+      targetType === 'room'
+        ? pick(roomsCreated).id
+        : targetType === 'club'
+          ? pick(createdClubs).id
+          : actorId;
 
     notifData.push({
       userId: recipientId,
@@ -536,13 +638,8 @@ async function main() {
       title: titles[type],
       body: faker.lorem.sentence(),
       isRead: randBool(0.7),
-      targetId: randBool(0.5) ? (pick(liveRooms)?.id ?? null) : null,
-      targetType:
-        type === 'ROOM_INVITE' || type === 'ROOM_STARTED'
-          ? 'room'
-          : type === 'CLUB_INVITE'
-            ? 'club'
-            : 'user',
+      targetId,
+      targetType,
       createdAt: faker.date.recent({ days: 30 }),
     });
   }

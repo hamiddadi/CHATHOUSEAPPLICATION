@@ -6,6 +6,7 @@ jest.mock('../../../shared/services/api/apiClient', () => ({
 }));
 
 const post = apiClient.post as jest.Mock;
+const get = apiClient.get as jest.Mock;
 const rawMessage = {
   id: 'message-1',
   conversationId: 'group-1',
@@ -27,7 +28,10 @@ const rawGroup = {
 };
 
 describe('groupService idempotency headers', () => {
-  beforeEach(() => post.mockReset());
+  beforeEach(() => {
+    get.mockReset();
+    post.mockReset();
+  });
 
   it('forwards the caller-owned key for every idempotent group mutation', async () => {
     post
@@ -81,5 +85,42 @@ describe('groupService idempotency headers', () => {
       { userIds: ['member-2'] },
       { headers: { 'Idempotency-Key': 'rn-group-members-123' } },
     );
+  });
+});
+
+describe('groupService list pagination', () => {
+  beforeEach(() => get.mockReset());
+
+  it('requests the paginated contract and preserves its opaque cursor', async () => {
+    get.mockResolvedValue({
+      data: {
+        data: {
+          data: [rawGroup],
+          nextCursor: 'v1.next-group',
+          hasMore: true,
+        },
+      },
+    });
+
+    const page = await groupService.list({ cursor: 'v1.current-group', limit: 25 });
+
+    expect(get).toHaveBeenCalledWith('/groups', {
+      params: { paginated: true, cursor: 'v1.current-group', limit: 25 },
+    });
+    expect(page).toMatchObject({
+      items: [{ id: 'group-1', title: 'Group' }],
+      nextCursor: 'v1.next-group',
+      hasMore: true,
+    });
+  });
+
+  it('accepts the legacy bare-array response during rolling deployments', async () => {
+    get.mockResolvedValue({ data: { data: [rawGroup] } });
+
+    await expect(groupService.list()).resolves.toMatchObject({
+      items: [{ id: 'group-1' }],
+      nextCursor: null,
+      hasMore: false,
+    });
   });
 });

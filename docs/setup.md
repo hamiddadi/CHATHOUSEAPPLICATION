@@ -100,12 +100,15 @@ notifications and microphone publishing require a real device.
 Both platforms accept `chathouse://` and HTTPS links on
 `https://app.chathouse.com`. Native declarations alone are insufficient; host:
 
-- `https://app.chathouse.com/.well-known/assetlinks.json` with the Android
-  package and production signing SHA-256 fingerprint.
+- `https://app.chathouse.com/.well-known/assetlinks.json` with the
+  `delegate_permission/common.handle_all_urls` relation, Android package and
+  production Play App Signing SHA-256 fingerprint.
 - `https://app.chathouse.com/.well-known/apple-app-site-association` with the
-  Apple Team ID and `com.chathouse.app`.
+  Apple Team ID, `com.chathouse.app`, and path coverage for `/invite/*`,
+  `/room/*`, `/u/*` and `/house/*` (including house invitations).
 
 Serve both over HTTPS without redirects and with `application/json` content.
+Keep the uncompressed AASA document at or below 128 KiB.
 
 ## 8. Integration tests
 

@@ -66,7 +66,7 @@ export const registerChatPaths = (
     responses: {
       201: {
         description:
-          'Persists the text message exactly once per Idempotency-Key. Realtime and push delivery are at least once; consumers must deduplicate with messageId and notificationId.',
+          'Persists the text message exactly once per Idempotency-Key. Realtime and push arrival are best effort; consumers must deduplicate delivery attempts with messageId and notificationId.',
         content: {
           'application/json': {
             schema: z.object({ success: z.literal(true), data: z.object({}).passthrough() }),
@@ -97,7 +97,7 @@ export const registerChatPaths = (
     responses: {
       201: {
         description:
-          'Persists the voice message exactly once per Idempotency-Key. Realtime and push delivery are at least once; consumers must deduplicate with messageId and notificationId.',
+          'Persists the voice message exactly once per Idempotency-Key. Realtime and push arrival are best effort; consumers must deduplicate delivery attempts with messageId and notificationId.',
         content: {
           'application/json': {
             schema: z.object({ success: z.literal(true), data: z.object({}).passthrough() }),

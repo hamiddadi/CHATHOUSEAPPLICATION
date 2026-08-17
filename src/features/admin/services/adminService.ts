@@ -135,9 +135,10 @@ export const adminService = {
     return res.data.data;
   },
 
-  async stopImpersonation(userId: string): Promise<{ ok: true }> {
+  async stopImpersonation(userId: string, token: string): Promise<{ ok: true }> {
     const res = await apiClient.post<Envelope<{ ok: true }>>(
       `/admin/users/${userId}/stop-impersonating`,
+      { token },
     );
     return res.data.data;
   },

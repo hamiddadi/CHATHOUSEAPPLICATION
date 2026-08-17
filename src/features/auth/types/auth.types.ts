@@ -1,4 +1,11 @@
-export type AuthStatus = 'idle' | 'authenticating' | 'authenticated' | 'unauthenticated';
+export type AuthStatus =
+  | 'idle'
+  | 'authenticating'
+  | 'authenticated'
+  | 'restoration_required'
+  | 'unauthenticated';
+
+export type AccountState = 'ACTIVE' | 'PENDING_DELETION';
 
 export interface AuthUser {
   id: string;
@@ -16,6 +23,9 @@ export interface AuthUser {
   legalAcceptanceLocale?: string | null;
   legalDocumentVersion?: string;
   legalAcceptanceRequired?: boolean;
+  accountState: AccountState;
+  deletedAt: string | null;
+  permanentDeletionAt: string | null;
   createdAt: string;
 }
 
@@ -23,6 +33,7 @@ export interface AuthSession {
   accessToken: string;
   refreshToken: string;
   expiresAt: string;
+  scope: 'active' | 'account_recovery';
 }
 
 export interface LegalAcceptancePayload {

@@ -1,4 +1,4 @@
-import type { Express } from 'express';
+import type { Express, RequestHandler } from 'express';
 import { logger } from '../config/logger';
 import { audioRouter } from './modules/audio/audio.router';
 import { badgesRouter } from './modules/badges/badges.router';
@@ -32,8 +32,15 @@ import { topicsRouter } from './modules/topics/topics.router';
 import { twitterRouter } from './modules/twitter/twitter.router';
 import { shutdownFollowFanout, startFollowFanoutWorker } from './queues/followFanout';
 import { shutdownReminder15, startReminder15Worker } from './queues/reminder15';
+import { materializePrivateMediaUrls } from '../modules/media/media-url';
 
 const mountedApps = new WeakSet<Express>();
+
+const materializeExtensionMedia: RequestHandler = (_req, res, next) => {
+  const json = res.json.bind(res);
+  res.json = body => json(materializePrivateMediaUrls(body));
+  next();
+};
 
 /**
  * Mount extension routers before the terminal 404/error middleware.
@@ -43,6 +50,11 @@ const mountedApps = new WeakSet<Express>();
 export const mountExtensions = (app: Express): void => {
   if (mountedApps.has(app)) return;
   mountedApps.add(app);
+
+  // Extension routers use Express's res.json directly rather than the core
+  // response helper. Refresh private media capabilities at this common
+  // transport boundary without persisting the short-lived URLs.
+  app.use('/api/ext', materializeExtensionMedia);
 
   app.use('/api/ext/suggestions', suggestionsRouter);
   app.use('/api/ext/contacts', contactsRouter);

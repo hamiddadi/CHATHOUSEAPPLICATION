@@ -4,6 +4,7 @@ import { Server, type Socket } from 'socket.io';
 import { io as ioClient } from 'socket.io-client';
 import {
   attachSocketEventRateLimiter,
+  DistributedSocketEventRateLimiter,
   MAX_SOCKET_PAYLOAD_BYTES,
   SocketEventRateLimiter,
   type SocketRateLimitNotice,
@@ -74,6 +75,32 @@ describe('Socket.IO inbound event rate limiter', () => {
       category: 'mutation',
       retryAfterMs: 100,
     });
+  });
+
+  it('enforces a fixed-window account quota through one atomic Redis command', async () => {
+    const evalCommand = jest.fn().mockResolvedValue([13, 12_345]);
+    const subject = new DistributedSocketEventRateLimiter({ eval: evalCommand }, () => 120_001);
+
+    await expect(subject.check('user-a', 'presence')).resolves.toEqual({
+      allowed: false,
+      retryAfterMs: 12_345,
+    });
+    expect(evalCommand).toHaveBeenCalledTimes(1);
+    expect(evalCommand.mock.calls[0]?.[1]).toEqual({
+      keys: ['socket:quota:presence:user-a:2'],
+      arguments: ['60000'],
+    });
+  });
+
+  it('does not send hot RTC signalling through Redis', async () => {
+    const evalCommand = jest.fn();
+    const subject = new DistributedSocketEventRateLimiter({ eval: evalCommand });
+
+    await expect(subject.check('user-a', 'rtc')).resolves.toEqual({
+      allowed: true,
+      retryAfterMs: 0,
+    });
+    expect(evalCommand).not.toHaveBeenCalled();
   });
 
   it('preserves the account bucket across reconnects until the retention window expires', () => {

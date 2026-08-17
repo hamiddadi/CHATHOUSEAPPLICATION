@@ -25,7 +25,8 @@ import { UserLocationPulse } from '../../components/UserLocationPulse';
 
 const HEADER_HEIGHT = 64;
 const SEARCH_BAR_TOP_OFFSET = HEADER_HEIGHT + 8;
-const MINI_CARD_BOTTOM_OFFSET = layout.tabBarHeight + layout.tabBarBottomOffset + spacing.xxxl;
+const TAB_BAR_CLEARANCE = layout.tabBarHeight + layout.tabBarBottomOffset;
+const MINI_CARD_BOTTOM_OFFSET = TAB_BAR_CLEARANCE + spacing.xxxl;
 // Extra lift applied to the floating controls when the mini-card is visible,
 // so they sit above the card instead of being covered by it.
 const MINI_CARD_LIFT = 120;
@@ -236,7 +237,7 @@ export const MapsScreen: React.FC = () => {
           visible, legible credit. Kept in the bottom-left corner, out of the way
           of the floating controls (bottom-right). */}
       <View
-        style={[styles.attribution, { bottom: insets.bottom + 4 }]}
+        style={[styles.attribution, { bottom: insets.bottom + TAB_BAR_CLEARANCE + spacing.xs }]}
         pointerEvents="none"
         accessibilityRole="text"
       >

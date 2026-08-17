@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { publicContentString } from '../../utils/publicContentModeration';
 import { decodeChatCursor } from '../chat/chat.cursor';
+import { decodeGroupCursor } from './groups.cursor';
 
 export const MAX_GROUP_MEMBERS = 50;
 
@@ -40,6 +41,31 @@ export const listGroupMessagesSchema = z.object({
     .transform(value => value === 'true'),
 });
 
+export const listGroupsSchema = z
+  .object({
+    // Keep the legacy array response while bounding the relation graph loaded
+    // for each group (members + latest message).
+    limit: z.coerce.number().int().min(1).max(100).default(50),
+    cursor: z
+      .string()
+      .max(1024)
+      .refine(value => decodeGroupCursor(value) !== null, { message: 'Invalid group cursor' })
+      .optional(),
+    paginated: z
+      .enum(['true', 'false'])
+      .default('false')
+      .transform(value => value === 'true'),
+  })
+  .superRefine((input, ctx) => {
+    if (input.cursor && !input.paginated) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['paginated'],
+        message: 'paginated=true is required when cursor is provided',
+      });
+    }
+  });
+
 export const addGroupMembersSchema = z.object({
   userIds: z.array(z.string().min(1)).min(1).max(MAX_GROUP_MEMBERS),
 });
@@ -54,5 +80,6 @@ export type CreateGroupInput = z.infer<typeof createGroupSchema>;
 export type SendGroupMessageInput = z.infer<typeof sendGroupMessageSchema>;
 export type SendGroupVoiceInput = z.infer<typeof sendGroupVoiceSchema>;
 export type ListGroupMessagesInput = z.infer<typeof listGroupMessagesSchema>;
+export type ListGroupsInput = z.infer<typeof listGroupsSchema>;
 export type AddGroupMembersInput = z.infer<typeof addGroupMembersSchema>;
 export type RenameGroupInput = z.infer<typeof renameGroupSchema>;

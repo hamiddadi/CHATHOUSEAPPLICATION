@@ -19,8 +19,14 @@ const QUICK = ['❤️', '👏', '🔥', '😂', '🙏', '🎉', '✨', '🤯'] 
  */
 export const ExtReactionPicker: React.FC<Props> = ({ visible, onPick, onClose }) => (
   <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-    <Pressable style={styles.backdrop} onPress={onClose}>
-      <Pressable style={styles.pill} onPress={e => e.stopPropagation()}>
+    <Pressable style={styles.backdrop} onPress={onClose} accessible={false}>
+      <Pressable
+        style={styles.pill}
+        onPress={e => e.stopPropagation()}
+        accessible={false}
+        focusable={false}
+        accessibilityViewIsModal
+      >
         {QUICK.map(em => (
           <Pressable
             key={em}
@@ -50,6 +56,9 @@ const styles = StyleSheet.create({
   },
   pill: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    maxWidth: '90%',
     backgroundColor: colors.surfaceAlt,
     borderRadius: 999,
     paddingHorizontal: 10,
@@ -61,6 +70,6 @@ const styles = StyleSheet.create({
     elevation: 4,
     gap: 4,
   },
-  btn: { padding: 8 },
+  btn: { minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
   emoji: { fontSize: 26, color: colors.text },
 });

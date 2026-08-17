@@ -198,6 +198,10 @@ export const PhoneScreen: React.FC = () => {
               onPress={() => onChange(!value)}
               className="flex-row items-center gap-sm mb-md min-h-[44px]"
               accessibilityRole="checkbox"
+              accessibilityLabel={t(
+                'auth.phone.ageVerification',
+                'I confirm I am at least 16 years old',
+              )}
               accessibilityState={{ checked: value }}
             >
               <View

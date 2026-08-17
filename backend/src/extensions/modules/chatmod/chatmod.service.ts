@@ -45,22 +45,22 @@ export const chatmodService = {
         where: { id: messageId },
         data: { isDeleted: true },
       });
+      await auditLogService.record(
+        {
+          actorId: callerId,
+          action: 'ROOM_MESSAGE_DELETED',
+          targetUserId: current.userId,
+          targetRoomId: current.roomId,
+          targetType: 'roomChatMessage',
+          targetId: current.id,
+          metadata: { messageId: current.id },
+        },
+        tx,
+      );
       return { ...current, alreadyDeleted: false as const };
     });
 
     if (deletion.alreadyDeleted) return { id: deletion.id, alreadyDeleted: true };
-
-    // MODE-06: audit the moderation action. record() swallows persistence
-    // errors itself, so a failed write never breaks the delete.
-    await auditLogService.record({
-      actorId: callerId,
-      action: 'ROOM_MESSAGE_DELETED',
-      targetUserId: deletion.userId,
-      targetRoomId: deletion.roomId,
-      targetType: 'roomChatMessage',
-      targetId: deletion.id,
-      metadata: { messageId: deletion.id },
-    });
 
     return { id: deletion.id, alreadyDeleted: false };
   },

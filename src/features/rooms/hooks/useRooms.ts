@@ -222,22 +222,37 @@ export const useRoomMessages = (roomId: string | null) =>
 
 export const useSendRoomMessage = () => {
   const qc = useQueryClient();
-  return useMutation({
+  const mutation = useMutation({
     mutationFn: ({
       roomId,
       content,
       replyToId,
+      idempotencyKey,
     }: {
       roomId: string;
       content: string;
       replyToId?: string;
-    }) => roomService.sendMessage(roomId, content, replyToId),
+      idempotencyKey: string;
+    }) => roomService.sendMessage(roomId, content, idempotencyKey, replyToId),
+    retry: retryTransientMutation,
     onSuccess: (_data, vars) => {
       void qc.invalidateQueries({
         queryKey: [...roomKeys.all, 'messages', vars.roomId] as const,
       });
     },
   });
+  type Variables = { roomId: string; content: string; replyToId?: string };
+  const withKey = (variables: Variables) => ({
+    ...variables,
+    idempotencyKey: createIdempotencyKey(),
+  });
+  return {
+    ...mutation,
+    mutate: (variables: Variables, options?: Parameters<typeof mutation.mutate>[1]) =>
+      mutation.mutate(withKey(variables), options),
+    mutateAsync: (variables: Variables, options?: Parameters<typeof mutation.mutateAsync>[1]) =>
+      mutation.mutateAsync(withKey(variables), options),
+  };
 };
 
 export const useReportRoomMessage = () =>
@@ -253,11 +268,32 @@ export const useReportRoomMessage = () =>
     }) => roomService.reportMessage(roomId, messageId, reason),
   });
 
-export const useSendReaction = () =>
-  useMutation({
-    mutationFn: ({ roomId, emoji }: { roomId: string; emoji: string }) =>
-      roomService.sendReaction(roomId, emoji),
+export const useSendReaction = () => {
+  const mutation = useMutation({
+    mutationFn: ({
+      roomId,
+      emoji,
+      idempotencyKey,
+    }: {
+      roomId: string;
+      emoji: string;
+      idempotencyKey: string;
+    }) => roomService.sendReaction(roomId, emoji, idempotencyKey),
+    retry: retryTransientMutation,
   });
+  type Variables = { roomId: string; emoji: string };
+  const withKey = (variables: Variables) => ({
+    ...variables,
+    idempotencyKey: createIdempotencyKey(),
+  });
+  return {
+    ...mutation,
+    mutate: (variables: Variables, options?: Parameters<typeof mutation.mutate>[1]) =>
+      mutation.mutate(withKey(variables), options),
+    mutateAsync: (variables: Variables, options?: Parameters<typeof mutation.mutateAsync>[1]) =>
+      mutation.mutateAsync(withKey(variables), options),
+  };
+};
 
 export const useUpdateRoomTitle = () => {
   const qc = useQueryClient();

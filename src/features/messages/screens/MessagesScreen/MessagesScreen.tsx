@@ -77,10 +77,10 @@ const ConvoRow: React.FC<ConvoRowProps> = memo(({ convo, myId, onPress }) => {
       <Avatar uri={other.avatarUrl ?? undefined} name={other.displayName} size="lg" />
       <View className="flex-1">
         <View className="flex-row items-center justify-between">
-          <Text className="text-md font-body-bold text-ink" numberOfLines={1}>
+          <Text className="flex-1 mr-sm text-md font-body-bold text-ink" numberOfLines={1}>
             {other.displayName}
           </Text>
-          <Text className="text-xxs font-body text-ink-muted">{timeLabel}</Text>
+          <Text className="shrink-0 text-xxs font-body text-ink-muted">{timeLabel}</Text>
         </View>
         <View className="flex-row items-center justify-between mt-xxs">
           <Text
@@ -142,10 +142,10 @@ const GroupRow: React.FC<GroupRowProps> = memo(({ group, myId, onPress }) => {
       </View>
       <View className="flex-1">
         <View className="flex-row items-center justify-between">
-          <Text className="text-md font-body-bold text-ink" numberOfLines={1}>
+          <Text className="flex-1 mr-sm text-md font-body-bold text-ink" numberOfLines={1}>
             {title}
           </Text>
-          <Text className="text-xxs font-body text-ink-muted">{timeLabel}</Text>
+          <Text className="shrink-0 text-xxs font-body text-ink-muted">{timeLabel}</Text>
         </View>
         <View className="flex-row items-center justify-between mt-xxs">
           <Text
@@ -192,7 +192,14 @@ export const MessagesScreen: React.FC = () => {
     isFetchingNextPage,
     fetchNextPage,
   } = useConversations();
-  const { data: groups, refetch: refetchGroups, isRefetching: isRefetchingGroups } = useGroups();
+  const {
+    data: groups,
+    refetch: refetchGroups,
+    isRefetching: isRefetchingGroups,
+    hasNextPage: hasNextGroupPage,
+    isFetchingNextPage: isFetchingNextGroupPage,
+    fetchNextPage: fetchNextGroupPage,
+  } = useGroups();
   // "Online now" strip: people I follow who are currently online / recently-seen
   // and free to chat (GET /api/ext/presence/available). Copy the backend id
   // verbatim into a semantically named `peerId`; never derive a conversation id.
@@ -226,7 +233,15 @@ export const MessagesScreen: React.FC = () => {
 
   const handleEndReached = useCallback(() => {
     if (hasNextPage && !isFetchingNextPage) void fetchNextPage();
-  }, [fetchNextPage, hasNextPage, isFetchingNextPage]);
+    if (hasNextGroupPage && !isFetchingNextGroupPage) void fetchNextGroupPage();
+  }, [
+    fetchNextGroupPage,
+    fetchNextPage,
+    hasNextGroupPage,
+    hasNextPage,
+    isFetchingNextGroupPage,
+    isFetchingNextPage,
+  ]);
 
   const handleOpenDirectMessage = useCallback(
     (peerId: string) => navigation.navigate('ChatDetail', { conversationId: peerId }),
@@ -305,7 +320,7 @@ export const MessagesScreen: React.FC = () => {
           ItemSeparatorComponent={renderSeparator}
           ListHeaderComponent={ListHeader}
           ListFooterComponent={
-            isFetchingNextPage ? (
+            isFetchingNextPage || isFetchingNextGroupPage ? (
               <Loader size="small" accessibilityLabel={t('common.loading')} />
             ) : null
           }

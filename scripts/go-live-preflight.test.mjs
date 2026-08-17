@@ -5,7 +5,6 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
-
 import {
   buildPublicEndpoints,
   hasPlaceholder,
@@ -14,6 +13,7 @@ import {
   parseEnv,
   plistString,
   validateAndroidAab16KbCompatibility,
+  validateAndroidAppLinks,
   validateAndroidBundlePageAlignment,
   validateLegalDocumentAlignment,
   validateLegalPublicationControl,
@@ -27,11 +27,14 @@ import {
   validateCorsOrigins,
   validateElfLoadAlignment,
   validateAndroidManifestTargetSdk,
+  validateIosArtifactIdentity,
   validateIosFirebaseText,
   validateIosNativeConfiguration,
+  validateIosUniversalLinks,
   validateMediaS3Region,
   validateMetricsTokenSecretFile,
   validatePublicUrl,
+  validateJwtIssuerAudienceRollout,
   validateProductionLiveKitAndStripe,
 } from './go-live-preflight.mjs';
 
@@ -167,6 +170,42 @@ test('production LiveKit/Stripe contract keeps Stripe optional but atomic', () =
         STRIPE_RETURN_URL: 'https://payments.local/return',
       }),
     /hôte local ou privé interdit/u,
+  );
+});
+
+test('JWT issuer/audience rollout is strict by default and bounded to seven days', () => {
+  const now = Date.parse('2026-08-13T12:00:00Z');
+
+  assert.match(validateJwtIssuerAudienceRollout({}, now), /stricte/u);
+  assert.match(
+    validateJwtIssuerAudienceRollout(
+      { JWT_LEGACY_NO_ISS_AUD_ACCEPT_UNTIL: '2026-08-20T12:00:00Z' },
+      now,
+    ),
+    /borne/u,
+  );
+  assert.match(
+    validateJwtIssuerAudienceRollout(
+      { JWT_LEGACY_NO_ISS_AUD_ACCEPT_UNTIL: '2026-08-13T11:59:59Z' },
+      now,
+    ),
+    /expire/u,
+  );
+  assert.throws(
+    () =>
+      validateJwtIssuerAudienceRollout(
+        { JWT_LEGACY_NO_ISS_AUD_ACCEPT_UNTIL: '2026-08-20T12:00:01Z' },
+        now,
+      ),
+    /sept jours/u,
+  );
+  assert.throws(
+    () =>
+      validateJwtIssuerAudienceRollout(
+        { JWT_LEGACY_NO_ISS_AUD_ACCEPT_UNTIL: '2026-08-20 12:00:00' },
+        now,
+      ),
+    /timestamp ISO/u,
   );
 });
 
@@ -319,15 +358,281 @@ test('validatePublicUrl rejects local, cleartext and placeholder URLs', () => {
   );
 });
 
-test('acceptance evidence is bound to the exact Android and iOS artifacts and iOS build', t => {
+const IOS_UNIVERSAL_LINKS_ENTITLEMENTS = `<?xml version="1.0"?>
+<plist><dict>
+  <key>com.apple.developer.associated-domains</key>
+  <array>
+    <string>webcredentials:app.chathouse.com</string>
+    <string>applinks:app.chathouse.com</string>
+  </array>
+</dict></plist>`;
+
+function associationResponse(url, payload, options = {}) {
+  const { contentType = 'application/json; charset=utf-8', contentLength, ...overrides } = options;
+  const body = typeof payload === 'string' ? payload : JSON.stringify(payload);
+  return {
+    ok: true,
+    status: 200,
+    redirected: false,
+    url,
+    headers: {
+      get: name => {
+        if (name.toLowerCase() === 'content-type') return contentType;
+        if (name.toLowerCase() === 'content-length') {
+          return contentLength === undefined
+            ? String(Buffer.byteLength(body))
+            : String(contentLength);
+        }
+        return null;
+      },
+    },
+    text: async () => body,
+    ...overrides,
+  };
+}
+
+const VALID_AASA = {
+  applinks: {
+    details: [
+      {
+        appIDs: ['ABCDEFGHIJ.com.chathouse.app'],
+        components: [
+          { '/': '/invite/*' },
+          { '/': '/room/*' },
+          { '/': '/u/*' },
+          { '/': '/house/*' },
+        ],
+      },
+    ],
+  },
+};
+
+const ANDROID_APP_LINKS_MANIFEST = `<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <application><activity>
+    <intent-filter android:autoVerify="true">
+      <action android:name="android.intent.action.VIEW" />
+      <category android:name="android.intent.category.BROWSABLE" />
+      <data android:host="app.chathouse.com" android:scheme="https" />
+    </intent-filter>
+  </activity></application>
+</manifest>`;
+
+const PLAY_FINGERPRINT = 'A'.repeat(64);
+
+test('Android App Links binds the exact manifest host, relation, package and Play fingerprint', async () => {
+  const calls = [];
+  const expectedUrl = 'https://app.chathouse.com/.well-known/assetlinks.json';
+  const result = await validateAndroidAppLinks({
+    manifest: ANDROID_APP_LINKS_MANIFEST,
+    appUrl: 'https://app.chathouse.com/room/example',
+    signingSha256: PLAY_FINGERPRINT,
+    fetchImpl: async (url, options) => {
+      calls.push({ url, options });
+      return associationResponse(url, [
+        {
+          relation: ['delegate_permission/common.get_login_creds'],
+          target: {
+            namespace: 'android_app',
+            package_name: 'com.chathouse.app',
+            sha256_cert_fingerprints: [PLAY_FINGERPRINT],
+          },
+        },
+        {
+          relation: ['delegate_permission/common.handle_all_urls'],
+          target: {
+            namespace: 'android_app',
+            package_name: 'com.chathouse.app',
+            sha256_cert_fingerprints: [PLAY_FINGERPRINT],
+          },
+        },
+      ]);
+    },
+  });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, expectedUrl);
+  assert.equal(calls[0].options.redirect, 'error');
+  assert.match(result, /handle_all_urls|relation/u);
+});
+
+test('Android App Links is NO-GO before HTTP when the controlled host diverges', async () => {
+  let fetchCalls = 0;
+  await assert.rejects(
+    validateAndroidAppLinks({
+      manifest: ANDROID_APP_LINKS_MANIFEST,
+      appUrl: 'https://links.chathouse.com',
+      signingSha256: PLAY_FINGERPRINT,
+      fetchImpl: async () => {
+        fetchCalls += 1;
+        throw new Error('unexpected network call');
+      },
+    }),
+    /NO-GO App Links.*links\.chathouse\.com.*diverge.*app\.chathouse\.com/u,
+  );
+  assert.equal(fetchCalls, 0);
+});
+
+test('Android App Links rejects a matching package without handle_all_urls', async () => {
+  await assert.rejects(
+    validateAndroidAppLinks({
+      manifest: ANDROID_APP_LINKS_MANIFEST,
+      appUrl: 'https://app.chathouse.com',
+      signingSha256: PLAY_FINGERPRINT,
+      fetchImpl: async url =>
+        associationResponse(url, [
+          {
+            relation: ['delegate_permission/common.get_login_creds'],
+            target: {
+              namespace: 'android_app',
+              package_name: 'com.chathouse.app',
+              sha256_cert_fingerprints: [PLAY_FINGERPRINT],
+            },
+          },
+        ]),
+    }),
+    /NO-GO App Links.*handle_all_urls/u,
+  );
+});
+
+test('iOS Universal Links fetches the AASA on the exact entitled HTTPS host without redirects', async () => {
+  const calls = [];
+  const expectedUrl = 'https://app.chathouse.com/.well-known/apple-app-site-association';
+  const result = await validateIosUniversalLinks({
+    entitlements: IOS_UNIVERSAL_LINKS_ENTITLEMENTS,
+    appUrl: 'https://app.chathouse.com/welcome?source=mobile',
+    teamId: 'ABCDEFGHIJ',
+    fetchImpl: async (url, options) => {
+      calls.push({ url, options });
+      return associationResponse(url, VALID_AASA);
+    },
+  });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, expectedUrl);
+  assert.equal(calls[0].options.redirect, 'error');
+  assert.match(result, /app\.chathouse\.com.*5 routes/u);
+});
+
+test('iOS Universal Links accepts the legacy dictionary format only when all shared routes match', async () => {
+  const result = await validateIosUniversalLinks({
+    entitlements: IOS_UNIVERSAL_LINKS_ENTITLEMENTS,
+    appUrl: 'https://app.chathouse.com',
+    teamId: 'ABCDEFGHIJ',
+    fetchImpl: async url =>
+      associationResponse(url, {
+        applinks: {
+          details: {
+            'ABCDEFGHIJ.com.chathouse.app': {
+              paths: ['/invite/*', '/room/*', '/u/*', '/house/*'],
+            },
+          },
+        },
+      }),
+  });
+  assert.match(result, /5 routes/u);
+});
+
+test('iOS Universal Links rejects an App ID that declares no usable shared route', async () => {
+  await assert.rejects(
+    validateIosUniversalLinks({
+      entitlements: IOS_UNIVERSAL_LINKS_ENTITLEMENTS,
+      appUrl: 'https://app.chathouse.com',
+      teamId: 'ABCDEFGHIJ',
+      fetchImpl: async url =>
+        associationResponse(url, {
+          applinks: { details: [{ appID: 'ABCDEFGHIJ.com.chathouse.app', paths: [] }] },
+        }),
+    }),
+    /NO-GO Universal Links.*routes partagées non couvertes.*\/invite\//u,
+  );
+});
+
+test('association files reject the wrong JSON media type and Apple-oversized AASA content', async () => {
+  await assert.rejects(
+    validateIosUniversalLinks({
+      entitlements: IOS_UNIVERSAL_LINKS_ENTITLEMENTS,
+      appUrl: 'https://app.chathouse.com',
+      teamId: 'ABCDEFGHIJ',
+      fetchImpl: async url => associationResponse(url, VALID_AASA, { contentType: 'text/plain' }),
+    }),
+    /NO-GO Universal Links.*Content-Type.*application\/json/u,
+  );
+
+  await assert.rejects(
+    validateIosUniversalLinks({
+      entitlements: IOS_UNIVERSAL_LINKS_ENTITLEMENTS,
+      appUrl: 'https://app.chathouse.com',
+      teamId: 'ABCDEFGHIJ',
+      fetchImpl: async url =>
+        associationResponse(url, VALID_AASA, { contentLength: 128 * 1024 + 1 }),
+    }),
+    /NO-GO Universal Links.*128 Kio/u,
+  );
+});
+
+test('iOS Universal Links is NO-GO before HTTP when the controlled host diverges from entitlements', async () => {
+  let fetchCalls = 0;
+
+  await assert.rejects(
+    validateIosUniversalLinks({
+      entitlements: IOS_UNIVERSAL_LINKS_ENTITLEMENTS,
+      appUrl: 'https://links.chathouse.com',
+      teamId: 'ABCDEFGHIJ',
+      fetchImpl: async () => {
+        fetchCalls += 1;
+        throw new Error('unexpected network call');
+      },
+    }),
+    /NO-GO Universal Links.*links\.chathouse\.com.*diverge.*app\.chathouse\.com/u,
+  );
+  assert.equal(fetchCalls, 0);
+});
+
+test('iOS Universal Links is NO-GO before HTTP for a non-HTTPS application URL', async () => {
+  let fetchCalls = 0;
+
+  await assert.rejects(
+    validateIosUniversalLinks({
+      entitlements: IOS_UNIVERSAL_LINKS_ENTITLEMENTS,
+      appUrl: 'http://app.chathouse.com',
+      teamId: 'ABCDEFGHIJ',
+      fetchImpl: async () => {
+        fetchCalls += 1;
+        throw new Error('unexpected network call');
+      },
+    }),
+    /NO-GO Universal Links.*protocole requis: https:/u,
+  );
+  assert.equal(fetchCalls, 0);
+});
+
+test('iOS Universal Links rejects any AASA redirect even when a client returns a response', async () => {
+  await assert.rejects(
+    validateIosUniversalLinks({
+      entitlements: IOS_UNIVERSAL_LINKS_ENTITLEMENTS,
+      appUrl: 'https://app.chathouse.com',
+      teamId: 'ABCDEFGHIJ',
+      fetchImpl: async () =>
+        associationResponse('https://cdn.chathouse.com/apple-app-site-association', VALID_AASA, {
+          redirected: true,
+        }),
+    }),
+    /NO-GO Universal Links.*redirection interdite/u,
+  );
+});
+
+test('acceptance evidence is bound to the exact Android archive, iOS archive, IPA and build', t => {
   const artifactDirectory = mkdtempSync(path.join(tmpdir(), 'chathouse-evidence-'));
   t.after(() => rmSync(artifactDirectory, { recursive: true, force: true }));
   const aabPath = path.join(artifactDirectory, 'android-production.aab');
   const iosTarballPath = path.join(artifactDirectory, 'ChatHouse.xcarchive.tgz');
+  const iosIpaPath = path.join(artifactDirectory, 'ChatHouse.ipa');
   const aab = Buffer.from('signed Android fixture');
   const iosTarball = Buffer.from('signed iOS archive fixture');
+  const iosIpa = Buffer.from('signed iOS IPA fixture');
   writeFileSync(aabPath, aab);
   writeFileSync(iosTarballPath, iosTarball);
+  writeFileSync(iosIpaPath, iosIpa);
   const sha256 = value => createHash('sha256').update(value).digest('hex');
   const testedAt = new Date().toISOString();
   const evidence = {
@@ -339,6 +644,7 @@ test('acceptance evidence is bound to the exact Android and iOS artifacts and iO
     },
     ios: {
       artifact_sha256: sha256(iosTarball),
+      ipa_sha256: sha256(iosIpa),
       build_number: '42',
       testflight: { status: 'passed', tested_at: testedAt, reference: 'testflight-build-42' },
       physical_devices: [
@@ -347,9 +653,22 @@ test('acceptance evidence is bound to the exact Android and iOS artifacts and iO
       ],
     },
   };
+  const iosIdentity = {
+    bundleId: 'com.chathouse.app',
+    versionName: '1.2.3',
+    buildNumber: '42',
+  };
 
   assert.match(
-    validateAcceptanceEvidence(evidence, 'a'.repeat(40), aabPath, iosTarballPath, '42'),
+    validateAcceptanceEvidence(
+      evidence,
+      'a'.repeat(40),
+      aabPath,
+      iosTarballPath,
+      iosIpaPath,
+      iosIdentity,
+      iosIdentity,
+    ),
     /Artefacts Android\/iOS exacts/u,
   );
   assert.throws(
@@ -359,13 +678,74 @@ test('acceptance evidence is bound to the exact Android and iOS artifacts and iO
         'a'.repeat(40),
         aabPath,
         iosTarballPath,
-        '42',
+        iosIpaPath,
+        iosIdentity,
+        iosIdentity,
       ),
     /SHA-256 de l'archive iOS/u,
   );
   assert.throws(
-    () => validateAcceptanceEvidence(evidence, 'a'.repeat(40), aabPath, iosTarballPath, '43'),
+    () =>
+      validateAcceptanceEvidence(
+        { ...evidence, ios: { ...evidence.ios, ipa_sha256: '0'.repeat(64) } },
+        'a'.repeat(40),
+        aabPath,
+        iosTarballPath,
+        iosIpaPath,
+        iosIdentity,
+        iosIdentity,
+      ),
+    /SHA-256 de l'IPA/u,
+  );
+  assert.throws(() => {
+    const iosWithoutIpaHash = { ...evidence.ios };
+    delete iosWithoutIpaHash.ipa_sha256;
+    return validateAcceptanceEvidence(
+      { ...evidence, ios: iosWithoutIpaHash },
+      'a'.repeat(40),
+      aabPath,
+      iosTarballPath,
+      iosIpaPath,
+      iosIdentity,
+      iosIdentity,
+    );
+  }, /SHA-256 de l'IPA/u);
+  assert.throws(
+    () =>
+      validateAcceptanceEvidence(
+        evidence,
+        'a'.repeat(40),
+        aabPath,
+        iosTarballPath,
+        iosIpaPath,
+        { ...iosIdentity, buildNumber: '43' },
+        { ...iosIdentity, buildNumber: '43' },
+      ),
     /numéro de build iOS/u,
+  );
+});
+
+test('iOS IPA identity must exactly match the archive bundle, version and build', () => {
+  const archive = {
+    bundleId: 'com.chathouse.app',
+    versionName: '1.2.3',
+    buildNumber: '42',
+  };
+
+  assert.deepEqual(validateIosArtifactIdentity(archive, { ...archive }), archive);
+  for (const [field, value] of [
+    ['bundleId', 'com.example.other'],
+    ['versionName', '1.2.4'],
+    ['buildNumber', '43'],
+  ]) {
+    assert.throws(
+      () => validateIosArtifactIdentity(archive, { ...archive, [field]: value }),
+      field === 'bundleId' ? /bundle ID iOS inattendu/u : /ne correspond pas/u,
+    );
+  }
+  assert.throws(
+    () => validateIosArtifactIdentity(archive, { ...archive, versionName: '1.2' }),
+    /version iOS invalide/u,
   );
 });
 

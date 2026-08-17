@@ -70,6 +70,54 @@ export interface SocketRateLimitNotice {
   disconnecting: boolean;
 }
 
+interface RedisEvalClient {
+  eval(script: string, options: { keys: string[]; arguments: string[] }): Promise<unknown>;
+}
+
+interface DistributedQuotaSpec {
+  limit: number;
+  windowMs: number;
+}
+
+const DISTRIBUTED_QUOTAS: Partial<Record<SocketEventCategory, DistributedQuotaSpec>> = {
+  captions: { limit: 2_400, windowMs: 60_000 },
+  presence: { limit: 12, windowMs: 60_000 },
+  location: { limit: 240, windowMs: 60_000 },
+  mutation: { limit: 600, windowMs: 60_000 },
+};
+
+const DISTRIBUTED_QUOTA_SCRIPT = `
+local count = redis.call('INCR', KEYS[1])
+if count == 1 then redis.call('PEXPIRE', KEYS[1], ARGV[1]) end
+local ttl = redis.call('PTTL', KEYS[1])
+return {count, ttl}
+`;
+
+/** Coarse account budget shared by every horizontally-scaled Socket.IO node. */
+export class DistributedSocketEventRateLimiter {
+  constructor(
+    private readonly client: RedisEvalClient,
+    private readonly now: () => number = Date.now,
+  ) {}
+
+  async check(
+    userId: string,
+    category: SocketEventCategory,
+  ): Promise<{ allowed: boolean; retryAfterMs: number }> {
+    const spec = DISTRIBUTED_QUOTAS[category];
+    if (!spec) return { allowed: true, retryAfterMs: 0 };
+    const window = Math.floor(this.now() / spec.windowMs);
+    const raw = await this.client.eval(DISTRIBUTED_QUOTA_SCRIPT, {
+      keys: [`socket:quota:${category}:${userId}:${window}`],
+      arguments: [String(spec.windowMs)],
+    });
+    if (!Array.isArray(raw)) throw new Error('Invalid distributed socket quota response');
+    const count = Number(raw[0]);
+    const ttl = Math.max(1, Number(raw[1]) || spec.windowMs);
+    return { allowed: Number.isFinite(count) && count <= spec.limit, retryAfterMs: ttl };
+  }
+}
+
 const DEFAULT_SOCKET_OVERALL: BucketSpec = { capacity: 240, refillPerSecond: 60 };
 const DEFAULT_USER_OVERALL: BucketSpec = { capacity: 360, refillPerSecond: 90 };
 const DEFAULT_USER_STATE_RETENTION_MS = 5 * 60 * 1_000;
@@ -316,6 +364,7 @@ const acknowledgeRejection = (
 export const attachSocketEventRateLimiter = (
   socket: Socket,
   limiter: SocketEventRateLimiter,
+  distributedLimiter?: DistributedSocketEventRateLimiter,
 ): void => {
   const userId = getUserId(socket);
   limiter.register(socket.id, userId);
@@ -323,26 +372,41 @@ export const attachSocketEventRateLimiter = (
   socket.use((packet, next) => {
     const event = typeof packet[0] === 'string' ? packet[0] : '';
     const decision = limiter.check(socket.id, event);
-    if (decision.allowed) {
+    const reject = (retryAfterMs: number, notify: boolean, disconnect: boolean): void => {
+      const notice: SocketRateLimitNotice = {
+        code: 'SOCKET_RATE_LIMITED',
+        event: event.slice(0, 80),
+        category: decision.category,
+        retryAfterMs,
+        disconnecting: disconnect,
+      };
+      acknowledgeRejection(event, packet, notice);
+      if (notify || disconnect) socket.emit('socket:rate_limited', notice);
+      if (disconnect) socket.disconnect(true);
+    };
+
+    if (!decision.allowed) {
+      reject(decision.retryAfterMs, decision.notify, decision.disconnect);
+      return;
+    }
+    if (!distributedLimiter) {
       next();
       return;
     }
 
-    const notice: SocketRateLimitNotice = {
-      code: 'SOCKET_RATE_LIMITED',
-      event: event.slice(0, 80),
-      category: decision.category,
-      retryAfterMs: decision.retryAfterMs,
-      disconnecting: decision.disconnect,
-    };
-    acknowledgeRejection(event, packet, notice);
-    if (decision.notify || decision.disconnect) socket.emit('socket:rate_limited', notice);
-
-    // Only sustained traffic after the budget is already exhausted is treated
-    // as hostile. Ordinary bursts are dropped but keep the audio room alive.
-    if (decision.disconnect) socket.disconnect(true);
-    // Do not call next(): the packet is intentionally discarded before any
-    // feature handler or persistence side effect can run.
+    void distributedLimiter
+      .check(userId, decision.category)
+      .then(globalDecision => {
+        if (!socket.connected) return;
+        if (globalDecision.allowed) next();
+        else reject(globalDecision.retryAfterMs, true, false);
+      })
+      .catch(() => {
+        // Mutating/caption/location/presence categories fail closed when the
+        // shared quota store is unavailable. Hot RTC and probe categories do
+        // not use Redis and already continued above with an allowed result.
+        if (socket.connected) reject(1_000, true, false);
+      });
   });
 
   socket.on('disconnect', () => limiter.unregister(socket.id));

@@ -30,9 +30,15 @@ export const ExtShareSheet: React.FC<Props> = ({ roomId, visible, onClose }) => 
   const { t } = useTranslation();
   const [links, setLinks] = useState<ShareLinks | null>(null);
   const [loading, setLoading] = useState(false);
+  const [retryAttempt, setRetryAttempt] = useState(0);
 
   useEffect(() => {
-    if (!visible || !roomId) return;
+    if (!visible) return;
+    if (!roomId) {
+      setLinks(null);
+      setLoading(false);
+      return;
+    }
     let cancelled = false;
     setLoading(true);
     setLinks(null);
@@ -48,7 +54,7 @@ export const ExtShareSheet: React.FC<Props> = ({ roomId, visible, onClose }) => 
     return () => {
       cancelled = true;
     };
-  }, [visible, roomId]);
+  }, [retryAttempt, roomId, visible]);
 
   const handleOpen = async (option: (typeof OPTIONS)[number]['key']): Promise<void> => {
     if (!links) return;
@@ -79,32 +85,52 @@ export const ExtShareSheet: React.FC<Props> = ({ roomId, visible, onClose }) => 
     <ExtBottomSheet visible={visible} onClose={onClose} sheetStyle={styles.sheet}>
       <Text style={styles.title}>{t('extensions.share.title', 'Share this room')}</Text>
       {loading ? (
-        <ActivityIndicator style={styles.loader} color={colors.primary} />
+        <ActivityIndicator
+          style={styles.loader}
+          color={colors.primary}
+          accessibilityRole="progressbar"
+          accessibilityLabel={t('extensions.share.loading', 'Building share links')}
+        />
       ) : !links ? (
-        <Text style={styles.error}>
-          {t('extensions.share.error', 'Failed to build share links.')}
-        </Text>
-      ) : (
         <>
-          {OPTIONS.map(opt => (
+          <Text style={styles.error} accessibilityRole="alert">
+            {t('extensions.share.error', 'Failed to build share links.')}
+          </Text>
+          {roomId ? (
             <Pressable
-              key={opt.key}
-              style={styles.row}
-              onPress={() => void handleOpen(opt.key)}
+              style={styles.retry}
+              onPress={() => setRetryAttempt(attempt => attempt + 1)}
               accessibilityRole="button"
-              accessibilityLabel={t('extensions.share.shareViaA11y', 'Share via {{target}}', {
-                target: optionLabel(opt),
-              })}
+              accessibilityLabel={t('common.retry', 'Retry')}
             >
-              <Text style={styles.emoji}>{opt.emoji}</Text>
-              <Text style={styles.label}>{optionLabel(opt)}</Text>
+              <Text style={styles.retryText}>{t('common.retry', 'Retry')}</Text>
             </Pressable>
-          ))}
-          <Pressable style={styles.cancel} onPress={onClose}>
-            <Text style={styles.cancelText}>{t('common.cancel', 'Cancel')}</Text>
-          </Pressable>
+          ) : null}
         </>
+      ) : (
+        OPTIONS.map(opt => (
+          <Pressable
+            key={opt.key}
+            style={styles.row}
+            onPress={() => void handleOpen(opt.key)}
+            accessibilityRole="button"
+            accessibilityLabel={t('extensions.share.shareViaA11y', 'Share via {{target}}', {
+              target: optionLabel(opt),
+            })}
+          >
+            <Text style={styles.emoji}>{opt.emoji}</Text>
+            <Text style={styles.label}>{optionLabel(opt)}</Text>
+          </Pressable>
+        ))
       )}
+      <Pressable
+        style={styles.cancel}
+        onPress={onClose}
+        accessibilityRole="button"
+        accessibilityLabel={t('common.cancel', 'Cancel')}
+      >
+        <Text style={styles.cancelText}>{t('common.cancel', 'Cancel')}</Text>
+      </Pressable>
     </ExtBottomSheet>
   );
 };
@@ -125,6 +151,15 @@ const styles = StyleSheet.create({
     color: colors.text,
   },
   error: { color: colors.danger, textAlign: 'center', marginVertical: 16 },
+  retry: {
+    minHeight: 44,
+    alignSelf: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    backgroundColor: colors.primary,
+  },
+  retryText: { color: colors.onPrimary, fontSize: 15, fontWeight: '600' },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -135,6 +170,6 @@ const styles = StyleSheet.create({
   },
   emoji: { fontSize: 20, width: 28, textAlign: 'center' },
   label: { fontSize: 15, color: colors.text },
-  cancel: { marginTop: 12, paddingVertical: 14, alignItems: 'center' },
+  cancel: { minHeight: 44, marginTop: 12, paddingVertical: 12, alignItems: 'center' },
   cancelText: { fontSize: 15, color: colors.textMuted },
 });

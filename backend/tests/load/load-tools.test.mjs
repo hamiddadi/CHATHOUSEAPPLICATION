@@ -201,6 +201,10 @@ test('k6 smoke test retains the shared guard, timeouts and aborting thresholds',
   assert.match(source, /validateLoadTarget/u);
   assert.match(source, /exec\.test\.abort/u);
   assert.match(source, /GET \/health \[setup\]/u);
+  assert.match(source, /GET \/terms \[setup\]/u);
+  assert.match(source, /termsAccepted: true/u);
+  assert.match(source, /privacyNoticeAcknowledged: true/u);
+  assert.match(source, /legalDocumentVersion,/u);
   assert.match(source, /timeout: `\$\{REQUEST_TIMEOUT_MS\}ms`/u);
   assert.match(source, /abortOnFail: true/u);
   assert.doesNotMatch(source, /https:\/\/api\.chathouse\.(?:app|com)/u);

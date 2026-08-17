@@ -1440,7 +1440,7 @@
     "delete": {
       "title": "Delete my account",
       "description": "The request immediately disables your account, revokes sessions and hides your profile. Permanent purge occurs after 30 days.",
-      "grace": "During those 30 days, a successful sign-in automatically restores a self-deleted account. Without a sign-in, account data and private media are purged.",
+      "grace": "During those 30 days, signing in opens a recovery-only session. Your account is restored only after you explicitly confirm. Without restoration, account data and private media are purged.",
       "confirmInputLabel": "To confirm, type: ",
       "buttonDelete": "Request account deletion",
       "buttonCancel": "Cancel",
@@ -1558,7 +1558,7 @@
     "restore": {
       "title": "Account scheduled for deletion",
       "body": "Your account is being deleted. Would you like to restore it and keep your data?",
-      "dismiss": "Not now",
+      "dismiss": "Sign out",
       "confirm": "Restore",
       "successTitle": "Account restored",
       "successBody": "Welcome back — your account is active again.",
@@ -1635,6 +1635,7 @@
       "CLUB_008": "This invitation link has expired.",
       "CLUB_009": "This invitation link is invalid.",
       "ACCOUNT_001": "Account deletion is already scheduled.",
+      "ACCOUNT_002": "Restore your account before continuing.",
       "AGE_001": "You must confirm that you are at least 16 years old.",
       "MAPS_001": "Enable map visibility before sharing your location.",
       "UPLOAD_001": "This media file is too large.",

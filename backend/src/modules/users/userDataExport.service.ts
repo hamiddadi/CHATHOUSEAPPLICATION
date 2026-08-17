@@ -2,7 +2,7 @@ import { prisma } from '../../config/database';
 import { env } from '../../config/env';
 import { AppError } from '../../middlewares/error.middleware';
 import { exportExtensionData } from '../../extensions/gdpr';
-import { expiringMediaUrlFor } from '../media/media-url';
+import { expiringMediaUrlFor, mediaIdFromPrivateUrl } from '../media/media-url';
 import { legalAcceptanceSelect } from '../auth/legal-acceptance';
 
 export const USER_EXPORT_BATCH_SIZE = 250;
@@ -10,23 +10,12 @@ export const USER_EXPORT_BATCH_SIZE = 250;
 type ExportMediaReference = { mediaId: string; downloadUrl: string } | { externalUrl: string };
 
 const mediaIdFromInternalUrl = (value: string): string | null => {
-  let parsed: URL;
   try {
-    parsed = new URL(value);
+    if (env.PUBLIC_URL && new URL(value).origin !== new URL(env.PUBLIC_URL).origin) return null;
   } catch {
     return null;
   }
-  if (env.PUBLIC_URL && parsed.origin !== new URL(env.PUBLIC_URL).origin) return null;
-  const parts = parsed.pathname.split('/').filter(Boolean);
-  const stable = parts.length === 3;
-  const expiring = parts.length === 4 && /^\d{10}$/.test(parts[2] ?? '');
-  const mediaId = parts[1];
-  if (parts[0] !== 'media' || (!stable && !expiring) || !mediaId || !parts.at(-1)) return null;
-  try {
-    return decodeURIComponent(mediaId);
-  } catch {
-    return null;
-  }
+  return mediaIdFromPrivateUrl(value, { allowExpired: true });
 };
 
 const mediaReferenceForExport = (
@@ -93,6 +82,7 @@ const exportProfile = (userId: string) =>
       interests: true,
       isPrivateAccount: true,
       isVisible: true,
+      allowContactDiscovery: true,
       latitude: true,
       longitude: true,
       allowWaves: true,
@@ -135,7 +125,7 @@ const archiveChunks = async function* (
     accountDeletionGraceDays: env.ACCOUNT_DELETION_GRACE_DAYS,
     auditLogRetentionDays: env.AUDIT_LOG_RETENTION_DAYS,
     mediaDownloadUrlTtlSeconds: env.MEDIA_EXPORT_URL_TTL_SECONDS,
-    note: 'A deletion request disables the account immediately. Signing in during the grace period restores a self-deleted account; otherwise automated purge follows.',
+    note: 'A deletion request disables the account immediately. Signing in during the grace period opens a recovery-only session; restoration requires explicit confirmation, otherwise automated purge follows.',
   })}`;
   yield `${prefix('profile')}${json({
     ...portableProfile,

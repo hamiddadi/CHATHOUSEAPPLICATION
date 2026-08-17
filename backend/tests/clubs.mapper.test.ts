@@ -48,6 +48,7 @@ const makeClub = (
   category: 'general',
   categoryEmoji: '🏠',
   iconUrl: null,
+  iconMediaObjectId: null,
   privacy,
   ownerId,
   memberCount,

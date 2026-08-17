@@ -115,6 +115,55 @@ describe('Transactional idempotency under retries and concurrent devices', () =>
     expect(conflictingReplay.body.error.code).toBe('IDEMPOTENCY_001');
   });
 
+  it('reclaims one expired key under concurrent retries without a P2025 response', async () => {
+    const host = await register(app);
+    userIds.push(host.id);
+    const idempotencyKey = key('expired-room');
+    const payload = { title: `Expired idempotency room ${rand()}` };
+
+    const original = await request(app)
+      .post('/api/rooms')
+      .set('Authorization', `Bearer ${host.token}`)
+      .set('Idempotency-Key', idempotencyKey)
+      .send(payload);
+    expect(original.status).toBe(201);
+    const originalId = original.body.data.id as string;
+    roomIds.push(originalId);
+    outboxAggregateIds.push(originalId);
+    const ended = await request(app)
+      .post(`/api/rooms/${originalId}/end`)
+      .set('Authorization', `Bearer ${host.token}`);
+    expect(ended.status).toBe(200);
+
+    await prisma.idempotencyKey.update({
+      where: {
+        userId_scope_key: { userId: host.id, scope: 'rooms.create', key: idempotencyKey },
+      },
+      data: { expiresAt: new Date(Date.now() - 1_000) },
+    });
+
+    const retries = await Promise.all(
+      Array.from({ length: 2 }, () =>
+        request(app)
+          .post('/api/rooms')
+          .set('Authorization', `Bearer ${host.token}`)
+          .set('Idempotency-Key', idempotencyKey)
+          .send(payload),
+      ),
+    );
+    expect(retries.map(response => response.status)).toEqual([201, 201]);
+    const replacementId = retries[0]?.body.data.id as string;
+    expect(retries[1]?.body.data.id).toBe(replacementId);
+    expect(replacementId).not.toBe(originalId);
+    roomIds.push(replacementId);
+    expect(await prisma.room.count({ where: { hostId: host.id, title: payload.title } })).toBe(2);
+    expect(
+      await prisma.idempotencyKey.count({
+        where: { userId: host.id, scope: 'rooms.create', key: idempotencyKey },
+      }),
+    ).toBe(1);
+  });
+
   it('replays concurrent club creation exactly once and binds the key to its payload', async () => {
     const owner = await register(app);
     userIds.push(owner.id);
@@ -255,6 +304,62 @@ describe('Transactional idempotency under retries and concurrent devices', () =>
     expect((await prisma.room.findUniqueOrThrow({ where: { id: roomId } })).participantCount).toBe(
       1,
     );
+  });
+
+  it('replays room chat and reactions exactly once across concurrent retries', async () => {
+    const host = await register(app);
+    userIds.push(host.id);
+
+    const created = await request(app)
+      .post('/api/rooms')
+      .set('Authorization', `Bearer ${host.token}`)
+      .send({ title: `Idempotent room chat ${rand()}` });
+    expect(created.status).toBe(201);
+    const roomId = created.body.data.id as string;
+    roomIds.push(roomId);
+
+    const messageKey = key('room-message');
+    const messagePayload = { content: `Only once ${rand()}` };
+    const messages = await Promise.all(
+      Array.from({ length: 2 }, () =>
+        request(app)
+          .post(`/api/rooms/${roomId}/messages`)
+          .set('Authorization', `Bearer ${host.token}`)
+          .set('Idempotency-Key', messageKey)
+          .send(messagePayload),
+      ),
+    );
+    expect(messages.map(response => response.status)).toEqual([201, 201]);
+    expect(messages[1]?.body.data.id).toBe(messages[0]?.body.data.id);
+    expect(
+      await prisma.roomChatMessage.count({
+        where: { roomId, userId: host.id, content: messagePayload.content },
+      }),
+    ).toBe(1);
+
+    const conflictingMessage = await request(app)
+      .post(`/api/rooms/${roomId}/messages`)
+      .set('Authorization', `Bearer ${host.token}`)
+      .set('Idempotency-Key', messageKey)
+      .send({ content: 'Different payload' });
+    expect(conflictingMessage.status).toBe(409);
+    expect(conflictingMessage.body.error.code).toBe('IDEMPOTENCY_001');
+
+    const reactionKey = key('room-reaction');
+    const reactions = await Promise.all(
+      Array.from({ length: 2 }, () =>
+        request(app)
+          .post(`/api/rooms/${roomId}/reactions`)
+          .set('Authorization', `Bearer ${host.token}`)
+          .set('Idempotency-Key', reactionKey)
+          .send({ emoji: '👍' }),
+      ),
+    );
+    expect(reactions.map(response => response.status)).toEqual([201, 201]);
+    expect(reactions[1]?.body.data.id).toBe(reactions[0]?.body.data.id);
+    expect(
+      await prisma.roomReaction.count({ where: { roomId, userId: host.id, emoji: '👍' } }),
+    ).toBe(1);
   });
 
   it('replays group creation/messages/member admission exactly once', async () => {
@@ -600,7 +705,7 @@ describe('Transactional idempotency under retries and concurrent devices', () =>
           senderId: sender.id,
           receiverId: receiver.id,
           kind: 'VOICE',
-          audioUrl: voice.url,
+          mediaObjectId: voice.id,
         },
       }),
     ).toBe(1);

@@ -179,7 +179,12 @@ export const roomsController = {
 
   async sendMessage(req: Request, res: Response) {
     const input = sendRoomMessageSchema.parse(req.body);
-    const msg = await roomsService.sendRoomMessage(paramId(req, 'id'), requireUserId(req), input);
+    const msg = await roomsService.sendRoomMessage(
+      paramId(req, 'id'),
+      requireUserId(req),
+      input,
+      req.get('Idempotency-Key'),
+    );
     sendOk(res, msg, 201);
   },
 
@@ -190,7 +195,12 @@ export const roomsController = {
 
   async reaction(req: Request, res: Response) {
     const input = sendReactionSchema.parse(req.body);
-    const r = await roomsService.sendReaction(paramId(req, 'id'), requireUserId(req), input);
+    const r = await roomsService.sendReaction(
+      paramId(req, 'id'),
+      requireUserId(req),
+      input,
+      req.get('Idempotency-Key'),
+    );
     sendOk(res, r, 201);
   },
 

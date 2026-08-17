@@ -158,6 +158,45 @@ describe('admin actor authorization is revalidated under the mutation lock', () 
     expect(failureCode(result)).toBe('AUTH_007');
     expect((await prisma.user.findUnique({ where: { id: targetId } }))?.deletedAt).toBeNull();
   });
+
+  it('rejects report resolution when the actor is demoted while the mutation is in flight', async () => {
+    const report = await prisma.report.create({
+      data: {
+        reporterId: targetId,
+        reportedId: actorId,
+        reason: 'SPAM',
+      },
+      select: { id: true },
+    });
+
+    let observed!: Promise<{ ok: boolean; error?: unknown }>;
+    await prisma.$transaction(
+      async tx => {
+        // Hold the actor row so the service can enter the in-flight window but
+        // cannot make its transactional authorization decision yet.
+        await tx.$queryRaw`SELECT id FROM "User" WHERE id = ${actorId} FOR UPDATE`;
+        observed = adminService
+          .resolveReport(actorId, report.id, { outcome: 'resolved' }, context)
+          .then(
+            () => ({ ok: true }),
+            (error: unknown) => ({ ok: false, error }),
+          );
+        await new Promise(resolve => setTimeout(resolve, 25));
+        await tx.user.update({ where: { id: actorId }, data: { appRole: 'USER' } });
+      },
+      { maxWait: 5_000, timeout: 15_000 },
+    );
+
+    expect(failureCode(await observed)).toBe('AUTH_008');
+    expect(
+      (await prisma.report.findUniqueOrThrow({ where: { id: report.id } })).resolvedAt,
+    ).toBeNull();
+    expect(
+      await prisma.auditLog.count({
+        where: { actorId, targetType: 'report', targetId: report.id },
+      }),
+    ).toBe(0);
+  });
 });
 
 export {};

@@ -32,19 +32,23 @@ Le verdict `GO` exige simultanément :
 - les environnements mobile/backend et les deux configurations Firebase réels ;
 - une clé upload et un AAB non-debug incluant `arm64-v8a`, avec les endpoints
   production effectivement embarqués ;
-- une archive `.xcarchive` Apple Distribution, son profil production et le bon
-  Team ID ;
+- une archive `.xcarchive` Apple Distribution et l’IPA App Store Connect issu du
+  même build, avec le profil production et le bon Team ID ;
 - DNS, TLS, pages publiques, `assetlinks.json` et
   `apple-app-site-association` accessibles et cohérents ;
 - les documents juridiques et fiches stores sans brouillon ni placeholder ;
-- une preuve liée au SHA source, au SHA-256 exact de l’AAB, au SHA-256 exact de
-  `ChatHouse.xcarchive.tgz` et au numéro de build iOS pour Play Internal Testing,
-  TestFlight et les tests physiques Android, iPhone et iPad. Le format est fourni dans
+- une preuve liée au SHA source, au SHA-256 exact de l’AAB, aux SHA-256 exacts de
+  `ChatHouse.xcarchive.tgz` et `ChatHouse.ipa`, et au numéro de build iOS pour Play
+  Internal Testing, TestFlight et les tests physiques Android, iPhone et iPad. Le
+  préflight confirme aussi que l’archive et l’IPA portent le même bundle, la même
+  version et le même build. Le format est fourni dans
   `docs/GO-LIVE-EVIDENCE.example.json`.
 
 Dans GitHub Actions, lancer manuellement **Go-Live Preflight - Android and iOS**
-sur un commit déjà intégré à `main`, avec les IDs des runs ayant produit les
-artefacts signés. L’environnement GitHub protégé `production` doit fournir :
+sur un commit déjà intégré à `main`, avec le même ID de run pour les deux
+artefacts. Ce run doit être un `workflow_dispatch` de **Mobile Store Artifacts -
+Signed Android and iOS** lancé sur `main`. L’environnement GitHub protégé
+`production` doit fournir :
 
 - secrets : `MOBILE_PRODUCTION_ENV_BASE64`,
   `BACKEND_PRODUCTION_ENV_BASE64`, `FIREBASE_ANDROID_CONFIG_BASE64`,
@@ -67,7 +71,7 @@ ou un artefact provenant d’un autre commit reste un `NO-GO`.
 | Frontend React Native | Lint, format, typecheck, couverture et suite Jest bloquants dans la CI   | Rejouer tous les gates puis tester les binaires signés sur appareils physiques |
 | Backend               | Lint, typecheck, build, tests, migrations et charge bloquants dans la CI | Drill sur clone anonymisé, restauration et déploiement staging                 |
 | Android               | Gardes Release, TLS, signature stricte et compatibilité 16 Kio contrôlés | AAB signé exact, Play Internal et parcours physiques                           |
-| iOS                   | Gardes Release, ressources, signature et profil d’archive contrôlés      | Archive signée exacte, TestFlight, iPhone et iPad physiques                    |
+| iOS                   | Gardes Release, ressources, archive/IPA, signature et profil contrôlés   | IPA exacte sur TestFlight, iPhone et iPad physiques                            |
 | Production            | Déploiement par digest, smoke tests et rollback automatisés              | Infrastructure publique et exercice réel rattachés au digest candidat          |
 
 La présence d’un gate ne constitue pas sa preuve d’exécution. Le SHA candidat
@@ -127,8 +131,9 @@ Références détaillées :
       Play App Signing dans Firebase et les restrictions Google Maps.
 - [ ] Publier
       `https://app.chathouse.com/.well-known/assetlinks.json` avec l’empreinte
-      Play App Signing, puis vérifier les App Links sur un binaire installé par
-      Play.
+      Play App Signing, la relation `delegate_permission/common.handle_all_urls`
+      et le package exact, puis vérifier les App Links sur un binaire installé
+      par Play.
 - [ ] Tester physiquement Android 12 à 16 : OTP, refus/acceptation micro,
       Bluetooth, audio en arrière-plan, interruption audio, localisation
       approximative/précise, notifications au premier plan/arrière-plan/app
@@ -156,8 +161,11 @@ Références détaillées :
       déclaration de chiffrement pour LiveKit/WebRTC.
 - [ ] Publier
       `https://app.chathouse.com/.well-known/apple-app-site-association` avec le
-      Team ID réel, puis vérifier Universal Links.
-- [ ] Distribuer exactement cette archive sur TestFlight.
+      Team ID réel et les routes `/invite/*`, `/room/*`, `/u/*`, `/house/*`;
+      servir le JSON direct sans redirection, en `application/json`, sous
+      128 Kio, puis vérifier Universal Links.
+- [ ] Distribuer exactement `ChatHouse.ipa` sur TestFlight et reporter son
+      `ipa_sha256` dans les preuves protégées.
 - [ ] Tester sur iPhone **et iPad** physiques : APNs/FCM, notifications app
       fermée, micro, audio Bluetooth, arrière-plan, interruptions, parole,
       localisation, LiveKit, réseau faible, reprise après crash et suppression.
@@ -230,8 +238,9 @@ Référence : [`runbook.md`](../backend/docs/deployment/runbook.md).
 ## 6. Ordre d’activation
 
 1. Fermer toutes les cases des sections 1, 4 et 5 sur staging.
-2. Générer les artefacts signés Android/iOS à partir du même commit et conserver
-   leurs empreintes.
+2. Générer les artefacts signés Android/iOS dans le même run protégé à partir du
+   même commit et conserver les empreintes de l’AAB, du tarball `.xcarchive` et
+   de l’IPA.
 3. Valider Play Internal Testing et TestFlight sur appareils physiques.
 4. Corriger tout échec, reconstruire et recommencer les tests sur les nouveaux
    artefacts ; ne jamais promouvoir un binaire différent de celui testé.

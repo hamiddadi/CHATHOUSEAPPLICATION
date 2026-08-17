@@ -4,6 +4,7 @@ import { logger } from '../../../config/logger';
 import { redis } from '../../../config/redis';
 import { AppError } from '../../../middlewares/error.middleware';
 import { notificationsService } from '../../../modules/notifications/notifications.service';
+import { clubDeletionTombstoneKey } from '../../club-extension-cleanup.outbox';
 
 /**
  * Club join request workflow (Module 10.3 / CLUB-006..009 / NOTIF-008).
@@ -37,6 +38,28 @@ interface JoinRequest {
 const reqKey = (clubId: string, userId: string) => `ext:clubreq:${clubId}:${userId}`;
 const indexKey = (clubId: string) => `ext:clubreq:club:${clubId}`;
 const TTL_S = 30 * 24 * 3600; // 30 days
+
+const STORE_PENDING_REQUEST_SCRIPT = `
+if redis.call('EXISTS', KEYS[1]) == 1 then return -1 end
+local first = redis.call('SADD', KEYS[2], ARGV[1])
+redis.call('SETEX', KEYS[3], tonumber(ARGV[2]), ARGV[3])
+redis.call('EXPIRE', KEYS[2], tonumber(ARGV[2]))
+return first
+`;
+
+const storePendingRequest = async (request: JoinRequest): Promise<boolean | null> => {
+  const result = await redis.eval(STORE_PENDING_REQUEST_SCRIPT, {
+    keys: [
+      clubDeletionTombstoneKey(request.clubId),
+      indexKey(request.clubId),
+      reqKey(request.clubId, request.userId),
+    ],
+    arguments: [request.userId, String(TTL_S), JSON.stringify(request)],
+  });
+  const numeric = Number(result);
+  if (numeric === -1) return null;
+  return numeric === 1;
+};
 
 const isAdmin = async (clubId: string, userId: string): Promise<boolean> => {
   const club = await prisma.club.findFirst({
@@ -81,10 +104,7 @@ const consumePendingRequest = async (clubId: string, userId: string): Promise<Jo
 };
 
 const restorePendingRequest = async (request: JoinRequest): Promise<void> => {
-  await Promise.all([
-    redis.setEx(reqKey(request.clubId, request.userId), TTL_S, JSON.stringify(request)),
-    redis.sAdd(indexKey(request.clubId), request.userId),
-  ]);
+  await storePendingRequest(request);
 };
 
 export const clubReqService = {
@@ -156,11 +176,11 @@ export const clubReqService = {
     // SOCIAL: queue (or refresh) a pending approval request. Only
     // notify admins on the FIRST submission so a user can't spam admins by
     // re-POSTing the same request (idempotent re-submission).
-    // Atomic first-submission detection: sAdd returns 1 only when callerId is a
-    // brand-new member of the pending set, so two concurrent double-submits
-    // can't both fall through and spam admins (closes the exists()→setEx TOCTOU).
-    const isFirstRequest = (await redis.sAdd(indexKey(clubId), callerId)) === 1;
-    await redis.setEx(reqKey(clubId, callerId), TTL_S, JSON.stringify(payload));
+    // One Lua operation checks the deletion tombstone, writes the request and
+    // updates the bounded-lifetime index. It also returns first-submission
+    // status, so concurrent double-submits cannot both notify administrators.
+    const isFirstRequest = await storePendingRequest(payload);
+    if (isFirstRequest === null) throw new AppError('CLUB_001', 'Club no longer exists');
     if (!isFirstRequest) {
       return { ...payload, status: 'pending' };
     }
@@ -190,6 +210,7 @@ export const clubReqService = {
           data: { kind: 'join_request', clubId, requesterId: callerId },
           targetId: clubId,
           targetType: 'club',
+          dedupeKey: `club-join-request:${clubId}:${callerId}:${u}`,
         });
       } catch (err) {
         logger.warn('ext.clubreq: notify admin failed', { err, u });
@@ -369,6 +390,7 @@ export const clubReqService = {
         data: { kind: 'join_approved', clubId },
         targetId: clubId,
         targetType: 'club',
+        dedupeKey: `club-join-approved:${clubId}:${requesterId}`,
       });
     } catch (err) {
       logger.warn('ext.clubreq: approval notification failed', { err, clubId, requesterId });
@@ -399,6 +421,7 @@ export const clubReqService = {
           data: { kind: 'join_declined', clubId },
           targetId: clubId,
           targetType: 'club',
+          dedupeKey: `club-join-declined:${clubId}:${requesterId}`,
         });
       } catch (err) {
         logger.warn('ext.clubreq: decline notification failed', { err, clubId, requesterId });

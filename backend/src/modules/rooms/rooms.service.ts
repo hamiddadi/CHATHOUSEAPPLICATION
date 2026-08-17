@@ -1834,46 +1834,66 @@ export const roomsService = {
   // Gated on room.chatEnabled; the sender must be an active participant
   // (speaker or listener — chat is open to everyone who's in the room).
 
-  async sendRoomMessage(roomId: string, userId: string, input: SendRoomMessageInput) {
-    const room = await prisma.room.findUnique({ where: { id: roomId } });
-    if (!room) throw new AppError('ROOM_001');
-    if (room.endedAt || !room.isLive) throw new AppError('ROOM_004');
-    if (!room.chatEnabled) throw new AppError('ROOM_006');
-    await requireActiveParticipant(roomId, userId);
+  async sendRoomMessage(
+    roomId: string,
+    userId: string,
+    input: SendRoomMessageInput,
+    idempotencyKey?: string,
+  ) {
+    // Serialize chat authorization with every Room-first lifecycle mutation.
+    // Authorization and INSERT share one transaction, closing the previous
+    // check-then-create race with leave, kick, end and chat-disable.
+    const creation = await runIdempotentCreate({
+      userId,
+      scope: `room-message:${roomId}`,
+      key: idempotencyKey,
+      payload: { roomId, ...input },
+      create: async tx => {
+        await tx.$queryRaw`SELECT set_config('lock_timeout', '5000ms', true)`;
+        await tx.$queryRaw`SELECT "id" FROM "Room" WHERE "id" = ${roomId} FOR UPDATE`;
+        const room = await tx.room.findUnique({ where: { id: roomId } });
+        if (!room) throw new AppError('ROOM_001');
+        if (room.endedAt || !room.isLive) throw new AppError('ROOM_004');
+        if (!room.chatEnabled) throw new AppError('ROOM_006');
 
-    // MODS_ONLY: only host + moderators can post (and read — list is gated
-    // identically). Listeners get a clean ROOM_006 if they somehow probe
-    // the endpoint with the chat hidden client-side.
-    if (room.chatVisibility === 'MODS_ONLY') {
-      const me = await prisma.participant.findUnique({
-        where: { userId_roomId: { userId, roomId } },
-        select: { role: true },
-      });
-      if (room.hostId !== userId && (!me || me.role !== 'MODERATOR')) {
-        throw new AppError('ROOM_006');
-      }
-    }
+        const participant = await tx.participant.findUnique({
+          where: { userId_roomId: { userId, roomId } },
+          select: { role: true, leftAt: true },
+        });
+        if (!participant || participant.leftAt) throw new AppError('ROOM_005');
+        if (
+          room.chatVisibility === 'MODS_ONLY' &&
+          room.hostId !== userId &&
+          participant.role !== 'MODERATOR'
+        ) {
+          throw new AppError('ROOM_006');
+        }
 
-    // Validate the reply target belongs to the same room — prevents
-    // cross-room threading and dangling pointers if the client sends a
-    // stale id from another room.
-    if (input.replyToId) {
-      const parent = await prisma.roomChatMessage.findUnique({
-        where: { id: input.replyToId },
-        select: { roomId: true, isDeleted: true },
-      });
-      if (!parent || parent.roomId !== roomId || parent.isDeleted) {
-        throw new AppError('CHAT_002');
-      }
-    }
+        if (input.replyToId) {
+          const parent = await tx.roomChatMessage.findUnique({
+            where: { id: input.replyToId },
+            select: { roomId: true, isDeleted: true },
+          });
+          if (!parent || parent.roomId !== roomId || parent.isDeleted) {
+            throw new AppError('CHAT_002');
+          }
+        }
 
-    const msg = await prisma.roomChatMessage.create({
-      data: {
-        roomId,
-        userId,
-        content: input.content,
-        replyToId: input.replyToId ?? null,
+        const created = await tx.roomChatMessage.create({
+          data: {
+            roomId,
+            userId,
+            content: input.content,
+            replyToId: input.replyToId ?? null,
+          },
+          select: { id: true },
+        });
+        return created.id;
       },
+    });
+
+    const msg = await prisma.roomChatMessage.findUnique({
+      where: { id: creation.resourceId },
       include: {
         user: { select: publicUser },
         replyTo: {
@@ -1881,19 +1901,23 @@ export const roomsService = {
         },
       },
     });
-    emitRoomMessage(roomId, {
-      id: msg.id,
-      content: msg.content,
-      createdAt: msg.createdAt.toISOString(),
-      user: msg.user,
-      replyTo: msg.replyTo
-        ? {
-            id: msg.replyTo.id,
-            content: msg.replyTo.content,
-            user: msg.replyTo.user,
-          }
-        : null,
-    });
+    if (!msg) throw new AppError('SERVER_001', 'Room message disappeared after commit');
+
+    if (!creation.replayed) {
+      emitRoomMessage(roomId, {
+        id: msg.id,
+        content: msg.content,
+        createdAt: msg.createdAt.toISOString(),
+        user: msg.user,
+        replyTo: msg.replyTo
+          ? {
+              id: msg.replyTo.id,
+              content: msg.replyTo.content,
+              user: msg.replyTo.user,
+            }
+          : null,
+      });
+    }
     return msg;
   },
 
@@ -1934,21 +1958,51 @@ export const roomsService = {
   // Float-up emoji. Persisted for moderation/analytics; the room socket
   // handler broadcasts them so clients can animate.
 
-  async sendReaction(roomId: string, userId: string, input: SendReactionInput) {
-    const room = await prisma.room.findUnique({ where: { id: roomId } });
-    if (!room) throw new AppError('ROOM_001');
-    if (room.endedAt || !room.isLive) throw new AppError('ROOM_004');
-    await requireActiveParticipant(roomId, userId);
+  async sendReaction(
+    roomId: string,
+    userId: string,
+    input: SendReactionInput,
+    idempotencyKey?: string,
+  ) {
+    const creation = await runIdempotentCreate({
+      userId,
+      scope: `room-reaction:${roomId}`,
+      key: idempotencyKey,
+      payload: { roomId, ...input },
+      create: async tx => {
+        await tx.$queryRaw`SELECT set_config('lock_timeout', '5000ms', true)`;
+        await tx.$queryRaw`SELECT "id" FROM "Room" WHERE "id" = ${roomId} FOR UPDATE`;
+        const room = await tx.room.findUnique({
+          where: { id: roomId },
+          select: { endedAt: true, isLive: true },
+        });
+        if (!room) throw new AppError('ROOM_001');
+        if (room.endedAt || !room.isLive) throw new AppError('ROOM_004');
+        const participant = await tx.participant.findUnique({
+          where: { userId_roomId: { userId, roomId } },
+          select: { leftAt: true },
+        });
+        if (!participant || participant.leftAt) throw new AppError('ROOM_005');
+        const created = await tx.roomReaction.create({
+          data: { roomId, userId, emoji: input.emoji },
+          select: { id: true },
+        });
+        return created.id;
+      },
+    });
 
-    const row = await prisma.roomReaction.create({
-      data: { roomId, userId, emoji: input.emoji },
+    const row = await prisma.roomReaction.findUnique({
+      where: { id: creation.resourceId },
       include: { user: { select: { id: true, username: true, avatarUrl: true } } },
     });
-    emitRoomReaction(roomId, {
-      userId,
-      emoji: row.emoji,
-      createdAt: row.createdAt.toISOString(),
-    });
+    if (!row) throw new AppError('SERVER_001', 'Room reaction disappeared after commit');
+    if (!creation.replayed) {
+      emitRoomReaction(roomId, {
+        userId,
+        emoji: row.emoji,
+        createdAt: row.createdAt.toISOString(),
+      });
+    }
     return row;
   },
 
@@ -2035,6 +2089,22 @@ export const roomsService = {
               revocationTransitionId,
             ),
           });
+          await auditLogService.record(
+            {
+              actorId: callerUserId,
+              action: 'ROOM_USER_KICKED',
+              targetUserId,
+              targetRoomId: roomId,
+              targetType: 'room',
+              targetId: roomId,
+              metadata: {
+                banMinutes: minutes,
+                permanent: minutes === 0,
+                reason: options.reason ?? null,
+              },
+            },
+            tx,
+          );
           return {
             ...lockedRoom,
             participantCount: updatedRooms[0]?.participantCount ?? 0,
@@ -2044,18 +2114,6 @@ export const roomsService = {
         { maxWait: 5_000, timeout: 10_000 },
       ),
     );
-
-    // MODE-06: audit the moderation action. record() swallows persistence
-    // errors itself, so a failed write never breaks the kick.
-    await auditLogService.record({
-      actorId: callerUserId,
-      action: 'ROOM_USER_KICKED',
-      targetUserId,
-      targetRoomId: roomId,
-      targetType: 'room',
-      targetId: roomId,
-      metadata: { banMinutes: minutes, permanent: minutes === 0, reason: options.reason ?? null },
-    });
 
     // Resolve the moderator's display name so the kicked user's client can show
     // *who* removed them (e.g. "Jane removed you from this room"). displayName ??

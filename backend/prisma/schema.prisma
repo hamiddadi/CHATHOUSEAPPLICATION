@@ -46,6 +46,23 @@ enum OutboxEventStatus {
   DELIVERED
 }
 
+enum AudioQualityTier {
+  STANDARD
+  HIGH
+  MUSIC
+}
+
+enum DropInMode {
+  SILENT
+  NORMAL
+}
+
+enum NotificationFrequencyTier {
+  INFREQUENT
+  NORMAL
+  FREQUENT
+}
+
 // FOLL-01: a Follow is PENDING when it targets a private account (awaiting the
 // target's approval) and ACCEPTED otherwise. Default ACCEPTED so every existing
 // edge (public follows) stays a real follow with no backfill.
@@ -145,6 +162,8 @@ model User {
   isOnline                         Boolean   @default(false)
   isVisible                        Boolean   @default(false) // Ghost Mode ON by default → user must opt-in to map visibility (privacy-safe)
   allowWaves                       Boolean   @default(true)
+  // Explicit opt-in for phone contact matching; false prevents enumeration.
+  allowContactDiscovery            Boolean   @default(false)
   isPrivateAccount                 Boolean   @default(false)
   // #114: who may start a DM with this user — 'everyone' | 'followers' |
   // 'mutual' (default, close-friends) | 'nobody'. Enforced in chatService.send.
@@ -205,47 +224,55 @@ model User {
   createdAt                        DateTime  @default(now())
   updatedAt                        DateTime  @updatedAt
 
-  hostedRooms             Room[]                  @relation("RoomHost")
-  participants            Participant[]
-  roomBansIssued          RoomBan[]               @relation("BanIssuer")
-  roomBansReceived        RoomBan[]               @relation("BanTarget")
-  sentMessages            Message[]               @relation("MessageSender")
-  receivedMessages        Message[]               @relation("MessageReceiver")
-  ownedConversations      Conversation[]          @relation("ConvOwner")
-  conversationMemberships ConversationMember[]    @relation("ConvMembership")
-  groupMessagesSent       GroupMessage[]          @relation("GroupMsgSender")
-  followers               Follow[]                @relation("Following")
-  following               Follow[]                @relation("Follower")
-  notifications           Notification[]          @relation("NotifRecipient")
-  actedNotifications      Notification[]          @relation("NotifActor")
-  refreshTokens           RefreshToken[]
-  passwordResetTokens     PasswordResetToken[]
-  ownedClubs              Club[]                  @relation("ClubOwner")
-  clubMemberships         ClubMember[]
-  rsvps                   RoomRsvp[]
-  pushTokens              PushToken[]
-  roomHandRaises          RoomHandRaise[]
-  roomChatMessages        RoomChatMessage[]
-  roomReactions           RoomReaction[]
-  blocksCreated           Block[]                 @relation("BlockAuthor")
-  blocksReceived          Block[]                 @relation("BlockTarget")
-  reportsFiled            Report[]                @relation("ReportAuthor")
-  reportsReceived         Report[]                @relation("ReportTarget")
-  contentReportsReceived  Report[]                @relation("ReportContentAuthor")
-  notifPreferences        NotificationPreference?
-  auditLogsAuthored       AuditLog[]              @relation("AuditActor")
-  auditLogsTargeted       AuditLog[]              @relation("AuditTargetUser")
-  tipsSent                Tip[]                   @relation("TipsSent")
-  tipsReceived            Tip[]                   @relation("TipsReceived")
-  subscription            Subscription?
+  hostedRooms              Room[]                               @relation("RoomHost")
+  participants             Participant[]
+  roomBansIssued           RoomBan[]                            @relation("BanIssuer")
+  roomBansReceived         RoomBan[]                            @relation("BanTarget")
+  sentMessages             Message[]                            @relation("MessageSender")
+  receivedMessages         Message[]                            @relation("MessageReceiver")
+  ownedConversations       Conversation[]                       @relation("ConvOwner")
+  conversationMemberships  ConversationMember[]                 @relation("ConvMembership")
+  groupMessagesSent        GroupMessage[]                       @relation("GroupMsgSender")
+  followers                Follow[]                             @relation("Following")
+  following                Follow[]                             @relation("Follower")
+  notifications            Notification[]                       @relation("NotifRecipient")
+  actedNotifications       Notification[]                       @relation("NotifActor")
+  refreshTokens            RefreshToken[]
+  passwordResetTokens      PasswordResetToken[]
+  ownedClubs               Club[]                               @relation("ClubOwner")
+  clubMemberships          ClubMember[]
+  rsvps                    RoomRsvp[]
+  pushTokens               PushToken[]
+  roomHandRaises           RoomHandRaise[]
+  roomChatMessages         RoomChatMessage[]
+  roomReactions            RoomReaction[]
+  blocksCreated            Block[]                              @relation("BlockAuthor")
+  blocksReceived           Block[]                              @relation("BlockTarget")
+  reportsFiled             Report[]                             @relation("ReportAuthor")
+  reportsReceived          Report[]                             @relation("ReportTarget")
+  contentReportsReceived   Report[]                             @relation("ReportContentAuthor")
+  notifPreferences         NotificationPreference?
+  auditLogsAuthored        AuditLog[]                           @relation("AuditActor")
+  auditLogsTargeted        AuditLog[]                           @relation("AuditTargetUser")
+  tipsSent                 Tip[]                                @relation("TipsSent")
+  tipsReceived             Tip[]                                @relation("TipsReceived")
+  subscription             Subscription?
   // Referral self-relation: the user who invited me, and everyone I invited.
-  invitedBy               User?                   @relation("UserInvites", fields: [invitedById], references: [id], onDelete: SetNull)
-  invitedUsers            User[]                  @relation("UserInvites")
+  invitedBy                User?                                @relation("UserInvites", fields: [invitedById], references: [id], onDelete: SetNull)
+  invitedUsers             User[]                               @relation("UserInvites")
   // #76: profile-view records I made and ones I received.
-  profileViewsGiven       ProfileView[]           @relation("ProfileViewer")
-  profileViewsReceived    ProfileView[]           @relation("ProfileViewed")
-  mediaObjects            MediaObject[]
-  idempotencyKeys         IdempotencyKey[]
+  profileViewsGiven        ProfileView[]                        @relation("ProfileViewer")
+  profileViewsReceived     ProfileView[]                        @relation("ProfileViewed")
+  mediaObjects             MediaObject[]
+  idempotencyKeys          IdempotencyKey[]
+  profileLinks             ProfileLink[]
+  audioPreference          UserAudioPreference?
+  notifExtensionPreference UserNotificationExtensionPreference?
+  notificationClubMutes    NotificationClubMute[]               @relation("NotificationClubMuteOwner")
+  notificationUserMutes    NotificationUserMute[]               @relation("NotificationUserMuteOwner")
+  mutedByNotificationUsers NotificationUserMute[]               @relation("NotificationUserMuteTarget")
+  featuredInClubs          ClubFeaturedMember[]
+  extensionImports         UserExtensionImport[]
 
   @@index([isOnline])
   @@index([isVisible])
@@ -261,6 +288,7 @@ model User {
   // Keeping them in the data model prevents migrate-diff from treating the
   // production search indexes as drift to remove.
   @@index([username(ops: raw("gin_trgm_ops"))], type: Gin, map: "user_username_trgm")
+  @@index([allowContactDiscovery, phoneNumber], map: "User_contact_discovery_idx")
   @@index([displayName(ops: raw("gin_trgm_ops"))], type: Gin, map: "user_displayName_trgm")
   @@index([bio(ops: raw("gin_trgm_ops"))], type: Gin, map: "user_bio_trgm")
 }
@@ -292,6 +320,9 @@ model MediaObject {
   owner          User           @relation(fields: [ownerId], references: [id], onDelete: Cascade)
   directMessages Message[]      @relation("DirectMessageMedia")
   groupMessages  GroupMessage[] @relation("GroupMessageMedia")
+  reports        Report[]       @relation("ReportMedia")
+  clubCovers     ClubMetadata[] @relation("ClubCoverMedia")
+  clubIcons      Club[]         @relation("ClubIconMedia")
 
   @@index([ownerId, kind, createdAt])
   @@index([kind, deletionClaimedAt, createdAt])
@@ -314,6 +345,89 @@ model IdempotencyKey {
 
   @@unique([userId, scope, key])
   @@index([expiresAt])
+}
+
+// Records irreversible application-level data cutovers that cannot be
+// expressed by SQL alone (for example HMAC-signed private-media references).
+// The deployment guard uses this ledger to keep the old writer stopped until
+// the candidate image has completed the cutover transaction.
+model DeploymentCutover {
+  key         String   @id @db.VarChar(100)
+  completedAt DateTime @default(now())
+  details     Json?
+}
+
+// Durable profile extensions. Redis may cache these rows, but PostgreSQL is
+// the source of truth and owns their account-deletion lifecycle.
+model ProfileLink {
+  id        String   @id @default(cuid()) @db.VarChar(64)
+  userId    String
+  label     String   @db.VarChar(40)
+  url       String   @db.VarChar(500)
+  icon      String?  @db.VarChar(16)
+  position  Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, position])
+  @@index([userId, createdAt])
+}
+
+model UserAudioPreference {
+  userId           String           @id
+  qualityTier      AudioQualityTier @default(STANDARD)
+  spatialAudio     Boolean          @default(false)
+  noiseSuppression Boolean          @default(true)
+  dropInMode       DropInMode       @default(NORMAL)
+  updatedAt        DateTime         @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model UserNotificationExtensionPreference {
+  userId    String                    @id
+  frequency NotificationFrequencyTier @default(NORMAL)
+  updatedAt DateTime                  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model NotificationClubMute {
+  userId    String
+  clubId    String
+  createdAt DateTime @default(now())
+
+  user User @relation("NotificationClubMuteOwner", fields: [userId], references: [id], onDelete: Cascade)
+  club Club @relation(fields: [clubId], references: [id], onDelete: Cascade)
+
+  @@id([userId, clubId])
+  @@index([clubId])
+}
+
+model NotificationUserMute {
+  userId      String
+  mutedUserId String
+  createdAt   DateTime @default(now())
+
+  user      User @relation("NotificationUserMuteOwner", fields: [userId], references: [id], onDelete: Cascade)
+  mutedUser User @relation("NotificationUserMuteTarget", fields: [mutedUserId], references: [id], onDelete: Cascade)
+
+  @@id([userId, mutedUserId])
+  @@index([mutedUserId])
+}
+
+// A per-namespace cut-over marker makes lazy Redis-to-PostgreSQL imports
+// idempotent, including the important case where the legacy value is empty.
+model UserExtensionImport {
+  userId     String
+  namespace  String   @db.VarChar(64)
+  importedAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, namespace])
 }
 
 model ProfileView {
@@ -532,6 +646,7 @@ model RoomReaction {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([roomId, createdAt])
+  @@index([userId, createdAt])
 }
 
 // ─── RoomRsvp (scheduled-room interest marker) ─────────
@@ -641,6 +756,7 @@ model Conversation {
   messages GroupMessage[]
 
   @@index([ownerId])
+  @@index([updatedAt, id])
 }
 
 model ConversationMember {
@@ -713,6 +829,7 @@ model Notification {
   targetId   String? // ID of the target entity (room, club, user)
   targetType String?          @db.VarChar(32) // 'room', 'club', 'user'
   isRead     Boolean          @default(false)
+  dedupeKey  String?          @unique @db.VarChar(191)
   createdAt  DateTime         @default(now())
 
   user  User  @relation("NotifRecipient", fields: [userId], references: [id], onDelete: Cascade)
@@ -772,32 +889,75 @@ model NotificationPreference {
 
 // ─── Club (House) ──────────────────────────────────────
 model Club {
-  id            String      @id @default(cuid())
-  name          String      @unique @db.VarChar(50)
-  slug          String      @unique @db.VarChar(60)
-  description   String?     @db.VarChar(500)
+  id                String      @id @default(cuid())
+  name              String      @unique @db.VarChar(50)
+  slug              String      @unique @db.VarChar(60)
+  description       String?     @db.VarChar(500)
   // #87: house rules / charter shown on the club page.
-  rules         String?     @db.VarChar(2000)
-  iconUrl       String?     @db.VarChar(500)
-  privacy       ClubPrivacy @default(OPEN)
-  category      String      @default("tech") @db.VarChar(32)
-  categoryEmoji String      @default("🏠") @db.VarChar(8)
-  ownerId       String
-  memberCount   Int         @default(1) // Denormalized
-  isVerified    Boolean     @default(false)
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
+  rules             String?     @db.VarChar(2000)
+  iconUrl           String?     @db.VarChar(500)
+  iconMediaObjectId String?
+  privacy           ClubPrivacy @default(OPEN)
+  category          String      @default("tech") @db.VarChar(32)
+  categoryEmoji     String      @default("🏠") @db.VarChar(8)
+  ownerId           String
+  memberCount       Int         @default(1) // Denormalized
+  isVerified        Boolean     @default(false)
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
 
-  owner   User         @relation("ClubOwner", fields: [ownerId], references: [id], onDelete: Cascade)
-  members ClubMember[]
-  rooms   Room[]
+  owner             User                   @relation("ClubOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  iconMediaObject   MediaObject?           @relation("ClubIconMedia", fields: [iconMediaObjectId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  members           ClubMember[]
+  rooms             Room[]
+  metadata          ClubMetadata?
+  featuredMembers   ClubFeaturedMember[]
+  notificationMutes NotificationClubMute[]
+  extensionImports  ClubExtensionImport[]
 
   @@index([ownerId])
+  @@index([iconMediaObjectId])
   @@index([privacy])
   @@index([createdAt])
   @@index([slug])
   @@index([name(ops: raw("gin_trgm_ops"))], type: Gin, map: "club_name_trgm")
   @@index([description(ops: raw("gin_trgm_ops"))], type: Gin, map: "club_description_trgm")
+}
+
+model ClubMetadata {
+  clubId             String   @id
+  coverUrl           String?  @db.VarChar(500)
+  coverMediaObjectId String?
+  updatedAt          DateTime @updatedAt
+
+  club             Club         @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  coverMediaObject MediaObject? @relation("ClubCoverMedia", fields: [coverMediaObjectId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+
+  @@index([coverMediaObjectId])
+}
+
+model ClubFeaturedMember {
+  clubId     String
+  userId     String
+  featuredAt DateTime @default(now())
+
+  club       Club       @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  membership ClubMember @relation("ClubFeaturedMembership", fields: [clubId, userId], references: [clubId, userId], onDelete: Cascade, onUpdate: Cascade)
+
+  @@id([clubId, userId])
+  @@index([clubId, featuredAt])
+  @@index([userId])
+}
+
+model ClubExtensionImport {
+  clubId     String
+  namespace  String   @db.VarChar(64)
+  importedAt DateTime @default(now())
+
+  club Club @relation(fields: [clubId], references: [id], onDelete: Cascade)
+
+  @@id([clubId, namespace])
 }
 
 model ClubMember {
@@ -807,8 +967,9 @@ model ClubMember {
   role     ClubMemberRole @default(MEMBER)
   joinedAt DateTime       @default(now())
 
-  club Club @relation(fields: [clubId], references: [id], onDelete: Cascade)
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  club          Club                @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  user          User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  featuredEntry ClubFeaturedMember? @relation("ClubFeaturedMembership")
 
   @@unique([clubId, userId])
   @@index([clubId])
@@ -918,9 +1079,10 @@ model Report {
   reportedGroupMessageId String?
   reportedRoomMessageId  String?
   contentSnapshot        String?          @db.VarChar(4000)
-  // Signed private-media capability captured at report time. These fields are
-  // returned only by moderator/admin APIs, never by the report mutation.
+  // Non-routable private-media reference captured at report time. The API
+  // materializes it as a short-lived capability only for moderator/admin reads.
   contentAudioUrl        String?          @db.VarChar(2048)
+  contentMediaObjectId   String?
   contentAudioDurationMs Int?
   contentKind            MessageKind?
   contentCreatedAt       DateTime?
@@ -931,10 +1093,11 @@ model Report {
   resolvedAt             DateTime?
   createdAt              DateTime         @default(now())
 
-  reporter      User  @relation("ReportAuthor", fields: [reporterId], references: [id], onDelete: Cascade)
-  reported      User? @relation("ReportTarget", fields: [reportedId], references: [id], onDelete: Cascade)
-  reportedRoom  Room? @relation("ReportRoomTarget", fields: [reportedRoomId], references: [id], onDelete: Cascade)
-  contentAuthor User? @relation("ReportContentAuthor", fields: [contentAuthorId], references: [id], onDelete: SetNull)
+  reporter      User         @relation("ReportAuthor", fields: [reporterId], references: [id], onDelete: Cascade)
+  reported      User?        @relation("ReportTarget", fields: [reportedId], references: [id], onDelete: Cascade)
+  reportedRoom  Room?        @relation("ReportRoomTarget", fields: [reportedRoomId], references: [id], onDelete: Cascade)
+  contentAuthor User?        @relation("ReportContentAuthor", fields: [contentAuthorId], references: [id], onDelete: SetNull)
+  contentMedia  MediaObject? @relation("ReportMedia", fields: [contentMediaObjectId], references: [id], onDelete: SetNull)
 
   // Message target ids deliberately have no FK: they are immutable evidence
   // identifiers that must survive deletion of the source message.
@@ -945,6 +1108,7 @@ model Report {
   @@index([reportedRoomId, createdAt])
   @@index([reporterId])
   @@index([contentAuthorId, createdAt])
+  @@index([contentMediaObjectId])
   @@index([resolvedAt, createdAt, id])
 }
 
@@ -1002,4 +1166,5 @@ model RoomBan {
   @@index([roomId])
   @@index([userId])
   @@index([expiresAt])
+  @@index([bannedBy, createdAt])
 }

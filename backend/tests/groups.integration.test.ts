@@ -1,5 +1,6 @@
 import request from 'supertest';
 import type { Express } from 'express';
+import { encodeGroupCursor } from '../src/modules/groups/groups.cursor';
 
 process.env.DATABASE_URL =
   process.env.DATABASE_URL ??
@@ -124,6 +125,87 @@ describe('Groups — block gate, ownership transfer, rename-to-null', () => {
     expect(res.status).toBe(201);
     expect(res.body.data.members).toHaveLength(3);
     expect(res.body.data.title).toBe('Trip planning');
+  });
+
+  it('lists every equal-timestamp group through a cursor, even if the boundary is deleted', async () => {
+    const alice = await register(app);
+    const bob = await register(app);
+    const carol = await register(app);
+    createdIds.push(alice.id, bob.id, carol.id);
+    const prefix = `group_page_${rand()}`;
+    const groupIds = ['a', 'b', 'c', 'd', 'e'].map(suffix => `${prefix}_${suffix}`);
+    const timestamp = new Date('2026-08-13T12:00:00.456Z');
+
+    await prisma.$transaction(async tx => {
+      await tx.conversation.createMany({
+        data: groupIds.map(id => ({
+          id,
+          ownerId: alice.id,
+          title: id,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        })),
+      });
+      await tx.conversationMember.createMany({
+        data: groupIds.flatMap(conversationId =>
+          [alice.id, bob.id, carol.id].map(userId => ({ conversationId, userId })),
+        ),
+      });
+    });
+
+    const legacy = await request(app)
+      .get('/api/groups')
+      .query({ limit: 2 })
+      .set('Authorization', `Bearer ${alice.token}`);
+    expect(legacy.status).toBe(200);
+    expect(Array.isArray(legacy.body.data)).toBe(true);
+    expect(legacy.body.data).toHaveLength(2);
+
+    const seen: string[] = [];
+    let cursor: string | undefined;
+    let pageCount = 0;
+    do {
+      const page = await request(app)
+        .get('/api/groups')
+        .query({ limit: 2, paginated: 'true', ...(cursor ? { cursor } : {}) })
+        .set('Authorization', `Bearer ${alice.token}`);
+
+      expect(page.status).toBe(200);
+      expect(Array.isArray(page.body.data.data)).toBe(true);
+      seen.push(...page.body.data.data.map((group: { id: string }) => group.id));
+      cursor = page.body.data.nextCursor ?? undefined;
+      pageCount += 1;
+
+      if (pageCount === 1) {
+        expect(cursor).toMatch(/^v1\./);
+        const boundaryId = seen[seen.length - 1];
+        if (!boundaryId) throw new Error('Expected a first-page boundary group');
+        await prisma.conversation.delete({ where: { id: boundaryId } });
+      }
+      expect(pageCount).toBeLessThan(10);
+    } while (cursor);
+
+    expect(new Set(seen)).toEqual(new Set(groupIds));
+    expect(seen).toHaveLength(groupIds.length);
+  });
+
+  it('rejects invalid group-list pagination queries', async () => {
+    const alice = await register(app);
+    createdIds.push(alice.id);
+
+    for (const query of [
+      { paginated: 'true', cursor: 'not-a-cursor' },
+      { cursor: encodeGroupCursor(new Date('2026-08-13T12:00:00.000Z'), 'group-boundary') },
+      { paginated: 'true', limit: 0 },
+      { paginated: 'true', limit: 101 },
+    ]) {
+      const response = await request(app)
+        .get('/api/groups')
+        .query(query)
+        .set('Authorization', `Bearer ${alice.token}`);
+      expect(response.status).toBe(400);
+      expect(response.body.error.code).toBe('VALIDATION_001');
+    }
   });
 
   it('create: a PENDING private-account request is not enough (GROUP_007)', async () => {

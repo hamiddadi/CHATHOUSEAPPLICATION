@@ -5,7 +5,7 @@ import { env } from '../../config/env';
 import { logger } from '../../config/logger';
 import { AppError } from '../../middlewares/error.middleware';
 import { runIdempotentCreate } from '../../utils/idempotency';
-import { isValidMediaSignature, mediaUrlFor } from './media-url';
+import { mediaIdFromCanonicalPrivateUrl, mediaReferenceFor } from './media-url';
 import { privateObjectStore, type ByteRange } from './object-storage';
 
 interface StoreMediaInput {
@@ -141,7 +141,7 @@ const store = async ({
     }
   }
 
-  return { id: media.id, url: mediaUrlFor(media.id, requestOrigin) };
+  return { id: media.id, url: mediaReferenceFor(media.id, requestOrigin) };
 };
 
 const getMetadataForRead = async (id: string) => {
@@ -152,9 +152,20 @@ const getMetadataForRead = async (id: string) => {
       mimeType: true,
       sizeBytes: true,
       owner: { select: { deletedAt: true } },
+      clubCovers: { select: { clubId: true }, take: 1 },
+      clubIcons: { select: { id: true }, take: 1 },
     },
   });
-  if (!media || media.owner.deletedAt) throw new AppError('NOT_FOUND_001');
+  // Keep a club-linked object readable during the uploader's reversible
+  // soft-delete grace period. Hard purge later neutralizes the authoritative
+  // club link before scheduling byte deletion; ownership is never transferred
+  // while the immutable storage key still embeds the erased user's id.
+  if (
+    !media ||
+    (media.owner.deletedAt && media.clubCovers.length === 0 && media.clubIcons.length === 0)
+  ) {
+    throw new AppError('NOT_FOUND_001');
+  }
   return media;
 };
 
@@ -198,26 +209,24 @@ const mediaIdFromOwnedUrl = (url: string): string => {
     throw new AppError('VALIDATION_001', 'Media URL must use the configured API origin');
   }
 
-  const parts = parsed.pathname.split('/').filter(Boolean);
-  const [prefix, id, signature] = parts;
-  if (
-    parts.length !== 3 ||
-    prefix !== 'media' ||
-    !id ||
-    !signature ||
-    !isValidMediaSignature(id, signature)
-  ) {
+  const id = mediaIdFromCanonicalPrivateUrl(parsed.toString(), { allowExpired: true });
+  if (!id) {
     throw new AppError('VALIDATION_001', 'Invalid private media URL');
   }
 
   return id;
 };
 
+// Persist a non-routable reference. The current DB trigger accepts this shape
+// as well as legacy `/media/:id/*` writers during a rolling deployment.
+const canonicalizeVoiceMediaUrl = (url: string): string =>
+  mediaReferenceFor(mediaIdFromOwnedUrl(url), new URL(url).origin);
+
 const assertOwnedMediaUrl = async (
   ownerId: string,
   url: string,
   expectedKind: MediaKind,
-): Promise<void> => {
+): Promise<string> => {
   const id = mediaIdFromOwnedUrl(url);
   const owned = await prisma.mediaObject.findFirst({
     where: {
@@ -232,6 +241,7 @@ const assertOwnedMediaUrl = async (
   if (!owned) {
     throw new AppError('VALIDATION_001', 'Media must be uploaded by the current user');
   }
+  return mediaReferenceFor(id, new URL(url).origin);
 };
 
 /**
@@ -286,10 +296,13 @@ const abandonedMediaWhere = (
           kind: MediaKind.VOICE,
           directMessages: { none: {} },
           groupMessages: { none: {} },
+          reports: { none: {} },
         },
         { kind: MediaKind.AVATAR, uploadCompletedAt: null },
       ],
     },
+    { clubCovers: { none: {} } },
+    { clubIcons: { none: {} } },
     {
       OR: [{ deletionClaimedAt: null }, { deletionClaimedAt: { lt: staleClaimBefore } }],
     },
@@ -347,6 +360,9 @@ const deleteClaimedMedia = async (media: ClaimedMedia): Promise<boolean> => {
       deletionClaimedAt: media.claimedAt,
       directMessages: { none: {} },
       groupMessages: { none: {} },
+      reports: { none: {} },
+      clubCovers: { none: {} },
+      clubIcons: { none: {} },
     },
   });
   return removed.count === 1;
@@ -398,5 +414,6 @@ export const mediaService = {
   deleteAllForUser,
   assertOwnedMediaUrl,
   assertOwnedMediaUrlWithinTransaction,
+  canonicalizeVoiceMediaUrl,
   purgeAbandonedMedia,
 };

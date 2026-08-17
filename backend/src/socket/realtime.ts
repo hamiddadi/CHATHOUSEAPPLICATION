@@ -4,8 +4,15 @@ import { logger } from '../config/logger';
 import { getBlockedIdSet } from '../modules/social/blocks';
 import { getMutualFollowIds, locationForViewer } from '../modules/users/location-privacy';
 import { scheduleBackgroundTask } from '../utils/backgroundTasks';
+import { materializePrivateMediaUrls } from '../modules/media/media-url';
 import { HALLWAY_ROOM } from './handlers/hallway.handler';
-import { MAPS_CHANNEL, roomChannel, userChannel } from './channels';
+import {
+  delegatedActorChannel,
+  delegatedTokenChannel,
+  MAPS_CHANNEL,
+  roomChannel,
+  userChannel,
+} from './channels';
 
 /**
  * Side-channel the HTTP layer uses to fan events into the socket tier.
@@ -25,15 +32,47 @@ export type AuthRevocationReason =
   | 'logout'
   | 'password_reset'
   | 'account_deleted'
-  | 'account_suspended';
+  | 'account_suspended'
+  | 'authorization_changed'
+  | 'impersonation_ended'
+  | 'impersonation_expired';
 
 /**
  * Revoke every live Socket.IO connection for a user. Targeting the personal
  * channel works through the Redis adapter, including across app instances.
  */
 export const disconnectUserSockets = (userId: string, reason: AuthRevocationReason): void => {
-  const channel = userChannel(userId);
+  const channels = [userChannel(userId), delegatedActorChannel(userId)];
+  ioRef?.to(channels).emit('auth:revoked', { reason });
+  // RedisAdapter.disconnectSockets() publishes a cluster command and returns
+  // before that command loops back through Redis. Close this node immediately
+  // so a revoked socket cannot send another packet during that round-trip;
+  // the unscoped call still reaches every other node.
+  ioRef?.local.in(channels).disconnectSockets(true);
+  ioRef?.in(channels).disconnectSockets(true);
+};
+
+/** Revoke one exact impersonation bearer without disconnecting the target's
+ * genuine account session or another delegated session owned by the actor. */
+export const disconnectDelegatedTokenSockets = (
+  jti: string,
+  reason: AuthRevocationReason = 'impersonation_ended',
+): void => {
+  const channel = delegatedTokenChannel(jti);
   ioRef?.to(channel).emit('auth:revoked', { reason });
+  ioRef?.local.in(channel).disconnectSockets(true);
+  ioRef?.in(channel).disconnectSockets(true);
+};
+
+/** Revoke every delegated session created by one impersonating actor while
+ * leaving that actor's ordinary account socket connected. */
+export const disconnectDelegatedActorSockets = (
+  actorId: string,
+  reason: AuthRevocationReason = 'authorization_changed',
+): void => {
+  const channel = delegatedActorChannel(actorId);
+  ioRef?.to(channel).emit('auth:revoked', { reason });
+  ioRef?.local.in(channel).disconnectSockets(true);
   ioRef?.in(channel).disconnectSockets(true);
 };
 
@@ -101,7 +140,9 @@ export const emitRoomHandRaised = (
     avatarUrl: string | null;
   },
 ): void => {
-  ioRef?.to(roomChannel(roomId)).emit('room:hand_raised', { roomId, user });
+  ioRef
+    ?.to(roomChannel(roomId))
+    .emit('room:hand_raised', materializePrivateMediaUrls({ roomId, user }));
 };
 
 export const emitRoomHandLowered = (roomId: string, userId: string): void => {
@@ -132,7 +173,9 @@ export const emitRoomMessage = (
     } | null;
   },
 ): void => {
-  ioRef?.to(roomChannel(roomId)).emit('room:chat_message', { roomId, ...message });
+  ioRef
+    ?.to(roomChannel(roomId))
+    .emit('room:chat_message', materializePrivateMediaUrls({ roomId, ...message }));
 };
 
 export const emitRoomReaction = (
@@ -260,7 +303,7 @@ const emitMapEventToEligibleViewers = async (
       event === 'maps:user-moved'
         ? locationForViewer(payload as MapUserMovedPayload, exactViewerIds.has(viewer.viewerId))
         : payload;
-    io.to(viewer.socketId).emit(event, viewerPayload);
+    io.to(viewer.socketId).emit(event, materializePrivateMediaUrls(viewerPayload));
   }
 };
 
@@ -355,14 +398,16 @@ export const emitNotificationCount = (userId: string, count: number): void => {
  * without it the recipient sees nothing until a manual refetch.
  */
 export const emitChatMessage = (senderId: string, receiverId: string, msg: unknown): void => {
-  ioRef?.to(userChannel(senderId)).emit('chat:message', msg);
-  ioRef?.to(userChannel(receiverId)).emit('chat:message', msg);
+  const payload = materializePrivateMediaUrls(msg);
+  ioRef?.to(userChannel(senderId)).emit('chat:message', payload);
+  ioRef?.to(userChannel(receiverId)).emit('chat:message', payload);
 };
 
 /** Policy-aware durable delivery can target only the still-eligible accounts. */
 export const emitChatMessageToUsers = (userIds: readonly string[], msg: unknown): void => {
+  const payload = materializePrivateMediaUrls(msg);
   for (const id of new Set(userIds)) {
-    ioRef?.to(userChannel(id)).emit('chat:message', msg);
+    ioRef?.to(userChannel(id)).emit('chat:message', payload);
   }
 };
 
@@ -373,7 +418,8 @@ export const emitChatMessageToUsers = (userIds: readonly string[], msg: unknown)
  * same one chat + notifications already use).
  */
 export const emitGroupMessage = (memberIds: readonly string[], payload: unknown): void => {
+  const safePayload = materializePrivateMediaUrls(payload);
   for (const id of memberIds) {
-    ioRef?.to(userChannel(id)).emit('group:message', payload);
+    ioRef?.to(userChannel(id)).emit('group:message', safePayload);
   }
 };

@@ -15,11 +15,16 @@ const TARGET = validateLoadTarget(
 );
 const BASE_URL = TARGET.origin;
 const VUS = parseBoundedInteger('LOAD_TEST_VUS', __ENV.LOAD_TEST_VUS, {
-  defaultValue: 10,
+  defaultValue: 25,
   min: 1,
   max: 100,
 });
-const DURATION = parseDuration('LOAD_TEST_DURATION', __ENV.LOAD_TEST_DURATION, '30s');
+const DURATION = parseDuration('LOAD_TEST_DURATION', __ENV.LOAD_TEST_DURATION, '45s');
+const SETUP_USERS = parseBoundedInteger('LOAD_TEST_SETUP_USERS', __ENV.LOAD_TEST_SETUP_USERS, {
+  defaultValue: 12,
+  min: 2,
+  max: 50,
+});
 const GRACEFUL_STOP = parseDuration('LOAD_TEST_GRACEFUL_STOP', __ENV.LOAD_TEST_GRACEFUL_STOP, '5s');
 const REQUEST_TIMEOUT_MS = parseBoundedInteger(
   'LOAD_TEST_REQUEST_TIMEOUT_MS',
@@ -67,9 +72,10 @@ export const options = {
       },
     ],
     http_req_duration: [`p(95)<${P95_MS}`],
+    'http_req_duration{name:GET /api/rooms/feed}': [`p(95)<${P95_MS}`],
   },
   maxRedirects: 0,
-  setupTimeout: '30s',
+  setupTimeout: '90s',
 };
 
 export function setup() {
@@ -84,37 +90,71 @@ export function setup() {
   if (health.status !== 200 || health.json('status') !== 'healthy') {
     exec.test.abort(`Load target is not healthy: HTTP ${health.status}`);
   }
-
-  const suffix = `${Date.now().toString(36)}_${Math.floor(Math.random() * 1e6)}`;
-  const username = `load_${suffix}`.slice(0, 24);
-  const registration = http.post(
-    `${BASE_URL}/api/auth/register`,
-    JSON.stringify({
-      username,
-      email: `${username}@load.test`,
-      password: 'load-test-password-123',
-      ageConfirmed: true,
-    }),
-    {
-      ...requestOptions,
-      headers: { 'Content-Type': 'application/json' },
-      tags: { name: 'POST /api/auth/register [setup]' },
-    },
-  );
-  const registered = check(registration, {
-    'load user registered': response => response.status === 201,
+  const terms = http.get(`${BASE_URL}/terms`, {
+    ...requestOptions,
+    tags: { name: 'GET /terms [setup]' },
   });
-  if (!registered) {
-    exec.test.abort(`Unable to create load user: HTTP ${registration.status}`);
+  const legalDocumentVersion =
+    __ENV.LOAD_TEST_LEGAL_DOCUMENT_VERSION ||
+    terms.headers['X-Chathouse-Legal-Document-Version'] ||
+    terms.headers['X-ChatHouse-Legal-Document-Version'];
+  if (terms.status !== 200 || !legalDocumentVersion) {
+    exec.test.abort(`Unable to resolve the current legal document version: HTTP ${terms.status}`);
   }
-  const accessToken = registration.json('data.accessToken');
-  if (!accessToken) exec.test.abort('Registration response did not contain an access token');
-  return { accessToken };
+
+  const run = `${Date.now().toString(36)}_${Math.floor(Math.random() * 1e6)}`;
+  const accessTokens = [];
+  for (let index = 0; index < SETUP_USERS; index += 1) {
+    const username = `load_${index}_${run}`.slice(0, 24);
+    const registration = http.post(
+      `${BASE_URL}/api/auth/register`,
+      JSON.stringify({
+        username,
+        email: `${username}@load.test`,
+        password: 'load-test-password-123',
+        ageConfirmed: true,
+        termsAccepted: true,
+        privacyNoticeAcknowledged: true,
+        legalDocumentVersion,
+        legalLocale: 'en',
+      }),
+      {
+        ...requestOptions,
+        headers: { 'Content-Type': 'application/json' },
+        tags: { name: 'POST /api/auth/register [setup]' },
+      },
+    );
+    if (registration.status !== 201) {
+      exec.test.abort(`Unable to create load user ${index}: HTTP ${registration.status}`);
+    }
+    const accessToken = registration.json('data.accessToken');
+    if (!accessToken) exec.test.abort('Registration response did not contain an access token');
+    accessTokens.push(accessToken);
+
+    const room = http.post(
+      `${BASE_URL}/api/rooms`,
+      JSON.stringify({ title: `Load room ${index}`, topics: [`load-${index % 4}`] }),
+      {
+        ...requestOptions,
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+          'Idempotency-Key': `load-room-${run}-${index}`,
+        },
+        tags: { name: 'POST /api/rooms [setup]' },
+      },
+    );
+    if (room.status !== 201) {
+      exec.test.abort(`Unable to seed load room ${index}: HTTP ${room.status}`);
+    }
+  }
+  return { accessTokens };
 }
 
 export default function (data) {
+  const accessToken = data.accessTokens[(__VU - 1) % data.accessTokens.length];
   const params = {
-    headers: { Authorization: `Bearer ${data.accessToken}` },
+    headers: { Authorization: `Bearer ${accessToken}` },
     redirects: 0,
     timeout: `${REQUEST_TIMEOUT_MS}ms`,
   };
@@ -128,6 +168,24 @@ export default function (data) {
     ],
     [
       'GET',
+      `${BASE_URL}/api/rooms/feed?limit=20`,
+      null,
+      { ...params, tags: { name: 'GET /api/rooms/feed' } },
+    ],
+    [
+      'GET',
+      `${BASE_URL}/api/groups?limit=20`,
+      null,
+      { ...params, tags: { name: 'GET /api/groups' } },
+    ],
+    [
+      'GET',
+      `${BASE_URL}/api/notifications/unread-count`,
+      null,
+      { ...params, tags: { name: 'GET /api/notifications/unread-count' } },
+    ],
+    [
+      'GET',
       `${BASE_URL}/api/maps/users`,
       null,
       { ...params, tags: { name: 'GET /api/maps/users' } },
@@ -136,6 +194,9 @@ export default function (data) {
 
   check(responses[0], { 'profile returned 200': response => response.status === 200 });
   check(responses[1], { 'rooms returned 200': response => response.status === 200 });
-  check(responses[2], { 'map roster returned 200': response => response.status === 200 });
+  check(responses[2], { 'hallway feed returned 200': response => response.status === 200 });
+  check(responses[3], { 'group list returned 200': response => response.status === 200 });
+  check(responses[4], { 'unread count returned 200': response => response.status === 200 });
+  check(responses[5], { 'map roster returned 200': response => response.status === 200 });
   sleep(1);
 }

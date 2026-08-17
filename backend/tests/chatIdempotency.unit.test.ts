@@ -57,6 +57,7 @@ jest.mock('../src/modules/chat/chat.policy', () => ({
 }));
 jest.mock('../src/modules/media/media.service', () => ({
   mediaService: {
+    canonicalizeVoiceMediaUrl: (url: string) => url,
     assertOwnedMediaUrlWithinTransaction: (...args: unknown[]) =>
       mockAssertOwnedMediaUrlWithinTransaction(...args),
   },

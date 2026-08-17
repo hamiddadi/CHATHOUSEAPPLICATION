@@ -9,6 +9,10 @@ import { cursorPage } from '../../utils/paginate';
 import { directMessageEligibility } from '../chat/chat.policy';
 import { decodeTimeIdCursor, encodeTimeIdCursor } from '../../utils/timeIdCursor';
 import { logger } from '../../config/logger';
+import {
+  notificationDeliveryOutboxData,
+  wakeNotificationDelivery,
+} from '../notifications/notification.outbox';
 
 const publicUser = {
   id: true,
@@ -119,6 +123,9 @@ export const followService = {
                 targetType: 'user',
               },
             });
+            await tx.outboxEvent.create({
+              data: notificationDeliveryOutboxData(notification.id, notification.id),
+            });
             return {
               state: 'pending-created' as const,
               followerCount: null,
@@ -150,6 +157,9 @@ export const followService = {
               targetType: 'user',
             },
           });
+          await tx.outboxEvent.create({
+            data: notificationDeliveryOutboxData(notification.id, notification.id),
+          });
           return {
             state: 'accepted-created' as const,
             followerCount: updatedTarget.followerCount,
@@ -164,16 +174,14 @@ export const followService = {
       emitUserFollowerCount(followingId, result.followerCount);
     }
     if (result.notification) {
-      await notificationsService
-        .deliverPersisted(result.notification, { verifyExists: true })
-        .catch(err =>
-          logger.warn('follow notification fanout failed after atomic commit', {
-            err,
-            notificationId: result.notification?.id,
-            followerId,
-            followingId,
-          }),
-        );
+      await wakeNotificationDelivery(result.notification.id).catch(err =>
+        logger.warn('follow notification outbox wake failed after atomic commit', {
+          err,
+          notificationId: result.notification?.id,
+          followerId,
+          followingId,
+        }),
+      );
     }
 
     if (result.state === 'pending-created' || result.state === 'pending-existing') {

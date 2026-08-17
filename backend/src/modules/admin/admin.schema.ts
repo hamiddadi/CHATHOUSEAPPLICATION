@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { decodeAdminCursor } from './admin.cursor';
+import { strictBooleanQuery } from '../../utils/strictBooleanQuery';
 
 export const adminCursorSchema = z
   .string()
@@ -11,7 +12,7 @@ export const adminCursorSchema = z
 export const listUsersSchema = z.object({
   q: z.string().min(1).max(100).optional(),
   role: z.enum(['USER', 'MODERATOR', 'ADMIN', 'SUPER_ADMIN']).optional(),
-  suspended: z.coerce.boolean().optional(),
+  suspended: strictBooleanQuery.optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
   cursor: adminCursorSchema.optional(),
 });
@@ -69,13 +70,18 @@ export const resolveReportSchema = z.object({
 });
 
 export const listRoomsSchema = z.object({
-  live: z.coerce.boolean().optional(),
+  live: strictBooleanQuery.optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
 });
 
 export const forceEndRoomSchema = z.object({
   reason: z.string().min(1).max(500),
 });
+
+// The primary admin session authorizes the stop request; this separately
+// supplies the delegated bearer that must be cryptographically bound to both
+// the current actor and the target path before its jti can be revoked.
+export const stopImpersonationSchema = z.object({ token: z.string().min(32).max(4096) }).strict();
 
 export type ListUsersInput = z.infer<typeof listUsersSchema>;
 export type SetRoleInput = z.infer<typeof setRoleSchema>;

@@ -194,3 +194,42 @@ describe('roomService.ping — REGRESSION: must hit canonical /rooms/:id/ping/:u
     expect(url).toMatch(/^\/rooms\/[^/]+\/ping\/[^/]+$/);
   });
 });
+
+describe('roomService — retry-safe room chat mutations', () => {
+  it('sends a room message with the logical attempt idempotency key', async () => {
+    api.post.mockResolvedValueOnce({
+      data: {
+        data: {
+          id: 'message-1',
+          content: 'hello',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          user: {
+            id: 'user-1',
+            username: 'alice',
+            displayName: 'Alice',
+            avatarUrl: null,
+          },
+          replyTo: null,
+        },
+      },
+    });
+
+    await roomService.sendMessage('room-1', 'hello', 'rn-room-message-attempt-123');
+
+    expect(api.post).toHaveBeenCalledWith(
+      '/rooms/room-1/messages',
+      { content: 'hello' },
+      { headers: { 'Idempotency-Key': 'rn-room-message-attempt-123' } },
+    );
+  });
+
+  it('sends a room reaction with the logical attempt idempotency key', async () => {
+    await roomService.sendReaction('room-1', '👍', 'rn-room-reaction-attempt-456');
+
+    expect(api.post).toHaveBeenCalledWith(
+      '/rooms/room-1/reactions',
+      { emoji: '👍' },
+      { headers: { 'Idempotency-Key': 'rn-room-reaction-attempt-456' } },
+    );
+  });
+});

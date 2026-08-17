@@ -1,13 +1,13 @@
 #!/bin/sh
-# Exit 0 while any known write-blocking migration still needs a database
-# maintenance window, 3 when all are complete, and any other non-zero status on
-# an operational error.
+# Exit 0 while any known write-blocking migration or one-way state cutover still
+# needs a database maintenance window, 3 when all are complete, and any other
+# non-zero status on an operational error.
 (
 set -eu
 
 mode="${1:-check}"
 case "$mode" in
-  check|--wait-for-owner-idle) ;;
+  check|--wait-for-owner-idle|--wait-for-cutover-idle) ;;
   *)
     printf '%s\n' "unsupported migration-maintenance mode: ${mode}" >&2
     exit 1
@@ -76,6 +76,43 @@ SQL
   done
 fi
 
+if [ "$mode" = --wait-for-cutover-idle ]; then
+  # The cutover runs with the shared application role, so counting every
+  # session for that role would also include the independent security worker.
+  # Instead, prove quiescence with the same transaction-scoped advisory lock
+  # held by mediaReferenceCutover.worker.ts. A successful try-lock is released
+  # automatically when this short psql session exits.
+  attempt=1
+  max_attempts=60
+  while :; do
+    cutover_idle=$(psql "$@" <<'SQL'
+SELECT CASE WHEN pg_try_advisory_lock(
+  hashtext('chathouse'),
+  hashtext('private-media-reference-v1')
+) THEN 'yes' ELSE 'no' END;
+SQL
+    )
+    case "$cutover_idle" in
+      yes)
+        unset PGPASSWORD
+        log "Private-media cutover transaction is quiescent"
+        exit 0
+        ;;
+      no) ;;
+      *)
+        log "ERROR: unexpected private-media cutover lock result"
+        exit 1
+        ;;
+    esac
+    if [ "$attempt" -ge "$max_attempts" ]; then
+      log "ERROR: private-media cutover remained active after $((max_attempts * 2)) seconds"
+      exit 1
+    fi
+    sleep 2
+    attempt=$((attempt + 1))
+  done
+fi
+
 ledger_exists=$(psql "$@" <<'SQL'
 SELECT CASE WHEN to_regclass('public."_prisma_migrations"') IS NULL THEN 'no' ELSE 'yes' END;
 SQL
@@ -86,7 +123,7 @@ if [ "$ledger_exists" = yes ]; then
 SELECT CASE WHEN
   COUNT(DISTINCT migration_name) FILTER (
     WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL
-  ) = 4
+  ) = 7
   AND COUNT(*) FILTER (
     WHERE finished_at IS NULL AND rolled_back_at IS NULL
   ) = 0
@@ -96,7 +133,10 @@ WHERE migration_name IN (
   '20260810190000_search_trigram_indexes',
   '20260810190000_stable_notification_follow_cursors',
   '20260810214000_media_idempotency_cleanup',
-  '20260810220000_participant_admission_lease'
+  '20260810220000_participant_admission_lease',
+  '20260813120000_relational_extension_data_integrity',
+  '20260813130000_group_list_cursor_index',
+  '20260813140000_gdpr_media_outbox'
 );
 SQL
   )
@@ -106,19 +146,51 @@ else
   log "ERROR: unexpected migration-ledger result"
   exit 1
 fi
-unset PGPASSWORD
 
+cutover_complete=no
 case "$migration_complete" in
   yes)
-    log "All blocking migrations are already complete"
+    cutover_table_exists=$(psql "$@" <<'SQL'
+SELECT CASE WHEN to_regclass('public."DeploymentCutover"') IS NULL THEN 'no' ELSE 'yes' END;
+SQL
+    )
+    case "$cutover_table_exists" in
+      yes)
+        cutover_complete=$(psql "$@" <<'SQL'
+SELECT CASE WHEN EXISTS (
+  SELECT 1
+  FROM public."DeploymentCutover"
+  WHERE "key" = 'private-media-reference-v1'
+) THEN 'yes' ELSE 'no' END;
+SQL
+        )
+        ;;
+      no) ;;
+      *)
+        log "ERROR: unexpected deployment-cutover table result"
+        exit 1
+        ;;
+    esac
+    ;;
+  no) ;;
+  *)
+    log "ERROR: unexpected migration-state result"
+    exit 1
+    ;;
+esac
+unset PGPASSWORD
+
+case "${migration_complete}:${cutover_complete}" in
+  yes:yes)
+    log "All blocking migrations and the private-media reference cutover are complete"
     exit 3
     ;;
-  no)
-    log "At least one blocking migration requires a maintenance window"
+  no:no|yes:no)
+    log "At least one blocking migration or the private-media reference cutover requires a maintenance window"
     exit 0
     ;;
   *)
-    log "ERROR: unexpected migration-state result"
+    log "ERROR: unexpected combined migration/cutover state"
     exit 1
     ;;
 esac

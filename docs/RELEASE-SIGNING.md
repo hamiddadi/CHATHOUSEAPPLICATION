@@ -84,6 +84,10 @@ Automatic signing is enabled in the project; CI Simulator builds disable code
 signing. For automated App Store delivery, use an App Store Connect API key
 stored as CI secrets (`.p8`, issuer ID and key ID). Never commit the key.
 
+Generate and review `Gemfile.lock` and `ios/Podfile.lock` on macOS, then commit
+both files. The protected release workflow fails closed when either lockfile is
+missing and installs exclusively from those resolved versions.
+
 Firebase Cloud Messaging on iOS also requires an APNs authentication key or
 certificate configured in the Firebase console. Push delivery must be tested
 on a physical device.
@@ -127,12 +131,15 @@ Also configure the Android signing passwords/alias
 (`IOS_DISTRIBUTION_CERTIFICATE_PASSWORD`) and the environment variable
 `IOS_TEAM_ID`.
 
-The workflow verifies that the Android bundle is not debug-signed and that the
-iOS archive contains the expected Apple Distribution team, App Store profile,
-production APNs entitlement and requested version/build. It intentionally does
-not upload to Play or TestFlight: use the verified artifacts on the Internal
-Testing/TestFlight tracks, then record those external runs in the protected
-Go-Live evidence. The iOS manifest records both `artifact_sha256` for the exact
-`ChatHouse.xcarchive.tgz` and `build_number`; copy these values into the evidence
-schema. The Go-Live preflight recomputes the tarball hash and extracts
-`CFBundleVersion` from the archive, so evidence for a different build fails.
+The workflow verifies that the Android bundle is not debug-signed. For iOS it
+verifies the archive and exported IPA use the expected Apple Distribution team,
+an App Store Connect profile, production APNs entitlement and the requested
+version/build. It intentionally does not upload to Play or TestFlight: use the
+verified artifacts on the Internal Testing/TestFlight tracks, then record those
+external runs in the protected Go-Live evidence. The iOS manifest records
+`artifact_sha256` for the exact `ChatHouse.xcarchive.tgz`, `ipa_sha256` for
+`ChatHouse.ipa`, and `build_number`; preserve these values with the release
+evidence. The Go-Live preflight recomputes both hashes, then compares
+`CFBundleIdentifier`, `CFBundleShortVersionString` and `CFBundleVersion`
+between the archive and IPA. Evidence for a repackaged or different TestFlight
+binary therefore fails closed.

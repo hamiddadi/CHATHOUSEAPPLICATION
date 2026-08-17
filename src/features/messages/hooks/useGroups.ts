@@ -9,6 +9,7 @@ import {
 import {
   groupService,
   type GroupConversation,
+  type GroupConversationPage,
   type GroupMessage,
   type GroupMessagePage,
 } from '../services/groupService';
@@ -26,14 +27,21 @@ export const groupKeys = {
 // Matches the backend default (groups.schema listGroupMessagesSchema limit=30).
 // Pagination ends only when the backend returns `nextCursor: null`.
 export const GROUP_MESSAGES_PAGE_SIZE = 30;
+export const GROUPS_PAGE_SIZE = 30;
 
 /** Cache shape of a paginated thread: pages of ascending messages, page 0 = newest. */
 type GroupMessagesCache = InfiniteData<GroupMessagePage, string | undefined>;
+type GroupConversationsCache = InfiniteData<GroupConversationPage, string | undefined>;
 
 export const useGroups = () =>
-  useQuery<GroupConversation[]>({
+  useInfiniteQuery({
     queryKey: groupKeys.list(),
-    queryFn: () => groupService.list(),
+    queryFn: ({ pageParam }: { pageParam: string | undefined }) =>
+      groupService.list({ cursor: pageParam, limit: GROUPS_PAGE_SIZE }),
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (lastPage: GroupConversationPage) =>
+      lastPage.hasMore ? (lastPage.nextCursor ?? undefined) : undefined,
+    select: (data: GroupConversationsCache) => data.pages.flatMap(page => page.items),
   });
 
 export const useGroup = (id: string) =>

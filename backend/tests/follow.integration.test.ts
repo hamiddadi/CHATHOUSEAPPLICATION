@@ -278,7 +278,7 @@ describe('Follow integration', () => {
     });
 
     const fanout = jest
-      .spyOn(notificationsService, 'deliverPersisted')
+      .spyOn(notificationsService, 'deliverPersistedStrict')
       .mockRejectedValueOnce(new Error('simulated delivery outage'));
     try {
       const first = await request(app)

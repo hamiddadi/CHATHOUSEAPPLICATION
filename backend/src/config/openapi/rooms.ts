@@ -3,6 +3,8 @@ import { z } from 'zod';
 import {
   createRoomSchema,
   listRoomsSchema,
+  sendReactionSchema,
+  sendRoomMessageSchema,
   updateRoleSchema,
   muteSchema,
 } from '../../modules/rooms/rooms.schema';
@@ -37,6 +39,60 @@ export const registerRoomsPaths = (
             }),
           },
         },
+      },
+    },
+  });
+
+  registry.registerPath({
+    method: 'post',
+    path: '/api/rooms/{id}/messages',
+    tags: ['Rooms', 'Chat'],
+    security: [{ bearerAuth: [] }],
+    request: {
+      params: z.object({ id: z.string().min(1) }),
+      headers: idempotencyHeaders,
+      body: { content: { 'application/json': { schema: sendRoomMessageSchema } } },
+    },
+    responses: {
+      201: {
+        description:
+          'Persists the room message exactly once per Idempotency-Key; realtime delivery is best effort and clients deduplicate with message id.',
+        content: {
+          'application/json': {
+            schema: z.object({ success: z.literal(true), data: z.object({}).passthrough() }),
+          },
+        },
+      },
+      409: {
+        description: 'Idempotency key reused with another payload',
+        content: { 'application/json': { schema: ErrorBody } },
+      },
+    },
+  });
+
+  registry.registerPath({
+    method: 'post',
+    path: '/api/rooms/{id}/reactions',
+    tags: ['Rooms'],
+    security: [{ bearerAuth: [] }],
+    request: {
+      params: z.object({ id: z.string().min(1) }),
+      headers: idempotencyHeaders,
+      body: { content: { 'application/json': { schema: sendReactionSchema } } },
+    },
+    responses: {
+      201: {
+        description:
+          'Persists the reaction exactly once per Idempotency-Key; realtime delivery is best effort.',
+        content: {
+          'application/json': {
+            schema: z.object({ success: z.literal(true), data: z.object({}).passthrough() }),
+          },
+        },
+      },
+      409: {
+        description: 'Idempotency key reused with another payload',
+        content: { 'application/json': { schema: ErrorBody } },
       },
     },
   });

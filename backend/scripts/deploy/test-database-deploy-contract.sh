@@ -2,10 +2,12 @@
 # Static guard for the safety-critical production database activation order.
 set -eu
 
-SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 DEPLOY_SCRIPT="${SCRIPT_DIR}/deploy-image.sh"
 ROLLBACK_SCRIPT="${SCRIPT_DIR}/rollback.sh"
 MAINTENANCE_SCRIPT="${SCRIPT_DIR}/migration-maintenance-required.sh"
+STATE_GUARD_SCRIPT="${SCRIPT_DIR}/state-contract-deploy-guard.sh"
+STATE_GUARD_TEST="${SCRIPT_DIR}/test-state-contract-deploy-guard.sh"
 LIVEKIT_GUARD_SCRIPT="${SCRIPT_DIR}/livekit-deploy-guard.sh"
 LIVEKIT_GUARD_TEST="${SCRIPT_DIR}/test-livekit-deploy-guard.sh"
 BOOTSTRAP_SCRIPT="${SCRIPT_DIR}/bootstrap-app-role.sh"
@@ -24,6 +26,10 @@ MEDIA_MIGRATION="${SCRIPT_DIR}/../../prisma/migrations/20260810214000_media_idem
 MEDIA_ROLLBACK_MIGRATION="${SCRIPT_DIR}/../../prisma/migrations/20260810214500_media_rollback_compatibility/migration.sql"
 OUTBOX_EFFECT_MIGRATION="${SCRIPT_DIR}/../../prisma/migrations/20260810215000_outbox_effect_started_at/migration.sql"
 PARTICIPANT_ADMISSION_MIGRATION="${SCRIPT_DIR}/../../prisma/migrations/20260810220000_participant_admission_lease/migration.sql"
+RELATIONAL_INTEGRITY_MIGRATION="${SCRIPT_DIR}/../../prisma/migrations/20260813120000_relational_extension_data_integrity/migration.sql"
+GROUP_CURSOR_MIGRATION="${SCRIPT_DIR}/../../prisma/migrations/20260813130000_group_list_cursor_index/migration.sql"
+GDPR_MEDIA_MIGRATION="${SCRIPT_DIR}/../../prisma/migrations/20260813140000_gdpr_media_outbox/migration.sql"
+MEDIA_CUTOVER_WORKER="${SCRIPT_DIR}/../../src/workers/mediaReferenceCutover.worker.ts"
 
 line_number() {
   match=$(grep -nF "$2" "$1" | sed -n '1{s/:.*//;p;}')
@@ -49,46 +55,67 @@ stop_line=$(line_number "$DEPLOY_SCRIPT" 'stop "$API_SERVICE"')
 migrate_line=$(line_number "$DEPLOY_SCRIPT" 'run_migrations_bounded "$file"')
 grants_line=$(line_number "$DEPLOY_SCRIPT" 'run --rm --no-deps "$DB_GRANTS_SERVICE"')
 label_guard_line=$(line_number "$DEPLOY_SCRIPT" 'image is incompatible with the restricted database-role contract')
+state_label_guard_line=$(line_number "$DEPLOY_SCRIPT" 'image is incompatible with state contract')
 livekit_label_guard_line=$(line_number "$DEPLOY_SCRIPT" 'image is incompatible with the LiveKit revocation contract')
+previous_state_guard_line=$(line_number "$DEPLOY_SCRIPT" 'preflight_previous_api_state_contract "$CURRENT_CONTAINER" "$PREV_IMAGE"')
 previous_livekit_guard_line=$(line_number "$DEPLOY_SCRIPT" 'preflight_previous_api_livekit_contract "$CURRENT_CONTAINER" "$PREV_IMAGE"')
 previous_database_guard_line=$(line_number "$DEPLOY_SCRIPT" 'preflight_previous_api_database_role_contract "$CURRENT_CONTAINER" "$PREV_IMAGE"')
 prepare_call_line=$(line_number "$DEPLOY_SCRIPT" 'if ! prepare_database "$COMPOSE_FILE" "$NEW_IMAGE"; then')
+media_reference_cutover_line=$(line_number "$DEPLOY_SCRIPT" 'run_media_reference_cutover_bounded "$file"')
 worker_preflight_line=$(line_number "$DEPLOY_SCRIPT" 'dist/workers/livekitSecurity.worker.js')
 worker_up_line=$(line_number "$DEPLOY_SCRIPT" 'up -d --no-deps "$LIVEKIT_REVOCATION_WORKER_SERVICE"')
 worker_activation_line=$(line_number "$DEPLOY_SCRIPT" 'if ! activate_livekit_worker_with_contract "$COMPOSE_FILE" "$NEW_IMAGE"; then')
 api_activation_line=$(line_number "$DEPLOY_SCRIPT" 'if activate_image_with_runtime_contracts "$COMPOSE_FILE" "$NEW_IMAGE"; then')
-rollback_target_refusal_line=$(line_number "$DEPLOY_SCRIPT" 'Rollback target API activation failed; restoring the captured worker before exit')
+api_activation_guard_line=$(nth_line_number "$DEPLOY_SCRIPT" 'API_ACTIVATION_ACTIVE=1' 1)
 
 [ "$bootstrap_line" -lt "$maintenance_line" ]
 [ "$maintenance_line" -lt "$stop_line" ]
+maintenance_active_line=$(line_number "$DEPLOY_SCRIPT" 'DATABASE_MAINTENANCE_ACTIVE=1')
+[ "$maintenance_active_line" -lt "$stop_line" ]
 [ "$stop_line" -lt "$migrate_line" ]
 [ "$migrate_line" -lt "$grants_line" ]
+[ "$grants_line" -lt "$media_reference_cutover_line" ]
+[ "$media_reference_cutover_line" -lt "$worker_activation_line" ]
+[ "$media_reference_cutover_line" -lt "$api_activation_line" ]
 [ "$label_guard_line" -lt "$prepare_call_line" ]
+[ "$state_label_guard_line" -lt "$prepare_call_line" ]
 [ "$livekit_label_guard_line" -lt "$prepare_call_line" ]
+[ "$previous_state_guard_line" -lt "$prepare_call_line" ]
 [ "$previous_livekit_guard_line" -lt "$prepare_call_line" ]
 [ "$previous_database_guard_line" -lt "$prepare_call_line" ]
 [ "$worker_preflight_line" -lt "$worker_up_line" ]
 [ "$worker_activation_line" -lt "$api_activation_line" ]
-rollback_target_refusal_end=$((rollback_target_refusal_line + 6))
-rollback_target_refusal_block=$(sed -n "${rollback_target_refusal_line},${rollback_target_refusal_end}p" "$DEPLOY_SCRIPT")
-printf '%s\n' "$rollback_target_refusal_block" | grep -Fq 'restore_previous_livekit_security_worker'
-printf '%s\n' "$rollback_target_refusal_block" | grep -Fq 'rollback target activation refused'
+[ "$api_activation_guard_line" -lt "$api_activation_line" ]
 
 grep -Fq 'if [ "$RUN_DATABASE_MIGRATIONS" = "true" ]' "$DEPLOY_SCRIPT"
 grep -Fq 'org.chathouse.database-role-contract' "$DEPLOY_SCRIPT"
 grep -Fq 'LABEL org.chathouse.database-role-contract="v1"' "$DOCKERFILE"
 grep -Fq 'LABEL org.chathouse.livekit-revocation-contract="v1"' "$DOCKERFILE"
+grep -Fq 'LABEL org.chathouse.state-contract="v2"' "$DOCKERFILE"
+grep -Fq 'REQUIRED_STATE_CONTRACT=v2' "$DEPLOY_SCRIPT"
 grep -Fq 'REQUIRED_LIVEKIT_REVOCATION_CONTRACT=v1' "$DEPLOY_SCRIPT"
+grep -Fq 'source "$STATE_CONTRACT_DEPLOY_GUARD"' "$DEPLOY_SCRIPT"
 grep -Fq 'source "$LIVEKIT_DEPLOY_GUARD"' "$DEPLOY_SCRIPT"
+grep -Fq 'ACKNOWLEDGE_ONE_WAY_STATE_CONTRACT_V2_CUTOVER' "$DEPLOY_SCRIPT"
 grep -Fq 'ALLOW_ONE_WAY_LIVEKIT_REVOCATION_UPGRADE' "$DEPLOY_SCRIPT"
 grep -Fq 'ALLOW_ONE_WAY_DATABASE_ROLE_UPGRADE' "$DEPLOY_SCRIPT"
 grep -Fq 'Refusing every database/API mutation' "$LIVEKIT_GUARD_SCRIPT"
+grep -Fq 'Refusing every database/API mutation' "$STATE_GUARD_SCRIPT"
+grep -Fq 'pre-v2 activation and rollback are permanently refused' "$STATE_GUARD_SCRIPT"
+grep -Fq 'activate_image_with_state_contract "$file" "$image"' "$LIVEKIT_GUARD_SCRIPT"
+grep -Fq 'scripts/deploy/state-contract-deploy-guard.sh' "$PRODUCTION_WORKFLOW"
+grep -Fq 'scripts/deploy/state-contract-deploy-guard.sh' "$STAGING_WORKFLOW"
 grep -Fq 'scripts/deploy/livekit-deploy-guard.sh' "$PRODUCTION_WORKFLOW"
 grep -Fq 'scripts/deploy/livekit-deploy-guard.sh' "$STAGING_WORKFLOW"
 grep -Fq 'ALLOW_ONE_WAY_LIVEKIT_REVOCATION_UPGRADE="$ALLOW_ONE_WAY_LIVEKIT_REVOCATION_UPGRADE"' "$PRODUCTION_WORKFLOW"
 grep -Fq 'ALLOW_ONE_WAY_LIVEKIT_REVOCATION_UPGRADE="$ALLOW_ONE_WAY_LIVEKIT_REVOCATION_UPGRADE"' "$STAGING_WORKFLOW"
 grep -Fq 'ALLOW_ONE_WAY_DATABASE_ROLE_UPGRADE="$ALLOW_ONE_WAY_DATABASE_ROLE_UPGRADE"' "$PRODUCTION_WORKFLOW"
 grep -Fq 'ALLOW_ONE_WAY_DATABASE_ROLE_UPGRADE="$ALLOW_ONE_WAY_DATABASE_ROLE_UPGRADE"' "$STAGING_WORKFLOW"
+grep -Fq 'acknowledge_one_way_state_contract_v2_cutover:' "$PRODUCTION_WORKFLOW"
+grep -Fq 'acknowledge_one_way_state_contract_v2_cutover:' "$STAGING_WORKFLOW"
+grep -Fq 'ACKNOWLEDGE_ONE_WAY_STATE_CONTRACT_V2_CUTOVER="$ACKNOWLEDGE_ONE_WAY_STATE_CONTRACT_V2_CUTOVER"' "$PRODUCTION_WORKFLOW"
+grep -Fq 'ACKNOWLEDGE_ONE_WAY_STATE_CONTRACT_V2_CUTOVER="$ACKNOWLEDGE_ONE_WAY_STATE_CONTRACT_V2_CUTOVER"' "$STAGING_WORKFLOW"
+grep -Fq 'bash scripts/deploy/test-state-contract-deploy-guard.sh' "$CI_WORKFLOW"
 grep -Fq 'bash scripts/deploy/test-livekit-deploy-guard.sh' "$CI_WORKFLOW"
 grep -Fq 'image is incompatible with the LiveKit revocation contract' "$DEPLOY_SCRIPT"
 if grep -Fq 'livekit-outbox-handoff:' "$COMPOSE_FILE"; then
@@ -96,17 +123,35 @@ if grep -Fq 'livekit-outbox-handoff:' "$COMPOSE_FILE"; then
   exit 1
 fi
 grep -Fq 'RUN_DATABASE_MIGRATIONS=false' "$ROLLBACK_SCRIPT"
+grep -Fq 'ACKNOWLEDGE_ONE_WAY_STATE_CONTRACT_V2_CUTOVER=false' "$ROLLBACK_SCRIPT"
 grep -Fq 'ALLOW_ONE_WAY_LIVEKIT_REVOCATION_UPGRADE=false' "$ROLLBACK_SCRIPT"
 grep -Fq 'ALLOW_ONE_WAY_DATABASE_ROLE_UPGRADE=false' "$ROLLBACK_SCRIPT"
 grep -Fq '20260810190000_search_trigram_indexes' "$MAINTENANCE_SCRIPT"
 grep -Fq '20260810190000_stable_notification_follow_cursors' "$MAINTENANCE_SCRIPT"
 grep -Fq '20260810214000_media_idempotency_cleanup' "$MAINTENANCE_SCRIPT"
 grep -Fq '20260810220000_participant_admission_lease' "$MAINTENANCE_SCRIPT"
-grep -Fq ') = 4' "$MAINTENANCE_SCRIPT"
+grep -Fq '20260813120000_relational_extension_data_integrity' "$MAINTENANCE_SCRIPT"
+grep -Fq '20260813130000_group_list_cursor_index' "$MAINTENANCE_SCRIPT"
+grep -Fq '20260813140000_gdpr_media_outbox' "$MAINTENANCE_SCRIPT"
+grep -Fq ') = 7' "$MAINTENANCE_SCRIPT"
+grep -Fq 'to_regclass('\''public."DeploymentCutover"'\'')' "$MAINTENANCE_SCRIPT"
+grep -Fq "WHERE \"key\" = 'private-media-reference-v1'" "$MAINTENANCE_SCRIPT"
+grep -Fq 'MEDIA_REFERENCE_CUTOVER_SERVICE="${MEDIA_REFERENCE_CUTOVER_SERVICE:-media-reference-cutover}"' "$DEPLOY_SCRIPT"
+grep -Fq 'if [ "$DATABASE_MAINTENANCE_ACTIVE" -eq 1 ]; then' "$DEPLOY_SCRIPT"
+grep -Fq 'if [ "$API_ACTIVATION_ACTIVE" -eq 1 ]; then' "$DEPLOY_SCRIPT"
+grep -Fq 'Interrupted API activation recovered; previous API is healthy' "$DEPLOY_SCRIPT"
+if grep -Fq 'rollback target activation refused; current API worker remains authoritative' "$DEPLOY_SCRIPT"; then
+  printf '%s\n' 'rollback activation failure still assumes the previous API container survived Compose replacement' >&2
+  exit 1
+fi
 grep -Fq 'MIGRATION_COMMAND_TIMEOUT=35m' "$DEPLOY_SCRIPT"
+grep -Fq 'CUTOVER_COMMAND_TIMEOUT=32m' "$DEPLOY_SCRIPT"
 grep -Fq -- '--kill-after="$MIGRATION_TERMINATION_GRACE"' "$DEPLOY_SCRIPT"
-grep -Fq 'MIGRATION_CONTAINER_NAME="chathouse-prisma-migrate-$$"' "$DEPLOY_SCRIPT"
+grep -Fq -- '--kill-after="$CUTOVER_TERMINATION_GRACE"' "$DEPLOY_SCRIPT"
+grep -Fq 'MIGRATION_CONTAINER_NAME="chathouse-prisma-migrate"' "$DEPLOY_SCRIPT"
+grep -Fq 'CUTOVER_CONTAINER_NAME="chathouse-media-reference-cutover"' "$DEPLOY_SCRIPT"
 grep -Fq 'run --name "$MIGRATION_CONTAINER_NAME" --rm --no-deps "$DB_MIGRATION_SERVICE"' "$DEPLOY_SCRIPT"
+grep -Fq 'run --name "$CUTOVER_CONTAINER_NAME" --rm --no-deps "$MEDIA_REFERENCE_CUTOVER_SERVICE"' "$DEPLOY_SCRIPT"
 [ "$(grep -Fc 'if ! stop_migration_container_and_wait; then' "$DEPLOY_SCRIPT")" -eq 2 ]
 grep -Fq 'refusing to restart API writers' "$DEPLOY_SCRIPT"
 for signal in TERM INT HUP; do
@@ -114,6 +159,7 @@ for signal in TERM INT HUP; do
 done
 grep -Fq 'activate_image_with_runtime_contracts "$COMPOSE_FILE" "$NEW_IMAGE"' "$DEPLOY_SCRIPT"
 grep -Fq 'activate_image_with_runtime_contracts "$ROLLBACK_COMPOSE_FILE" "$PREV_IMAGE"' "$LIVEKIT_GUARD_SCRIPT"
+grep -Fq 'irreversible state cutover forbids automatic reactivation' "$LIVEKIT_GUARD_SCRIPT"
 grep -Fq '&& activate_previous_image' "$DEPLOY_SCRIPT"
 grep -Fq 'if activate_previous_image && verify_internal_health; then' "$DEPLOY_SCRIPT"
 grep -Fq 'if activate_previous_image; then' "$DEPLOY_SCRIPT"
@@ -128,12 +174,18 @@ grep -Fq 'livekit_worker_is_healthy "$COMPOSE_FILE" "$NEW_IMAGE"' "$DEPLOY_SCRIP
 grep -Fq '&& verify_internal_health' "$DEPLOY_SCRIPT"
 signal_quiescence_line=$(nth_line_number "$DEPLOY_SCRIPT" 'if ! stop_migration_container_and_wait; then' 1)
 failure_quiescence_line=$(nth_line_number "$DEPLOY_SCRIPT" 'if ! stop_migration_container_and_wait; then' 2)
-signal_reactivation_line=$(line_number "$DEPLOY_SCRIPT" '&& activate_previous_image')
+signal_cutover_quiescence_line=$(nth_line_number "$DEPLOY_SCRIPT" 'if ! stop_cutover_container_and_wait; then' 1)
+failure_cutover_quiescence_line=$(nth_line_number "$DEPLOY_SCRIPT" 'if ! stop_cutover_container_and_wait; then' 2)
+nonmaintenance_signal_reactivation_line=$(nth_line_number "$DEPLOY_SCRIPT" '&& activate_previous_image' 1)
+signal_reactivation_line=$(nth_line_number "$DEPLOY_SCRIPT" '&& activate_previous_image' 2)
 failure_reactivation_line=$(line_number "$DEPLOY_SCRIPT" 'if activate_previous_image && verify_internal_health; then')
 migration_failure_cleanup_line=$(nth_line_number "$DEPLOY_SCRIPT" 'stop_migration_container_and_wait || return 1' 2)
 migration_failure_return_line=$(line_number "$DEPLOY_SCRIPT" 'return "$migration_status"')
 [ "$signal_quiescence_line" -lt "$signal_reactivation_line" ]
+[ "$signal_cutover_quiescence_line" -lt "$signal_reactivation_line" ]
+[ "$nonmaintenance_signal_reactivation_line" -lt "$signal_quiescence_line" ]
 [ "$failure_quiescence_line" -lt "$failure_reactivation_line" ]
+[ "$failure_cutover_quiescence_line" -lt "$failure_reactivation_line" ]
 [ "$migration_failure_cleanup_line" -lt "$migration_failure_return_line" ]
 
 grep -Fq '  livekit-revocation-worker:' "$COMPOSE_FILE"
@@ -168,7 +220,10 @@ for transactional_migration in \
   "$MEDIA_MIGRATION" \
   "$MEDIA_ROLLBACK_MIGRATION" \
   "$OUTBOX_EFFECT_MIGRATION" \
-  "$PARTICIPANT_ADMISSION_MIGRATION"; do
+  "$PARTICIPANT_ADMISSION_MIGRATION" \
+  "$RELATIONAL_INTEGRITY_MIGRATION" \
+  "$GROUP_CURSOR_MIGRATION" \
+  "$GDPR_MEDIA_MIGRATION"; do
   [ "$(grep -Fc 'BEGIN;' "$transactional_migration")" -eq 1 ]
   [ "$(grep -Fc 'COMMIT;' "$transactional_migration")" -eq 1 ]
 done
@@ -180,10 +235,26 @@ grep -Fq "SET LOCAL lock_timeout = '5s';" "$OUTBOX_EFFECT_MIGRATION"
 grep -Fq "SET LOCAL statement_timeout = '5min';" "$OUTBOX_EFFECT_MIGRATION"
 grep -Fq "SET LOCAL lock_timeout = '5s';" "$PARTICIPANT_ADMISSION_MIGRATION"
 grep -Fq "SET LOCAL statement_timeout = '15min';" "$PARTICIPANT_ADMISSION_MIGRATION"
+grep -Fq "SET LOCAL lock_timeout = '5s';" "$RELATIONAL_INTEGRITY_MIGRATION"
+grep -Fq "SET LOCAL statement_timeout = '30min';" "$RELATIONAL_INTEGRITY_MIGRATION"
+grep -Fq "SET LOCAL lock_timeout = '5s';" "$GROUP_CURSOR_MIGRATION"
+grep -Fq "SET LOCAL statement_timeout = '30min';" "$GROUP_CURSOR_MIGRATION"
+grep -Fq "SET LOCAL lock_timeout = '5s';" "$GDPR_MEDIA_MIGRATION"
+grep -Fq "SET LOCAL statement_timeout = '10min';" "$GDPR_MEDIA_MIGRATION"
+if grep -Fq 'SET "contentMediaObjectId" = media."id"' "$RELATIONAL_INTEGRITY_MIGRATION"; then
+  printf '%s\n' 'report media relation is inferred from an unauthenticated URL substring' >&2
+  exit 1
+fi
+grep -Fq 'data: { contentAudioUrl: replacement, contentMediaObjectId: mediaId }' "$MEDIA_CUTOVER_WORKER"
+grep -Fq 'data: { iconUrl: replacement, iconMediaObjectId: mediaId }' "$MEDIA_CUTOVER_WORKER"
+grep -Fq 'data: { coverUrl: replacement, coverMediaObjectId: mediaId }' "$MEDIA_CUTOVER_WORKER"
 grep -Fq -- '--wait-for-owner-idle' "$MAINTENANCE_SCRIPT"
+grep -Fq -- '--wait-for-cutover-idle' "$MAINTENANCE_SCRIPT"
 grep -Fq 'pg_catalog.pg_stat_activity' "$MAINTENANCE_SCRIPT"
-[ "$(grep -Fc 'command_timeout: 60m' "$PRODUCTION_WORKFLOW")" -eq 1 ]
-[ "$(grep -Fc 'command_timeout: 60m' "$STAGING_WORKFLOW")" -eq 1 ]
+grep -Fq "hashtext('private-media-reference-v1')" "$MAINTENANCE_SCRIPT"
+grep -Fq "hashtext(\${MEDIA_REFERENCE_CUTOVER_KEY})" "$MEDIA_CUTOVER_WORKER"
+[ "$(grep -Fc 'command_timeout: 90m' "$PRODUCTION_WORKFLOW")" -eq 1 ]
+[ "$(grep -Fc 'command_timeout: 90m' "$STAGING_WORKFLOW")" -eq 1 ]
 [ "$(grep -Fc 'command_timeout: 15m' "$ROLLBACK_WORKFLOW")" -eq 1 ]
 grep -Fq 'trap interrupt TERM INT HUP' "$PRODUCTION_WORKFLOW"
 grep -Fq 'trap interrupt TERM INT HUP' "$STAGING_WORKFLOW"
@@ -198,5 +269,6 @@ commit_line=$(line_number "$BOOTSTRAP_SCRIPT" 'COMMIT;')
 [ "$grant_line" -lt "$commit_line" ]
 
 bash "$LIVEKIT_GUARD_TEST"
+bash "$STATE_GUARD_TEST"
 
 printf '%s\n' "database deployment contract smoke passed"

@@ -16,13 +16,14 @@ export const OUTBOX_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 export const OUTBOX_HANDLER_TIMEOUT_MS = 20_000;
 const POLL_INTERVAL_MS = 500;
 const CLEANUP_EVERY_POLLS = 120;
-const METRICS_EVERY_POLLS = 10;
+const METRICS_INTERVAL_MS = 60_000;
 const LEASE_HEARTBEAT_MS = 10_000;
 const CLEANUP_MAX_BATCHES = 20;
 
 let pollTimer: NodeJS.Timeout | null = null;
 let activePoll: Promise<void> | null = null;
 let pollCount = 0;
+let lastMetricsAt = 0;
 
 /**
  * Register one topic consumer. The outbox guarantees an at-least-once handoff,
@@ -282,20 +283,28 @@ export const cleanupDeliveredOutboxEvents = async (
 const poll = async (): Promise<void> => {
   await processOutboxBatch();
   pollCount += 1;
-  if (pollCount % METRICS_EVERY_POLLS === 0) {
-    const [pending, processing, delivered, oldest] = await Promise.all([
-      prisma.outboxEvent.count({ where: { status: 'PENDING' } }),
-      prisma.outboxEvent.count({ where: { status: 'PROCESSING' } }),
-      prisma.outboxEvent.count({ where: { status: 'DELIVERED' } }),
+  const now = Date.now();
+  if (now - lastMetricsAt >= METRICS_INTERVAL_MS) {
+    lastMetricsAt = now;
+    // Keep operational backlog telemetry cheap: one grouped count over the
+    // undelivered working set plus one indexed oldest-row lookup. Delivered
+    // throughput is already represented by outboxEventsTotal and must not scan
+    // thirty days of retained history on every API replica.
+    const [counts, oldest] = await Promise.all([
+      prisma.outboxEvent.groupBy({
+        by: ['status'],
+        where: { deliveredAt: null },
+        _count: { _all: true },
+      }),
       prisma.outboxEvent.findFirst({
         where: { deliveredAt: null },
         orderBy: { createdAt: 'asc' },
         select: { createdAt: true },
       }),
     ]);
-    outboxBacklogGauge.set({ status: 'PENDING' }, pending);
-    outboxBacklogGauge.set({ status: 'PROCESSING' }, processing);
-    outboxBacklogGauge.set({ status: 'DELIVERED' }, delivered);
+    const byStatus = new Map(counts.map(row => [row.status, row._count._all]));
+    outboxBacklogGauge.set({ status: 'PENDING' }, byStatus.get('PENDING') ?? 0);
+    outboxBacklogGauge.set({ status: 'PROCESSING' }, byStatus.get('PROCESSING') ?? 0);
     outboxOldestPendingAgeSecondsGauge.set(
       oldest ? Math.max(0, (Date.now() - oldest.createdAt.getTime()) / 1000) : 0,
     );
@@ -310,6 +319,7 @@ const poll = async (): Promise<void> => {
 
 export const startOutboxWorker = (): void => {
   if (pollTimer) return;
+  lastMetricsAt = 0;
   const tick = (): void => {
     if (activePoll) return;
     activePoll = poll()

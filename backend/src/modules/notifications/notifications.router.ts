@@ -8,6 +8,7 @@ import { AppError } from '../../middlewares/error.middleware';
 import { authedUserId as uid } from '../../utils/authedUserId';
 import { decodeTimeIdCursor } from '../../utils/timeIdCursor';
 import { notificationsService, parseFilter } from './notifications.service';
+import { materializePrivateMediaUrls } from '../media/media-url';
 
 export const notificationsRouter: Router = Router();
 
@@ -32,7 +33,7 @@ notificationsRouter.get(
     // metadata to newer clients at the envelope's top level.
     res.status(200).json({
       success: true,
-      data: page.data,
+      data: materializePrivateMediaUrls(page.data),
       nextCursor: page.nextCursor,
       hasMore: page.hasMore,
     });

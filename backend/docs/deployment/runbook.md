@@ -12,19 +12,20 @@ and `redis`.
 
 ## 1. Pipelines at a glance
 
-| Pipeline        | File                                  | Trigger                       | Target     | Approval           |
-| --------------- | ------------------------------------- | ----------------------------- | ---------- | ------------------ |
-| CI              | `.github/workflows/ci.yml`            | push / PR to `main`,`develop` | —          | none               |
-| CD — Staging    | `.github/workflows/cd-staging.yml`    | push to `main`, manual        | staging    | none               |
-| CD — Production | `.github/workflows/cd-production.yml` | push tag `v*.*.*`             | production | required reviewers |
-| Rollback        | `.github/workflows/rollback.yml`      | manual (`workflow_dispatch`)  | either     | env gate           |
+| Pipeline        | File                                  | Trigger                                  | Target     | Approval           |
+| --------------- | ------------------------------------- | ---------------------------------------- | ---------- | ------------------ |
+| CI              | `.github/workflows/ci.yml`            | push (all branches), PR, manual/reusable | —          | none               |
+| CD — Staging    | `.github/workflows/cd-staging.yml`    | push to `main`, manual                   | staging    | none               |
+| CD — Production | `.github/workflows/cd-production.yml` | push tag `v*.*.*`                        | production | required reviewers |
+| Rollback        | `.github/workflows/rollback.yml`      | manual (`workflow_dispatch`)             | either     | env gate           |
 
 Images are pushed to **GHCR**: `ghcr.io/<owner>/<repo>/api`.
 
 - Staging tags: `staging-<sha>` and `staging-latest`
 - Production tag: `<semver>` (e.g. `1.4.2`), created only after the protected
-  production deployment succeeds. The release workflow does not publish or
-  move `latest`.
+  production deployment succeeds. This is an immutable version-to-digest
+  binding: a retry may reuse the tag only for the same digest. The release
+  workflow does not publish or move `latest`.
 
 These tags are discovery aliases only. Every deploy, rollback and migration
 upgrade drill uses the immutable identity
@@ -52,7 +53,8 @@ Staging deploys are automatic.
    - **attest-staging-candidate** — only after a successful staging deployment,
      uploads GitHub Actions evidence binding the repository, source commit,
      workflow run and exact accepted image digest. Production accepts evidence
-     only from a successful push-to-`main` run for the tagged commit.
+     only from a successful push or manual run on protected `main` for the
+     exact tagged commit.
    - **notify** — posts success/failure to Slack.
 3. Watch the Actions run + the Slack message. Done.
 
@@ -74,9 +76,9 @@ Production deploys are tag-driven and gated behind a manual approval.
    ```
 3. `cd-production.yml` runs:
    - **resolve-candidate** — does not rebuild. It finds a successful staging
-     push run for the exact tagged commit, downloads that run's acceptance
-     evidence, validates its repository/SHA/run identity and confirms the
-     immutable digest still exists in GHCR.
+     push or manual run on `main` for the exact tagged commit, downloads that
+     run's acceptance evidence, validates its repository/SHA/run identity and
+     confirms the immutable digest still exists in GHCR.
    - **deploy-production** — this job has `environment: production`, so it
      **pauses for a required reviewer to approve** in the Actions UI.
      After approval it SSHes to `PROD_HOST`, pulls that exact staging-tested
@@ -86,7 +88,9 @@ Production deploys are tag-driven and gated behind a manual approval.
      - `GET /api/users/me` (no token) → 401
        If smoke tests fail (10 retries), it **auto-rolls back** and fails.
    - **promote-release** — only after the protected deploy succeeds, points the
-     SemVer discovery tag at the accepted digest. No `latest` tag is moved.
+     SemVer discovery tag at the accepted digest. If that SemVer tag already
+     exists, it must resolve to the same digest; a different digest or an
+     inconclusive registry lookup aborts promotion. No `latest` tag is moved.
    - **notify** — posts to Slack.
 4. Approve the deploy in _Actions → the run → Review deployments → production_.
 5. Confirm the Slack success message and spot-check the app.
@@ -96,7 +100,8 @@ Production deploys are tag-driven and gated behind a manual approval.
 > metadata. For example, `v1.4.2-rc.1`, `v01.4.2` and `release-1.4.2` fail.
 > A correctly formed tag also fails closed unless its commit has successful,
 > matching staging acceptance evidence. No production alias is published
-> before the environment approval and successful deployment.
+> before the environment approval and successful deployment, and an existing
+> SemVer alias is never reassigned to another digest.
 
 ---
 
@@ -115,23 +120,42 @@ run logs and Slack to confirm both restorations.
 Use this when a bad deploy was already declared healthy but a problem surfaced
 later.
 
-1. _Actions → Rollback → Run workflow_.
+1. _Actions → Rollback → Run workflow_, then select the protected `main`
+   branch so the emergency run uses the current audited rollback guards.
 2. Inputs:
    - **environment**: `staging` or `production`
    - **image_digest**: the exact full ref
      `ghcr.io/<owner>/<repo>/api@sha256:<64 lowercase hex characters>`.
      Tags, other registries and other repositories are rejected.
-     The target must carry both image labels
+     The target must carry all three image labels
      `org.chathouse.database-role-contract=v1` and
-     `org.chathouse.livekit-revocation-contract=v1`. Older images are rejected
-     before DB preparation and are never activated.
-3. The workflow SSHes to the chosen host, pulls + deploys that digest, verifies
+     `org.chathouse.livekit-revocation-contract=v1`, plus
+     `org.chathouse.state-contract=v2`. Older images are rejected before DB
+     preparation and are never activated.
+   - **staging_run_id**: the positive numeric run ID from a successful
+     _CD — Deploy to Staging_ run on `main` that deployed and attested this exact
+     digest. Copy it from that Actions run URL; do not substitute a CI or
+     production run ID.
+3. Before opening SSH, the workflow resolves the canonical staging workflow ID
+   through the GitHub API, verifies that the supplied run belongs to this
+   repository, completed successfully on `main` via `push` or
+   `workflow_dispatch`, downloads
+   `staging-release-candidate-<source-sha>`, and binds its schema, repository,
+   source SHA, run ID/attempt and image digest exactly to the inputs and API
+   record.
+4. The workflow SSHes to the chosen host, pulls + deploys that digest, verifies
    `/health`, and logs the rollback to Slack.
+
+The Actions path fails closed before SSH when the run is invalid, its retained
+artifact is expired/missing, or any evidence field differs. Do not weaken this
+gate or substitute a human assertion inside Actions during an incident. Use the
+manual SSH procedure below only when GitHub or its retained evidence is
+unavailable, after independently verifying the exact digest.
 
 ### 4c. Manual via SSH (`rollback.sh`)
 
-Last resort / when GitHub is unavailable. SSH to the host and run the
-host-side script (shipped in the image / deploy dir):
+Last resort / when GitHub or the required staging artifact is unavailable. SSH
+to the host and run the host-side script (shipped in the image / deploy dir):
 
 ```bash
 ssh <user>@<host>
@@ -147,10 +171,16 @@ IMAGE_NAME=<owner>/<repo>/api ./scripts/deploy/rollback.sh \
 `rollback.sh` accepts only immutable digests from the configured repository. If
 the requested rollback target fails Compose, image verification, or health
 checks, it restores and verifies the digest that was running before the command.
-Manual rollback targets must have been built after both contract cutovers.
+Because this host-side escape hatch cannot query the Actions attestation, the
+operator must match the exact digest against a separately trusted successful
+staging/production run or the last-known-good deployment record before invoking
+it. Contract labels prove runtime compatibility, not provenance. Do not infer
+provenance from a mutable tag; if no trusted record exists, stop and escalate.
+Manual rollback targets must have been built after every contract cutover.
 There is no runtime exemption: every image reactivated after the cutovers must
-carry both `org.chathouse.database-role-contract=v1` and
-`org.chathouse.livekit-revocation-contract=v1`.
+carry `org.chathouse.database-role-contract=v1`,
+`org.chathouse.livekit-revocation-contract=v1`, and
+`org.chathouse.state-contract=v2`.
 
 ### 4d. Runtime rollback compatibility contracts
 
@@ -160,37 +190,57 @@ A point-in-time queue drain is not a safe compatibility bridge: the old binary
 could mint a new room token or create another state transition after the drain,
 without preserving the required revocation effect.
 
+Images built before `org.chathouse.state-contract=v2` also assume the old
+Redis/PostgreSQL split and legacy private-media references. Once migration
+`20260813120000_relational_extension_data_integrity`,
+`20260813140000_gdpr_media_outbox` and the
+`private-media-reference-v1` cutover have run, those assumptions cannot be
+recreated by restarting an old binary. State-contract v2 is therefore a
+permanent activation boundary, not a promise that CD can roll the database
+backward.
+
 The deploy script therefore fails closed on every activation path. Before any
 role bootstrap, grant change, API stop, migration or API replacement, it checks
 the captured rollback digest. Manual rollback targets are rejected too;
-automatic, maintenance-recovery and signal-recovery paths verify both labels
-again immediately before activation. If either label is absent or differs from
-`v1`, the image is not started. Never add a label to an old image as a
+automatic, maintenance-recovery and signal-recovery paths verify all three
+labels again immediately before activation. If any required label/version is
+absent, the image is not started. Never add a label to an old image as a
 workaround: each label certifies behavior implemented by that image.
 
-The first v1 upgrade of an environment already running a pre-v1 image is a
-one-way contract cutover because no compatible predecessor exists yet. (A
-brand-new environment with no running API needs no override.) Use this
+The first state-contract v2 upgrade of an environment running a pre-v2 image is
+an irreversible cutover because no compatible predecessor exists yet. The
+same rule applies independently to either v1 contract when its label is absent.
+(A brand-new environment with no running API needs no override.) Use this
 procedure exactly once per existing environment:
 
 1. Complete the production-clone migration drill and verified backup/restore
-   drill, then deploy the exact digest to staging with both one-way LiveKit and
-   database-role workflow-dispatch checkboxes enabled.
-2. Record the healthy staging API, worker and signed-webhook evidence. Select
-   the same tested tag in the production workflow-dispatch screen and enable
-   both checkboxes. The workflow passes
+   drill, then manually dispatch staging from protected `main` at the exact
+   commit referenced (or about to be referenced) by the release tag. Deploy
+   that digest with
+   `acknowledge_one_way_state_contract_v2_cutover` enabled. Also enable the
+   one-way LiveKit/database-role inputs if the captured predecessor lacks their
+   respective v1 labels.
+2. Record the healthy staging API, worker and signed-webhook evidence.
+   Production accepts this manual staging attestation only because its
+   `head_branch` is `main`, its `head_sha` exactly matches the release tag and
+   it completed successfully. Select that tag in the production
+   workflow-dispatch screen and repeat the same explicit acknowledgements. The
+   workflow passes
+   `ACKNOWLEDGE_ONE_WAY_STATE_CONTRACT_V2_CUTOVER=true`, plus any required
    `ALLOW_ONE_WAY_LIVEKIT_REVOCATION_UPGRADE=true` and
    `ALLOW_ONE_WAY_DATABASE_ROLE_UPGRADE=true` only for that
    invocation.
-3. Each override bypasses only its corresponding _previous-image_
-   compatibility preflight. The candidate's two v1 image labels, DB/schema
-   preflight, worker health and public health gates remain mandatory. If
-   failure happens after maintenance starts, the pre-v1 API remains stopped;
-   deploy the tested v1 digest (or a corrected v1 digest) rather than attempting
+3. Each acknowledgement bypasses only its corresponding _previous-image_
+   compatibility preflight. The candidate's two v1 labels and state-v2 label,
+   DB/schema preflight, worker health and public health gates remain mandatory.
+   The state acknowledgement never authorizes activation of a pre-v2 image.
+   If failure happens after maintenance starts, the pre-v2 API remains stopped;
+   deploy the tested v2 digest (or a corrected v2 digest) rather than attempting
    the incompatible rollback.
-4. After the first successful v1 deployment, leave both checkboxes disabled for
-   every deployment. A compatible predecessor and worker digest are then
-   captured and restored automatically on candidate failure.
+4. After the first successful v2 deployment, leave the state acknowledgement
+   disabled for every deployment, along with each completed v1 override. A
+   compatible predecessor and worker digest are then captured and restored
+   automatically on candidate failure.
 
 The contract-v1 image also runs `livekit-revocation-worker`, independently of
 API boot. It consumes only the participant/room revocation topics and receives
@@ -282,9 +332,14 @@ Run through this **before** pushing a `v*.*.*` tag:
       `20260810190000_stable_notification_follow_cursors` build/swap
       transactional indexes; `20260810214000_media_idempotency_cleanup`
       backfills media/message relations and then creates their indexes and
-      foreign keys. Announce a maintenance window; CD stops the API for the
-      first run of any of these migrations instead of blocking live writes
-      silently.
+      foreign keys; `20260810220000_participant_admission_lease` backfills
+      participant leases; `20260813120000_relational_extension_data_integrity`
+      enforces the relational extension cutover;
+      `20260813130000_group_list_cursor_index` builds the group-list cursor
+      index; and `20260813140000_gdpr_media_outbox` adds the GDPR/media outbox
+      integrity path. Announce a maintenance window; CD stops the API for the
+      first run of any of these seven migrations instead of blocking live
+      writes silently.
 
 ---
 
@@ -295,18 +350,18 @@ Run through this **before** pushing a `v*.*.*` tag:
 Set these in _Settings → Secrets and variables → Actions_ (and scope the
 host/SSH secrets to the matching **Environment** where appropriate).
 
-| Secret                     | Used by                 | Purpose                                                     |
-| -------------------------- | ----------------------- | ----------------------------------------------------------- |
-| `GITHUB_TOKEN`             | all (auto-provided)     | Pushes images to GHCR (`packages: write`). No manual setup. |
-| `STAGING_HOST`             | cd-staging, rollback    | Staging host (IP/DNS) for SSH.                              |
-| `STAGING_USER`             | cd-staging, rollback    | SSH user on the staging host.                               |
-| `STAGING_SSH_KEY`          | cd-staging, rollback    | Private SSH key (PEM) for the staging user.                 |
-| `STAGING_HOST_FINGERPRINT` | cd-staging, rollback    | Pinned SSH host-key fingerprint (for example SHA256:...).   |
-| `PROD_HOST`                | cd-production, rollback | Production host for SSH.                                    |
-| `PROD_USER`                | cd-production, rollback | SSH user on the production host.                            |
-| `PROD_SSH_KEY`             | cd-production, rollback | Private SSH key (PEM) for the production user.              |
-| `PROD_HOST_FINGERPRINT`    | cd-production, rollback | Pinned production SSH host-key fingerprint.                 |
-| `SLACK_WEBHOOK_URL`        | all CD workflows        | Incoming-webhook URL for deploy notifications.              |
+| Secret                     | Used by                 | Purpose                                                                                                                                  |
+| -------------------------- | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `GITHUB_TOKEN`             | all (auto-provided)     | Pushes images to GHCR (`packages: write`). No manual setup.                                                                              |
+| `STAGING_HOST`             | cd-staging, rollback    | Staging host (IP/DNS) for SSH.                                                                                                           |
+| `STAGING_USER`             | cd-staging, rollback    | SSH user on the staging host.                                                                                                            |
+| `STAGING_SSH_KEY`          | cd-staging, rollback    | Private SSH key (PEM) for the staging user.                                                                                              |
+| `STAGING_HOST_FINGERPRINT` | cd-staging, rollback    | Pinned SSH host-key fingerprint (for example SHA256:...).                                                                                |
+| `PROD_HOST`                | cd-production, rollback | Production host for SSH.                                                                                                                 |
+| `PROD_USER`                | cd-production, rollback | SSH user on the production host.                                                                                                         |
+| `PROD_SSH_KEY`             | cd-production, rollback | Private SSH key (PEM) for the production user.                                                                                           |
+| `PROD_HOST_FINGERPRINT`    | cd-production, rollback | Pinned production SSH host-key fingerprint.                                                                                              |
+| `SLACK_WEBHOOK_URL`        | all CD workflows        | Optional notification webhook. Scope it at repository/org level: the staging/production `notify` jobs do not enter a GitHub Environment. |
 
 If the GHCR package is in a different org/visibility than the repo, you may
 need a `GHCR_PAT` (classic PAT with `write:packages`) instead of
@@ -334,6 +389,10 @@ notable:
 | `REDIS_MAXMEMORY`                        |   rec    | Redis ceiling used by production Compose; defaults to `512mb`.                                         |
 | `JWT_ACCESS_SECRET`                      |   yes    | zod-validated; boot fails if missing.                                                                  |
 | `JWT_REFRESH_SECRET`                     |   yes    | zod-validated; boot fails if missing.                                                                  |
+| `JWT_ACCESS_TTL`                         |   opt    | Access-session TTL; production Compose defaults to `15m`.                                              |
+| `JWT_REFRESH_TTL`                        |   opt    | Refresh-session TTL; production Compose defaults to `7d`.                                              |
+| `JWT_ISSUER` / `JWT_AUDIENCE`            |   rec    | Stable identifiers stamped on and required from every newly issued session token.                      |
+| `JWT_LEGACY_NO_ISS_AUD_ACCEPT_UNTIL`     |   opt    | Disabled when empty; absolute ISO cutoff for the bounded rollout below, maximum seven days ahead.      |
 | `CORS_ORIGINS`                           |   yes    | Comma-separated canonical public HTTPS origins, without paths, queries or fragments.                   |
 | `NODE_ENV`                               |   rec    | `production` on prod.                                                                                  |
 | `LIVEKIT_URL`                            |   yes    | Public `wss://` LiveKit endpoint (Cloud or self-hosted). Live audio 503s without it.                   |
@@ -398,6 +457,49 @@ while withdrawing an API instance before ordinary writes start failing.
 BullMQ gauges also alert when a queue retains failed jobs for 10 minutes or has
 more than 100 immediately waiting (not delayed) jobs for 10 minutes. Inspect
 worker logs and the failed job payload before retrying or deleting a job.
+
+#### 6.2.1 JWT issuer/audience two-phase rollout
+
+Normal operation is strict: leave `JWT_LEGACY_NO_ISS_AUD_ACCEPT_UNTIL` empty.
+Every token minted by the candidate uses HS256 and contains the configured
+`iss` and `aud`; verification also requires both values. The compatibility
+setting exists only for the first rollout from an image that minted neither
+claim.
+
+The default access TTL is 15 minutes, while the refresh TTL is seven days. At
+deployment time, an old access token therefore drains quickly, but an old
+refresh token can still be presented for the full seven days. A cutoff beyond
+seven days adds exposure without preserving another valid default-lifetime
+token, so production refuses to boot when the timestamp is more than seven
+days ahead.
+
+Phase 1 (strict emission, bounded legacy read):
+
+1. Keep `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, `JWT_ISSUER` and
+   `JWT_AUDIENCE` identical on every API replica. Do not combine this rollout
+   with a signing-secret rotation.
+2. Immediately before deployment, set
+   `JWT_LEGACY_NO_ISS_AUD_ACCEPT_UNTIL` to one absolute UTC timestamp no later
+   than seven days after the rollout starts (for example,
+   `2026-08-20T12:00:00Z`). Ensure hosts have synchronized clocks.
+3. Deploy the candidate to every replica. New access and refresh tokens are
+   strict immediately. Until the cutoff, only correctly signed HS256 legacy
+   tokens with **both** `iss` and `aud` absent use the bridge. A token carrying
+   only one claim, or a wrong issuer/audience, is always rejected.
+4. Exercise login, an authenticated request and refresh rotation in staging,
+   then monitor authentication failures during the production drain. Existing
+   admin impersonation sessions should be restarted; their additional actor
+   revocation claims are deliberately not relaxed by this bridge.
+
+Phase 2 (strict read):
+
+1. At or after the cutoff, confirm normal login/refresh traffic is healthy.
+   The running process already rejects claim-less tokens at the exact cutoff.
+2. Clear `JWT_LEGACY_NO_ISS_AUD_ACCEPT_UNTIL` and redeploy all replicas so the
+   temporary configuration is removed. A past timestamp is also fail-closed
+   and remains bootable, which makes recovery safe if cleanup is delayed.
+3. Never move the cutoff forward. A user still holding only an expired legacy
+   refresh token must authenticate again.
 
 ### 6.3 First host bootstrap
 
@@ -475,12 +577,19 @@ roles, grant each one CONNECT and its reviewed object privileges explicitly
 before applying the upgrade; never restore TEMPORARY to the API role. Normal CD
 executes this same sequence before every activation. While any known
 write-blocking migration is pending, `db-maintenance-check` makes CD stop the
-API before applying it. The index-only migrations use a five-second lock
-timeout and bounded statement timeouts and roll back on failure. Later releases
-keep the previous API online because the check returns “already complete”. For
-rollback, CD reapplies the role contract but deliberately skips forward migrations;
-database schema changes remain forward-only and must satisfy the
-expand/contract rule above.
+API before applying it. Migration
+`20260813120000_relational_extension_data_integrity` is explicitly blocking,
+and maintenance remains required until `DeploymentCutover` contains the key
+`private-media-reference-v1`. With API writers stopped, CD applies migrations,
+reapplies grants, then runs the idempotent `media-reference-cutover` service.
+Only after that service records its marker does CD activate workers and the v2
+API. A failure leaves the pre-v2 API stopped because reactivation would violate
+the state contract. The index-only migrations use a five-second lock timeout
+and bounded statement timeouts and roll back on failure. Later releases keep
+the previous API online once both the migration ledger and cutover marker are
+complete. For rollback, CD reapplies the role contract but deliberately skips
+forward migrations; database schema changes remain forward-only and must
+satisfy the expand/contract rule above.
 
 The bootstrap fails transactionally if `POSTGRES_APP_USER` owns any database,
 extension, non-system schema, table/index/sequence, function or type, or retains
@@ -581,14 +690,19 @@ idempotency migration also backfills existing media/message rows before adding
 ordinary indexes and foreign keys, so it belongs to the same maintenance gate.
 The participant-admission migration backfills active participant leases and
 builds the complete lease-reaper index, so it uses that gate as well.
+The relational-extension integrity migration normalizes existing relations and
+adds the associated constraints and indexes. The group-list cursor migration
+builds its write-blocking pagination index. The GDPR/media-outbox migration
+adds and backfills media integrity data, indexes, foreign keys and triggers.
+All three use the same maintenance gate.
 
 Before approving any of these migrations, measure its duration on the latest
 production clone, announce a write-maintenance window, drain/stop API workers
 that write the affected tables, and check for long-running transactions. All
-four maintenance-gated migrations use a five-second `lock_timeout`; no SQL
+seven maintenance-gated migrations use a five-second `lock_timeout`; no SQL
 statement may exceed 30 minutes. CD additionally caps the complete Prisma
 migration command at 35 minutes, gives its one-off container two minutes to
-terminate, and keeps the SSH command alive for up to 60 minutes so verified API
+terminate, and keeps the SSH command alive for up to 90 minutes so verified API
 rollback/health checks retain substantial margin. TERM/INT/HUP during an active
 maintenance window first force-removes the globally named migration container,
 then waits (up to two minutes) until the migration owner has no active database
@@ -691,6 +805,15 @@ The desired config is documented in
 `.github/environments/staging.yml` (and the production equivalent should be
 created with **stricter required reviewers**). GitHub does **not** read those
 YAML files automatically — configure them in _Settings → Environments_.
+
+For `production`, configure custom deployment branch/tag patterns that allow
+both protected `main` and `v*.*.*`. `main` is needed by the manual mobile
+signing, Go-Live preflight and emergency rollback workflows; stable tags are
+needed by normal production CD. Keep required reviewers, prevent-self-review
+and no-admin-bypass protections enabled. Permitting `main` at the Environment
+layer does not permit a backend deployment from `main`: `cd-production.yml`
+independently requires an exact stable `vMAJOR.MINOR.PATCH` ref and a matching
+staging-tested digest before the protected deployment job can run.
 
 ---
 

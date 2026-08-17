@@ -1,17 +1,32 @@
-import { Router } from 'express';
+import { Router, type RequestHandler } from 'express';
+import { env } from '../../config/env';
 import { asyncHandler } from '../../utils/asyncHandler';
-import { requireAuth } from '../../middlewares/auth.middleware';
+import { requireAnySession, requireAuth } from '../../middlewares/auth.middleware';
+import { AppError } from '../../middlewares/error.middleware';
 import { authLimiter, sendLimiter } from '../../middlewares/rateLimit.middleware';
 import { otpController } from '../otp/otp.controller';
 import { authController } from './auth.controller';
 
 export const authRouter: Router = Router();
 
-// Email + password flow (legacy, kept for the existing tests).
-authRouter.post('/register', authLimiter, asyncHandler(authController.register));
-authRouter.post('/login', authLimiter, asyncHandler(authController.login));
+const requireLegacyEmailAuth: RequestHandler = (_req, _res, next) => {
+  if (env.NODE_ENV === 'production' || !env.LEGACY_EMAIL_AUTH_ENABLED) {
+    return next(new AppError('AUTH_009'));
+  }
+  next();
+};
+
+// Explicitly gated legacy flow for local/test fixtures. Production remains
+// phone + OTP only even if the flag is accidentally set there.
+authRouter.post(
+  '/register',
+  requireLegacyEmailAuth,
+  authLimiter,
+  asyncHandler(authController.register),
+);
+authRouter.post('/login', requireLegacyEmailAuth, authLimiter, asyncHandler(authController.login));
 authRouter.post('/refresh', authLimiter, asyncHandler(authController.refresh));
-authRouter.post('/logout', requireAuth, asyncHandler(authController.logout));
+authRouter.post('/logout', requireAnySession, asyncHandler(authController.logout));
 authRouter.post(
   '/legal-acceptance',
   requireAuth,

@@ -1,5 +1,6 @@
 import type { Server } from 'socket.io';
 import { logger } from '../../config/logger';
+import { materializePrivateMediaUrls } from '../../modules/media/media-url';
 
 /**
  * Socket alias emitter (parité noms d'événements Clubhouse).
@@ -46,8 +47,9 @@ const emitBoth = (
     return;
   }
   const room = ioRef.to(channel);
-  if (legacyName) room.emit(legacyName, payload);
-  room.emit(aliasName, payload);
+  const safePayload = materializePrivateMediaUrls(payload);
+  if (legacyName) room.emit(legacyName, safePayload);
+  room.emit(aliasName, safePayload);
 };
 
 // ─── Room lifecycle ──────────────────────────────────────────────

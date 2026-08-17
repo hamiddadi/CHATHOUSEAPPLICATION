@@ -1,21 +1,15 @@
 import type { NextFunction, Request, Response } from 'express';
 import { Router } from 'express';
-import { rateLimit } from 'express-rate-limit';
-import { ERROR_CODES } from '../../middlewares/error.middleware';
+import { env } from '../../config/env';
+import { createRateLimiter } from '../../middlewares/rateLimit.middleware';
 import { asyncHandler } from '../../utils/asyncHandler';
 import { isValidMediaSignature } from './media-url';
 import { mediaService } from './media.service';
 import type { ByteRange } from './object-storage';
 
-const mediaLimiter = rateLimit({
+const mediaLimiter = createRateLimiter('rl:media-read:', {
   windowMs: 60_000,
   max: 300,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: {
-    success: false,
-    error: { code: 'RATE_LIMIT_001', message: ERROR_CODES.RATE_LIMIT_001.message },
-  },
 });
 
 const parseRange = (header: string | undefined, size: number): ByteRange | null | 'invalid' => {
@@ -58,6 +52,15 @@ const servePrivateMedia = async (
   const id = req.params['id'];
   const signature = req.params['signature'];
   const expires = req.params['expires'];
+  if (expires === undefined) {
+    const legacyUntil = env.MEDIA_LEGACY_STABLE_READ_UNTIL
+      ? Date.parse(env.MEDIA_LEGACY_STABLE_READ_UNTIL)
+      : 0;
+    if (Date.now() >= legacyUntil) {
+      res.status(404).end();
+      return;
+    }
+  }
   if (
     typeof id !== 'string' ||
     typeof signature !== 'string' ||
@@ -84,7 +87,7 @@ const servePrivateMedia = async (
   res.setHeader('Content-Type', opened.mimeType);
   res.setHeader('Content-Length', String(opened.contentLength));
   res.setHeader('Accept-Ranges', 'bytes');
-  res.setHeader('Cache-Control', 'private, max-age=300');
+  res.setHeader('Cache-Control', 'private, no-store');
   res.setHeader('X-Content-Type-Options', 'nosniff');
   if (opened.contentRange) res.setHeader('Content-Range', opened.contentRange);
 

@@ -151,7 +151,12 @@ export const GroupInfoScreen: React.FC = () => {
       style={{ paddingTop: insets.top }}
     >
       <View className="flex-row items-center gap-md px-xxl py-md">
-        <Pressable onPress={handleBack} accessibilityRole="button" hitSlop={8}>
+        <Pressable
+          onPress={handleBack}
+          accessibilityRole="button"
+          accessibilityLabel={t('common.back', 'Back')}
+          hitSlop={8}
+        >
           <MaterialIcons name="arrow-back" size={24} color={colors.text} />
         </Pressable>
         <Text className="text-xl font-display text-ink tracking-tight">

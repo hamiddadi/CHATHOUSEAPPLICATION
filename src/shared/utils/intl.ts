@@ -26,9 +26,9 @@ const resolveLocale = (): string => {
  * en-US vs fr-FR. If they match (or Intl throws / is absent), we fall back
  * to our own deterministic formatter instead of trusting `toLocale*`.
  *
- * NOTE: loading a polyfill (`import 'intl'`) belongs in the boot entry
- * (index.js), which is outside this file's scope.
- * // TODO(audit): load Intl polyfill at boot if full ICU is required.
+ * Full ICU is therefore optional: when it is unavailable, the deterministic
+ * formatters below preserve the supported FR/EN output without increasing the
+ * mobile bundle with a global polyfill.
  */
 const intlIsLocaleAware = ((): boolean => {
   try {

@@ -199,9 +199,10 @@ const privacyPolicy = layout(
       <p>Active-account content is retained while needed to provide the service.
       A self-service deletion request immediately disables the account, clears
       map location, revokes sessions and removes push tokens. The account remains
-      in a 30-day recovery period. A successful sign-in during that period
-      restores a self-deleted account; otherwise the database records and private
-      media are permanently purged. Moderation bans cannot be self-restored.</p>
+      in a 30-day recovery period. A successful sign-in during that period opens
+      a recovery-only session; the account is restored only after explicit
+      confirmation. Otherwise the database records and private media are
+      permanently purged. Moderation bans cannot be self-restored.</p>
       <p>Expired authentication artefacts are removed on short schedules.
       Infrastructure logs and backup deletion propagation:
       ${legalIdentity.logBackupRetention}. Support and moderation records:
@@ -512,9 +513,10 @@ const accountDeletion = layout(
       <p>The request immediately disables the profile, location visibility,
       sessions and notifications, and schedules any recurring Stripe
       subscription not to renew. ChatHouse applies a 30-day recovery period;
-      signing in successfully during those 30 days restores a self-deleted
-      account and attempts to resume a cancellation that is still pending. If
-      no restoration occurs, account data and private media are permanently
+      signing in successfully during those 30 days opens a recovery-only
+      session. The account is restored, and a still-pending cancellation is
+      resumed, only after explicit confirmation. If no restoration occurs,
+      account data and private media are permanently
       purged. Narrow records may be retained only where required for security,
       fraud prevention or law, as described in the privacy policy.</p>
       <p>Customer-service deletion request:
@@ -626,10 +628,11 @@ const privacyPolicyFr = layout(
       <p>Le contenu d’un compte actif est conservé pendant la fourniture du
       service. Une demande de suppression désactive immédiatement le compte,
       efface la visibilité cartographique, révoque les sessions et supprime les
-      jetons push. Le compte peut être restauré pendant 30 jours après une
-      auto-suppression ; sans restauration, les données et médias privés sont
-      définitivement purgés. Un bannissement de modération ne peut pas être
-      restauré par l’utilisateur.</p>
+      jetons push. Pendant les 30 jours suivant une auto-suppression, une
+      connexion réussie ouvre uniquement une session de récupération ; le compte
+      n’est restauré qu’après confirmation explicite. Sans restauration, les
+      données et médias privés sont définitivement purgés. Un bannissement de
+      modération ne peut pas être restauré par l’utilisateur.</p>
       <p>Journaux d’infrastructure, sauvegardes et propagation de la suppression :
       ${legalIdentity.logBackupRetention}. Dossiers d’assistance et de
       modération : ${legalIdentity.supportModerationRetention}. Des
@@ -977,9 +980,10 @@ const accountDeletionFr = layout(
       de contrôle du numéro de téléphone ou de l’adresse e-mail enregistrés.</p>
       <p>La demande désactive immédiatement le profil, la localisation, les
       sessions et les notifications, et empêche le renouvellement d’un
-      abonnement Stripe récurrent. Une auto-suppression peut être restaurée par
-      une connexion vérifiée pendant 30 jours. Sans restauration, les données du
-      compte et les médias privés sont définitivement purgés. Des enregistrements
+      abonnement Stripe récurrent. Pendant 30 jours, une connexion vérifiée ouvre
+      une session limitée à la récupération ; l’auto-suppression n’est annulée
+      qu’après confirmation explicite. Sans restauration, les données du compte
+      et les médias privés sont définitivement purgés. Des enregistrements
       limités ne sont conservés que lorsqu’ils sont nécessaires à la sécurité, à
       la prévention de la fraude ou au respect de la loi, conformément à la
       <a href="${localizedPath('/privacy', 'fr')}">Politique de

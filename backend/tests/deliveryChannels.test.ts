@@ -273,6 +273,7 @@ describe('production delivery configuration at boot', () => {
       MEDIA_STORAGE_DRIVER: 's3',
       MEDIA_URL_SIGNING_SECRET: 'production-media-secret-that-is-long-enough',
       MEDIA_S3_BUCKET: 'private-media',
+      LEGACY_EMAIL_AUTH_ENABLED: 'false',
     };
     delete process.env.TWILIO_ACCOUNT_SID;
     delete process.env.TWILIO_AUTH_TOKEN;
@@ -309,6 +310,7 @@ describe('production delivery configuration at boot', () => {
       MEDIA_STORAGE_DRIVER: 's3',
       MEDIA_URL_SIGNING_SECRET: 'production-media-secret-that-is-long-enough',
       MEDIA_S3_BUCKET: 'private-media',
+      LEGACY_EMAIL_AUTH_ENABLED: 'false',
       TWILIO_ACCOUNT_SID: `AC${'a'.repeat(32)}`,
       TWILIO_AUTH_TOKEN: 'production-twilio-auth-token',
       TWILIO_FROM_NUMBER: '+15551234567',

@@ -235,7 +235,7 @@ const RoomCard: React.FC<RoomCardProps> = memo(({ room, onJoin }) => {
               onPressOut={onPressOut}
               accessibilityRole="button"
               accessibilityLabel={`Join room: ${room.title}`}
-              className="bg-primary rounded-pill px-xxl py-sm items-center justify-center ml-md"
+              className="min-h-[44px] bg-primary rounded-pill px-xxl py-sm items-center justify-center ml-md"
             >
               <Text className="text-sm font-display text-primary-on-container">
                 {t('feed.join', 'Join')}

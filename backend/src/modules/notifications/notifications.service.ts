@@ -13,6 +13,9 @@ import { emitNotification, emitNotificationCount } from '../../socket/realtime';
 import { notifPrefsExtService } from '../../extensions/modules/notifPrefsExt/notifPrefsExt.service';
 import { scheduleBackgroundTask } from '../../utils/backgroundTasks';
 import { decodeTimeIdCursor, encodeTimeIdCursor } from '../../utils/timeIdCursor';
+import { wakeAndProcessOutbox } from '../../workers/outbox.worker';
+
+const NOTIFICATION_DELIVERY_TOPIC = 'notification.deliver';
 
 /**
  * Maps a NotificationType to the matching boolean field on
@@ -427,10 +430,8 @@ export const notificationsService = {
   },
 
   /**
-   * Central entry point for every subsystem that raises a notification.
-   * Creates the row AND kicks off a best-effort push dispatch + real-time
-   * WS emission. Push/WS errors don't bubble — a failing delivery must
-   * not abort the operation that triggered the notification.
+   * Atomically commits the durable notification and its delivery envelope.
+   * `dedupeKey` should identify the originating domain event when one exists.
    */
   async create(input: {
     userId: string;
@@ -441,9 +442,13 @@ export const notificationsService = {
     data?: Prisma.InputJsonValue;
     targetId?: string;
     targetType?: string;
+    dedupeKey?: string;
   }) {
-    const row = await prisma.notification.create({
-      data: {
+    if (input.dedupeKey && input.dedupeKey.length > 191) {
+      throw new AppError('VALIDATION_001', 'Notification deduplication key is too long');
+    }
+    const row = await prisma.$transaction(async tx => {
+      const data = {
         userId: input.userId,
         actorId: input.actorId ?? null,
         type: input.type,
@@ -452,77 +457,47 @@ export const notificationsService = {
         data: input.data ?? undefined,
         targetId: input.targetId ?? null,
         targetType: input.targetType ?? null,
-      },
-    });
+        dedupeKey: input.dedupeKey ?? null,
+      } satisfies Prisma.NotificationUncheckedCreateInput;
+      const notification = input.dedupeKey
+        ? await tx.notification.upsert({
+            where: { dedupeKey: input.dedupeKey },
+            create: data,
+            update: {},
+          })
+        : await tx.notification.create({ data });
 
-    // Emit real-time notification over WebSocket
-    emitNotification(input.userId, {
-      id: row.id,
-      type: input.type,
-      title: input.title,
-      body: input.body,
-      data: input.data,
-      createdAt: row.createdAt.toISOString(),
-    });
+      if (
+        notification.userId !== input.userId ||
+        notification.type !== input.type ||
+        notification.actorId !== (input.actorId ?? null) ||
+        notification.targetId !== (input.targetId ?? null) ||
+        notification.targetType !== (input.targetType ?? null)
+      ) {
+        throw new AppError('VALIDATION_001', 'Notification deduplication key conflict');
+      }
 
-    // Bump the unread badge. A freshly created notification is always
-    // unread, so the cached count grows by exactly 1. Increment the cache
-    // in place instead of re-running a full COUNT on every create (which
-    // got hammered under reminder fan-out: one create per club member).
-    const key = unreadCacheKey(input.userId);
-    // Atomic INCR: creates the key at 1 if it was absent/expired. That single
-    // op closes the get→incr race (where the TTL expired between the two calls
-    // and the badge reset to 1). On a 1 result we self-heal by recomputing the
-    // true unread count once and seeding the cache.
-    let count = await redis.incr(key);
-    if (count === 1) {
-      count = await prisma.notification.count({
-        where: { userId: input.userId, isRead: false },
-      });
-      await redis.set(key, String(count), { EX: UNREAD_CACHE_TTL });
-    } else {
-      await redis.expire(key, UNREAD_CACHE_TTL);
-    }
-    emitNotificationCount(input.userId, count);
-
-    // Best-effort push dispatch — gated on the user's per-type preference.
-    // It stays non-blocking in production but is registered for graceful
-    // shutdown; tests await it so Prisma/Redis work cannot outlive fixtures.
-    await scheduleBackgroundTask(
-      (async () => {
-        if (!(await isPushAllowed(input.userId, input.type, input.data))) return;
-        // Extension gate (notifPrefsExt): frequency-tier throttle + per-club /
-        // per-user mute. Only the push is suppressed; the in-app row + realtime
-        // emit above already happened. Fail-open: a thrown check (Redis down,
-        // etc.) must never swallow a push, so we default to allow on error. No
-        // ext prefs ⇒ canDeliver returns true (defaults), so this is a no-op.
-        let extAllows = true;
-        try {
-          extAllows = await notifPrefsExtService.canDeliver(input.userId, input.type, {
-            clubId: extractClubId(input.data),
-            actorId: input.actorId,
-          });
-        } catch (err) {
-          logger.warn('notifPrefsExt canDeliver failed; pushing anyway', {
-            err,
-            userId: input.userId,
-          });
-        }
-        if (!extAllows) return;
-        await pushService.dispatchToUser(input.userId, {
-          title: input.title,
-          body: input.body,
-          data: {
-            notificationId: row.id,
-            type: input.type,
-            ...(input.data && typeof input.data === 'object' && !Array.isArray(input.data)
-              ? (input.data as Record<string, unknown>)
-              : {}),
+      await tx.outboxEvent.createMany({
+        data: [
+          {
+            eventKey: `notification-delivery:${notification.id}`,
+            topic: NOTIFICATION_DELIVERY_TOPIC,
+            aggregateId: notification.id,
+            payload: { notificationId: notification.id },
           },
-        });
-      })(),
-      err => logger.warn('notif push dispatch failed', { err, userId: input.userId }),
-    );
+        ],
+        skipDuplicates: true,
+      });
+      return notification;
+    });
+
+    await wakeAndProcessOutbox(NOTIFICATION_DELIVERY_TOPIC, row.id).catch(err => {
+      logger.warn('notification outbox wake failed; poller will retry', {
+        err,
+        notificationId: row.id,
+        userId: row.userId,
+      });
+    });
     return row;
   },
 };

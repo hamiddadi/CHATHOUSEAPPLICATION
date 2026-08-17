@@ -91,7 +91,7 @@ export const sendLimiter = createRateLimiter('rl:send:', {
  * still allowing normal avatar retries and batches of voice notes.
  */
 export const uploadLimiter = createRateLimiter('rl:upload:', {
-  max: 30,
+  max: 10,
   keyGenerator: req => req.userId ?? 'unauthenticated',
 });
 
@@ -101,7 +101,7 @@ export const uploadLimiter = createRateLimiter('rl:upload:', {
  * making phone-space enumeration materially more expensive.
  */
 export const contactMatchLimiter = createRateLimiter('rl:contacts:', {
-  max: 5,
+  max: 3,
   keyGenerator: req => req.userId ?? 'unauthenticated',
 });
 

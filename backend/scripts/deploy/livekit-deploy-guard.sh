@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Compatibility flags deliberately cross the source boundary into deploy-image.sh.
+# shellcheck disable=SC2034
 # Shared, sourceable guards for deploy-image.sh. Keep this file free of
 # top-level side effects so the recovery decisions can be exercised without a
 # Docker daemon.
@@ -85,7 +87,7 @@ activate_image_with_livekit_contract() {
     log "CRITICAL: image '${image}' lacks LiveKit revocation contract '${REQUIRED_LIVEKIT_REVOCATION_CONTRACT}'; activation refused and current API worker left running"
     return 1
   fi
-  activate_image "$file" "$image"
+  activate_image_with_state_contract "$file" "$image"
 }
 
 activate_image_with_runtime_contracts() {
@@ -106,6 +108,10 @@ activate_image_with_runtime_contracts() {
 
 activate_previous_image() {
   [ -n "${PREV_IMAGE:-}" ] || return 1
+  if [ "${PREV_IMAGE_STATE_COMPATIBLE:-0}" -ne 1 ]; then
+    log "CRITICAL: captured previous API is pre-v2; irreversible state cutover forbids automatic reactivation"
+    return 1
+  fi
   activate_image_with_runtime_contracts "$ROLLBACK_COMPOSE_FILE" "$PREV_IMAGE"
 }
 

@@ -34,6 +34,9 @@ describe('messageService pagination', () => {
         bio: null,
         interests: [],
         hasCompletedOnboarding: true,
+        accountState: 'ACTIVE',
+        deletedAt: null,
+        permanentDeletionAt: null,
         createdAt: '2026-08-10T00:00:00.000Z',
       },
     });

@@ -73,6 +73,11 @@ import {
   stopRedisMemoryMetricsCollector,
 } from './monitoring/redisMetrics';
 import { shutdownOutboxWorker, startOutboxWorker } from './workers/outbox.worker';
+import { requestIdMiddleware } from './middlewares/requestId.middleware';
+// Register the storage-deletion consumer in every process that starts the
+// generic outbox poller; do not rely on an incidental GDPR-worker import.
+import './modules/media/media-deletion.outbox';
+import './extensions/club-extension-cleanup.outbox';
 
 // Grace period before a hung Socket.IO/HTTP shutdown is hard-killed.
 const SHUTDOWN_GRACE_MS = 10_000;
@@ -86,7 +91,7 @@ registerMorganToken('safe-url', request => {
 });
 
 const ACCESS_LOG_FORMAT =
-  ':remote-addr [:date[iso]] ":method :safe-url HTTP/:http-version" :status :res[content-length] :response-time ms';
+  ':remote-addr [:date[iso]] request_id=:request-id ":method :safe-url HTTP/:http-version" :status :res[content-length] :response-time ms';
 
 export const createApp = (): express.Express => {
   const app = express();
@@ -95,6 +100,12 @@ export const createApp = (): express.Express => {
   });
 
   app.set('trust proxy', 1);
+
+  app.use(requestIdMiddleware);
+  registerMorganToken('request-id', request => {
+    const req = request as http.IncomingMessage & { requestId?: string };
+    return req.requestId ?? '-';
+  });
 
   // LiveKit egress webhook — mounted BEFORE the JSON parser because signature
   // verification needs the raw request body (the router installs its own
@@ -121,6 +132,7 @@ export const createApp = (): express.Express => {
       },
       credentials: true,
       methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE'],
+      exposedHeaders: ['X-Request-ID'],
     }),
   );
 
@@ -261,6 +273,7 @@ export const startServer = async (): Promise<void> => {
   const shutdown = async (signal: string): Promise<void> => {
     if (shuttingDown) return;
     shuttingDown = true;
+    const exitCode = signal === 'unhandledRejection' || signal === 'uncaughtException' ? 1 : 0;
     logger.info(`${signal} received — graceful shutdown`);
     // Arm the deadline before awaiting network teardown so a stuck close is
     // still bounded.
@@ -295,8 +308,8 @@ export const startServer = async (): Promise<void> => {
       await disconnectDatabase();
       await disconnectRedis();
       clearTimeout(forceTimer);
-      logger.info('server stopped cleanly');
-      process.exit(0);
+      logger.info('server shutdown completed', { exitCode });
+      process.exit(exitCode);
     } catch (err) {
       logger.error('shutdown error', { err });
       process.exit(1);
@@ -311,6 +324,7 @@ export const startServer = async (): Promise<void> => {
   });
   process.on('unhandledRejection', err => {
     logger.error('unhandledRejection', { err });
+    void shutdown('unhandledRejection');
   });
   process.on('uncaughtException', err => {
     logger.error('uncaughtException', { err });

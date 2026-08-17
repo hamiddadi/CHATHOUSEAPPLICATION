@@ -94,6 +94,9 @@ export const fakeAuthUser = (overrides: Partial<AuthUser> = {}): AuthUser => ({
   bio: null,
   interests: [],
   hasCompletedOnboarding: true,
+  accountState: 'ACTIVE',
+  deletedAt: null,
+  permanentDeletionAt: null,
   createdAt: new Date(0).toISOString(),
   ...overrides,
 });
@@ -113,6 +116,7 @@ export const mockAuthenticated = (overrides: Partial<AuthUser> = {}): AuthUser =
       accessToken: 'test-access',
       refreshToken: 'test-refresh',
       expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+      scope: 'active',
     },
     error: null,
   });

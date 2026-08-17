@@ -30,15 +30,22 @@ const start = async (userId: string): Promise<void> => {
 };
 
 const stop = async (): Promise<void> => {
-  const { user } = useImpersonationState.getState();
-  useImpersonationState.getState().clear();
-  if (user) {
-    try {
-      await adminService.stopImpersonation(user.id);
-    } catch {
-      // Best-effort: local state already cleared, the audit trail is
-      // non-critical to UX.
+  const { token, user } = useImpersonationState.getState();
+  if (!token || !user) {
+    useImpersonationState.getState().clear();
+    return;
+  }
+  try {
+    await adminService.stopImpersonation(user.id, token);
+    // Do not let a late response for an older stop clear a newer delegated
+    // session that may have been started while the request was in flight.
+    if (Object.is(useImpersonationState.getState().token, token)) {
+      useImpersonationState.getState().clear();
     }
+  } catch {
+    // Keep the banner and bearer locally when server-side revocation failed.
+    // Clearing here would tell the operator the session ended while a copied
+    // token could remain usable until its natural expiry.
   }
 };
 

@@ -329,12 +329,12 @@ const processReminder = async (job: Job<ReminderJobData>): Promise<void> => {
     for (const m of members) recipientIds.add(m.userId);
   }
 
-  // Fan-out in bounded batches. notificationsService.create does several DB
-  // writes + a COUNT + a push dispatch per recipient; for a club of thousands
-  // of members an unbounded Promise.all could exhaust the Prisma/Redis pools
-  // and fail the job. Batching caps in-flight concurrency.
-  // TODO(audit): for very large clubs, prefer a single createMany for the rows
-  // plus one COUNT, and batch the push dispatch by recipient set.
+  // Fan-out in bounded batches. Keep the per-recipient durable create on
+  // purpose: it atomically pairs each notification with its outbox envelope
+  // and its dedupe key, so a retry repairs only missing recipients. A bare
+  // createMany would lose that per-recipient delivery guarantee. The fixed
+  // batch size caps Prisma/outbox work at 50 concurrent recipients even for
+  // very large clubs (covered by eventRemindersFanout.unit.test.ts).
   const ids = [...recipientIds];
   const BATCH = 50;
   for (let i = 0; i < ids.length; i += BATCH) {
@@ -348,6 +348,7 @@ const processReminder = async (job: Job<ReminderJobData>): Promise<void> => {
           data: { roomId: room.id },
           targetId: room.id,
           targetType: 'room',
+          dedupeKey: `room-reminder-5m:${room.id}:${userId}`,
         }),
       ),
     );
@@ -380,4 +381,4 @@ export const shutdownReminders = async (): Promise<void> => {
   }
 };
 
-export const _internals = { openScheduledRoom };
+export const _internals = { openScheduledRoom, processReminder };
